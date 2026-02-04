@@ -1,0 +1,12 @@
+# Node
+node_modules/
+
+# Compiler
+cache/
+out/
+
+# Docs
+docs/
+
+# Env
+.env
