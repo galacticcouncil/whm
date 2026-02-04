@@ -1,5 +1,6 @@
 import { isAddress } from "viem";
 
+import { loadEnv } from "../env";
 import { getArgValue } from "../utils";
 
 export type DeployConfig = {
@@ -11,6 +12,8 @@ export type DeployConfig = {
 };
 
 export function getConfig(): DeployConfig {
+  loadEnv();
+
   const rpcUrl = getArgValue("--rpc") ?? process.env.RPC_URL;
   const privateKey = getArgValue("--pk") ?? process.env.PRIVATE_KEY;
   const relayer = getArgValue("--relayer") ?? process.env.WHM_RELAYER;

@@ -11,6 +11,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.8
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.6.1
       ts-node:
         specifier: ^10.9.1
         version: 10.9.2(@types/node@22.19.8)(typescript@5.9.3)
@@ -270,6 +273,10 @@ packages:
   diff@4.0.4:
     resolution: {integrity: sha512-X07nttJQkwkfKfvTPG/KSnE2OMdcUCao6+eXF3wmnIQRn2aPAHH3VxDbDOdegkd6JbPsXqShpvEOHfAT+nCNwQ==}
     engines: {node: '>=0.3.1'}
+
+  dotenv@16.6.1:
+    resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
+    engines: {node: '>=12'}
 
   esbuild@0.27.2:
     resolution: {integrity: sha512-HyNQImnsOC7X9PMNaCIeAm4ISCQXs5a5YasTXVliKv4uuBo1dKrG0A+uQS8M5eXjVMnLg3WgXaKvprHlFJQffw==}
@@ -537,6 +544,8 @@ snapshots:
   create-require@1.1.1: {}
 
   diff@4.0.4: {}
+
+  dotenv@16.6.1: {}
 
   esbuild@0.27.2:
     optionalDependencies:
