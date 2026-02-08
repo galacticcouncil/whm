@@ -1,0 +1,11 @@
+{
+  "name": "@nohaapav/whm-evm",
+  "private": true,
+  "scripts": {
+    "build": "cd contracts && forge build",
+    "test": "cd contracts && forge test"
+  },
+  "dependencies": {
+    "viem": "^2.38.3"
+  }
+}

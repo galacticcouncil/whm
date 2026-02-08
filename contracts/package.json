@@ -1,8 +1,0 @@
-{
-  "name": "@nohaapav/whm-contracts",
-  "private": true,
-  "scripts": {},
-  "dependencies": {
-    "viem": "^2.38.3"
-  }
-}
