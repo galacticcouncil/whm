@@ -1,0 +1,8 @@
+.anchor
+
+# Node
+node_modules/
+
+# Compiler
+target
+**/*.rs.bk
