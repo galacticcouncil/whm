@@ -1,13 +1,17 @@
 {
   "name": "@nohaapav/whm-solana",
+  "type": "module",
   "private": true,
   "scripts": {
     "build": "anchor build -p sender",
-    "test:validator": "ANCHOR_PROVIDER_URL=http://127.0.0.1:8898 anchor test --skip-local-validator",
-    "validator": "solana-test-validator --ledger ./.anchor/test-ledger --rpc-port 8898"
+    "test": "ANCHOR_PROVIDER_URL=http://127.0.0.1:8898 anchor test --skip-local-validator",
+    "validator": "solana-test-validator --ledger ./.anchor/test-ledger --rpc-port 8898",
+    "validator:cleanup": "rm -rf .anchor/test-ledger",
+    "deploy:sender": "DOTENV_CONFIG_PATH=.env npx tsx scripts/deploySender.ts"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
+    "@types/chai": "^5.2.3",
     "chai": "^4.3.4",
     "mocha": "^10.0.0",
     "ts-mocha": "^10.0.0"

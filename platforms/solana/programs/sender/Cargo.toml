@@ -18,5 +18,8 @@ custom-heap = []
 custom-panic = []
 anchor-debug = []
 
+[lints]
+workspace = true
+
 [dependencies]
 anchor-lang = "0.32.1"

@@ -17,5 +17,6 @@
   "prettier.printWidth": 100,
   "solidity.formatter": "forge",
   "solidity.packageDefaultDependenciesContractsDirectory": "src",
-  "solidity.packageDefaultDependenciesDirectory": "lib"
+  "solidity.packageDefaultDependenciesDirectory": "lib",
+  "rust-analyzer.linkedProjects": ["platforms/solana/Cargo.toml"]
 }
