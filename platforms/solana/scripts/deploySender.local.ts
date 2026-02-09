@@ -1,8 +1,7 @@
-import "dotenv/config";
-
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 
+import { readFileSync } from "fs";
 import { execSync } from "child_process";
 
 import senderIdl from "../target/idl/sender.json";
@@ -10,17 +9,13 @@ import { Sender } from "../target/types/sender";
 
 const { PublicKey, Keypair, Connection } = anchor.web3;
 
-const RPC_URL = "https://api.mainnet-beta.solana.com";
+const RPC_URL = "http://127.0.0.1:8898";
 
 function loadKeypair(): InstanceType<typeof Keypair> {
-  const accountPk = process.env.ACCOUNT_PK;
-
-  if (accountPk) {
-    const decoded = anchor.utils.bytes.bs58.decode(accountPk);
-    return Keypair.fromSecretKey(decoded);
-  }
-
-  throw new Error("Missing account info. Provide ACCOUNT_PK.");
+  const home = process.env.HOME!;
+  const defaultPath = `${home}/.config/solana/id.json`;
+  const secretKey = JSON.parse(readFileSync(defaultPath, "utf-8"));
+  return Keypair.fromSecretKey(Uint8Array.from(secretKey));
 }
 
 async function main(): Promise<void> {
@@ -28,6 +23,11 @@ async function main(): Promise<void> {
   const connection = new Connection(RPC_URL, "confirmed");
   const wallet = new anchor.Wallet(keypair);
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
+
+  console.log("Airdropping 10 SOL to:", wallet.publicKey.toBase58());
+  const sig = await connection.requestAirdrop(wallet.publicKey, 10 * anchor.web3.LAMPORTS_PER_SOL);
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
 
   const deployArgs = [
     "anchor",

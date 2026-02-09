@@ -4,6 +4,9 @@ members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+blake3 = "=1.8.1"
+
 [workspace.lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(target_os, values("solana"))'] }
 

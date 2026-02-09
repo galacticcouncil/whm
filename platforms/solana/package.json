@@ -7,7 +7,9 @@
     "test": "ANCHOR_PROVIDER_URL=http://127.0.0.1:8898 anchor test --skip-local-validator",
     "validator": "solana-test-validator --ledger ./.anchor/test-ledger --rpc-port 8898",
     "validator:cleanup": "rm -rf .anchor/test-ledger",
-    "deploy:sender": "DOTENV_CONFIG_PATH=.env npx tsx scripts/deploySender.ts"
+    "validator:wormhole": "npx tsx scripts/runValidator.ts",
+    "deploy:sender": "DOTENV_CONFIG_PATH=.env npx tsx scripts/deploySender.ts",
+    "deploy:sender:local": "npx tsx scripts/deploySender.local.ts"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

@@ -8,18 +8,20 @@ name = "sender"
 crate-type = ["cdylib", "lib"]
 
 [features]
-default = []
-cpi = ["no-entrypoint"]
+default = ["mainnet"]
+mainnet = ["wormhole-anchor-sdk/mainnet"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build"]
 custom-heap = []
 custom-panic = []
 anchor-debug = []
+cpi = ["no-entrypoint"]
+idl-build = ["anchor-lang/idl-build", "wormhole-anchor-sdk/idl-build"]
 
 [lints]
 workspace = true
 
 [dependencies]
 anchor-lang = "0.32.1"
+wormhole-anchor-sdk = { git = "https://github.com/wormhole-foundation/wormhole-scaffolding", default-features = false }
