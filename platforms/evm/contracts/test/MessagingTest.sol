@@ -3,17 +3,18 @@ pragma solidity ^0.8.18;
 
 import {Test} from "forge-std/Test.sol";
 
-import {MessageSender} from "../src/MessageSender.sol";
+import {MessageRelayer} from "../src/MessageRelayer.sol";
 import {MessageReceiver} from "../src/MessageReceiver.sol";
 
 contract MessagingTest is Test {
-    MessageSender public senderContract;
+    MessageRelayer public senderContract;
     MessageReceiver public receiverContract;
     address public wormholeRelayer = address(this);
+    address public wormhole = address(this);
 
     function setUp() public {
-        senderContract = new MessageSender(wormholeRelayer);
-        receiverContract = new MessageReceiver(wormholeRelayer);
+        senderContract = new MessageRelayer(wormholeRelayer);
+        receiverContract = new MessageReceiver(wormholeRelayer, wormhole);
     }
 
     function testDeployment() public view {

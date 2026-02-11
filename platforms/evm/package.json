@@ -5,9 +5,11 @@
   "scripts": {
     "build": "cd contracts && forge build",
     "test": "cd contracts && forge test",
-    "deploy:sender": "DOTENV_CONFIG_PATH=.env npx tsx scripts/deploySender.ts",
-    "deploy:receiver": "DOTENV_CONFIG_PATH=.env npx tsx scripts/deployReceiver.ts",
-    "send:message": "DOTENV_CONFIG_PATH=.env npx tsx scripts/sendMessage.ts",
+    "relayer:deploy": "npx tsx scripts/relayer/deploy.ts",
+    "relayer:sendMessage": "npx tsx scripts/relayer/sendMessage.ts",
+    "receiver:deploy": "npx tsx scripts/receiver/deploy.ts",
+    "receiver:verify": "npx tsx scripts/receiver/verify.ts",
+    "receiver:registerSender": "npx tsx scripts/receiver/registerSender.ts",
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh"
   },

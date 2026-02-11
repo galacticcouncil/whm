@@ -6,24 +6,26 @@ import {toWormholeFormat} from "wormhole-solidity-sdk/Utils.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {console} from "forge-std/console.sol";
 
-import {MessageSender} from "../src/MessageSender.sol";
+import {MessageRelayer} from "../src/MessageRelayer.sol";
 import {MessageReceiver} from "../src/MessageReceiver.sol";
 
 contract MessagingForkTest is WormholeRelayerBasicTest {
-    MessageSender public senderSource;
+    MessageRelayer public senderSource;
     MessageReceiver public receiverTarget;
 
     constructor() WormholeRelayerBasicTest() {
+        // Avoid dependency default (Ankr)
+        chainInfosMainnet[16].url = vm.envOr("MOOMBEAM_RPC_URL", string("https://rpc.api.moonbeam.network"));
         // Moonbeam (16) -> Base (30) on mainnet forks
         setMainnetForkChains(16, 30);
     }
 
     function setUpSource() public override {
-        senderSource = new MessageSender(address(relayerSource));
+        senderSource = new MessageRelayer(address(relayerSource));
     }
 
     function setUpTarget() public override {
-        receiverTarget = new MessageReceiver(address(relayerTarget));
+        receiverTarget = new MessageReceiver(address(relayerTarget), address(wormholeTarget));
     }
 
     function setUpGeneral() public override {

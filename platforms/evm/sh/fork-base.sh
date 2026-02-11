@@ -10,6 +10,5 @@ echo "Chain ID: $CHAIN_ID"
 echo
 
 anvil \
-  --port 8546 \
   --fork-url $RPC \
   --chain-id $CHAIN_ID

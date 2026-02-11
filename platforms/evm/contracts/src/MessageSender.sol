@@ -1,26 +1,30 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
-import {IWormholeRelayer} from "wormhole-solidity-sdk/interfaces/IWormholeRelayer.sol";
+import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
 contract MessageSender {
-    IWormholeRelayer public wormholeRelayer;
-    uint256 constant GAS_LIMIT = 50000; // Adjust the gas limit as needed
+    IWormhole public wormhole;
+    uint32 public nonce;
 
-    constructor(address _wormholeRelayer) {
-        wormholeRelayer = IWormholeRelayer(_wormholeRelayer);
+    constructor(address _wormhole) {
+        wormhole = IWormhole(_wormhole);
     }
 
-    function quoteCrossChainCost(uint16 targetChain) public view returns (uint256 cost) {
-        (cost,) = wormholeRelayer.quoteEVMDeliveryPrice(targetChain, 0, GAS_LIMIT);
+    function quoteCrossChainCost() public view returns (uint256 cost) {
+        cost = wormhole.messageFee();
     }
 
-    function sendMessage(uint16 targetChain, address targetAddress, string memory message) external payable {
-        uint256 cost = quoteCrossChainCost(targetChain);
-        require(msg.value >= cost, "Insufficient funds for cross-chain delivery");
+    function sendMessage(string memory message) external payable returns (uint64 sequence) {
+        uint256 cost = wormhole.messageFee();
+        require(msg.value >= cost, "Insufficient funds for message fee");
 
-        wormholeRelayer.sendPayloadToEvm{value: cost}(
-            targetChain, targetAddress, abi.encode(message, msg.sender), 0, GAS_LIMIT
+        sequence = wormhole.publishMessage{value: cost}(
+            nonce,
+            abi.encode(message),
+            1 // finality: finalized
         );
+
+        nonce++;
     }
 }
