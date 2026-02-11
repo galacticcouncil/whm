@@ -10,10 +10,14 @@
     "receiver:deploy": "npx tsx scripts/receiver/deploy.ts",
     "receiver:verify": "npx tsx scripts/receiver/verify.ts",
     "receiver:registerSender": "npx tsx scripts/receiver/registerSender.ts",
+    "receiver:registerUpdater": "npx tsx scripts/receiver/registerUpdater.ts",
+    "receiver:receiveMessage": "npx tsx scripts/receiver/receiveMessage.ts",
     "fork:base": "bash sh/fork-base.sh",
-    "fork:moonbeam": "bash sh/fork-moonbeam.sh"
+    "fork:moonbeam": "bash sh/fork-moonbeam.sh",
+    "account:getSecret": "npx tsx scripts/getSecret.ts"
   },
   "dependencies": {
+    "@nohaapav/whm-sdk": "workspace:*",
     "viem": "^2.38.3"
   }
 }

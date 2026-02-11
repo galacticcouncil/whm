@@ -3,12 +3,13 @@ import "dotenv/config";
 import { createPublicClient, createWalletClient, http, isAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { chains, utils, ifs } from "../../lib";
+import { args } from "@nohaapav/whm-sdk";
+import { chains, ifs } from "../../lib";
 
 import messageRelayerJson from "../../contracts/out/MessageRelayer.sol/MessageRelayer.json";
 
+const { requiredArg, requiredEnv } = args;
 const { getChain } = chains;
-const { requiredArg, requiredEnv } = utils;
 
 function getConfig() {
   const rpcUrl = requiredEnv("SENDER_RPC");

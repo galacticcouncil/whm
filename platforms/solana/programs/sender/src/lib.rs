@@ -17,12 +17,7 @@ pub mod sender {
         instructions::initialize::initialize(ctx)
     }
 
-    pub fn send_message(
-        ctx: Context<SendMessage>,
-        target_chain: u16,
-        target_address: [u8; 32],
-        message: String,
-    ) -> Result<()> {
-        instructions::send_message::send_message(ctx, target_chain, target_address, message)
+    pub fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
+        instructions::send_message::send_message(ctx, message)
     }
 }

@@ -1,4 +1,5 @@
 packages:
+  - sdk
   - platforms/evm
   - platforms/solana
 

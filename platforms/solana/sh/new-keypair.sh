@@ -1,0 +1,1 @@
+solana-keygen new --outfile ~/.config/solana/test.json

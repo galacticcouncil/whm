@@ -6,9 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { isAddress } from "viem";
 
-import { utils } from "../../lib";
-
-const { requiredArg, requiredEnv } = utils;
+import { args } from "@nohaapav/whm-sdk";
+const { requiredArg, requiredEnv } = args;
 
 function getConfig() {
   const rpcUrl = requiredEnv("RECEIVER_RPC");

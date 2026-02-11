@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { createPublicClient, createWalletClient, http, isAddress, pad } from "viem";
+import { createPublicClient, createWalletClient, http, isAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { args } from "@nohaapav/whm-sdk";
@@ -11,36 +11,32 @@ import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/Message
 const { requiredArg, requiredEnv } = args;
 const { getChain } = chains;
 
+function parseVaa(vaa: string): `0x${string}` {
+  if (vaa.startsWith("0x")) return vaa as `0x${string}`;
+  return `0x${Buffer.from(vaa, "base64").toString("hex")}`;
+}
+
 function getConfig() {
   const rpcUrl = requiredEnv("RECEIVER_RPC");
   const chainId = requiredEnv("RECEIVER_CHAIN_ID");
 
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");
-  const sender = requiredArg("--sender");
-  const sourceChain = requiredArg("--source-chain");
+  const vaa = requiredArg("--vaa");
 
   if (!isAddress(address)) throw new Error("Invalid receiver address.");
-
-  const isBytes32 = sender.startsWith("0x") && sender.length === 66;
-  if (!isBytes32 && !isAddress(sender)) {
-    throw new Error("Invalid sender (expected address or bytes32).");
-  }
 
   return {
     rpcUrl,
     chainId: Number(chainId),
     address: address as `0x${string}`,
     privateKey: privateKey as `0x${string}`,
-    senderBytes32: isBytes32
-      ? (sender as `0x${string}`)
-      : pad(sender as `0x${string}`, { size: 32 }),
-    sourceChain,
+    vaa: parseVaa(vaa),
   };
 }
 
 async function main(): Promise<void> {
-  const { address, rpcUrl, chainId, privateKey, senderBytes32, sourceChain } = getConfig();
+  const { address, rpcUrl, chainId, privateKey, vaa } = getConfig();
 
   const account = privateKeyToAccount(privateKey);
   const chain = getChain(chainId);
@@ -55,15 +51,17 @@ async function main(): Promise<void> {
 
   const { abi } = messageReceiverJson as ifs.ContractArtifact;
 
-  const registerHash = await walletClient.writeContract({
+  const txHash = await walletClient.writeContract({
     address: address,
     abi,
-    functionName: "setRegisteredSender",
-    args: [sourceChain, senderBytes32],
+    functionName: "receiveMessage",
+    args: [vaa],
   });
 
-  await publicClient.waitForTransactionReceipt({ hash: registerHash });
-  console.log(`MessageSender registered: ${senderBytes32} (${sourceChain})`);
+  console.log("Transaction sent:", txHash);
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  console.log("Message received in block:", receipt.blockNumber);
 }
 
 main().catch((error) => {

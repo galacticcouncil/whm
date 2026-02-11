@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 use wormhole_anchor_sdk::wormhole::{
-    self, program::Wormhole, BridgeData, FeeCollector, Finality, SequenceTracker,
-    SEED_PREFIX_EMITTER,
+    self, program::Wormhole, BridgeData, FeeCollector, Finality, SEED_PREFIX_EMITTER,
 };
 
 use crate::helpers::abi_encode_string;
@@ -31,13 +30,9 @@ pub struct SendMessage<'info> {
     #[account(seeds = [SEED_PREFIX_EMITTER], bump)]
     pub emitter: UncheckedAccount<'info>,
 
-    #[account(
-        mut,
-        seeds = [SequenceTracker::SEED_PREFIX, emitter.key().as_ref()],
-        bump,
-        seeds::program = wormhole_program.key(),
-    )]
-    pub wormhole_sequence: Account<'info, SequenceTracker>,
+    /// CHECK: Initialized by the Wormhole program on the first message.
+    #[account(mut)]
+    pub wormhole_sequence: UncheckedAccount<'info>,
 
     #[account(
         mut,
@@ -53,12 +48,7 @@ pub struct SendMessage<'info> {
     pub wormhole_program: Program<'info, Wormhole>,
 }
 
-pub(crate) fn send_message(
-    ctx: Context<SendMessage>,
-    _target_chain: u16,
-    _target_address: [u8; 32],
-    message: String,
-) -> Result<()> {
+pub(crate) fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
     let payload = abi_encode_string(&message);
 
     // Pay the Wormhole bridge fee
