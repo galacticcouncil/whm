@@ -61,6 +61,16 @@ async function main(): Promise<void> {
   const receiverAddress = deployReceipt.contractAddress;
   console.log("MessageReceiver deployed to:", receiverAddress);
   console.log("MessageReceiver owner:", account.address);
+
+  const setUpdaterHash = await walletClient.writeContract({
+    address: receiverAddress,
+    abi,
+    functionName: "setRegisteredUpdater",
+    args: [account.address, true],
+  });
+
+  await publicClient.waitForTransactionReceipt({ hash: setUpdaterHash });
+  console.log(`Updater registered: ${account.address}`);
 }
 
 main().catch((error) => {

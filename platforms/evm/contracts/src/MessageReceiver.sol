@@ -20,7 +20,6 @@ contract MessageReceiver is IWormholeReceiver {
     mapping(bytes32 => bool) public processedVaas;
 
     event MessageReceived(string message);
-    event SourceChainLogged(uint16 sourceChain);
 
     constructor(address _wormholeRelayer, address _wormhole) {
         wormholeRelayer = IWormholeRelayer(_wormholeRelayer);
@@ -46,13 +45,8 @@ contract MessageReceiver is IWormholeReceiver {
         require(registeredUpdaters[msg.sender], "Not registered updater");
     }
 
-    function _processMessage(bytes memory payload, uint16 sourceChain) internal {
+    function _processMessage(bytes memory payload) internal virtual {
         (string memory message) = abi.decode(payload, (string));
-
-        if (sourceChain != 0) {
-            emit SourceChainLogged(sourceChain);
-        }
-
         emit MessageReceived(message);
     }
 
@@ -75,7 +69,7 @@ contract MessageReceiver is IWormholeReceiver {
         bytes32
     ) public payable override isRegisteredSender(sourceChain, sourceAddress) {
         require(msg.sender == address(wormholeRelayer), "Only the Wormhole relayer can call this function");
-        _processMessage(payload, sourceChain);
+        _processMessage(payload);
     }
 
     // Receive a message via Core Bridge (for non-EVM chains)
@@ -87,6 +81,6 @@ contract MessageReceiver is IWormholeReceiver {
         processedVaas[vm.hash] = true;
 
         _isRegisteredSender(vm.emitterChainId, vm.emitterAddress);
-        _processMessage(vm.payload, vm.emitterChainId);
+        _processMessage(vm.payload);
     }
 }
