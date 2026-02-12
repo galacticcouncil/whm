@@ -4,12 +4,11 @@ use wormhole_anchor_sdk::wormhole::{
 };
 
 use crate::helpers::abi_encode_string;
-use crate::state::{Config, PriceFeed};
 
 #[derive(Accounts)]
 pub struct SendMessage<'info> {
     #[account(seeds = [b"config"], bump)]
-    pub config: Account<'info, Config>,
+    pub config: Account<'info, crate::state::Config>,
 
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -46,19 +45,6 @@ pub struct SendMessage<'info> {
     pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
     pub wormhole_program: Program<'info, Wormhole>,
-}
-
-#[derive(Accounts)]
-pub struct SendPrice<'info> {
-    /// Owner-registered binding: asset_id ↔ oracle indexes.
-    #[account(seeds = [b"price_feed".as_ref(), price_feed.asset_id.as_ref()], bump)]
-    pub price_feed: Account<'info, PriceFeed>,
-
-    /// CHECK: Kamino Scope OraclePrices account.
-    pub scope_prices: UncheckedAccount<'info>,
-
-    /// Embedded Wormhole accounts (config, payer, bridge, emitter, etc.)
-    pub wormhole: SendMessage<'info>,
 }
 
 pub(crate) fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {

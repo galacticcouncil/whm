@@ -7,8 +7,11 @@ pub mod state;
 
 pub use instructions::initialize::*;
 pub use instructions::register_price_feed::*;
-pub use instructions::send_message::*;
-pub use instructions::send_price::*;
+pub use instructions::send_price::SendPrice;
+pub use instructions::send_message::SendMessage;
+
+use instructions::send_price::__client_accounts_send_price;
+use instructions::send_message::__client_accounts_send_message;
 
 declare_id!("BqbowXrcN2KbKswhBHLZwasFrDh9NV9qpJty7fLH6peJ");
 

@@ -1,10 +1,27 @@
 use anchor_lang::prelude::*;
 
+use crate::__client_accounts_send_message;
 use crate::helpers::abi_encode_price_payload;
+use crate::instructions::send_message::{
+    __cpi_client_accounts_send_message, post_wormhole_message, SendMessage, SendMessageBumps,
+};
 use crate::oracle::{compute_usd_price_18dec, read_price};
-use crate::{post_wormhole_message, SendPrice};
+use crate::state::PriceFeed;
 
 const ACTION_PRICE_UPDATE: u8 = 1;
+
+#[derive(Accounts)]
+pub struct SendPrice<'info> {
+    /// Owner-registered binding: asset_id ↔ oracle indexes.
+    #[account(seeds = [b"price_feed".as_ref(), price_feed.asset_id.as_ref()], bump)]
+    pub price_feed: Account<'info, PriceFeed>,
+
+    /// CHECK: Kamino Scope OraclePrices account.
+    pub scope_prices: UncheckedAccount<'info>,
+
+    /// Embedded Wormhole accounts (config, payer, bridge, emitter, etc.)
+    pub wormhole: SendMessage<'info>,
+}
 
 pub(crate) fn send_price(ctx: Context<SendPrice>) -> Result<()> {
     let feed = &ctx.accounts.price_feed;
