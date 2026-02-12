@@ -13,10 +13,10 @@ const PRICES_OFFSET: usize = DISCRIMINATOR_LEN + HEADER_LEN;
 ///   Price { value: u64, exp: u64 }  = 16
 ///   last_updated_slot: u64          =  8
 ///   unix_timestamp:    u64          =  8
-///   _padding:          [u8; 8]      =  8   (index u16 + 6-byte pad)
+///   generic_data:      [u8; 24]     = 24
 ///                                   -----
-///                                     40
-const DATED_PRICE_LEN: usize = 40;
+///                                     56
+const DATED_PRICE_LEN: usize = 56;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScopePrice {

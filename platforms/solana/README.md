@@ -64,29 +64,40 @@ Derive secret from seed & address
 
 ```bash
 pnpm run account:getSecret -- \
- --seed 'word1 word2 ... word12' \
- --address GRpBoLhKQaHkrEocwqYu5jDUNNC8cFMjpCedVEAB32ob \
+ --seed your_account_seed \
+ --address your_account_address \
 ```
 
 ### Message sender
 
-#### Deploy program (fork environment)
+To run sender scripts agains local validator use **DOTENV_CONFIG_PATH=.env.fork**.
 
-Deploy the message relayer contract.
+#### Local validator (fork environment)
 
-| Flag   | Description                              |
-| ------ | ---------------------------------------- |
-| `--pk` | Private key used to sign the transaction |
+Spawn local validator for sender program.
 
 ```bash
-DOTENV_CONFIG_PATH=.env.fork pnpm run sender:deploy -- \
- --pk '5BTqGoQihN3....rf7YJJWu' \
+pnpm sender:runValidator
+```
+
+#### Deploy program
+
+Deploy the sender program.
+
+| Flag     | Description                              |
+| -------- | ---------------------------------------- |
+| `--pk`   | Private key used to sign the transaction |
+| `--test` | Use in local environment to airdrop sol  |
+
+```bash
+pnpm sender:deploy -- \
+ --pk your_private_key \
  --test true
 ```
 
-#### Broadcast message (fork environment)
+#### Broadcast message
 
-Send message to receiver contract via wormhole relayer.
+Broadcast message to wormhole guardians via core contract.
 
 | Flag        | Description                                          |
 | ----------- | ---------------------------------------------------- |
@@ -94,7 +105,20 @@ Send message to receiver contract via wormhole relayer.
 | `--message` | Message payload to send (string or hex-encoded data) |
 
 ```bash
-DOTENV_CONFIG_PATH=.env.fork pnpm sender:sendMessage -- \
- --pk '5BTqGoQihN3....rf7YJJWu'
- --message "hello"
+pnpm sender:sendMessage -- \
+ --pk your_private_key \
+ --message your_message
+```
+
+#### Broadcast price
+
+Broadcast price to wormhole guardians via core contract.
+
+| Flag   | Description                              |
+| ------ | ---------------------------------------- |
+| `--pk` | Private key used to sign the transaction |
+
+```bash
+pnpm sender:sendPrice -- \
+ --pk your_private_key
 ```

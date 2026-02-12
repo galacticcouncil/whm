@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "build": "anchor build -p sender",
+    "build:local": "anchor build -p sender -- --features local-logs",
+    "logs:local": "solana logs -u http://127.0.0.1:8898",
     "validator:cleanup": "rm -rf .anchor/test-ledger",
-    "validator": "npx tsx scripts/runValidator.ts",
     "sender:deploy": "npx tsx scripts/sender/deploy.ts",
+    "sender:runValidator": "npx tsx scripts/sender/runValidator.ts",
     "sender:sendMessage": "npx tsx scripts/sender/sendMessage.ts",
-    "account:getSecret": "npx tsx scripts/getSecret.ts",
-    "keypair:new": "bash sh/new-keypair.sh"
+    "sender:sendPrice": "npx tsx scripts/sender/sendPrice.ts",
+    "account:getSecret": "npx tsx scripts/getSecret.ts"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

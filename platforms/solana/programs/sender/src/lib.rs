@@ -7,11 +7,7 @@ pub mod state;
 
 pub use instructions::initialize::*;
 pub use instructions::register_price_feed::*;
-pub use instructions::send_price::SendPrice;
-pub use instructions::send_message::SendMessage;
-
-use instructions::send_price::__client_accounts_send_price;
-use instructions::send_message::__client_accounts_send_message;
+pub use instructions::send::*;
 
 declare_id!("BqbowXrcN2KbKswhBHLZwasFrDh9NV9qpJty7fLH6peJ");
 
@@ -38,10 +34,10 @@ pub mod sender {
     }
 
     pub fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
-        instructions::send_message::send_message(ctx, message)
+        instructions::send::send_message(ctx, message)
     }
 
     pub fn send_price(ctx: Context<SendPrice>) -> Result<()> {
-        instructions::send_price::send_price(ctx)
+        instructions::send::send_price(ctx)
     }
 }

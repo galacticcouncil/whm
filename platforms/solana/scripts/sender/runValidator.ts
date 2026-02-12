@@ -4,6 +4,7 @@ const { PublicKey, Connection } = anchor.web3;
 
 const RPC = "https://api.mainnet-beta.solana.com";
 const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth");
+const KAMINO_ORACLES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH");
 
 // Wormhole PDAs
 const [BRIDGE_CONFIG] = PublicKey.findProgramAddressSync(
@@ -40,6 +41,7 @@ async function main() {
     "Bridge Config": BRIDGE_CONFIG.toBase58(),
     "Fee Collector": FEE_COLLECTOR.toBase58(),
     "Guardian Set": guardianSet.toBase58(),
+    "Kamino Oracles": KAMINO_ORACLES.toBase58(),
   };
 
   console.log("\nCloning from mainnet:");
@@ -65,6 +67,8 @@ async function main() {
     FEE_COLLECTOR.toBase58(),
     "--clone",
     guardianSet.toBase58(),
+    "--clone",
+    KAMINO_ORACLES.toBase58(),
   ];
 
   console.log(`> ${args.join(" ")}\n`);
