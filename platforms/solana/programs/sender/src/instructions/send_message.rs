@@ -4,7 +4,7 @@ use wormhole_anchor_sdk::wormhole::{
 };
 
 use crate::helpers::abi_encode_string;
-use crate::state::Config;
+use crate::state::{Config, PriceFeed};
 
 #[derive(Accounts)]
 pub struct SendMessage<'info> {
@@ -48,40 +48,59 @@ pub struct SendMessage<'info> {
     pub wormhole_program: Program<'info, Wormhole>,
 }
 
+#[derive(Accounts)]
+pub struct SendPrice<'info> {
+    /// Owner-registered binding: asset_id ↔ oracle indexes.
+    #[account(seeds = [b"price_feed".as_ref(), price_feed.asset_id.as_ref()], bump)]
+    pub price_feed: Account<'info, PriceFeed>,
+
+    /// CHECK: Kamino Scope OraclePrices account.
+    pub scope_prices: UncheckedAccount<'info>,
+
+    /// Embedded Wormhole accounts (config, payer, bridge, emitter, etc.)
+    pub wormhole: SendMessage<'info>,
+}
+
 pub(crate) fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
     let payload = abi_encode_string(&message);
+    post_wormhole_message(&ctx.accounts, ctx.bumps.emitter, payload)
+}
 
-    // Pay the Wormhole bridge fee
-    let fee = ctx.accounts.wormhole_bridge.fee();
+/// Shared Wormhole fee-payment + post_message CPI.
+pub(crate) fn post_wormhole_message(
+    accounts: &SendMessage,
+    emitter_bump: u8,
+    payload: Vec<u8>,
+) -> Result<()> {
+    let fee = accounts.wormhole_bridge.fee();
     if fee > 0 {
         anchor_lang::system_program::transfer(
             CpiContext::new(
-                ctx.accounts.system_program.to_account_info(),
+                accounts.system_program.to_account_info(),
                 anchor_lang::system_program::Transfer {
-                    from: ctx.accounts.payer.to_account_info(),
-                    to: ctx.accounts.wormhole_fee_collector.to_account_info(),
+                    from: accounts.payer.to_account_info(),
+                    to: accounts.wormhole_fee_collector.to_account_info(),
                 },
             ),
             fee,
         )?;
     }
 
-    // CPI to Wormhole post_message
     wormhole::post_message(
         CpiContext::new_with_signer(
-            ctx.accounts.wormhole_program.to_account_info(),
+            accounts.wormhole_program.to_account_info(),
             wormhole::PostMessage {
-                config: ctx.accounts.wormhole_bridge.to_account_info(),
-                message: ctx.accounts.wormhole_message.to_account_info(),
-                emitter: ctx.accounts.emitter.to_account_info(),
-                sequence: ctx.accounts.wormhole_sequence.to_account_info(),
-                payer: ctx.accounts.payer.to_account_info(),
-                fee_collector: ctx.accounts.wormhole_fee_collector.to_account_info(),
-                clock: ctx.accounts.clock.to_account_info(),
-                rent: ctx.accounts.rent.to_account_info(),
-                system_program: ctx.accounts.system_program.to_account_info(),
+                config: accounts.wormhole_bridge.to_account_info(),
+                message: accounts.wormhole_message.to_account_info(),
+                emitter: accounts.emitter.to_account_info(),
+                sequence: accounts.wormhole_sequence.to_account_info(),
+                payer: accounts.payer.to_account_info(),
+                fee_collector: accounts.wormhole_fee_collector.to_account_info(),
+                clock: accounts.clock.to_account_info(),
+                rent: accounts.rent.to_account_info(),
+                system_program: accounts.system_program.to_account_info(),
             },
-            &[&[SEED_PREFIX_EMITTER, &[ctx.bumps.emitter]]],
+            &[&[SEED_PREFIX_EMITTER, &[emitter_bump]]],
         ),
         0,
         payload,

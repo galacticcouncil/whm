@@ -26,3 +26,40 @@ pub fn abi_encode_string(s: &str) -> Vec<u8> {
 
     encoded
 }
+
+/// ABI-encode a price payload so the EVM receiver can decode it as:
+///   `abi.decode(payload, (uint8, bytes32, uint256, uint64))`
+///
+/// Layout (all static types, each left-padded to 32 bytes):
+///   bytes   0..32  : action   (uint8)
+///   bytes  32..64  : assetId  (bytes32)
+///   bytes  64..96  : price    (uint256, 18-decimal normalised)
+///   bytes  96..128 : timestamp (uint64)
+pub fn abi_encode_price_payload(
+    action: u8,
+    asset_id: [u8; 32],
+    price: u128,
+    timestamp: u64,
+) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(128);
+
+    // action — uint8 left-padded to 32 bytes
+    let mut slot = [0u8; 32];
+    slot[31] = action;
+    encoded.extend_from_slice(&slot);
+
+    // assetId — bytes32 (already 32 bytes, no padding needed)
+    encoded.extend_from_slice(&asset_id);
+
+    // price — uint256 as big-endian, left-padded to 32 bytes
+    let mut slot = [0u8; 32];
+    slot[16..32].copy_from_slice(&price.to_be_bytes());
+    encoded.extend_from_slice(&slot);
+
+    // timestamp — uint64 left-padded to 32 bytes
+    let mut slot = [0u8; 32];
+    slot[24..32].copy_from_slice(&timestamp.to_be_bytes());
+    encoded.extend_from_slice(&slot);
+
+    encoded
+}

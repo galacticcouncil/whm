@@ -2,10 +2,13 @@ use anchor_lang::prelude::*;
 
 pub mod helpers;
 pub mod instructions;
+pub mod oracle;
 pub mod state;
 
 pub use instructions::initialize::*;
+pub use instructions::register_price_feed::*;
 pub use instructions::send_message::*;
+pub use instructions::send_price::*;
 
 declare_id!("BqbowXrcN2KbKswhBHLZwasFrDh9NV9qpJty7fLH6peJ");
 
@@ -17,7 +20,25 @@ pub mod sender {
         instructions::initialize::initialize(ctx)
     }
 
+    pub fn register_price_feed(
+        ctx: Context<RegisterPriceFeed>,
+        asset_id: [u8; 32],
+        price_index: u16,
+        ref_price_index: u16,
+    ) -> Result<()> {
+        instructions::register_price_feed::register_price_feed(
+            ctx,
+            asset_id,
+            price_index,
+            ref_price_index,
+        )
+    }
+
     pub fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
         instructions::send_message::send_message(ctx, message)
+    }
+
+    pub fn send_price(ctx: Context<SendPrice>) -> Result<()> {
+        instructions::send_price::send_price(ctx)
     }
 }
