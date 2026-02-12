@@ -8,6 +8,7 @@
     "logs:local": "solana logs -u http://127.0.0.1:8898",
     "validator:cleanup": "rm -rf .anchor/test-ledger",
     "sender:deploy": "npx tsx scripts/sender/deploy.ts",
+    "sender:close": "npx tsx scripts/sender/close.ts",
     "sender:runValidator": "npx tsx scripts/sender/runValidator.ts",
     "sender:sendMessage": "npx tsx scripts/sender/sendMessage.ts",
     "sender:sendPrice": "npx tsx scripts/sender/sendPrice.ts",

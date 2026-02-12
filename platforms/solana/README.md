@@ -65,7 +65,7 @@ Derive secret from seed & address
 ```bash
 pnpm run account:getSecret -- \
  --seed your_account_seed \
- --address your_account_address \
+ --address your_account_address
 ```
 
 ### Message sender
@@ -93,6 +93,38 @@ Deploy the sender program.
 pnpm sender:deploy -- \
  --pk your_private_key \
  --test true
+```
+
+#### Cleanup deploy buffers
+
+Close all buffer accounts for your deploy authority to reclaim stranded rent.
+
+| Flag          | Description                                              |
+| ------------- | -------------------------------------------------------- |
+| `--pk`        | Deploy authority private key used to sign close txs      |
+| `--recipient` | Recipient account for reclaimed lamports (optional)      |
+
+```bash
+pnpm sender:cleanup -- \
+ --pk your_private_key \
+ --recipient your_wallet_address
+```
+
+#### Close program
+
+Close the deployed sender program and reclaim rent to a recipient account.
+
+| Flag          | Description                                                      |
+| ------------- | ---------------------------------------------------------------- |
+| `--pk`        | Upgrade authority private key used to sign close transaction     |
+| `--programId` | Program id to close (defaults to current sender id from IDL)     |
+| `--recipient` | Recipient account for reclaimed lamports (defaults to authority) |
+
+```bash
+pnpm sender:close -- \
+ --pk your_private_key \
+ --programId your_program_id \
+ --recipient your_wallet_address
 ```
 
 #### Broadcast message
