@@ -12,31 +12,39 @@ struct Multilocation {
     bytes[] interior;
 }
 
-/// @notice Moonbeam XcmTransactorV2 precompile at 0x80D
-interface IXcmTransactorV2 {
-    function transactThroughSignedMultilocation(
+/// @notice Moonbeam XCM Weight representation (Weights V2)
+struct Weight {
+    uint64 refTime;
+    uint64 proofSize;
+}
+
+/// @notice Moonbeam XcmTransactorV3 precompile at 0x817
+interface IXcmTransactorV3 {
+    function transactThroughSigned(
         Multilocation memory dest,
-        Multilocation memory feeLocation,
-        uint64 transactRequiredWeightAtMost,
+        address feeLocationAddress,
+        Weight memory transactRequiredWeightAtMost,
         bytes memory call,
         uint256 feeAmount,
-        uint64 overallWeight
+        Weight memory overallWeight,
+        bool refund
     ) external;
 }
 
 /// @title XcmTransactor - Dispatch EVM calls on Hydration via Moonbeam XCM
 /// @notice Only whitelisted addresses (e.g. MessageDispatcher) can call transact
 contract XcmTransactor is Initializable, UUPSUpgradeable {
-    IXcmTransactorV2 public constant XCM_PRECOMPILE = IXcmTransactorV2(0x000000000000000000000000000000000000080D);
+    IXcmTransactorV3 public constant XCM_PRECOMPILE = IXcmTransactorV3(0x0000000000000000000000000000000000000817);
 
     address public owner;
     mapping(address => bool) public authorized;
 
-    // --- Hydration runtime config (immutable across upgrades) ---
-    uint32 public immutable HYDRATION_PARA_ID;
+    // --- Runtime config (immutable across upgrades) ---
+    uint32 public immutable DESTINATION_PARA_ID;
     uint32 public immutable SOURCE_PARA_ID;
     uint8 public immutable EVM_PALLET_INDEX;
     uint8 public immutable EVM_CALL_INDEX;
+    address public immutable FEE_LOCATION_ADDRESS;
 
     // --- XCM source (derived H160 on Hydration) ---
     address public xcmSource;
@@ -45,14 +53,14 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
     uint64 public xcmGasLimit;
     uint256 public xcmMaxFeePerGas;
     uint64 public xcmTransactWeight;
-    uint64 public xcmOverallWeight;
+    uint64 public xcmTransactProofSize;
     uint256 public xcmFeeAmount;
 
     event XcmDispatched(address indexed target, bytes input);
-    event AuthorizedSet(address indexed addr, bool enabled);
 
     error NotOwner();
     error NotAuthorized();
+    error InvalidFeeLocationAddress();
 
     modifier onlyOwner() {
         _onlyOwner();
@@ -64,12 +72,21 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
         _;
     }
 
-    constructor(uint32 _hydrationParaId, uint32 _sourceParaId, uint8 _evmPalletIndex, uint8 _evmCallIndex) {
+    constructor(
+        uint32 _destinationParaId,
+        uint32 _sourceParaId,
+        uint8 _evmPalletIndex,
+        uint8 _evmCallIndex,
+        address _feeLocationAddress
+    ) {
         _disableInitializers();
-        HYDRATION_PARA_ID = _hydrationParaId;
+        DESTINATION_PARA_ID = _destinationParaId;
         SOURCE_PARA_ID = _sourceParaId;
         EVM_PALLET_INDEX = _evmPalletIndex;
         EVM_CALL_INDEX = _evmCallIndex;
+
+        if (_feeLocationAddress == address(0)) revert InvalidFeeLocationAddress();
+        FEE_LOCATION_ADDRESS = _feeLocationAddress;
     }
 
     function initialize() public initializer {
@@ -77,9 +94,9 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
         xcmSource = DerivedAccount.deriveSibling(SOURCE_PARA_ID, address(this));
         xcmGasLimit = 200_000;
         xcmMaxFeePerGas = 1_000_000_000;
-        xcmTransactWeight = 300_000_000;
-        xcmOverallWeight = 6_000_000_000;
-        xcmFeeAmount = 1_000_000_000_000;
+        xcmTransactWeight = 1_000_000_000;
+        xcmTransactProofSize = 20_000;
+        xcmFeeAmount = 5_000_000_000_000;
     }
 
     // ─── Transact ──────────────────────────────────────────────
@@ -123,14 +140,14 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
         Multilocation memory dest;
         dest.parents = 1;
         dest.interior = new bytes[](1);
-        dest.interior[0] = abi.encodePacked(uint8(0x00), HYDRATION_PARA_ID);
+        dest.interior[0] = abi.encodePacked(uint8(0x00), DESTINATION_PARA_ID);
 
-        Multilocation memory feeLocation;
-        feeLocation.parents = 1;
-        feeLocation.interior = new bytes[](0);
+        Weight memory transactRequiredWeightAtMost =
+            Weight({refTime: xcmTransactWeight, proofSize: xcmTransactProofSize});
+        Weight memory overallWeight = Weight({refTime: xcmTransactWeight * 2, proofSize: xcmTransactProofSize * 2});
 
-        XCM_PRECOMPILE.transactThroughSignedMultilocation(
-            dest, feeLocation, xcmTransactWeight, encodedCall, xcmFeeAmount, xcmOverallWeight
+        XCM_PRECOMPILE.transactThroughSigned(
+            dest, FEE_LOCATION_ADDRESS, transactRequiredWeightAtMost, encodedCall, xcmFeeAmount, overallWeight, true
         );
     }
 
@@ -148,20 +165,19 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     function setAuthorized(address addr, bool enabled) external onlyOwner {
         authorized[addr] = enabled;
-        emit AuthorizedSet(addr, enabled);
     }
 
     function setXcmDefaults(
         uint64 gasLimit,
         uint256 maxFeePerGas,
-        uint64 transactWeight,
-        uint64 overallWeight,
+        uint64 transactWeightRefTime,
+        uint64 transactWeightProofSize,
         uint256 feeAmount
     ) external onlyAuthorized {
         xcmGasLimit = gasLimit;
         xcmMaxFeePerGas = maxFeePerGas;
-        xcmTransactWeight = transactWeight;
-        xcmOverallWeight = overallWeight;
+        xcmTransactWeight = transactWeightRefTime;
+        xcmTransactProofSize = transactWeightProofSize;
         xcmFeeAmount = feeAmount;
     }
 }

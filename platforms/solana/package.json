@@ -12,7 +12,8 @@
     "sender:runValidator": "npx tsx scripts/sender/runValidator.ts",
     "sender:sendMessage": "npx tsx scripts/sender/sendMessage.ts",
     "sender:sendPrice": "npx tsx scripts/sender/sendPrice.ts",
-    "account:getSecret": "npx tsx scripts/getSecret.ts"
+    "account:getSecret": "npx tsx scripts/getSecret.ts",
+    "asset:getBytes32": "npx tsx scripts/getBytes32.ts"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

@@ -36,7 +36,7 @@ contract MessagingForkTest is WormholeRelayerBasicTest {
 
     function setUpGeneral() public override {
         vm.selectFork(targetFork);
-        receiverTarget.setRegisteredSender(sourceChain, toWormholeFormat(address(senderSource)));
+        receiverTarget.setRegisteredEmitter(sourceChain, toWormholeFormat(address(senderSource)));
     }
 
     function testSendMessageEndToEndFork() public {

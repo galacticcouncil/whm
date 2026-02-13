@@ -19,12 +19,10 @@ contract MessageDispatcherTest is Test {
 
     function setUp() public {
         MessageDispatcher impl = new MessageDispatcher();
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl),
-            abi.encodeCall(MessageDispatcher.initialize, (wormholeRelayer, wormhole))
-        );
+        ERC1967Proxy proxy =
+            new ERC1967Proxy(address(impl), abi.encodeCall(MessageDispatcher.initialize, (wormholeRelayer, wormhole)));
         dispatcher = MessageDispatcher(address(proxy));
-        dispatcher.setRegisteredSender(sourceChain, sourceAddress);
+        dispatcher.setRegisteredEmitter(sourceChain, sourceAddress);
     }
 
     function testRoutesPriceUpdate() public {

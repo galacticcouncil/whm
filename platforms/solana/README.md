@@ -70,7 +70,7 @@ pnpm run account:getSecret -- \
 
 ### Message sender
 
-To run sender scripts agains local validator use **DOTENV_CONFIG_PATH=.env.fork**.
+To run scripts agains local validator use **DOTENV_CONFIG_PATH=.env.fork**.
 
 #### Local validator (fork environment)
 
@@ -99,10 +99,10 @@ pnpm sender:deploy -- \
 
 Close all buffer accounts for your deploy authority to reclaim stranded rent.
 
-| Flag          | Description                                              |
-| ------------- | -------------------------------------------------------- |
-| `--pk`        | Deploy authority private key used to sign close txs      |
-| `--recipient` | Recipient account for reclaimed lamports (optional)      |
+| Flag          | Description                                         |
+| ------------- | --------------------------------------------------- |
+| `--pk`        | Deploy authority private key used to sign close txs |
+| `--recipient` | Recipient account for reclaimed lamports (optional) |
 
 ```bash
 pnpm sender:cleanup -- \

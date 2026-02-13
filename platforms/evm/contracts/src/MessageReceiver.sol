@@ -14,14 +14,14 @@ contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
     address public owner;
     mapping(address => bool) public authorized;
 
-    mapping(uint16 => bytes32) public registeredSenders;
+    mapping(uint16 => bytes32) public registeredEmitters;
     mapping(bytes32 => bool) public processedVaas;
 
     event MessageReceived(string message);
 
     error NotOwner();
     error NotAuthorized();
-    error NotRegisteredSender();
+    error NotRegisteredEmitter();
 
     modifier onlyOwner() {
         _onlyOwner();
@@ -33,8 +33,8 @@ contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
         _;
     }
 
-    modifier onlyRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) {
-        _onlyRegisteredSender(sourceChain, sourceAddress);
+    modifier onlyRegisteredEmitter(uint16 sourceChain, bytes32 sourceAddress) {
+        _onlyRegisteredEmitter(sourceChain, sourceAddress);
         _;
     }
 
@@ -60,7 +60,7 @@ contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
         bytes32 sourceAddress,
         uint16 sourceChain,
         bytes32
-    ) public payable override onlyRegisteredSender(sourceChain, sourceAddress) {
+    ) public payable override onlyRegisteredEmitter(sourceChain, sourceAddress) {
         require(msg.sender == address(wormholeRelayer), "Only the Wormhole relayer can call this function");
         _processMessage(payload);
     }
@@ -72,7 +72,7 @@ contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
         require(!processedVaas[vm.hash], "VAA already processed");
         processedVaas[vm.hash] = true;
 
-        _onlyRegisteredSender(vm.emitterChainId, vm.emitterAddress);
+        _onlyRegisteredEmitter(vm.emitterChainId, vm.emitterAddress);
         _processMessage(vm.payload);
     }
 
@@ -86,8 +86,8 @@ contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
         if (!authorized[msg.sender]) revert NotAuthorized();
     }
 
-    function _onlyRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) internal view {
-        if (registeredSenders[sourceChain] != sourceAddress) revert NotRegisteredSender();
+    function _onlyRegisteredEmitter(uint16 sourceChain, bytes32 sourceAddress) internal view {
+        if (registeredEmitters[sourceChain] != sourceAddress) revert NotRegisteredEmitter();
     }
 
     function _processMessage(bytes memory payload) internal virtual {
@@ -111,7 +111,7 @@ contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
         authorized[addr] = enabled;
     }
 
-    function setRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) public onlyOwner {
-        registeredSenders[sourceChain] = sourceAddress;
+    function setRegisteredEmitter(uint16 sourceChain, bytes32 sourceAddress) public onlyOwner {
+        registeredEmitters[sourceChain] = sourceAddress;
     }
 }

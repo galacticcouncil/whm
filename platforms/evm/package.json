@@ -12,6 +12,10 @@
     "receiver:registerSender": "npx tsx scripts/receiver/registerSender.ts",
     "receiver:registerUpdater": "npx tsx scripts/receiver/registerUpdater.ts",
     "receiver:receiveMessage": "npx tsx scripts/receiver/receiveMessage.ts",
+    "dispatcher:setHandler": "npx tsx scripts/dispatcher/setHandler.ts",
+    "dispatcher:setOracle": "npx tsx scripts/dispatcher/setOracle.ts",
+    "transactor:deploy": "npx tsx scripts/transactor/deploy.ts",
+    "transactor:setAuthorized": "npx tsx scripts/transactor/setAuthorized.ts",
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
     "account:getSecret": "npx tsx scripts/getSecret.ts"

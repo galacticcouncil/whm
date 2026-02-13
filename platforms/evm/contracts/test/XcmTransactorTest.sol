@@ -10,13 +10,15 @@ import {DerivedAccount} from "../src/utils/DerivedAccount.sol";
 contract XcmTransactorTest is Test {
     XcmTransactor public transactor;
 
-    uint32 constant HYDRATION_PARA_ID = 2034;
+    uint32 constant DESTINATION_PARA_ID = 2034;
     uint32 constant SOURCE_PARA_ID = 2004;
     uint8 constant EVM_PALLET_INDEX = 36;
     uint8 constant EVM_CALL_INDEX = 0;
+    address constant XCM_FEE_LOCATION_ADDRESS = 0xFFFfFfff345Dc44DDAE98Df024Eb494321E73FcC;
 
     function setUp() public {
-        XcmTransactor impl = new XcmTransactor(HYDRATION_PARA_ID, SOURCE_PARA_ID, EVM_PALLET_INDEX, EVM_CALL_INDEX);
+        XcmTransactor impl =
+            new XcmTransactor(DESTINATION_PARA_ID, SOURCE_PARA_ID, EVM_PALLET_INDEX, EVM_CALL_INDEX, XCM_FEE_LOCATION_ADDRESS);
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), abi.encodeCall(XcmTransactor.initialize, ()));
         transactor = XcmTransactor(address(proxy));
         transactor.setAuthorized(address(this), true);
@@ -52,13 +54,17 @@ contract XcmTransactorTest is Test {
         transactor.setXcmDefaults(500_000, 2e9, 400_000_000, 8_000_000_000, 2e12);
         assertEq(transactor.xcmGasLimit(), 500_000);
         assertEq(transactor.xcmMaxFeePerGas(), 2e9);
+        assertEq(transactor.xcmTransactWeight(), 400_000_000);
+        assertEq(transactor.xcmTransactProofSize(), 8_000_000_000);
+        assertEq(transactor.xcmFeeAmount(), 2e12);
     }
 
     function testImmutableConfig() public view {
-        assertEq(transactor.HYDRATION_PARA_ID(), HYDRATION_PARA_ID);
+        assertEq(transactor.DESTINATION_PARA_ID(), DESTINATION_PARA_ID);
         assertEq(transactor.SOURCE_PARA_ID(), SOURCE_PARA_ID);
         assertEq(transactor.EVM_PALLET_INDEX(), EVM_PALLET_INDEX);
         assertEq(transactor.EVM_CALL_INDEX(), EVM_CALL_INDEX);
+        assertEq(transactor.FEE_LOCATION_ADDRESS(), XCM_FEE_LOCATION_ADDRESS);
     }
 
     function testSetXcmSourceUsesDerivedAccount() public view {

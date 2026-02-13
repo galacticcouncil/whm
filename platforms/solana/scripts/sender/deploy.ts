@@ -111,6 +111,7 @@ async function main(): Promise<void> {
   }
 
   const primeAssetId = Array.from(PRIME_ID.toBytes());
+  const primeAssetIdHex = "0x" + Buffer.from(PRIME_ID.toBytes()).toString("hex");
   const [primePriceFeedPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("price_feed"), Buffer.from(primeAssetId)],
     program.programId,
@@ -120,6 +121,8 @@ async function main(): Promise<void> {
   if (existingPrimeFeed) {
     const data = await program.account.priceFeed.fetch(primePriceFeedPda);
     console.log("PRIME price feed already registered at:", primePriceFeedPda.toBase58());
+    console.log("  assetId:", PRIME_ID.toBase58());
+    console.log("  assetId (bytes32):", primeAssetIdHex);
     console.log("  priceIndex:", data.priceIndex);
     console.log("  refPriceIndex:", data.refPriceIndex);
     return;
@@ -134,6 +137,7 @@ async function main(): Promise<void> {
 
   console.log("PRIME price feed registered:", primePriceFeedPda.toBase58());
   console.log("  assetId:", PRIME_ID.toBase58());
+  console.log("  assetId (bytes32):", primeAssetIdHex);
   console.log("  priceIndex:", PRIME_PRICE_INDEX);
   console.log("  refPriceIndex:", PRIME_REF_PRICE_INDEX);
   console.log("  Tx:", registerTx);
