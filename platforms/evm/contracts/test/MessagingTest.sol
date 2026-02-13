@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity ^0.8.22;
 
 import {Test} from "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {MessageRelayer} from "../src/MessageRelayer.sol";
-import {MessageReceiver} from "../src/MessageReceiver.sol";
+import {MessageDispatcher} from "../src/MessageDispatcher.sol";
 
 contract MessagingTest is Test {
     MessageRelayer public senderContract;
-    MessageReceiver public receiverContract;
+    MessageDispatcher public receiverContract;
     address public wormholeRelayer = address(this);
     address public wormhole = address(this);
 
     function setUp() public {
         senderContract = new MessageRelayer(wormholeRelayer);
-        receiverContract = new MessageReceiver(wormholeRelayer, wormhole);
+        MessageDispatcher impl = new MessageDispatcher();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(MessageDispatcher.initialize, (wormholeRelayer, wormhole))
+        );
+        receiverContract = MessageDispatcher(address(proxy));
     }
 
     function testDeployment() public view {

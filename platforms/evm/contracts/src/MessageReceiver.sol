@@ -1,48 +1,93 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity ^0.8.22;
 
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {IWormholeRelayer} from "wormhole-solidity-sdk/interfaces/IWormholeRelayer.sol";
 import {IWormholeReceiver} from "wormhole-solidity-sdk/interfaces/IWormholeReceiver.sol";
 import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
-contract MessageReceiver is IWormholeReceiver {
+contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
     IWormholeRelayer public wormholeRelayer;
     IWormhole public wormhole;
-    address public registrationOwner;
 
-    // Registered senders for each chain
+    address public owner;
+    mapping(address => bool) public authorized;
+
     mapping(uint16 => bytes32) public registeredSenders;
-
-    // Registered updaters (bots) that can submit VAAs
-    mapping(address => bool) public registeredUpdaters;
-
-    // Processed VAA hashes to prevent replay
     mapping(bytes32 => bool) public processedVaas;
 
     event MessageReceived(string message);
 
-    constructor(address _wormholeRelayer, address _wormhole) {
+    error NotOwner();
+    error NotAuthorized();
+    error NotRegisteredSender();
+
+    modifier onlyOwner() {
+        _onlyOwner();
+        _;
+    }
+
+    modifier onlyAuthorized() {
+        _onlyAuthorized();
+        _;
+    }
+
+    modifier onlyRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) {
+        _onlyRegisteredSender(sourceChain, sourceAddress);
+        _;
+    }
+
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address _wormholeRelayer, address _wormhole) public virtual initializer {
+        _initMessageReceiver(_wormholeRelayer, _wormhole);
+    }
+
+    function _initMessageReceiver(address _wormholeRelayer, address _wormhole) internal onlyInitializing {
         wormholeRelayer = IWormholeRelayer(_wormholeRelayer);
         wormhole = IWormhole(_wormhole);
-        registrationOwner = msg.sender;
+        owner = msg.sender;
     }
 
-    modifier isRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) {
-        _isRegisteredSender(sourceChain, sourceAddress);
-        _;
+    // ─── Receive ────────────────────────────────────────────────
+
+    function receiveWormholeMessages(
+        bytes memory payload,
+        bytes[] memory,
+        bytes32 sourceAddress,
+        uint16 sourceChain,
+        bytes32
+    ) public payable override onlyRegisteredSender(sourceChain, sourceAddress) {
+        require(msg.sender == address(wormholeRelayer), "Only the Wormhole relayer can call this function");
+        _processMessage(payload);
     }
 
-    modifier isRegisteredUpdater() {
-        _isRegisteredUpdater();
-        _;
+    function receiveMessage(bytes memory vaa) public onlyAuthorized {
+        (IWormhole.VM memory vm, bool valid, string memory reason) = wormhole.parseAndVerifyVM(vaa);
+        require(valid, reason);
+
+        require(!processedVaas[vm.hash], "VAA already processed");
+        processedVaas[vm.hash] = true;
+
+        _onlyRegisteredSender(vm.emitterChainId, vm.emitterAddress);
+        _processMessage(vm.payload);
     }
 
-    function _isRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) internal view {
-        require(registeredSenders[sourceChain] == sourceAddress, "Not registered sender");
+    // ─── Internal ───────────────────────────────────────────────
+
+    function _onlyOwner() internal view {
+        if (msg.sender != owner) revert NotOwner();
     }
 
-    function _isRegisteredUpdater() internal view {
-        require(registeredUpdaters[msg.sender], "Not registered updater");
+    function _onlyAuthorized() internal view {
+        if (!authorized[msg.sender]) revert NotAuthorized();
+    }
+
+    function _onlyRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) internal view {
+        if (registeredSenders[sourceChain] != sourceAddress) revert NotRegisteredSender();
     }
 
     function _processMessage(bytes memory payload) internal virtual {
@@ -50,37 +95,23 @@ contract MessageReceiver is IWormholeReceiver {
         emit MessageReceived(message);
     }
 
-    function setRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) public {
-        require(msg.sender == registrationOwner, "Not allowed to set registered sender");
+    // ─── Upgrade ────────────────────────────────────────────────
+
+    function _authorizeUpgrade(address) internal view virtual override {
+        _onlyOwner();
+    }
+
+    // ─── Admin ──────────────────────────────────────────────────
+
+    function setOwner(address newOwner) external onlyOwner {
+        owner = newOwner;
+    }
+
+    function setAuthorized(address addr, bool enabled) public onlyOwner {
+        authorized[addr] = enabled;
+    }
+
+    function setRegisteredSender(uint16 sourceChain, bytes32 sourceAddress) public onlyOwner {
         registeredSenders[sourceChain] = sourceAddress;
-    }
-
-    function setRegisteredUpdater(address updater, bool enabled) public {
-        require(msg.sender == registrationOwner, "Not allowed to set registered updater");
-        registeredUpdaters[updater] = enabled;
-    }
-
-    // Receive a message via Relayer
-    function receiveWormholeMessages(
-        bytes memory payload,
-        bytes[] memory,
-        bytes32 sourceAddress,
-        uint16 sourceChain,
-        bytes32
-    ) public payable override isRegisteredSender(sourceChain, sourceAddress) {
-        require(msg.sender == address(wormholeRelayer), "Only the Wormhole relayer can call this function");
-        _processMessage(payload);
-    }
-
-    // Receive a message via Core Bridge (for non-EVM chains)
-    function receiveMessage(bytes memory vaa) public isRegisteredUpdater {
-        (IWormhole.VM memory vm, bool valid, string memory reason) = wormhole.parseAndVerifyVM(vaa);
-        require(valid, reason);
-
-        require(!processedVaas[vm.hash], "VAA already processed");
-        processedVaas[vm.hash] = true;
-
-        _isRegisteredSender(vm.emitterChainId, vm.emitterAddress);
-        _processMessage(vm.payload);
     }
 }

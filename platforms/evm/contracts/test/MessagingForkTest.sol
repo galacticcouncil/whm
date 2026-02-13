@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity ^0.8.22;
 
 import {WormholeRelayerBasicTest} from "wormhole-solidity-sdk/testing/WormholeRelayerTest.sol";
 import {toWormholeFormat} from "wormhole-solidity-sdk/Utils.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {console} from "forge-std/console.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {MessageRelayer} from "../src/MessageRelayer.sol";
-import {MessageReceiver} from "../src/MessageReceiver.sol";
+import {MessageDispatcher} from "../src/MessageDispatcher.sol";
 
 contract MessagingForkTest is WormholeRelayerBasicTest {
     MessageRelayer public senderSource;
-    MessageReceiver public receiverTarget;
+    MessageDispatcher public receiverTarget;
 
     constructor() WormholeRelayerBasicTest() {
         // Avoid dependency default (Ankr)
@@ -25,7 +26,12 @@ contract MessagingForkTest is WormholeRelayerBasicTest {
     }
 
     function setUpTarget() public override {
-        receiverTarget = new MessageReceiver(address(relayerTarget), address(wormholeTarget));
+        MessageDispatcher impl = new MessageDispatcher();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(MessageDispatcher.initialize, (address(relayerTarget), address(wormholeTarget)))
+        );
+        receiverTarget = MessageDispatcher(address(proxy));
     }
 
     function setUpGeneral() public override {

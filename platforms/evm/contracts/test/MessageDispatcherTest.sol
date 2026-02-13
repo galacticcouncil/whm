@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity ^0.8.22;
 
 import {Test} from "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
+import {MessageReceiver} from "../src/MessageReceiver.sol";
 import {MessageDispatcher} from "../src/MessageDispatcher.sol";
 
 contract MessageDispatcherTest is Test {
@@ -16,7 +18,12 @@ contract MessageDispatcherTest is Test {
     bytes32 public sourceAddress = bytes32(uint256(0xabc123));
 
     function setUp() public {
-        dispatcher = new MessageDispatcher(wormholeRelayer, wormhole);
+        MessageDispatcher impl = new MessageDispatcher();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(MessageDispatcher.initialize, (wormholeRelayer, wormhole))
+        );
+        dispatcher = MessageDispatcher(address(proxy));
         dispatcher.setRegisteredSender(sourceChain, sourceAddress);
     }
 
@@ -61,13 +68,13 @@ contract MessageDispatcherTest is Test {
 
     function testOnlyOwnerCanSetHandler() public {
         vm.prank(address(0xdead));
-        vm.expectRevert("Not allowed");
+        vm.expectRevert(MessageReceiver.NotOwner.selector);
         dispatcher.setHandler(1, address(0xCAFE));
     }
 
     function testOnlyOwnerCanSetOracle() public {
         vm.prank(address(0xdead));
-        vm.expectRevert("Not allowed");
+        vm.expectRevert(MessageReceiver.NotOwner.selector);
         dispatcher.setOracle(keccak256("PRIME"), address(0xBEEF));
     }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity ^0.8.22;
 
 import {MessageReceiver} from "./MessageReceiver.sol";
 import {XcmTransactor} from "./XcmTransactor.sol";
@@ -14,15 +14,17 @@ contract MessageDispatcher is MessageReceiver {
 
     uint8 constant ACTION_PRICE_UPDATE = 1;
 
-    /// @notice action → handler contract (e.g. ACTION_PRICE_UPDATE → XcmTransactor)
+    /// @notice action -> handler contract (e.g. ACTION_PRICE_UPDATE -> XcmTransactor)
     mapping(uint8 => address) public handlers;
 
-    /// @notice assetId → oracle contract address on Hydration (dest for evm.call)
+    /// @notice assetId -> oracle contract address on Hydration (dest for evm.call)
     mapping(bytes32 => address) public oracles;
 
     event PriceReceived(bytes32 indexed assetId, uint256 price, uint64 timestamp);
 
-    constructor(address _wormholeRelayer, address _wormhole) MessageReceiver(_wormholeRelayer, _wormhole) {}
+    function initialize(address _wormholeRelayer, address _wormhole) public override initializer {
+        _initMessageReceiver(_wormholeRelayer, _wormhole);
+    }
 
     // ─── Message routing ───────────────────────────────────────
 
@@ -53,13 +55,11 @@ contract MessageDispatcher is MessageReceiver {
 
     // ─── Admin ─────────────────────────────────────────────────
 
-    function setHandler(uint8 action, address handler) external {
-        require(msg.sender == registrationOwner, "Not allowed");
+    function setHandler(uint8 action, address handler) external onlyOwner {
         handlers[action] = handler;
     }
 
-    function setOracle(bytes32 assetId, address oracle) external {
-        require(msg.sender == registrationOwner, "Not allowed");
+    function setOracle(bytes32 assetId, address oracle) external onlyOwner {
         oracles[assetId] = oracle;
     }
 }

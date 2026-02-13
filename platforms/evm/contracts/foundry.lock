@@ -5,6 +5,12 @@
       "rev": "1801b0541f4fda118a10798fd3486bb7051c5dd6"
     }
   },
+  "lib/openzeppelin-contracts-upgradeable": {
+    "tag": {
+      "name": "v5.5.0",
+      "rev": "aa677e9d28ed78fc427ec47ba2baef2030c58e7c"
+    }
+  },
   "lib/wormhole-solidity-sdk": {
     "rev": "b9e129e65d34827d92fceeed8c87d3ecdfc801d0"
   }
