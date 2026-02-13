@@ -1,0 +1,157 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
+
+import {ScaleCodec} from "./ScaleCodec.sol";
+
+/// @notice Moonbeam XCM Multilocation representation
+struct Multilocation {
+    uint8 parents;
+    bytes[] interior;
+}
+
+/// @notice Moonbeam XcmTransactorV2 precompile at 0x80D
+interface IXcmTransactorV2 {
+    function transactThroughSignedMultilocation(
+        Multilocation memory dest,
+        Multilocation memory feeLocation,
+        uint64 transactRequiredWeightAtMost,
+        bytes memory call,
+        uint256 feeAmount,
+        uint64 overallWeight
+    ) external;
+}
+
+/// @title XcmTransactor - Dispatch EVM calls on Hydration via Moonbeam XCM
+/// @notice Only whitelisted addresses (e.g. MessageDispatcher) can call transact
+contract XcmTransactor {
+    IXcmTransactorV2 public constant XCM_PRECOMPILE =
+        IXcmTransactorV2(0x000000000000000000000000000000000000080D);
+
+    address public owner;
+    mapping(address => bool) public authorized;
+
+    // --- Hydration runtime config (immutable) ---
+    uint32 public immutable HYDRATION_PARA_ID;
+    uint8 public immutable EVM_PALLET_INDEX;
+    uint8 public immutable EVM_CALL_INDEX;
+
+    // --- XCM source (derived H160 on Hydration) ---
+    address public xcmSource;
+
+    // --- XCM defaults (tunable by authorized callers) ---
+    uint64 public xcmGasLimit;
+    uint256 public xcmMaxFeePerGas;
+    uint64 public xcmTransactWeight;
+    uint64 public xcmOverallWeight;
+    uint256 public xcmFeeAmount;
+
+    event XcmDispatched(address indexed target, bytes input);
+    event AuthorizedSet(address indexed addr, bool enabled);
+
+    error NotOwner();
+    error NotAuthorized();
+
+    modifier onlyOwner() {
+        _onlyOwner();
+        _;
+    }
+
+    modifier onlyAuthorized() {
+        _onlyAuthorized();
+        _;
+    }
+
+    constructor(uint32 _hydrationParaId, uint8 _evmPalletIndex, uint8 _evmCallIndex) {
+        owner = msg.sender;
+        HYDRATION_PARA_ID = _hydrationParaId;
+        EVM_PALLET_INDEX = _evmPalletIndex;
+        EVM_CALL_INDEX = _evmCallIndex;
+
+        xcmGasLimit = 200_000;
+        xcmMaxFeePerGas = 1_000_000_000;
+        xcmTransactWeight = 300_000_000;
+        xcmOverallWeight = 6_000_000_000;
+        xcmFeeAmount = 1_000_000_000_000;
+    }
+
+    // ─── Transact ──────────────────────────────────────────────
+
+    /// @notice Dispatch an EVM call on Hydration via XCM
+    /// @param target  Contract address on Hydration
+    /// @param input   EVM calldata
+    function transact(address target, bytes calldata input) external onlyAuthorized {
+        bytes memory encoded = _encodeEvmCall(target, input);
+        _xcmSend(encoded);
+        emit XcmDispatched(target, input);
+    }
+
+    // ─── Internal ──────────────────────────────────────────────
+
+    function _onlyOwner() internal view {
+        if (msg.sender != owner) revert NotOwner();
+    }
+
+    function _onlyAuthorized() internal view {
+        if (!authorized[msg.sender]) revert NotAuthorized();
+    }
+
+    function _encodeEvmCall(address target, bytes calldata input) internal view returns (bytes memory) {
+        return abi.encodePacked(
+            EVM_PALLET_INDEX,
+            EVM_CALL_INDEX,
+            bytes20(xcmSource),
+            bytes20(target),
+            ScaleCodec.encodeVecU8(input),
+            ScaleCodec.u256Le(0),
+            ScaleCodec.u64Le(xcmGasLimit),
+            ScaleCodec.u256Le(xcmMaxFeePerGas),
+            ScaleCodec.encodeNone(), // max_priority_fee_per_gas
+            ScaleCodec.encodeNone(), // nonce
+            uint8(0x00)              // access_list: empty Vec
+        );
+    }
+
+    function _xcmSend(bytes memory encodedCall) internal {
+        Multilocation memory dest;
+        dest.parents = 1;
+        dest.interior = new bytes[](1);
+        dest.interior[0] = abi.encodePacked(uint8(0x00), HYDRATION_PARA_ID);
+
+        Multilocation memory feeLocation;
+        feeLocation.parents = 1;
+        feeLocation.interior = new bytes[](0);
+
+        XCM_PRECOMPILE.transactThroughSignedMultilocation(
+            dest, feeLocation, xcmTransactWeight, encodedCall, xcmFeeAmount, xcmOverallWeight
+        );
+    }
+
+    // ─── Admin ─────────────────────────────────────────────────
+
+    function setAuthorized(address addr, bool enabled) external onlyOwner {
+        authorized[addr] = enabled;
+        emit AuthorizedSet(addr, enabled);
+    }
+
+    function setXcmSource(address source) external onlyOwner {
+        xcmSource = source;
+    }
+
+    function setXcmDefaults(
+        uint64 gasLimit,
+        uint256 maxFeePerGas,
+        uint64 transactWeight,
+        uint64 overallWeight,
+        uint256 feeAmount
+    ) external onlyAuthorized {
+        xcmGasLimit = gasLimit;
+        xcmMaxFeePerGas = maxFeePerGas;
+        xcmTransactWeight = transactWeight;
+        xcmOverallWeight = overallWeight;
+        xcmFeeAmount = feeAmount;
+    }
+
+    function setOwner(address newOwner) external onlyOwner {
+        owner = newOwner;
+    }
+}
