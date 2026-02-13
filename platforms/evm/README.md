@@ -52,13 +52,15 @@ To run scripts agains local fork use **DOTENV_CONFIG_PATH=.env.fork**.
 
 Deploy the message receiver contract.
 
-| Flag   | Description                              |
-| ------ | ---------------------------------------- |
-| `--pk` | Private key used to sign the transaction |
+| Flag      | Description                                                     |
+| --------- | --------------------------------------------------------------- |
+| `--pk`    | Private key used to sign the transaction                        |
+| `--proxy` | Deploys new implementation and upgrades existing proxy in-place |
 
 ```bash
 pnpm run receiver:deploy -- \
  --pk your_private_key
+ --proxy receiver_proxy_address
 ```
 
 #### Verify contract
@@ -214,14 +216,15 @@ pnpm run relayer:sendMessage -- \
 
 Set handler for dispatch action.
 
-| Flag                    | Description                              |
-| ----------------------- | ---------------------------------------- |
-| `--pk`                  | Private key used to sign the transaction |
-| `--destination-para-id` | Destination parachain id                 |
-| `--source-para-id`      | Source parachain id                      |
-| `--evm-pallet-index`    | Pallet index for Hydration EVM transact  |
-| `--evm-call-index`      | Call index for Hydration EVM transact    |
-| `--fee-asset`           | XC-20 token used for XCM execution fees  |
+| Flag                    | Description                                                     |
+| ----------------------- | --------------------------------------------------------------- |
+| `--pk`                  | Private key used to sign the transaction                        |
+| `--destination-para-id` | Destination parachain id                                        |
+| `--source-para-id`      | Source parachain id                                             |
+| `--evm-pallet-index`    | Pallet index for Hydration EVM transact                         |
+| `--evm-call-index`      | Call index for Hydration EVM transact                           |
+| `--fee-asset`           | XC-20 token used for XCM execution fees                         |
+| `--proxy`               | Deploys new implementation and upgrades existing proxy in-place |
 
 ```bash
 pnpm run transactor:deploy -- \
@@ -230,7 +233,8 @@ pnpm run transactor:deploy -- \
  --source-para-id src_para_id \
  --evm-pallet-index evm_pallet_index \
  --evm-call-index evm_call_index \
- --fee-asset fee_asset_xc20
+ --fee-asset fee_asset_xc20 \
+ --proxy transactor_proxy_address
 ```
 
 Example:

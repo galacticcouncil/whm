@@ -1,14 +1,15 @@
 import "dotenv/config";
 
-import { createPublicClient, createWalletClient, http, isAddress } from "viem";
+import { createPublicClient, createWalletClient, encodeFunctionData, http, isAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { args } from "@nohaapav/whm-sdk";
 import { ifs, chains } from "../../lib";
 
 import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
+import erc1967ProxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
-const { requiredArg, requiredEnv } = args;
+const { requiredArg, optionalArg, requiredEnv } = args;
 const { getChain } = chains;
 
 function getConfig() {
@@ -22,17 +23,23 @@ function getConfig() {
 
   const privateKey = requiredArg("--pk");
 
+  const proxy = optionalArg("--proxy");
+  if (proxy && !isAddress(proxy)) {
+    throw new Error("Invalid --proxy address.");
+  }
+
   return {
     rpcUrl,
     chainId: Number(chainId),
     privateKey: privateKey as `0x${string}`,
     wormholeRelayer: wormholeRelayer as `0x${string}`,
     wormholeCore: wormholeCore as `0x${string}`,
+    proxy: proxy as `0x${string}` | undefined,
   };
 }
 
 async function main(): Promise<void> {
-  const { rpcUrl, chainId, privateKey, wormholeCore, wormholeRelayer } = getConfig();
+  const { rpcUrl, chainId, privateKey, wormholeCore, wormholeRelayer, proxy } = getConfig();
 
   const account = privateKeyToAccount(privateKey);
   const chain = getChain(chainId);
@@ -47,30 +54,66 @@ async function main(): Promise<void> {
 
   const { abi, bytecode } = messageReceiverJson as ifs.ContractArtifact;
 
-  const deployHash = await walletClient.deployContract({
+  const implDeployHash = await walletClient.deployContract({
     abi,
     bytecode: bytecode.object,
-    args: [wormholeRelayer, wormholeCore],
+    args: [],
   });
 
-  const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
-  if (!deployReceipt.contractAddress) {
-    throw new Error("Deployment failed! Contract address missing.");
+  const implDeployReceipt = await publicClient.waitForTransactionReceipt({ hash: implDeployHash });
+  if (!implDeployReceipt.contractAddress) {
+    throw new Error("Implementation deployment failed! Contract address missing.");
   }
+  const implementationAddress = implDeployReceipt.contractAddress;
 
-  const receiverAddress = deployReceipt.contractAddress;
-  console.log("MessageReceiver deployed to:", receiverAddress);
-  console.log("MessageReceiver owner:", account.address);
+  if (proxy) {
+    const upgradeHash = await walletClient.writeContract({
+      address: proxy,
+      abi,
+      functionName: "upgradeToAndCall",
+      args: [implementationAddress, "0x"],
+    });
 
-  const setAuthorizedHash = await walletClient.writeContract({
-    address: receiverAddress,
-    abi,
-    functionName: "setAuthorized",
-    args: [account.address, true],
-  });
+    await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
-  await publicClient.waitForTransactionReceipt({ hash: setAuthorizedHash });
-  console.log(`MessageReceiver authorized: ${account.address}`);
+    console.log("MessageReceiver implementation:", implementationAddress);
+    console.log("MessageReceiver proxy:", proxy, "(upgraded)");
+  } else {
+    const initializeData = encodeFunctionData({
+      abi,
+      functionName: "initialize",
+      args: [wormholeRelayer, wormholeCore],
+    });
+
+    const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson as ifs.ContractArtifact;
+
+    const proxyDeployHash = await walletClient.deployContract({
+      abi: proxyAbi,
+      bytecode: proxyBytecode.object,
+      args: [implementationAddress, initializeData],
+    });
+
+    const proxyDeployReceipt = await publicClient.waitForTransactionReceipt({ hash: proxyDeployHash });
+    if (!proxyDeployReceipt.contractAddress) {
+      throw new Error("Proxy deployment failed! Contract address missing.");
+    }
+
+    const receiverAddress = proxyDeployReceipt.contractAddress;
+
+    const setAuthorizedHash = await walletClient.writeContract({
+      address: receiverAddress,
+      abi,
+      functionName: "setAuthorized",
+      args: [account.address, true],
+    });
+
+    await publicClient.waitForTransactionReceipt({ hash: setAuthorizedHash });
+
+    console.log("MessageReceiver implementation:", implementationAddress);
+    console.log("MessageReceiver proxy:", receiverAddress);
+    console.log("MessageReceiver owner:", account.address);
+    console.log("MessageReceiver authorized:", account.address);
+  }
 }
 
 main().catch((error) => {
