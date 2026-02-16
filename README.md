@@ -6,7 +6,7 @@ The first use case is **oracle price relay**: the Solana program reads Kamino Sc
 
 See [SCHEMA.md](SCHEMA.md) for the full architecture diagram.
 
-**Parent Setup**
+## Setup
 
 Install workspace dependencies for all submodules:
 
@@ -14,9 +14,9 @@ Install workspace dependencies for all submodules:
 pnpm install
 ```
 
-**Platforms**
+## Platforms
 
-Each platform has its own README with prerequisites, build, and test steps:
+Each platform has its own README with prerequisites, build, test & deploy steps:
 
 - [platforms/evm](platforms/evm/README.md)
 - [platforms/solana](platforms/solana/README.md)
