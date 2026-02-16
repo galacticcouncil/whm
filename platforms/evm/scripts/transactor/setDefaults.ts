@@ -1,15 +1,14 @@
 import "dotenv/config";
 
-import { createPublicClient, createWalletClient, http, isAddress } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { isAddress } from "viem";
 
 import { args } from "@whm/common";
-import { chains, ifs } from "../../lib";
+import { ifs, wallet } from "../../lib";
 
 import xcmTransactorJson from "../../contracts/out/XcmTransactor.sol/XcmTransactor.json";
 
 const { requiredArg, requiredEnv } = args;
-const { getChain } = chains;
+const { getWallet } = wallet;
 
 const UINT64_MAX = (1n << 64n) - 1n;
 const UINT256_MAX = (1n << 256n) - 1n;
@@ -82,16 +81,7 @@ async function main(): Promise<void> {
     feeAmount,
   } = getConfig();
 
-  const account = privateKeyToAccount(privateKey);
-  const chain = getChain(chainId);
-
-  const transport = http(rpcUrl);
-  const publicClient = createPublicClient({ chain, transport });
-  const walletClient = createWalletClient({
-    account: account,
-    chain,
-    transport,
-  });
+  const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
   const { abi } = xcmTransactorJson as ifs.ContractArtifact;
 

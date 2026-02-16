@@ -1,15 +1,14 @@
 import "dotenv/config";
 
-import { createPublicClient, createWalletClient, http, isAddress } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { isAddress } from "viem";
 
 import { args } from "@whm/common";
-import { ifs, chains } from "../../lib";
+import { ifs, wallet } from "../../lib";
 
 import messageDispatcherJson from "../../contracts/out/MessageDispatcher.sol/MessageDispatcher.json";
 
 const { requiredArg, requiredEnv } = args;
-const { getChain } = chains;
+const { getWallet } = wallet;
 
 function getConfig() {
   const rpcUrl = requiredEnv("RECEIVER_RPC");
@@ -36,16 +35,7 @@ function getConfig() {
 async function main(): Promise<void> {
   const { address, rpcUrl, chainId, privateKey, oracle, assetId } = getConfig();
 
-  const account = privateKeyToAccount(privateKey);
-  const chain = getChain(chainId);
-
-  const transport = http(rpcUrl);
-  const publicClient = createPublicClient({ chain, transport });
-  const walletClient = createWalletClient({
-    account: account,
-    chain,
-    transport,
-  });
+  const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
   const { abi } = messageDispatcherJson as ifs.ContractArtifact;
 

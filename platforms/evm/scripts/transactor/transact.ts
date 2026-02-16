@@ -1,15 +1,14 @@
 import "dotenv/config";
 
-import { createPublicClient, createWalletClient, http, isAddress, isHex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { isAddress, isHex } from "viem";
 
 import { args } from "@whm/common";
-import { chains, ifs } from "../../lib";
+import { ifs, wallet } from "../../lib";
 
 import xcmTransactorJson from "../../contracts/out/XcmTransactor.sol/XcmTransactor.json";
 
 const { requiredArg, requiredEnv } = args;
-const { getChain } = chains;
+const { getWallet } = wallet;
 
 function parseInput(input: string): `0x${string}` {
   if (!isHex(input)) {
@@ -44,16 +43,7 @@ function getConfig() {
 async function main(): Promise<void> {
   const { address, rpcUrl, chainId, privateKey, target, input } = getConfig();
 
-  const account = privateKeyToAccount(privateKey);
-  const chain = getChain(chainId);
-
-  const transport = http(rpcUrl);
-  const publicClient = createPublicClient({ chain, transport });
-  const walletClient = createWalletClient({
-    account: account,
-    chain,
-    transport,
-  });
+  const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
   const { abi } = xcmTransactorJson as ifs.ContractArtifact;
 

@@ -1,16 +1,15 @@
 import "dotenv/config";
 
-import { createPublicClient, createWalletClient, encodeFunctionData, http, isAddress } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { encodeFunctionData, isAddress } from "viem";
 
 import { args } from "@whm/common";
-import { chains, ifs } from "../../lib";
+import { ifs, wallet } from "../../lib";
 
 import xcmTransactorJson from "../../contracts/out/XcmTransactor.sol/XcmTransactor.json";
 import erc1967ProxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
 const { requiredArg, optionalArg, requiredEnv } = args;
-const { getChain } = chains;
+const { getWallet } = wallet;
 
 function getConfig() {
   const rpcUrl = requiredEnv("RECEIVER_RPC");
@@ -56,16 +55,7 @@ async function main(): Promise<void> {
     proxy,
   } = getConfig();
 
-  const account = privateKeyToAccount(privateKey);
-  const chain = getChain(chainId);
-
-  const transport = http(rpcUrl);
-  const publicClient = createPublicClient({ chain, transport });
-  const walletClient = createWalletClient({
-    account: account,
-    chain,
-    transport,
-  });
+  const { publicClient, walletClient, account } = getWallet(rpcUrl, chainId, privateKey);
 
   const { abi, bytecode } = xcmTransactorJson as ifs.ContractArtifact;
 

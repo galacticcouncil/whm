@@ -3,13 +3,12 @@ import "dotenv/config";
 import { encodeFunctionData, isAddress } from "viem";
 
 import { args } from "@whm/common";
-import { ifs, chains, wallet } from "../../lib";
+import { ifs, wallet } from "../../lib";
 
 import messageDispatcherJson from "../../contracts/out/MessageDispatcher.sol/MessageDispatcher.json";
 import erc1967ProxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
 const { requiredArg, optionalArg, requiredEnv } = args;
-const { getChain } = chains;
 const { getWallet } = wallet;
 
 function getConfig() {

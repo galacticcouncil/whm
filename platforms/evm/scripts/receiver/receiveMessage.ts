@@ -1,15 +1,14 @@
 import "dotenv/config";
 
-import { createPublicClient, createWalletClient, http, isAddress } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { isAddress } from "viem";
 
 import { args } from "@whm/common";
-import { ifs, chains } from "../../lib";
+import { ifs, wallet } from "../../lib";
 
 import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
 
 const { requiredArg, requiredEnv } = args;
-const { getChain } = chains;
+const { getWallet } = wallet;
 
 function parseVaa(vaa: string): `0x${string}` {
   if (vaa.startsWith("0x")) return vaa as `0x${string}`;
@@ -38,16 +37,7 @@ function getConfig() {
 async function main(): Promise<void> {
   const { address, rpcUrl, chainId, privateKey, vaa } = getConfig();
 
-  const account = privateKeyToAccount(privateKey);
-  const chain = getChain(chainId);
-
-  const transport = http(rpcUrl);
-  const publicClient = createPublicClient({ chain, transport });
-  const walletClient = createWalletClient({
-    account: account,
-    chain,
-    transport,
-  });
+  const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
   const { abi } = messageReceiverJson as ifs.ContractArtifact;
 
