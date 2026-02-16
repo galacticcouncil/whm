@@ -68,7 +68,7 @@ pnpm run account:getSecret -- \
  --address your_account_address
 ```
 
-### Message sender
+### Message emitter
 
 To run scripts agains local validator use **DOTENV_CONFIG_PATH=.env.fork**.
 
@@ -93,21 +93,6 @@ Deploy the sender program.
 pnpm sender:deploy -- \
  --pk your_private_key \
  --test true
-```
-
-#### Cleanup deploy buffers
-
-Close all buffer accounts for your deploy authority to reclaim stranded rent.
-
-| Flag          | Description                                         |
-| ------------- | --------------------------------------------------- |
-| `--pk`        | Deploy authority private key used to sign close txs |
-| `--recipient` | Recipient account for reclaimed lamports (optional) |
-
-```bash
-pnpm sender:cleanup -- \
- --pk your_private_key \
- --recipient your_wallet_address
 ```
 
 #### Close program

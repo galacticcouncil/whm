@@ -3,7 +3,7 @@ import "dotenv/config";
 import { createPublicClient, createWalletClient, http, isAddress, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "../../../../common";
 import { ifs, chains } from "../../lib";
 
 import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   const registerHash = await walletClient.writeContract({
     address: address,
     abi,
-    functionName: "setRegisteredEmitter",
+    functionName: "setAuthorizedEmitter",
     args: [sourceChain, emitterBytes32],
   });
 

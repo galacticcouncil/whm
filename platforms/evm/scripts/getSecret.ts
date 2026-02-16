@@ -1,4 +1,4 @@
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "../../../common";
 
 import { utils } from "../lib";
 

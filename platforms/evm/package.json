@@ -1,27 +1,27 @@
 {
-  "name": "@nohaapav/whm-evm",
+  "name": "@whm/platform-evm",
   "type": "module",
   "private": true,
   "scripts": {
     "build": "cd contracts && forge build",
     "test": "cd contracts && forge test",
-    "relayer:deploy": "npx tsx scripts/relayer/deploy.ts",
-    "relayer:sendMessage": "npx tsx scripts/relayer/sendMessage.ts",
-    "receiver:deploy": "npx tsx scripts/receiver/deploy.ts",
-    "receiver:verify": "npx tsx scripts/receiver/verify.ts",
-    "receiver:registerSender": "npx tsx scripts/receiver/registerSender.ts",
-    "receiver:registerUpdater": "npx tsx scripts/receiver/registerUpdater.ts",
-    "receiver:receiveMessage": "npx tsx scripts/receiver/receiveMessage.ts",
+    "dispatcher:deploy": "npx tsx scripts/dispatcher/deploy.ts",
     "dispatcher:setHandler": "npx tsx scripts/dispatcher/setHandler.ts",
     "dispatcher:setOracle": "npx tsx scripts/dispatcher/setOracle.ts",
+    "receiver:deploy": "npx tsx scripts/receiver/deploy.ts",
+    "receiver:setAuthorizedEmitter": "npx tsx scripts/receiver/setAuthorizedEmitter.ts",
+    "receiver:receiveMessage": "npx tsx scripts/receiver/receiveMessage.ts",
     "transactor:deploy": "npx tsx scripts/transactor/deploy.ts",
     "transactor:setAuthorized": "npx tsx scripts/transactor/setAuthorized.ts",
+    "transactor:setAuthorizedDispatcher": "npx tsx scripts/transactor/setAuthorizedDispatcher.ts",
+    "transactor:setDefaults": "npx tsx scripts/transactor/setDefaults.ts",
+    "transactor:transact": "npx tsx scripts/transactor/transact.ts",
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
     "account:getSecret": "npx tsx scripts/getSecret.ts"
   },
   "dependencies": {
-    "@nohaapav/whm-sdk": "workspace:*",
+    "@whm/common": "workspace:*",
     "viem": "^2.38.3"
   }
 }

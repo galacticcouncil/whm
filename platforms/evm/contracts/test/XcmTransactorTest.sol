@@ -26,7 +26,7 @@ contract XcmTransactorTest is Test {
 
     function testOnlyAuthorizedCanTransact() public {
         vm.prank(address(0xdead));
-        vm.expectRevert(XcmTransactor.NotAuthorized.selector);
+        vm.expectRevert(XcmTransactor.NotAuthorizedDispatcher.selector);
         transactor.transact(address(0xBEEF), hex"");
     }
 

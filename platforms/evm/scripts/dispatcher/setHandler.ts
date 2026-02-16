@@ -3,7 +3,7 @@ import "dotenv/config";
 import { createPublicClient, createWalletClient, http, isAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "../../../../common";
 import { ifs, chains } from "../../lib";
 
 import messageDispatcherJson from "../../contracts/out/MessageDispatcher.sol/MessageDispatcher.json";
@@ -18,13 +18,10 @@ function getConfig() {
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");
   const handler = requiredArg("--handler");
-  const action = Number(requiredArg("--action"));
+  const action = Number(requiredArg("--action-id"));
 
   if (!isAddress(address)) throw new Error("Invalid dispatcher address.");
   if (!isAddress(handler)) throw new Error("Invalid handler address.");
-  if (!Number.isInteger(action) || action < 0 || action > 255) {
-    throw new Error("Invalid action (expected uint8 value: 0-255).");
-  }
 
   return {
     rpcUrl,

@@ -38,6 +38,7 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     address public owner;
     mapping(address => bool) public authorized;
+    mapping(address => bool) public authorizedDispatchers;
 
     // --- Runtime config (immutable across upgrades) ---
     uint32 public immutable DESTINATION_PARA_ID;
@@ -60,6 +61,7 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     error NotOwner();
     error NotAuthorized();
+    error NotAuthorizedDispatcher();
     error InvalidFeeLocationAddress();
 
     modifier onlyOwner() {
@@ -69,6 +71,11 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     modifier onlyAuthorized() {
         _onlyAuthorized();
+        _;
+    }
+
+    modifier onlyAuthorizedDispacher() {
+        _onlyAuthorizedDispatcher();
         _;
     }
 
@@ -93,9 +100,9 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
         owner = msg.sender;
         xcmSource = DerivedAccount.deriveSibling(SOURCE_PARA_ID, address(this));
         xcmGasLimit = 200_000;
-        xcmMaxFeePerGas = 1_000_000_000;
-        xcmTransactWeight = 1_000_000_000;
-        xcmTransactProofSize = 20_000;
+        xcmMaxFeePerGas = 10_000_000;
+        xcmTransactWeight = 6_000_000_000;
+        xcmTransactProofSize = 60_000;
         xcmFeeAmount = 5_000_000_000_000;
     }
 
@@ -104,10 +111,15 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
     /// @notice Dispatch an EVM call on Hydration via XCM
     /// @param target  Contract address on Hydration
     /// @param input   EVM calldata
-    function transact(address target, bytes calldata input) external onlyAuthorized {
+    function transact(address target, bytes calldata input) external onlyAuthorizedDispacher {
         bytes memory encoded = _encodeEvmCall(target, input);
         _xcmSend(encoded);
         emit XcmDispatched(target, input);
+    }
+
+    /// @notice Debug: returns the SCALE-encoded evm.call bytes without sending
+    function encodeEvmCall(address target, bytes calldata input) external view returns (bytes memory) {
+        return _encodeEvmCall(target, input);
     }
 
     // ─── Internal ──────────────────────────────────────────────
@@ -118,6 +130,10 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     function _onlyAuthorized() internal view {
         if (!authorized[msg.sender]) revert NotAuthorized();
+    }
+
+    function _onlyAuthorizedDispatcher() internal view {
+        if (!authorized[msg.sender]) revert NotAuthorizedDispatcher();
     }
 
     function _encodeEvmCall(address target, bytes calldata input) internal view returns (bytes memory) {
@@ -165,6 +181,10 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     function setAuthorized(address addr, bool enabled) external onlyOwner {
         authorized[addr] = enabled;
+    }
+
+    function setAuthorizedDispatcher(address addr, bool enabled) public onlyOwner {
+        authorizedDispatchers[addr] = enabled;
     }
 
     function setXcmDefaults(

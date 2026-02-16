@@ -1,19 +1,22 @@
 import "dotenv/config";
 
-import { createPublicClient, createWalletClient, http, isAddress } from "viem";
+import { createPublicClient, createWalletClient, http, isAddress, isHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { args } from "../../../../common";
-import { ifs, chains } from "../../lib";
+import { chains, ifs } from "../../lib";
 
-import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
+import xcmTransactorJson from "../../contracts/out/XcmTransactor.sol/XcmTransactor.json";
 
 const { requiredArg, requiredEnv } = args;
 const { getChain } = chains;
 
-function parseVaa(vaa: string): `0x${string}` {
-  if (vaa.startsWith("0x")) return vaa as `0x${string}`;
-  return `0x${Buffer.from(vaa, "base64").toString("hex")}`;
+function parseInput(input: string): `0x${string}` {
+  if (!isHex(input)) {
+    throw new Error("Invalid --input calldata. Expected a hex string (0x...).");
+  }
+
+  return input as `0x${string}`;
 }
 
 function getConfig() {
@@ -22,21 +25,24 @@ function getConfig() {
 
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");
-  const vaa = requiredArg("--vaa");
+  const target = requiredArg("--target");
+  const input = requiredArg("--input");
 
-  if (!isAddress(address)) throw new Error("Invalid receiver address.");
+  if (!isAddress(address)) throw new Error("Invalid transactor address.");
+  if (!isAddress(target)) throw new Error("Invalid target address.");
 
   return {
     rpcUrl,
     chainId: Number(chainId),
     address: address as `0x${string}`,
     privateKey: privateKey as `0x${string}`,
-    vaa: parseVaa(vaa),
+    target: target as `0x${string}`,
+    input: parseInput(input),
   };
 }
 
 async function main(): Promise<void> {
-  const { address, rpcUrl, chainId, privateKey, vaa } = getConfig();
+  const { address, rpcUrl, chainId, privateKey, target, input } = getConfig();
 
   const account = privateKeyToAccount(privateKey);
   const chain = getChain(chainId);
@@ -49,19 +55,20 @@ async function main(): Promise<void> {
     transport,
   });
 
-  const { abi } = messageReceiverJson as ifs.ContractArtifact;
+  const { abi } = xcmTransactorJson as ifs.ContractArtifact;
 
   const txHash = await walletClient.writeContract({
     address: address,
     abi,
-    functionName: "receiveMessage",
-    args: [vaa],
+    functionName: "transact",
+    args: [target, input],
+    gas: 2_000_000n,
   });
 
   console.log("Transaction sent:", txHash);
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-  console.log("Message received in block:", receipt.blockNumber);
+  console.log("Transaction included in block:", receipt.blockNumber);
 }
 
 main().catch((error) => {

@@ -4,17 +4,17 @@ pragma solidity ^0.8.22;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {MessageRelayer} from "../src/MessageRelayer.sol";
+import {MessageEmitter} from "../src/MessageEmitter.sol";
 import {MessageDispatcher} from "../src/MessageDispatcher.sol";
 
 contract MessagingTest is Test {
-    MessageRelayer public senderContract;
+    MessageEmitter public emitterContract;
     MessageDispatcher public receiverContract;
-    address public wormholeRelayer = address(this);
     address public wormhole = address(this);
+    address public wormholeRelayer = address(this);
 
     function setUp() public {
-        senderContract = new MessageRelayer(wormholeRelayer);
+        emitterContract = new MessageEmitter(wormhole);
         MessageDispatcher impl = new MessageDispatcher();
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(impl),
@@ -24,20 +24,18 @@ contract MessagingTest is Test {
     }
 
     function testDeployment() public view {
-        assertEq(address(senderContract).code.length > 0, true);
+        assertEq(address(emitterContract).code.length > 0, true);
         assertEq(address(receiverContract).code.length > 0, true);
     }
 
     function testSendMessage() public {
-        uint16 targetChain = 30;
-        address targetAddress = address(receiverContract);
         string memory message = "Hello from Moonbeam to Base!";
 
         uint256 estimatedCost = 1 ether;
         vm.deal(address(this), estimatedCost);
 
         vm.expectRevert();
-        senderContract.sendMessage{value: estimatedCost}(targetChain, targetAddress, message);
+        emitterContract.sendMessage{value: estimatedCost}(message);
     }
 
     function testReceiveMessage() public {

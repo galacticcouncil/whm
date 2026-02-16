@@ -11,30 +11,76 @@ import xcmTransactorJson from "../../contracts/out/XcmTransactor.sol/XcmTransact
 const { requiredArg, requiredEnv } = args;
 const { getChain } = chains;
 
+const UINT64_MAX = (1n << 64n) - 1n;
+const UINT256_MAX = (1n << 256n) - 1n;
+
+function parseUint(value: string, argName: string, max: bigint): bigint {
+  let parsed: bigint;
+  try {
+    parsed = BigInt(value);
+  } catch {
+    throw new Error(`Invalid ${argName} (expected unsigned integer).`);
+  }
+
+  if (parsed < 0n || parsed > max) {
+    throw new Error(`Invalid ${argName} (out of range).`);
+  }
+
+  return parsed;
+}
+
 function getConfig() {
   const rpcUrl = requiredEnv("RECEIVER_RPC");
   const chainId = requiredEnv("RECEIVER_CHAIN_ID");
 
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");
-  const operator = requiredArg("--operator");
-  const enabled = requiredArg("--enabled");
+
+  const gasLimit = parseUint(requiredArg("--gas-limit"), "--gas-limit", UINT64_MAX);
+  const maxFeePerGas = parseUint(
+    requiredArg("--max-fee-per-gas"),
+    "--max-fee-per-gas",
+    UINT256_MAX,
+  );
+  const transactWeight = parseUint(
+    requiredArg("--transact-weight"),
+    "--transact-weight",
+    UINT64_MAX,
+  );
+  const transactProofSize = parseUint(
+    requiredArg("--transact-proof-size"),
+    "--transact-proof-size",
+    UINT64_MAX,
+  );
+  const feeAmount = parseUint(requiredArg("--fee-amount"), "--fee-amount", UINT256_MAX);
 
   if (!isAddress(address)) throw new Error("Invalid transactor address.");
-  if (!isAddress(operator)) throw new Error("Invalid operator address.");
 
   return {
     rpcUrl,
     chainId: Number(chainId),
     address: address as `0x${string}`,
     privateKey: privateKey as `0x${string}`,
-    operator: operator as `0x${string}`,
-    enabled: enabled === "true",
+    gasLimit,
+    maxFeePerGas,
+    transactWeight,
+    transactProofSize,
+    feeAmount,
   };
 }
 
 async function main(): Promise<void> {
-  const { address, rpcUrl, chainId, privateKey, operator, enabled } = getConfig();
+  const {
+    address,
+    rpcUrl,
+    chainId,
+    privateKey,
+    gasLimit,
+    maxFeePerGas,
+    transactWeight,
+    transactProofSize,
+    feeAmount,
+  } = getConfig();
 
   const account = privateKeyToAccount(privateKey);
   const chain = getChain(chainId);
@@ -52,12 +98,12 @@ async function main(): Promise<void> {
   const txHash = await walletClient.writeContract({
     address: address,
     abi,
-    functionName: "setAuthorized",
-    args: [operator, enabled],
+    functionName: "setXcmDefaults",
+    args: [gasLimit, maxFeePerGas, transactWeight, transactProofSize, feeAmount],
   });
 
   await publicClient.waitForTransactionReceipt({ hash: txHash });
-  console.log(`Authorization ${enabled ? "granted" : "removed"}: ${operator}`);
+  console.log("XCM defaults updated:", address);
 }
 
 main().catch((error) => {

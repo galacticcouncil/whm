@@ -1,8 +1,0 @@
-{
-  "name": "@nohaapav/whm-sdk",
-  "type": "module",
-  "private": true,
-  "exports": {
-    ".": "./index.ts"
-  }
-}

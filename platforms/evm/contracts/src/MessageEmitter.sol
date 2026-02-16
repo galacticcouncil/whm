@@ -3,7 +3,7 @@ pragma solidity ^0.8.18;
 
 import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
-contract MessageSender {
+contract MessageEmitter {
     IWormhole public wormhole;
     uint32 public nonce;
 

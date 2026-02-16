@@ -3,12 +3,12 @@ import "dotenv/config";
 import { createPublicClient, createWalletClient, http, isAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { args } from "@nohaapav/whm-sdk";
-import { ifs, chains } from "../../lib";
+import { args } from "../../../../common";
+import { chains, ifs } from "../../lib";
 
-import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
+import xcmTransactorJson from "../../contracts/out/XcmTransactor.sol/XcmTransactor.json";
 
-const { requiredArg, requiredEnv } = args;
+const { requiredArg, optionalArg, requiredEnv } = args;
 const { getChain } = chains;
 
 function getConfig() {
@@ -17,24 +17,24 @@ function getConfig() {
 
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");
-  const operator = requiredArg("--operator");
-  const enabled = requiredArg("--enabled");
+  const dispatcher = requiredArg("--dispatcher");
+  const enabledArg = optionalArg("--enabled");
 
-  if (!isAddress(address)) throw new Error("Invalid receiver address.");
-  if (!isAddress(operator)) throw new Error("Invalid operator address.");
+  if (!isAddress(address)) throw new Error("Invalid transactor address.");
+  if (!isAddress(dispatcher)) throw new Error("Invalid dispatcher address.");
 
   return {
     rpcUrl,
     chainId: Number(chainId),
     address: address as `0x${string}`,
     privateKey: privateKey as `0x${string}`,
-    operator: operator as `0x${string}`,
-    enabled: enabled === "true",
+    dispatcher: dispatcher as `0x${string}`,
+    enabled: enabledArg === "true",
   };
 }
 
 async function main(): Promise<void> {
-  const { address, rpcUrl, chainId, privateKey, operator, enabled } = getConfig();
+  const { address, rpcUrl, chainId, privateKey, dispatcher, enabled } = getConfig();
 
   const account = privateKeyToAccount(privateKey);
   const chain = getChain(chainId);
@@ -47,17 +47,17 @@ async function main(): Promise<void> {
     transport,
   });
 
-  const { abi } = messageReceiverJson as ifs.ContractArtifact;
+  const { abi } = xcmTransactorJson as ifs.ContractArtifact;
 
   const txHash = await walletClient.writeContract({
     address: address,
     abi,
     functionName: "setAuthorized",
-    args: [operator, enabled],
+    args: [dispatcher, enabled],
   });
 
   await publicClient.waitForTransactionReceipt({ hash: txHash });
-  console.log(`Authorization ${enabled ? "granted" : "removed"}: ${operator}`);
+  console.log(`Dispatcher authorization ${enabled ? "granted" : "removed"}: ${dispatcher}`);
 }
 
 main().catch((error) => {

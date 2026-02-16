@@ -6,7 +6,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { args } from "../../../../common";
 import { ifs, chains } from "../../lib";
 
-import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
+import messageDispatcherJson from "../../contracts/out/MessageDispatcher.sol/MessageDispatcher.json";
 import erc1967ProxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
 const { requiredArg, optionalArg, requiredEnv } = args;
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     transport,
   });
 
-  const { abi, bytecode } = messageReceiverJson as ifs.ContractArtifact;
+  const { abi, bytecode } = messageDispatcherJson as ifs.ContractArtifact;
 
   const implDeployHash = await walletClient.deployContract({
     abi,
@@ -76,8 +76,8 @@ async function main(): Promise<void> {
 
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
-    console.log("MessageReceiver implementation:", implementationAddress);
-    console.log("MessageReceiver proxy:", proxy, "(upgraded)");
+    console.log("MessageDispatcher implementation:", implementationAddress);
+    console.log("MessageDispatcher proxy:", proxy, "(upgraded)");
   } else {
     const initializeData = encodeFunctionData({
       abi,
@@ -111,10 +111,10 @@ async function main(): Promise<void> {
 
     await publicClient.waitForTransactionReceipt({ hash: setAuthorizedHash });
 
-    console.log("MessageReceiver implementation:", implementationAddress);
-    console.log("MessageReceiver proxy:", receiverAddress);
-    console.log("MessageReceiver owner:", account.address);
-    console.log("MessageReceiver authorized:", account.address);
+    console.log("MessageDispatcher implementation:", implementationAddress);
+    console.log("MessageDispatcher proxy:", receiverAddress);
+    console.log("MessageDispatcher owner:", account.address);
+    console.log("MessageDispatcher authorized:", account.address);
   }
 }
 

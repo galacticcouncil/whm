@@ -63,20 +63,7 @@ pnpm run receiver:deploy -- \
  --proxy receiver_proxy_address
 ```
 
-#### Verify contract
-
-Verify the message receiver contract.
-
-| Flag        | Description                              |
-| ----------- | ---------------------------------------- |
-| `--pk`      | Private key used to sign the transaction |
-| `--address` | Contract address                         |
-
-```bash
-pnpm run receiver:verify -- \
- --pk your_private_key \
- --address receiver_address \
-```
+When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
 
 #### Register authorized emitter
 
@@ -90,30 +77,11 @@ Registers a trusted emitter contract from a source chain on the receiver.
 | `--source-chain` | Source chain identifier (Wormhole chain ID)  |
 
 ```bash
-pnpm run receiver:registerSender -- \
+pnpm run receiver:setAuthorizedEmitter -- \
  --pk your_private_key \
  --address receiver_address \
  --emitter emitter_address \
  --source-chain souce_chain_id
-```
-
-#### Register authorized operator
-
-Registers a trusted operator on the receiver.
-
-| Flag         | Description                              |
-| ------------ | ---------------------------------------- |
-| `--pk`       | Private key used to sign the transaction |
-| `--address`  | Contract address                         |
-| `--operator` | Operator address                         |
-| `--enabled`  | Operational flag                         |
-
-```bash
-pnpm run receiver:registerUpdater -- \
- --pk your_private_key \
- --address receiver_address \
- --updater operator_address \
- --enabled true
 ```
 
 #### Receive message
@@ -136,7 +104,24 @@ pnpm run receiver:receiveMessage -- \
 
 ### Message Dispatcher
 
-#### Set handler
+#### Deploy contract
+
+Deploy the message dispatcher contract.
+
+| Flag      | Description                                                     |
+| --------- | --------------------------------------------------------------- |
+| `--pk`    | Private key used to sign the transaction                        |
+| `--proxy` | Deploys new implementation and upgrades existing proxy in-place |
+
+```bash
+pnpm run dispatcher:deploy -- \
+ --pk your_private_key
+ --proxy dispatcher_proxy_address
+```
+
+When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
+
+#### Set dispatch handler
 
 Set handler for dispatch action.
 
@@ -155,7 +140,7 @@ pnpm run dispatcher:setHandler -- \
  --action-id action_id
 ```
 
-#### Set oracle
+#### Set price oracle
 
 Set oracle address for price update asset.
 
@@ -174,47 +159,11 @@ pnpm run dispatcher:setOracle -- \
  --asset-id asset_id
 ```
 
-### Message Relayer
+### Xcm Transactor
 
 #### Deploy contract
 
-Deploy the message relayer contract.
-
-| Flag   | Description                              |
-| ------ | ---------------------------------------- |
-| `--pk` | Private key used to sign the transaction |
-
-```bash
-pnpm run relayer:deploy -- \
- --pk your_private_key
-```
-
-#### Send message to receiver
-
-Send message to receiver contract via wormhole relayer.
-
-| Flag             | Description                                          |
-| ---------------- | ---------------------------------------------------- |
-| `--pk`           | Private key used to sign the transaction             |
-| `--address`      | Contract address                                     |
-| `--receiver`     | Receiver contract address on the target chain        |
-| `--target-chain` | Receiver chain identifier (Wormhole chain ID)        |
-| `--message`      | Message payload to send (string or hex-encoded data) |
-
-```bash
-pnpm run relayer:sendMessage -- \
- --pk your_private_key \
- --address relayer_address \
- --receiver receiver_address \
- --target-chain receiver_chain_id \
- --message your_message
-```
-
-### Xcm Transactor
-
-#### Set handler
-
-Set handler for dispatch action.
+Deploy xcm transactor contract.
 
 | Flag                    | Description                                                     |
 | ----------------------- | --------------------------------------------------------------- |
@@ -240,11 +189,95 @@ pnpm run transactor:deploy -- \
 Example:
 
 ```bash
-DOTENV_CONFIG_PATH=.env.fork pnpm run transactor:deploy -- \
- --pk 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+pnpm run transactor:deploy -- \
+ --pk your_private_key \
  --destination-para-id 2034 \
  --source-para-id 2004 \
- --evm-pallet-index 36 \
- --evm-call-index 0 \
+ --evm-pallet-index 90 \
+ --evm-call-index 1 \
  --fee-asset '0xFFFfFfff345Dc44DDAE98Df024Eb494321E73FcC'
+```
+
+When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
+
+#### Register authorized
+
+Registers a trusted operator on the transactor.
+
+| Flag         | Description                              |
+| ------------ | ---------------------------------------- |
+| `--pk`       | Private key used to sign the transaction |
+| `--address`  | Contract address                         |
+| `--operator` | Operator address                         |
+| `--enabled`  | Operational flag                         |
+
+```bash
+pnpm run transactor:setAuthorized -- \
+ --pk your_private_key \
+ --address transactor_address \
+ --operator operator_address \
+ --enabled true
+```
+
+#### Register authorized dispatcher
+
+Registers a dispatcher contract as an authorized caller on the transactor.
+
+| Flag           | Description                              |
+| -------------- | ---------------------------------------- |
+| `--pk`         | Private key used to sign the transaction |
+| `--address`    | Transactor contract address              |
+| `--dispatcher` | Dispatcher contract address              |
+| `--enabled`    | Optional flag (`true` by default)        |
+
+```bash
+pnpm run transactor:setAuthorizedDispatcher -- \
+ --pk your_private_key \
+ --address transactor_address \
+ --dispatcher dispatcher_address \
+ --enabled true
+```
+
+#### Set XCM defaults
+
+Updates runtime values used by `encodeEvmCall` and `transact`. Caller must be authorized on the transactor.
+
+| Flag                    | Description                              |
+| ----------------------- | ---------------------------------------- |
+| `--pk`                  | Private key used to sign the transaction |
+| `--address`             | Transactor contract address              |
+| `--gas-limit`           | `xcmGasLimit` (uint64)                   |
+| `--max-fee-per-gas`     | `xcmMaxFeePerGas` (uint256)              |
+| `--transact-weight`     | `xcmTransactWeight` (uint64)             |
+| `--transact-proof-size` | `xcmTransactProofSize` (uint64)          |
+| `--fee-amount`          | `xcmFeeAmount` (uint256)                 |
+
+```bash
+pnpm run transactor:setDefaults -- \
+ --pk your_private_key \
+ --address transactor_address \
+ --gas-limit 400000 \
+ --max-fee-per-gas 10000000 \
+ --transact-weight 2000000000 \
+ --transact-proof-size 20000 \
+ --fee-amount 5000000000000
+```
+
+#### Transact
+
+Dispatch an EVM call through the transactor.
+
+| Flag        | Description                                      |
+| ----------- | ------------------------------------------------ |
+| `--pk`      | Private key used to sign the transaction         |
+| `--address` | Transactor contract address                      |
+| `--target`  | Target contract address on destination parachain |
+| `--input`   | Hex-encoded calldata (0x...)                     |
+
+```bash
+pnpm run transactor:transact -- \
+ --pk your_private_key \
+ --address transactor_address \
+ --target target_contract_address \
+ --input encoded_calldata_hex
 ```
