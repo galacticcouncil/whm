@@ -21,6 +21,7 @@
     "account:getSecret": "npx tsx scripts/getSecret.ts"
   },
   "dependencies": {
+    "@galacticcouncil/common": "^0.5.0",
     "@whm/common": "workspace:*",
     "viem": "^2.38.3"
   }

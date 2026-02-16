@@ -91,19 +91,9 @@ async function main(): Promise<void> {
 
     const receiverAddress = proxyDeployReceipt.contractAddress;
 
-    const setAuthorizedHash = await walletClient.writeContract({
-      address: receiverAddress,
-      abi,
-      functionName: "setAuthorized",
-      args: [account.address, true],
-    });
-
-    await publicClient.waitForTransactionReceipt({ hash: setAuthorizedHash });
-
     console.log("MessageDispatcher implementation:", implementationAddress);
     console.log("MessageDispatcher proxy:", receiverAddress);
     console.log("MessageDispatcher owner:", account.address);
-    console.log("MessageDispatcher authorized:", account.address);
   }
 }
 

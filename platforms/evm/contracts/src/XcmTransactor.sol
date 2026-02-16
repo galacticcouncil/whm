@@ -148,7 +148,8 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
             ScaleCodec.u256Le(xcmMaxFeePerGas),
             ScaleCodec.encodeNone(), // max_priority_fee_per_gas
             ScaleCodec.encodeNone(), // nonce
-            uint8(0x00) // access_list: empty Vec
+            uint8(0x00), // access_list: empty Vec
+            uint8(0x00) // authorization_list: empty Vec (EIP-7702)
         );
     }
 

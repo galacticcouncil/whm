@@ -3,6 +3,8 @@ import "dotenv/config";
 import { encodeFunctionData, isAddress } from "viem";
 
 import { args } from "@whm/common";
+import { acc } from "@galacticcouncil/common";
+
 import { ifs, wallet } from "../../lib";
 
 import xcmTransactorJson from "../../contracts/out/XcmTransactor.sol/XcmTransactor.json";
@@ -16,7 +18,7 @@ function getConfig() {
   const chainId = requiredEnv("RECEIVER_CHAIN_ID");
 
   const privateKey = requiredArg("--pk");
-  const hydrationParaId = requiredArg("--destination-para-id");
+  const destinationParaId = requiredArg("--destination-para-id");
   const sourceParaId = requiredArg("--source-para-id");
   const evmPalletIndex = requiredArg("--evm-pallet-index");
   const evmCallIndex = requiredArg("--evm-call-index");
@@ -33,10 +35,10 @@ function getConfig() {
     rpcUrl,
     chainId: Number(chainId),
     privateKey: privateKey as `0x${string}`,
-    hydrationParaId,
-    sourceParaId,
-    evmPalletIndex,
-    evmCallIndex,
+    destinationParaId: Number(destinationParaId),
+    sourceParaId: Number(sourceParaId),
+    evmPalletIndex: Number(evmPalletIndex),
+    evmCallIndex: Number(evmCallIndex),
     feeAsset: feeAsset as `0x${string}`,
     proxy: proxy as `0x${string}` | undefined,
   };
@@ -47,7 +49,7 @@ async function main(): Promise<void> {
     rpcUrl,
     chainId,
     privateKey,
-    hydrationParaId,
+    destinationParaId,
     sourceParaId,
     evmPalletIndex,
     evmCallIndex,
@@ -62,7 +64,7 @@ async function main(): Promise<void> {
   const implDeployHash = await walletClient.deployContract({
     abi,
     bytecode: bytecode.object,
-    args: [hydrationParaId, sourceParaId, evmPalletIndex, evmCallIndex, feeAsset],
+    args: [destinationParaId, sourceParaId, evmPalletIndex, evmCallIndex, feeAsset],
   });
 
   const implDeployReceipt = await publicClient.waitForTransactionReceipt({ hash: implDeployHash });
@@ -120,6 +122,23 @@ async function main(): Promise<void> {
     console.log("XcmTransactor proxy:", transactorAddress);
     console.log("XcmTransactor owner:", account.address);
     console.log("XcmTransactor authorized:", account.address);
+
+    const proxyMda = acc.getMultilocationDerivatedAccount(
+      sourceParaId,
+      transactorAddress,
+      1,
+      false,
+    );
+
+    const proxyMdaH160 = acc.getMultilocationDerivatedAccount(
+      sourceParaId,
+      transactorAddress,
+      1,
+      true,
+    );
+
+    console.log("XcmTransactor MDA:", proxyMda);
+    console.log("XcmTransactor MDA (H160):", proxyMdaH160);
   }
 }
 
