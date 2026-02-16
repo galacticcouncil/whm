@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "anchor build -p message-emitter",
+    "test": "cargo test -p message-emitter",
     "build:local": "anchor build -p message-emitter -- --features local-logs",
     "logs:local": "solana logs -u http://127.0.0.1:8898",
     "validator:cleanup": "rm -rf .anchor/test-ledger",

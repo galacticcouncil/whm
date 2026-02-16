@@ -63,3 +63,67 @@ pub fn abi_encode_price_payload(
 
     encoded
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invariant_abi_encode_string_layout_holds_for_multiple_lengths() {
+        for len in 0usize..130usize {
+            let s = String::from_utf8(vec![b'a'; len]).unwrap();
+            let encoded = abi_encode_string(&s);
+            let padded_len = len.div_ceil(32) * 32;
+
+            assert_eq!(encoded.len(), 64 + padded_len);
+
+            assert!(encoded[0..31].iter().all(|b| *b == 0));
+            assert_eq!(encoded[31], 0x20);
+
+            assert!(encoded[32..56].iter().all(|b| *b == 0));
+            assert_eq!(
+                u64::from_be_bytes(encoded[56..64].try_into().unwrap()),
+                len as u64
+            );
+
+            assert_eq!(&encoded[64..64 + len], s.as_bytes());
+            assert!(encoded[64 + len..].iter().all(|b| *b == 0));
+        }
+    }
+
+    #[test]
+    fn invariant_abi_encode_price_payload_roundtrips_fields() {
+        let mut patterned_asset = [0u8; 32];
+        for (i, byte) in patterned_asset.iter_mut().enumerate() {
+            *byte = i as u8;
+        }
+
+        let cases = [
+            (0u8, [0u8; 32], 0u128, 0u64),
+            (1u8, [0xAA; 32], 1u128, 1u64),
+            (255u8, patterned_asset, u128::MAX, u64::MAX),
+        ];
+
+        for (action, asset_id, price, timestamp) in cases {
+            let encoded = abi_encode_price_payload(action, asset_id, price, timestamp);
+            assert_eq!(encoded.len(), 128);
+
+            assert!(encoded[0..31].iter().all(|b| *b == 0));
+            assert_eq!(encoded[31], action);
+
+            assert_eq!(&encoded[32..64], &asset_id);
+
+            assert!(encoded[64..80].iter().all(|b| *b == 0));
+            assert_eq!(
+                u128::from_be_bytes(encoded[80..96].try_into().unwrap()),
+                price
+            );
+
+            assert!(encoded[96..120].iter().all(|b| *b == 0));
+            assert_eq!(
+                u64::from_be_bytes(encoded[120..128].try_into().unwrap()),
+                timestamp
+            );
+        }
+    }
+}
