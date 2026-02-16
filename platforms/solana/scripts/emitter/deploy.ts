@@ -19,7 +19,6 @@ const { PublicKey, Keypair, Connection } = anchor.web3;
 
 const PRIME_ID = new PublicKey("3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7");
 const PRIME_PRICE_INDEX = 190;
-const PRIME_REF_PRICE_INDEX = 204;
 
 function getConfig() {
   const rpcUrl = requiredEnv("RPC_URL");
@@ -124,12 +123,11 @@ async function main(): Promise<void> {
     console.log("  assetId:", PRIME_ID.toBase58());
     console.log("  assetId (bytes32):", primeAssetIdHex);
     console.log("  priceIndex:", data.priceIndex);
-    console.log("  refPriceIndex:", data.refPriceIndex);
     return;
   }
 
   const registerTx = await program.methods
-    .registerPriceFeed(primeAssetId, PRIME_PRICE_INDEX, PRIME_REF_PRICE_INDEX)
+    .registerPriceFeed(primeAssetId, PRIME_PRICE_INDEX)
     .accounts({
       owner: wallet.publicKey,
     })
@@ -139,7 +137,6 @@ async function main(): Promise<void> {
   console.log("  assetId:", PRIME_ID.toBase58());
   console.log("  assetId (bytes32):", primeAssetIdHex);
   console.log("  priceIndex:", PRIME_PRICE_INDEX);
-  console.log("  refPriceIndex:", PRIME_REF_PRICE_INDEX);
   console.log("  Tx:", registerTx);
 }
 

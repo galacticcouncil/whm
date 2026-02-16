@@ -50,39 +50,27 @@ pub fn read_price(data: &[u8], index: u16) -> Result<ScopeDatedPrice> {
     })
 }
 
-/// Calculate a USD price normalised to 18 decimals from a price + reference price.
+/// Normalise a Scope oracle price to 18 decimals.
 ///
 /// Formula:
-///   combined_value = price.value × ref_price.value
-///   combined_exp   = price.exp + ref_price.exp
-///   result         = combined_value × 10^(18 - combined_exp)
-pub fn compute_usd_price_18dec(
-    price: &ScopeDatedPrice,
-    ref_price: &ScopeDatedPrice,
-) -> Result<u128> {
-    let combined_value = (price.price.value as u128)
-        .checked_mul(ref_price.price.value as u128)
-        .ok_or(error!(ScopeReadError::Overflow))?;
+///   result = value × 10^(18 - exp)   if exp <= 18
+///   result = value / 10^(exp - 18)   if exp  > 18
+pub fn normalize_to_18dec(price: &ScopeDatedPrice) -> Result<u128> {
+    let value = price.price.value as u128;
+    let exp = price.price.exp;
 
-    let combined_exp = price.price.exp + ref_price.price.exp;
-
-    // We want the result in 18 decimals.
-    // result = combined_value * 10^(18 - combined_exp)   if 18 >= combined_exp
-    // result = combined_value / 10^(combined_exp - 18)   if combined_exp > 18
-    let result = if combined_exp <= 18 {
-        let scale = 10u128.pow((18 - combined_exp) as u32);
-        combined_value
+    let result = if exp <= 18 {
+        let scale = 10u128.pow((18 - exp) as u32);
+        value
             .checked_mul(scale)
             .ok_or(error!(ScopeReadError::Overflow))?
     } else {
-        let downscale_exp = combined_exp - 18;
-        // 10^39 is larger than u128::MAX.
-        // Treat unsupported exponent ranges as an arithmetic failure.
+        let downscale_exp = exp - 18;
         if downscale_exp >= 39 {
             return Err(error!(ScopeReadError::Overflow));
         } else {
             let scale = 10u128.pow(downscale_exp as u32);
-            combined_value / scale
+            value / scale
         }
     };
 
@@ -155,49 +143,37 @@ mod tests {
     }
 
     #[test]
-    fn invariant_compute_usd_price_scales_correctly() {
+    fn invariant_normalize_upscales_correctly() {
+        // value=123, exp=2 → 123 * 10^16 = 1_230_000_000_000_000_000
         let p = make_price(123, 2, 0, 0);
-        let r = make_price(456, 4, 0, 0);
-        let upscaled = compute_usd_price_18dec(&p, &r).unwrap();
-        assert_eq!(upscaled, 56_088_000_000_000_000u128);
-
-        let p = make_price(999, 10, 0, 0);
-        let r = make_price(1_234, 10, 0, 0);
-        let downscaled = compute_usd_price_18dec(&p, &r).unwrap();
-        assert_eq!(downscaled, 12_327u128);
+        assert_eq!(normalize_to_18dec(&p).unwrap(), 1_230_000_000_000_000_000u128);
     }
 
     #[test]
-    fn invariant_compute_usd_price_is_commutative() {
-        let prices = [
-            make_price(1, 0, 0, 0),
-            make_price(9, 4, 0, 0),
-            make_price(50, 9, 0, 0),
-            make_price(1234, 18, 0, 0),
-        ];
-
-        for left in prices {
-            for right in prices {
-                let ab = compute_usd_price_18dec(&left, &right).unwrap();
-                let ba = compute_usd_price_18dec(&right, &left).unwrap();
-                assert_eq!(ab, ba);
-            }
-        }
+    fn invariant_normalize_downscales_correctly() {
+        // value=101923944434509490, exp=17 → 101923944434509490 * 10^1 = 1_019_239_444_345_094_900
+        let p = make_price(101_923_944_434_509_490, 17, 0, 0);
+        assert_eq!(normalize_to_18dec(&p).unwrap(), 1_019_239_444_345_094_900u128);
     }
 
     #[test]
-    fn invariant_compute_usd_price_overflow_returns_error() {
-        let p = make_price(u64::MAX, 0, 0, 0);
-        let r = make_price(u64::MAX, 0, 0, 0);
-        let err = compute_usd_price_18dec(&p, &r).unwrap_err();
-        assert_anchor_error_name(err, "Overflow");
+    fn invariant_normalize_exact_18_exp() {
+        // exp=18 → no scaling, value returned as-is
+        let p = make_price(1234, 18, 0, 0);
+        assert_eq!(normalize_to_18dec(&p).unwrap(), 1234u128);
     }
 
     #[test]
-    fn invariant_compute_usd_price_huge_exponent_returns_error() {
+    fn invariant_normalize_exp_above_18() {
+        // value=999_000, exp=20 → 999_000 / 10^2 = 9_990
+        let p = make_price(999_000, 20, 0, 0);
+        assert_eq!(normalize_to_18dec(&p).unwrap(), 9_990u128);
+    }
+
+    #[test]
+    fn invariant_normalize_huge_exponent_returns_error() {
         let p = make_price(42, 100, 0, 0);
-        let r = make_price(84, 100, 0, 0);
-        let err = compute_usd_price_18dec(&p, &r).unwrap_err();
+        let err = normalize_to_18dec(&p).unwrap_err();
         assert_anchor_error_name(err, "Overflow");
     }
 }

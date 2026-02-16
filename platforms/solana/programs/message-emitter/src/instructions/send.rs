@@ -4,7 +4,7 @@ use wormhole_anchor_sdk::wormhole::{
 };
 
 use crate::helpers::{abi_encode_price_payload, abi_encode_string};
-use crate::oracle::{compute_usd_price_18dec, read_price};
+use crate::oracle::{normalize_to_18dec, read_price};
 use crate::state::PriceFeed;
 
 const ACTION_PRICE_UPDATE: u8 = 1;
@@ -86,15 +86,13 @@ pub(crate) fn send_price(ctx: Context<SendPrice>) -> Result<()> {
 
     let oracle_data = ctx.accounts.scope_prices.try_borrow_data()?;
     let price_entry = read_price(&oracle_data, feed.price_index)?;
-    let ref_entry = read_price(&oracle_data, feed.ref_price_index)?;
     drop(oracle_data);
 
-    let usd_price = compute_usd_price_18dec(&price_entry, &ref_entry)?;
+    let usd_price = normalize_to_18dec(&price_entry)?;
 
     dev_msg!(
-        "send_price: price_index={} ref_price_index={}",
-        feed.price_index,
-        feed.ref_price_index
+        "send_price: price_index={}",
+        feed.price_index
     );
     dev_msg!(
         "send_price: price.value={} price.exp={} price.ts={} price.slot={}",
@@ -102,13 +100,6 @@ pub(crate) fn send_price(ctx: Context<SendPrice>) -> Result<()> {
         price_entry.price.exp,
         price_entry.unix_timestamp,
         price_entry.last_updated_slot
-    );
-    dev_msg!(
-        "send_price: ref.value={} ref.exp={} ref.ts={} ref.slot={}",
-        ref_entry.price.value,
-        ref_entry.price.exp,
-        ref_entry.unix_timestamp,
-        ref_entry.last_updated_slot
     );
     dev_msg!("send_price: usd_price_18dec={}", usd_price);
 

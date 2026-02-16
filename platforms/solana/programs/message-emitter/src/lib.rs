@@ -9,7 +9,7 @@ pub use instructions::initialize::*;
 pub use instructions::register_price_feed::*;
 pub use instructions::send::*;
 
-declare_id!("8KL6xhNL9mUVLSurKsB1jNiwgH4ifLk3gPtC5PccavNt");
+declare_id!("2DyyLL2Y6q4ZAdZmgDyxpWkDdNHbyaPQnitkZrAZdUKP");
 
 #[program]
 pub mod message_emitter {
@@ -23,14 +23,8 @@ pub mod message_emitter {
         ctx: Context<RegisterPriceFeed>,
         asset_id: [u8; 32],
         price_index: u16,
-        ref_price_index: u16,
     ) -> Result<()> {
-        instructions::register_price_feed::register_price_feed(
-            ctx,
-            asset_id,
-            price_index,
-            ref_price_index,
-        )
+        instructions::register_price_feed::register_price_feed(ctx, asset_id, price_index)
     }
 
     pub fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
