@@ -9,7 +9,7 @@ pub use instructions::initialize::*;
 pub use instructions::register_price_feed::*;
 pub use instructions::send::*;
 
-declare_id!("2DyyLL2Y6q4ZAdZmgDyxpWkDdNHbyaPQnitkZrAZdUKP");
+declare_id!("BwqNpyPVEYwdy4EbbTCdiWmGNQn9kqf2p47zZcaV7irC");
 
 #[program]
 pub mod message_emitter {
