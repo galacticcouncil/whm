@@ -18,8 +18,8 @@
 ═══════════════════════════════════════════════════════════════════════════════════
 
 
-  SOLANA                        WORMHOLE                          MOONBEAM (EVM)                    HYDRATION
- ─────────                     ─────────                         ──────────────                   ───────────
+    SOLANA                       WORMHOLE               MOONBEAM (EVM)                HYDRATION
+   ─────────                     ─────────              ──────────────               ───────────
 
  ┌──────────────────┐
  │  Kamino Scope    │
@@ -70,7 +70,7 @@
                                                   │                       │  XCM  │  Parachain         │
                                                   │  - SCALE encoding     │──────►│                    │
                                                   │  - XCM precompile     │       │  evm.call →        │
-                                                  │    (0x0817)            │       │  Oracle.setPrice() │
+                                                  │    (0x0817)           │       │  Oracle.setPrice() │
                                                   │  - derived H160 addr  │       │                    │
                                                   └───────────────────────┘       └────────────────────┘
 
