@@ -1,6 +1,10 @@
 # WHM Monorepo (Wormhole Messaging)
 
-Cross-chain oracle price relay from Solana to Hydration parachain via Wormhole and Moonbeam. Solana program reads Kamino Scope oracle prices, ABI-encodes them, and publishes VAAs through Wormhole. On Moonbeam, upgradeable contracts receive, validate, and route messages, then dispatch price updates to Hydration via XCM. See [SCHEMA.md](SCHEMA.md) for the full architecture diagram.
+Generic cross-chain messaging framework built on Wormhole. A Solana program ABI-encodes arbitrary payloads and publishes them as VAAs. On Moonbeam, upgradeable EVM contracts receive, validate, and route messages, then dispatch actions to destination parachains via XCM. The action-based routing is extensible — new message types plug in without changing the core pipeline.
+
+The first use case is **oracle price relay**: the Solana program reads Kamino Scope oracle prices and broadcasts them through Wormhole to Moonbeam, which forwards price updates to Hydration's on-chain oracle via XCM.
+
+See [SCHEMA.md](SCHEMA.md) for the full architecture diagram.
 
 **Parent Setup**
 
