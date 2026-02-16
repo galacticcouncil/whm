@@ -71,4 +71,4 @@ bytes 64+:   UTF-8 string data, zero-padded to 32-byte boundary
 
 - **Payload encodes only the message string** - matches what the receiver decodes. The EVM sender also encodes `msg.sender` but the receiver ignores it
 
-- **Emitter PDA as message source** - the Wormhole guardian network uses this as the sender identity. The Moonbeam receiver must register this emitter address (in bytes32 format) via `setRegisteredSender(1, emitterBytes32)` where Wormhole chain ID `1` = Solana
+- **Emitter PDA as message source** - the Wormhole guardian network uses this as the sender identity. The Moonbeam receiver must register this emitter address (in bytes32 format) via `setAuthorizedEmitter(1, emitterBytes32)` where Wormhole chain ID `1` = Solana

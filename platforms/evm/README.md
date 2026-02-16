@@ -1,5 +1,7 @@
 # EVM
 
+Upgradeable Solidity contracts deployed on Moonbeam that receive Wormhole messages, route them by action type, and dispatch calls to Hydration parachain via XCM.
+
 ## Prerequisites
 
 - Foundry (`forge`, `anvil`)
@@ -31,12 +33,12 @@ pnpm run test
 
 #### Get secret
 
-Derive secret from seed & address
+Derive a wallet secret from a mnemonic seed and account address.
 
 | Flag        | Description      |
 | ----------- | ---------------- |
-| `--seed`    | Accound mnemonic |
-| `--addrees` | Accound address  |
+| `--seed`    | Account mnemonic |
+| `--address` | Account address  |
 
 ```bash
 pnpm run account:getSecret -- \
@@ -46,11 +48,13 @@ pnpm run account:getSecret -- \
 
 ### Message Receiver
 
-To run scripts agains local fork use **DOTENV_CONFIG_PATH=.env.fork**.
+Receives and validates Wormhole VAAs, enforces emitter authorization and replay protection.
+
+To run scripts against local fork use **DOTENV_CONFIG_PATH=.env.fork**.
 
 #### Deploy contract
 
-Deploy the message receiver contract.
+Deploy or upgrade the MessageReceiver UUPS proxy.
 
 | Flag      | Description                                                     |
 | --------- | --------------------------------------------------------------- |
@@ -67,12 +71,12 @@ When `--proxy` is used, only implementation code is upgraded. Existing proxy sto
 
 #### Register authorized emitter
 
-Registers a trusted emitter contract from a source chain on the receiver.
+Whitelist a trusted emitter from a source chain so the receiver accepts its VAAs.
 
 | Flag             | Description                                  |
 | ---------------- | -------------------------------------------- |
 | `--pk`           | Private key used to sign the transaction     |
-| `--address`      | Contract address                             |
+| `--address`      | Receiver contract address                    |
 | `--emitter`      | Emitter contract address on the source chain |
 | `--source-chain` | Source chain identifier (Wormhole chain ID)  |
 
@@ -81,18 +85,17 @@ pnpm run receiver:setAuthorizedEmitter -- \
  --pk your_private_key \
  --address receiver_address \
  --emitter emitter_address \
- --source-chain souce_chain_id
+ --source-chain source_chain_id
 ```
 
 #### Receive message
 
-Submit a signed VAA (Verified Action Approval) from the Wormhole Guardian network to the receiver contract.
-Used for receiving messages from non-EVM chains (e.g. Solana) via Wormhole Core Bridge.
+Submit a signed VAA to the receiver for on-chain validation and processing.
 
 | Flag        | Description                                               |
 | ----------- | --------------------------------------------------------- |
 | `--pk`      | Private key used to sign the transaction                  |
-| `--address` | Contract address                                          |
+| `--address` | Receiver contract address                                 |
 | `--vaa`     | Hex-encoded signed VAA from the Wormhole Guardian network |
 
 ```bash
@@ -104,9 +107,11 @@ pnpm run receiver:receiveMessage -- \
 
 ### Message Dispatcher
 
+Extends MessageReceiver to decode ABI payloads, route by action ID, and forward to registered handlers.
+
 #### Deploy contract
 
-Deploy the message dispatcher contract.
+Deploy or upgrade the MessageDispatcher UUPS proxy.
 
 | Flag      | Description                                                     |
 | --------- | --------------------------------------------------------------- |
@@ -123,14 +128,14 @@ When `--proxy` is used, only implementation code is upgraded. Existing proxy sto
 
 #### Set dispatch handler
 
-Set handler for dispatch action.
+Map an action ID to a handler contract that processes that action type.
 
 | Flag          | Description                              |
 | ------------- | ---------------------------------------- |
 | `--pk`        | Private key used to sign the transaction |
-| `--address`   | Contract address                         |
-| `--handler`   | Dispatch handler address                 |
-| `--action-id` | Dispatch action id                       |
+| `--address`   | Dispatcher contract address              |
+| `--handler`   | Handler contract address                 |
+| `--action-id` | Action ID to route                       |
 
 ```bash
 pnpm run dispatcher:setHandler -- \
@@ -142,14 +147,14 @@ pnpm run dispatcher:setHandler -- \
 
 #### Set price oracle
 
-Set oracle address for price update asset.
+Map an asset ID to its managed oracle contract address on the destination chain.
 
 | Flag         | Description                              |
 | ------------ | ---------------------------------------- |
 | `--pk`       | Private key used to sign the transaction |
-| `--address`  | Contract address                         |
-| `--oracle`   | Managed oracle address                   |
-| `--asset-id` | Asset id bytes32 address                 |
+| `--address`  | Dispatcher contract address              |
+| `--oracle`   | Oracle contract address                  |
+| `--asset-id` | Asset ID (bytes32)                       |
 
 ```bash
 pnpm run dispatcher:setOracle -- \
@@ -159,17 +164,19 @@ pnpm run dispatcher:setOracle -- \
  --asset-id asset_id
 ```
 
-### Xcm Transactor
+### XCM Transactor
+
+Assembles and dispatches XCM messages to execute EVM calls on Hydration parachain via the Moonbeam XCM precompile.
 
 #### Deploy contract
 
-Deploy xcm transactor contract.
+Deploy or upgrade the XcmTransactor UUPS proxy with parachain and fee configuration.
 
 | Flag                    | Description                                                     |
 | ----------------------- | --------------------------------------------------------------- |
 | `--pk`                  | Private key used to sign the transaction                        |
-| `--destination-para-id` | Destination parachain id                                        |
-| `--source-para-id`      | Source parachain id                                             |
+| `--destination-para-id` | Destination parachain ID                                        |
+| `--source-para-id`      | Source parachain ID                                             |
 | `--evm-pallet-index`    | Pallet index for Hydration EVM transact                         |
 | `--evm-call-index`      | Call index for Hydration EVM transact                           |
 | `--fee-asset`           | XC-20 token used for XCM execution fees                         |
@@ -200,16 +207,16 @@ pnpm run transactor:deploy -- \
 
 When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
 
-#### Register authorized
+#### Register authorized operator
 
-Registers a trusted operator on the transactor.
+Grant or revoke operator privileges on the transactor.
 
 | Flag         | Description                              |
 | ------------ | ---------------------------------------- |
 | `--pk`       | Private key used to sign the transaction |
-| `--address`  | Contract address                         |
+| `--address`  | Transactor contract address              |
 | `--operator` | Operator address                         |
-| `--enabled`  | Operational flag                         |
+| `--enabled`  | Enable or disable (`true`/`false`)       |
 
 ```bash
 pnpm run transactor:setAuthorized -- \
@@ -221,7 +228,7 @@ pnpm run transactor:setAuthorized -- \
 
 #### Register authorized dispatcher
 
-Registers a dispatcher contract as an authorized caller on the transactor.
+Authorize a dispatcher contract to call `transact()` on the transactor.
 
 | Flag           | Description                              |
 | -------------- | ---------------------------------------- |
@@ -240,7 +247,7 @@ pnpm run transactor:setAuthorizedDispatcher -- \
 
 #### Set XCM defaults
 
-Updates runtime values used by `encodeEvmCall` and `transact`. Caller must be authorized on the transactor.
+Update gas, weight, and fee parameters used for XCM transact calls.
 
 | Flag                    | Description                              |
 | ----------------------- | ---------------------------------------- |
@@ -265,7 +272,7 @@ pnpm run transactor:setDefaults -- \
 
 #### Transact
 
-Dispatch an EVM call through the transactor.
+Dispatch an EVM call to the destination parachain through XCM.
 
 | Flag        | Description                                      |
 | ----------- | ------------------------------------------------ |

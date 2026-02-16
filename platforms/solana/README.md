@@ -1,5 +1,7 @@
 # Solana
 
+Anchor program that ABI-encodes arbitrary messages and oracle data, then publishes them as VAAs through Wormhole Core Bridge.
+
 ## Prerequisites
 
 - Rust toolchain (`cargo`)
@@ -55,12 +57,12 @@ pnpm run test:validator
 
 #### Get secret
 
-Derive secret from seed & address
+Derive a wallet secret from a mnemonic seed and account address.
 
-| Flag        | Description      |
-| ----------- | ---------------- |
-| `--seed`    | Accound mnemonic |
-| `--addrees` | Accound address  |
+| Flag        | Description     |
+| ----------- | --------------- |
+| `--seed`    | Account mnemonic |
+| `--address` | Account address  |
 
 ```bash
 pnpm run account:getSecret -- \
@@ -68,13 +70,28 @@ pnpm run account:getSecret -- \
  --address your_account_address
 ```
 
-### Message emitter
+### Asset
 
-To run scripts agains local validator use **DOTENV_CONFIG_PATH=.env.fork**.
+#### Get bytes32
+
+Convert a Solana public key to its bytes32 hex representation (used for cross-chain asset IDs).
+
+| Flag   | Description              |
+| ------ | ------------------------ |
+| `--id` | Solana public key string |
+
+```bash
+pnpm run asset:getBytes32 -- \
+ --id your_public_key
+```
+
+### Message Emitter
+
+To run scripts against local validator use **DOTENV_CONFIG_PATH=.env.fork**.
 
 #### Local validator (fork environment)
 
-Spawn local validator for the message-emitter program.
+Spawn a local Solana test validator pre-loaded with the message-emitter program and Wormhole accounts.
 
 ```bash
 pnpm emitter:runValidator
@@ -82,7 +99,7 @@ pnpm emitter:runValidator
 
 #### Deploy program
 
-Deploy the message-emitter program.
+Deploy the message-emitter program to the configured cluster.
 
 | Flag     | Description                              |
 | -------- | ---------------------------------------- |
@@ -97,7 +114,7 @@ pnpm emitter:deploy -- \
 
 #### Close program
 
-Close the deployed message-emitter program and reclaim rent to a recipient account.
+Close the deployed program and reclaim rent lamports to a recipient account.
 
 | Flag          | Description                                                           |
 | ------------- | --------------------------------------------------------------------- |
@@ -114,7 +131,7 @@ pnpm emitter:close -- \
 
 #### Broadcast message
 
-Broadcast message to wormhole guardians via core contract.
+Publish a string message as a Wormhole VAA through the Core Bridge.
 
 | Flag        | Description                                          |
 | ----------- | ---------------------------------------------------- |
@@ -129,7 +146,7 @@ pnpm emitter:sendMessage -- \
 
 #### Broadcast price
 
-Broadcast price to wormhole guardians via core contract.
+Read the latest oracle price and publish it as a Wormhole VAA.
 
 | Flag   | Description                              |
 | ------ | ---------------------------------------- |
