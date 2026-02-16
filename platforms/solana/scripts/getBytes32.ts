@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "@whm/common";
 
 const { PublicKey } = anchor.web3;
 

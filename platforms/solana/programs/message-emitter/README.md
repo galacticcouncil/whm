@@ -1,4 +1,4 @@
-# Wormhole Sender Program
+# Wormhole Message Emitter Program
 
 ## Context
 
@@ -55,7 +55,7 @@ On Solana, cross-chain messaging works through the Wormhole Core Bridge's `post_
 
 ### ABI encoding (EVM compatibility)
 
-The Moonbeam receiver does `abi.decode(payload, (string))`. The Solana sender must produce valid ABI encoding:
+The Moonbeam receiver does `abi.decode(payload, (string))`. The Solana message-emitter program must produce valid ABI encoding:
 
 ```
 bytes  0-31: offset to string data = 0x20 (32, big-endian)

@@ -74,15 +74,15 @@ To run scripts agains local validator use **DOTENV_CONFIG_PATH=.env.fork**.
 
 #### Local validator (fork environment)
 
-Spawn local validator for sender program.
+Spawn local validator for the message-emitter program.
 
 ```bash
-pnpm sender:runValidator
+pnpm emitter:runValidator
 ```
 
 #### Deploy program
 
-Deploy the sender program.
+Deploy the message-emitter program.
 
 | Flag     | Description                              |
 | -------- | ---------------------------------------- |
@@ -90,23 +90,23 @@ Deploy the sender program.
 | `--test` | Use in local environment to airdrop sol  |
 
 ```bash
-pnpm sender:deploy -- \
+pnpm emitter:deploy -- \
  --pk your_private_key \
  --test true
 ```
 
 #### Close program
 
-Close the deployed sender program and reclaim rent to a recipient account.
+Close the deployed message-emitter program and reclaim rent to a recipient account.
 
-| Flag          | Description                                                      |
-| ------------- | ---------------------------------------------------------------- |
-| `--pk`        | Upgrade authority private key used to sign close transaction     |
-| `--programId` | Program id to close (defaults to current sender id from IDL)     |
-| `--recipient` | Recipient account for reclaimed lamports (defaults to authority) |
+| Flag          | Description                                                           |
+| ------------- | --------------------------------------------------------------------- |
+| `--pk`        | Upgrade authority private key used to sign close transaction          |
+| `--programId` | Program id to close (defaults to current message-emitter id from IDL) |
+| `--recipient` | Recipient account for reclaimed lamports (defaults to authority)      |
 
 ```bash
-pnpm sender:close -- \
+pnpm emitter:close -- \
  --pk your_private_key \
  --programId your_program_id \
  --recipient your_wallet_address
@@ -122,7 +122,7 @@ Broadcast message to wormhole guardians via core contract.
 | `--message` | Message payload to send (string or hex-encoded data) |
 
 ```bash
-pnpm sender:sendMessage -- \
+pnpm emitter:sendMessage -- \
  --pk your_private_key \
  --message your_message
 ```
@@ -136,6 +136,6 @@ Broadcast price to wormhole guardians via core contract.
 | `--pk` | Private key used to sign the transaction |
 
 ```bash
-pnpm sender:sendPrice -- \
+pnpm emitter:sendPrice -- \
  --pk your_private_key
 ```

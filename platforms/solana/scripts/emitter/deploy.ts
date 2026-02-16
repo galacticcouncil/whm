@@ -3,15 +3,15 @@ import "dotenv/config";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "@whm/common";
 
 import { execSync } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-import senderIdl from "../../target/idl/sender.json";
-import { Sender } from "../../target/types/sender";
+import messageEmitterIdl from "../../target/idl/message_emitter.json";
+import { MessageEmitter } from "../../target/types/message_emitter";
 
 const { requiredEnv, requiredArg, optionalArg } = args;
 
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
       "--provider.wallet",
       walletPath,
       "--program-name",
-      "sender",
+      "message-emitter",
     ];
 
     console.log(`> ${deployArgs.join(" ")}\n`);
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
     unlinkSync(walletPath);
   }
 
-  const program = new Program<Sender>(senderIdl, provider);
+  const program = new Program<MessageEmitter>(messageEmitterIdl, provider);
   console.log("Program ID:", program.programId.toBase58());
 
   const [emitterPda] = PublicKey.findProgramAddressSync(

@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { isAddress } from "viem";
 
-import { args } from "../../../../common";
+import { args } from "@whm/common";
+
 const { requiredArg, requiredEnv } = args;
 
 function getConfig() {

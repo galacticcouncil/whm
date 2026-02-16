@@ -12,7 +12,7 @@ pub use instructions::send::*;
 declare_id!("8KL6xhNL9mUVLSurKsB1jNiwgH4ifLk3gPtC5PccavNt");
 
 #[program]
-pub mod sender {
+pub mod message_emitter {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {

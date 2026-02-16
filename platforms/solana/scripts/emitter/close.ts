@@ -2,14 +2,14 @@ import "dotenv/config";
 
 import * as anchor from "@coral-xyz/anchor";
 
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "@whm/common";
 
 import { execFileSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-import senderIdl from "../../target/idl/sender.json";
+import messageEmitterIdl from "../../target/idl/message_emitter.json";
 
 const { requiredEnv, requiredArg, optionalArg } = args;
 const { PublicKey, Keypair } = anchor.web3;
@@ -18,7 +18,7 @@ function getConfig() {
   const rpcUrl = requiredEnv("RPC_URL");
   const privateKey = requiredArg("--pk");
   const recipient = optionalArg("--recipient");
-  const programId = optionalArg("--programId") ?? senderIdl.address;
+  const programId = optionalArg("--programId") ?? messageEmitterIdl.address;
 
   return {
     rpcUrl,

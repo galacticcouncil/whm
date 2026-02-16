@@ -3,10 +3,10 @@ import "dotenv/config";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "@whm/common";
 
-import senderIdl from "../../target/idl/sender.json";
-import { Sender } from "../../target/types/sender";
+import messageEmitterIdl from "../../target/idl/message_emitter.json";
+import { MessageEmitter } from "../../target/types/message_emitter";
 
 const { requiredEnv, requiredArg } = args;
 const { Keypair, PublicKey, Connection } = anchor.web3;
@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   const wallet = new anchor.Wallet(keypair);
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
 
-  const program = new Program<Sender>(senderIdl, provider);
+  const program = new Program<MessageEmitter>(messageEmitterIdl, provider);
   const wormholeMessage = Keypair.generate();
 
   const [emitter] = PublicKey.findProgramAddressSync([Buffer.from("emitter")], program.programId);

@@ -3,7 +3,7 @@ import "dotenv/config";
 import { createPublicClient, createWalletClient, http, isAddress, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { args } from "../../../../common";
+import { args } from "@whm/common";
 import { ifs, chains } from "../../lib";
 
 import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/MessageReceiver.json";

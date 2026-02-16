@@ -1,4 +1,4 @@
-import { args } from "../../../common";
+import { args } from "@whm/common";
 
 import { utils } from "../lib";
 

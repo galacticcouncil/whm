@@ -3,7 +3,7 @@ import "dotenv/config";
 import { createPublicClient, createWalletClient, http, isAddress, isHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { args } from "../../../../common";
+import { args } from "@whm/common";
 import { chains, ifs } from "../../lib";
 
 import xcmTransactorJson from "../../contracts/out/XcmTransactor.sol/XcmTransactor.json";

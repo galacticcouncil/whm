@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "@whm/common";
 
 import { mnemonicToSeedSync } from "bip39";
 import { derivePath } from "ed25519-hd-key";

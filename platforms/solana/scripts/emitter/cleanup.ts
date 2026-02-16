@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import * as anchor from "@coral-xyz/anchor";
 
-import { args } from "@nohaapav/whm-sdk";
+import { args } from "@whm/common";
 
 import { execFileSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
