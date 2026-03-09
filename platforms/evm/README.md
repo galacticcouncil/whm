@@ -46,6 +46,46 @@ pnpm run account:getSecret -- \
  --address your_account_address
 ```
 
+### Message Emitter
+
+Publishes messages to the Wormhole network via the core bridge contract.
+
+To run scripts against local fork use **DOTENV_CONFIG_PATH=.env.fork**.
+
+#### Deploy contract
+
+Deploy or upgrade the MessageEmitter UUPS proxy.
+
+| Flag      | Description                                                     |
+| --------- | --------------------------------------------------------------- |
+| `--pk`    | Private key used to sign the transaction                        |
+| `--proxy` | Deploys new implementation and upgrades existing proxy in-place |
+
+```bash
+pnpm run emitter:deploy -- \
+ --pk your_private_key
+ --proxy emitter_proxy_address
+```
+
+When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
+
+#### Send message
+
+Publish a message to the Wormhole network through the emitter contract.
+
+| Flag        | Description                              |
+| ----------- | ---------------------------------------- |
+| `--pk`      | Private key used to sign the transaction |
+| `--address` | Emitter contract address                 |
+| `--message` | Message string to publish                |
+
+```bash
+pnpm run emitter:sendMessage -- \
+ --pk your_private_key \
+ --address emitter_address \
+ --message "hello world"
+```
+
 ### Message Receiver
 
 Receives and validates Wormhole VAAs, enforces emitter authorization and replay protection.

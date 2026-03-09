@@ -5,19 +5,17 @@ import { encodeFunctionData, isAddress } from "viem";
 import { args } from "@whm/common";
 import { ifs, wallet } from "../../lib";
 
-import messageReceiverJson from "../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
+import messageEmitterJson from "../../contracts/out/MessageEmitter.sol/MessageEmitter.json";
 import erc1967ProxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
 const { requiredArg, optionalArg, requiredEnv } = args;
 const { getWallet } = wallet;
 
 function getConfig() {
-  const rpcUrl = requiredEnv("RECEIVER_RPC");
-  const wormholeRelayer = requiredEnv("RECEIVER_WORMHOLE_RELAYER");
-  const wormholeCore = requiredEnv("RECEIVER_WORMHOLE_CORE");
-  const chainId = requiredEnv("RECEIVER_CHAIN_ID");
+  const rpcUrl = requiredEnv("EMITTER_RPC");
+  const wormholeCore = requiredEnv("EMITTER_WORMHOLE_CORE");
+  const chainId = requiredEnv("EMITTER_CHAIN_ID");
 
-  if (!isAddress(wormholeRelayer)) throw new Error("Invalid wormhole relayer address.");
   if (!isAddress(wormholeCore)) throw new Error("Invalid wormhole core address.");
 
   const privateKey = requiredArg("--pk");
@@ -31,18 +29,17 @@ function getConfig() {
     rpcUrl,
     chainId: Number(chainId),
     privateKey: privateKey as `0x${string}`,
-    wormholeRelayer: wormholeRelayer as `0x${string}`,
     wormholeCore: wormholeCore as `0x${string}`,
     proxy: proxy as `0x${string}` | undefined,
   };
 }
 
 async function main(): Promise<void> {
-  const { rpcUrl, chainId, privateKey, wormholeCore, wormholeRelayer, proxy } = getConfig();
+  const { rpcUrl, chainId, privateKey, wormholeCore, proxy } = getConfig();
 
   const { publicClient, walletClient, account } = getWallet(rpcUrl, chainId, privateKey);
 
-  const { abi, bytecode } = messageReceiverJson as ifs.ContractArtifact;
+  const { abi, bytecode } = messageEmitterJson as ifs.ContractArtifact;
 
   const implDeployHash = await walletClient.deployContract({
     abi,
@@ -66,13 +63,13 @@ async function main(): Promise<void> {
 
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
-    console.log("MessageReceiver implementation:", implementationAddress);
-    console.log("MessageReceiver proxy:", proxy, "(upgraded)");
+    console.log("MessageEmitter implementation:", implementationAddress);
+    console.log("MessageEmitter proxy:", proxy, "(upgraded)");
   } else {
     const initializeData = encodeFunctionData({
       abi,
       functionName: "initialize",
-      args: [wormholeRelayer, wormholeCore],
+      args: [wormholeCore],
     });
 
     const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson as ifs.ContractArtifact;
@@ -91,11 +88,11 @@ async function main(): Promise<void> {
       throw new Error("Proxy deployment failed! Contract address missing.");
     }
 
-    const receiverAddress = proxyDeployReceipt.contractAddress;
+    const emitterAddress = proxyDeployReceipt.contractAddress;
 
-    console.log("MessageReceiver implementation:", implementationAddress);
-    console.log("MessageReceiver proxy:", receiverAddress);
-    console.log("MessageReceiver owner:", account.address);
+    console.log("MessageEmitter implementation:", implementationAddress);
+    console.log("MessageEmitter proxy:", emitterAddress);
+    console.log("MessageEmitter owner:", account.address);
   }
 }
 

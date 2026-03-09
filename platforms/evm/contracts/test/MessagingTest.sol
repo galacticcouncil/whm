@@ -14,13 +14,19 @@ contract MessagingTest is Test {
     address public wormholeRelayer = address(this);
 
     function setUp() public {
-        emitterContract = new MessageEmitter(wormhole);
-        MessageDispatcher impl = new MessageDispatcher();
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl),
+        MessageEmitter emitterImpl = new MessageEmitter();
+        ERC1967Proxy emitterProxy = new ERC1967Proxy(
+            address(emitterImpl),
+            abi.encodeCall(MessageEmitter.initialize, (wormhole))
+        );
+        emitterContract = MessageEmitter(address(emitterProxy));
+
+        MessageDispatcher receiverImpl = new MessageDispatcher();
+        ERC1967Proxy receiverProxy = new ERC1967Proxy(
+            address(receiverImpl),
             abi.encodeCall(MessageDispatcher.initialize, (wormholeRelayer, wormhole))
         );
-        receiverContract = MessageDispatcher(address(proxy));
+        receiverContract = MessageDispatcher(address(receiverProxy));
     }
 
     function testDeployment() public view {

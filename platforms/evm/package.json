@@ -8,6 +8,8 @@
     "dispatcher:deploy": "npx tsx scripts/dispatcher/deploy.ts",
     "dispatcher:setHandler": "npx tsx scripts/dispatcher/setHandler.ts",
     "dispatcher:setOracle": "npx tsx scripts/dispatcher/setOracle.ts",
+    "emitter:deploy": "npx tsx scripts/emitter/deploy.ts",
+    "emitter:sendMessage": "npx tsx scripts/emitter/sendMessage.ts",
     "receiver:deploy": "npx tsx scripts/receiver/deploy.ts",
     "receiver:setAuthorizedEmitter": "npx tsx scripts/receiver/setAuthorizedEmitter.ts",
     "receiver:receiveMessage": "npx tsx scripts/receiver/receiveMessage.ts",
