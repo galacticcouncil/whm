@@ -1,4 +1,4 @@
-# WHM Monorepo (Wormhole Messaging)
+# WHM (Wormhole Messaging)
 
 Generic cross-chain messaging framework built on Wormhole. A Solana program ABI-encodes arbitrary payloads and publishes them as VAAs. On Moonbeam, upgradeable EVM contracts receive, validate, and route messages, then dispatch actions to destination parachains via XCM. The action-based routing is extensible — new message types plug in without changing the core pipeline.
 
