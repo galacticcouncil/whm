@@ -1,73 +1,180 @@
-# Instant Bridging POC — "Loan & Settle"
+# Instant Bridging v2 — "InstaBridge + InstaTransfer"
 
 ## The Problem
 
 Standard Wormhole Token Bridge transfers require waiting for full guardian finality (~13 min on Ethereum). Users want tokens on the destination chain _now_.
 
-## The Idea
+## Overview
 
-Three contracts across the bridging path: EVM → Moonbeam (Wormhole) → Hydration (XCM)
+Two independent contracts — **InstaBridge** (transport) and **InstaTransfer** (delivery) — deployed on every supported chain. Transport is decoupled from delivery, making the system chain-agnostic and composable.
 
-**Source EVM chain — `InstantBridgeEmitter`** (extends MessageEmitter pattern)
+## Architecture
 
-1. User calls `bridgeTokens(destChain, recipient, amount)`
-2. Contract calls `TokenBridge.transferTokens()` — the normal, slow path (this settles eventually)
-3. Contract also calls `wormhole.publishMessage()` with **consistency level 200 (instant finality)** — a fast signal containing transfer details (token, amount, recipient, transferSequence)
+Two contracts, deployed independently on every supported chain:
 
-**Moonbeam — `InstantBridgeProxy`** (extends MessageReceiver pattern)
+### `InstaBridge` — Transport + Messaging
 
-1. Off-chain relayer picks up the instant-finality VAA within seconds
-2. Relayer submits VAA to `receiveMessage(vaa)` on Moonbeam
-3. Contract verifies VAA, then calls `XcmTransactor` to dispatch a transact call to Hydration's `InstantBridgeSettler` with the verified transfer details
-4. Moonbeam holds no funds — acts purely as a VAA verification + XCM dispatch proxy
+Handles the bridge mechanics: initiating transfers and relaying verified messages. Can be swapped out for a different transport layer without touching InstaTransfer.
 
-**Hydration — `InstantBridgeSettler`** (holds liquidity pool)
+**`bridgeViaWormhole(asset, destChain, destAsset, recipient, amount)`**
 
-1. Receives XCM transact call from Moonbeam's `InstantBridgeProxy`
-2. **Loans** tokens to recipient from a pre-funded liquidity pool
-3. Later, when the slow TokenBridge transfer finalizes, the relayer redeems it and **replenishes** the pool on Hydration
+1. Calls `TokenBridge.transferTokens()` — the normal slow path (settles eventually)
+2. Calls `wormhole.publishMessage()` with **consistency level 200 (instant finality)** — a fast signal containing transfer metadata:
+   - `asset` — asset address on source chain (used by TokenBridge.transferTokens)
+   - `amount` — transfer amount
+   - `destAsset` — asset address on destination chain (caller specifies upfront, forwarded to InstaTransfer)
+   - `destChain` — destination chain id
+   - `recipient` — final receiver address
+
+**`completeTransfer(vaa)`**
+
+1. Off-chain relayer picks up the instant-finality VAA (within seconds)
+2. Relayer calls `completeTransfer(vaa)` on the destination chain's InstaBridge
+3. InstaBridge verifies the VAA (parseAndVerifyVM, replay protection, authorized emitter checks)
+4. Decodes metadata and calls `InstaTransfer.transfer(recipient, destAsset, amount)` — on Moonbeam this dispatches via XcmTransactor to InstaTransfer on Hydration
+
+### `InstaTransfer` — Instant Delivery
+
+Chain-agnostic transfer contract. Only callable by authorized bridge contracts. Delivers tokens to the recipient instantly using available liquidity.
+
+**`transfer(recipient, token, amount)`**
+
+- Called by an authorized InstaBridge (or any future authorized bridge)
+- Delivers tokens to the recipient immediately
+
+**Settlement — automatic via TokenBridge**
+
+- `bridgeViaWormhole()` sets the TokenBridge recipient to the InstaTransfer contract address
+- When the slow transfer finalizes (~13 min), relayer calls `TokenBridge.completeTransfer()` and tokens land directly in InstaTransfer's balance
+- No explicit `settle()` needed — the pool replenishes itself
+
+**Custom implementations per chain:**
+
+| Chain                 | InstaTransfer Strategy                                  |
+| --------------------- | ------------------------------------------------------- |
+| Simple (any EVM)      | Direct transfer from pre-funded pool                    |
+| Aave-supported chains | Flash-loan or borrow from Aave, repay on settlement     |
+| Hydration             | Borrow from Hydration money market (Omnipool / lending) |
+| Solana (Kamino)       | Borrow via Kamino, repay on settlement                  |
+
+The key insight: InstaTransfer doesn't know or care _how_ the bridge works. It just receives authorized `transfer()` calls and fulfills them using whatever liquidity strategy makes sense for that chain.
+
+### Asset Resolution — Caller-Provided
+
+The `destAsset` is specified by the consumer when calling `bridgeViaWormhole()`. It gets encoded into the instant message payload and forwarded all the way to `InstaTransfer.transfer()` on the destination chain. No on-chain derivation or registry needed — the off-chain layer (SDK/frontend) resolves the correct dest asset address based on the bridge type (Wormhole wrapped address, Snowbridge asset ID, etc.) and passes it in.
 
 ## Flow
 
 ```
-Source EVM                      Moonbeam (proxy only)               Hydration (holds funds)
-┌────────────────────┐          ┌──────────────────────────┐       ┌───────────────────────┐
-│ InstantBridge      │          │ InstantBridgeProxy       │       │ InstantBridge         │
-│ Emitter            │          │ (no funds, just routing) │       │ Settler               │
-│                    │          │                          │       │                       │
-│ 1. Lock tokens via │ instant  │                          │       │                       │
-│    TokenBridge     │── VAA ─→ | 3. Verify VAA            │       │                       │
-│                    │ (~2s)    │                          │       │                       │
-│ 2. Publish instant │          │ 4. Dispatch XCM transact │  XCM  │ 5. Loan tokens to     │
-│    wormhole msg    │          │    to Hydration          │──────→│    recipient          |
-|                    |          |                          |       |                       |
-│                    |          |                          |       |                       |
-│                    │          │                          │       │                       │
-│                    │  slow    │                          │       │ 6. Relayer redeems    │
-│                    │─redeem─→ | (passthrough)            │──────→│    TokenBridge        │
-│                    │(~13min)  │                          │       │    → replenish pool   │
-└────────────────────┘          └──────────────────────────┘       └───────────────────────┘
+A: Source EVM               Relayer (off-chain)         B: Moonbeam (proxy)              C: Hydration (dest)
+┌──────────────────────┐   ┌──────────────────┐       ┌──────────────────────────┐     ┌──────────────────────────┐
+│ InstaBridge          │   │                  │       │ InstaBridge              │     │ InstaTransfer            │
+│                      │   │                  │       │ (no funds, just routing) │     │ (holds liquidity)        │
+│ 1. TokenBridge       │   │                  │       │                          │     │                          │
+│    .transferTokens() │   │                  │       │                          │     │                          │
+│    (slow, ~13min)    │   │                  │       │                          │     │                          │
+│                      │   │                  │       │                          │     │                          │
+│ 2. wormhole          │   │                  │       │                          │     │                          │
+│    .publishMessage() │──→│ 3. Pick up       │       │                          │     │                          │
+│    (finality=200)    │   │    instant VAA   │       │                          │     │                          │
+│                      │   │    (~2s)         │       │                          │     │                          │
+└──────────────────────┘   │                  │       │                          │     │                          │
+                           │ 4. Submit VAA    │       │                          │     │                          │
+                           │    to Moonbeam   │──────→│ 5. completeTransfer()    │     │                          │
+                           │                  │       │    verify VAA            │     │                          │
+                           └──────────────────┘       │    decode metadata       │     │                          │
+                                                      │                          │     │                          │
+                                                      │ 6. XcmTransactor         │ XCM │                          │
+                                                      │    .transact()           │────→│ 7. transfer(recipient,   |
+                                                      │                          |     |      asset, amount)      |
+                                                      │    → InstaTransfer       |     |                          |
+                                                      |        .transfer()│      │     |                          │
+                                                      │                          │     │                          │
+                                                      └──────────────────────────┘     │ 8. Deliver tokens to     │
+                                                                                       │    recipient instantly   │
+                                                                                       │                          │
+                                                                                       │          ...             │
+                                                                                       │                          │
+                                                                                       │ 9. Slow TokenBridge      │
+                                                                                       │    transfer finalizes    │
+                                                                                       │    → tokens land in      │
+                                                                                       │    InstaTransfer balance │
+                                                                                       └──────────────────────────┘
 ```
 
-## Why Existing Contracts Already Solve Half of This
+## Contract Relationships
 
-- **MessageEmitter** — already publishes with `consistencyLevel = 200` (instant). Just need to add the TokenBridge call alongside it and encode transfer metadata instead of a string.
-- **MessageReceiver** — already has `receiveMessage(vaa)` with `parseAndVerifyVM`, authorized emitter checks, and replay protection via `processedVaas`. The Moonbeam proxy extends this and overrides `_processMessage` to dispatch XCM transact to Hydration instead of emitting an event.
+```
+┌─────────────┐     authorized          ┌─────────────-────┐
+│ InstaBridge │ ──────────────────→     │  InstaTransfer   │
+│ (transport) │    .transfer() calls    │  (liquidity)     │
+└─────────────┘                         └──────────────────┘
+       │                                    │
+       │ can be replaced with               │ can have custom impl
+       │ any transport layer                │ per chain
+       │ (Wormhole, Sig, ...)               │
+       │                                    │
+       ▼                                    ▼
+  Transport concern                   Liquidity concern
+  (bridge + message)                  (deliver + receive)
+```
+
+## Key Benefits
+
+1. **Separation of concerns** — InstaBridge handles transport, InstaTransfer handles delivery. Either can be upgraded or replaced independently.
+2. **Moonbeam as thin proxy** — Moonbeam only verifies VAAs and dispatches XCM to Hydration. Holds no funds, no liquidity risk.
+3. **Composable delivery** — InstaTransfer can plug into existing money markets (Aave, Kamino, Hydration Omnipool) instead of requiring its own liquidity pool. Less capital needed.
+4. **Future-proof transport** — want to switch from Wormhole to Snowbridge? Deploy a new bridge contract, authorize it on InstaTransfer, done. InstaTransfer doesn't change.
+5. **Caller-provided asset resolution** — `destAsset` specified upfront by consumer. No on-chain derivation or registry. SDK/frontend handles the mapping per bridge type.
+
+## How Existing Contracts Map
+
+| Existing          | New Role                                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `MessageEmitter`  | Base for InstaBridge source-side (publishMessage with finality=200)                                   |
+| `MessageReceiver` | Base for InstaBridge dest-side (VAA verification, replay protection, authorized emitters)             |
+| `XcmTransactor`   | Only needed if Hydration is the destination (InstaBridge on Moonbeam dispatches to Hydration via XCM) |
 
 ## Key Design Decisions
 
-1. **Liquidity pool on Moonbeam** — relayer/market maker pre-deposits tokens into the relay contract. Pool replenished when slow TokenBridge transfer settles.
-2. **XcmTransactor integration** — the relay contract on Moonbeam needs to call `XcmTransactor.transactThroughSigned()` or similar to reach Hydration. XCM weight/fees need to be pre-configured.
-3. **Hydration contract** — could be an EVM contract on Hydration (if EVM pallet available) or a Substrate pallet call target. POC assumes EVM on Hydration.
-4. **Fee model** — relayer/LP takes a small fee for the instant service (compensates capital lockup + XCM fees).
-5. **Race condition safety** — what if the slow transfer never arrives? Need a timeout or fallback mechanism.
-6. **Token scope** — start with a single token (e.g., USDC) to keep the POC simple.
+1. **InstaTransfer authorization** — only whitelisted bridge contracts can call `transfer()`. Owner manages the whitelist. This is the security boundary.
+2. **Auto-settlement** — TokenBridge recipient is set to InstaTransfer address. Tokens arrive directly when the slow transfer completes. Pool balance is the accounting.
+3. **Custom InstaTransfer impls** — base contract defines the interface (`transfer`). Chain-specific implementations inherit and override liquidity sourcing.
+4. **Timeout / bad debt** — if slow transfer never arrives, InstaTransfer needs a fallback. Options: governance clawback, insurance fund, or relayer bond.
 
 ## POC Scope
 
-- Single token (USDC or wrapped native)
-- Path: EVM → Moonbeam (Wormhole) → Hydration (XCM)
-- Trusted single relayer (no auction/competition)
-- Fixed fee (e.g., 0.1%)
-- Hydration side assumes EVM-compatible contract
-- No timeout logic yet — assume happy path
+- Two contracts: `InstaBridge` (extends MessageEmitter + MessageReceiver patterns), `InstaTransfer` (new)
+- Single token (USDC)
+- Path: EVM → Moonbeam (Wormhole VAA) → Hydration (XCM)
+- InstaTransfer: simple pre-funded pool strategy (no Aave/Kamino integration yet)
+- Trusted single relayer
+- No timeout logic — happy path only
+- Settlement: relayer redeems TokenBridge transfer, tokens land directly in InstaTransfer
+
+## Interface Sketch
+
+```solidity
+// InstaBridge — deployed on every chain
+interface IInstaBridge {
+    function bridgeViaWormhole(
+        address asset,
+        uint256 amount
+        uint16 destChain,
+        address destAsset,
+        bytes32 recipient,
+    ) external payable;
+
+    function completeTransfer(bytes memory vaa) external;
+}
+
+// InstaTransfer — deployed on every chain
+interface IInstaTransfer {
+    function transfer(
+        address asset,
+        uint256 amount,
+        address recipient,
+    ) external;  // only authorized bridges
+}
+// Settlement: TokenBridge.completeTransfer() sends tokens directly to InstaTransfer — no settle() needed
+```
