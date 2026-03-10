@@ -10,28 +10,33 @@ Two independent contracts — **InstaBridge** (transport) and **InstaTransfer** 
 
 ## Architecture
 
-Two contracts, deployed independently on every supported chain:
+Three contracts, sharing a common base (`InstaBridgeBase`):
 
-### `InstaBridge` — Transport + Messaging
+### `InstaBridgeBase` — Shared Logic (abstract)
 
-Handles the bridge mechanics: initiating transfers and relaying verified messages. Can be swapped out for a different transport layer without touching InstaTransfer.
+Common storage (`tokenBridge`, `emitterNonce`, `instaTransfers`, `feeBps`), VAA verification (`completeTransfer` → `receiveMessage` → `_processMessage`), fee calculation (`quoteFee`). Subclasses implement `bridgeViaWormhole` (outbound) and `_executeTransfer` (inbound).
 
-**`bridgeViaWormhole(asset, destChain, destAsset, recipient, amount)`**
+### `InstaBridge` — Source EVM Chains (Base, Ethereum, etc.)
 
-1. Calls `TokenBridge.transferTokens()` — the normal slow path (settles eventually)
-2. Calls `wormhole.publishMessage()` with **consistency level 200 (instant finality)** — a fast signal containing transfer metadata:
-   - `asset` — asset address on source chain (used by TokenBridge.transferTokens)
-   - `amount` — transfer amount
-   - `destAsset` — asset address on destination chain (caller specifies upfront, forwarded to InstaTransfer)
-   - `destChain` — destination chain id
-   - `recipient` — final receiver address
+Bridges funds **into** Hydration via Moonbeam GMP (MRL).
 
-**`completeTransfer(vaa)`**
+**`bridgeViaWormhole(asset, amount, destChain, destAsset, recipient)`**
 
-1. Off-chain relayer picks up the instant-finality VAA (within seconds)
-2. Relayer calls `completeTransfer(vaa)` on the destination chain's InstaBridge
-3. InstaBridge verifies the VAA (parseAndVerifyVM, replay protection, authorized emitter checks)
-4. Decodes metadata and calls `InstaTransfer.transfer(recipient, destAsset, amount)` — on Moonbeam this dispatches via XcmTransactor to InstaTransfer on Hydration
+1. Calls `TokenBridge.transferTokensWithPayload()` — slow path via MRL. Recipient is Moonbeam GMP precompile (`0x816`), payload is SCALE-encoded `VersionedUserAction::V1` pointing to InstaTransfer on Hydration (parachain 2034).
+2. Calls `wormhole.publishMessage()` with **consistency level 200 (instant finality)** — encodes `destAsset`, `netAmount` (amount after 0.1% fee), and `recipient`.
+
+**`completeTransfer(vaa)`** — receives fast-path VAA, calls `InstaTransfer.transfer()` directly on the same chain.
+
+### `InstaBridgeProxy` — Moonbeam (Hydration Proxy)
+
+Bridges funds **out** from Hydration to external Wormhole chains.
+
+**`bridgeViaWormhole(asset, amount, destChain, destAsset, recipient)`**
+
+1. Calls `TokenBridge.transferTokens()` — slow path, recipient = InstaTransfer on dest chain.
+2. Calls `wormhole.publishMessage()` with **consistency level 200** — encodes `destAsset`, `netAmount` (amount after fee), and `recipient`.
+
+**`completeTransfer(vaa)`** — receives fast-path VAA, dispatches via `XcmTransactor` to InstaTransfer on Hydration.
 
 ### `InstaTransfer` — Instant Delivery
 
@@ -140,14 +145,14 @@ A: Source EVM               Relayer (off-chain)         B: Moonbeam (proxy)     
 1. **InstaTransfer authorization** — only whitelisted bridge contracts can call `transfer()`. Owner manages the whitelist. This is the security boundary.
 2. **Auto-settlement** — TokenBridge recipient is set to InstaTransfer address. Tokens arrive directly when the slow transfer completes. Pool balance is the accounting.
 3. **Custom InstaTransfer impls** — base contract defines the interface (`transfer`). Chain-specific implementations inherit and override liquidity sourcing.
-4. **Fee** — InstaTransfer deducts 0.1% from the transfer amount at delivery. Recipient receives `amount - fee`. Fee accrues in InstaTransfer, withdrawable by owner/protocol.
+4. **Fee** — InstaBridge deducts 0.1% (10 bps, configurable via `feeBps`) from the transfer amount before encoding the fast-path message. TokenBridge sends the full `amount` (slow settlement), but the instant message encodes `amount - fee`. InstaTransfer delivers the net amount; the fee accrues as surplus in InstaTransfer's balance when the slow settlement arrives.
 5. **Timeout / bad debt** — if slow transfer never arrives, InstaTransfer needs a fallback. Options: governance clawback, insurance fund, or relayer bond.
 
 ## POC Scope
 
-- Two contracts: `InstaBridge` (extends MessageEmitter + MessageReceiver patterns), `InstaTransfer` (new)
+- Three contracts: `InstaBridge` (source EVMs, MRL), `InstaBridgeProxy` (Moonbeam, XCM), `InstaTransfer` (new)
 - Single token (USDC)
-- Path: EVM → Moonbeam (Wormhole VAA) → Hydration (XCM)
+- Paths: Source EVM → Moonbeam GMP (MRL) → Hydration, Hydration → Moonbeam → Dest EVM (Wormhole)
 - InstaTransfer: simple pre-funded pool strategy (no Aave/Kamino integration yet)
 - Trusted single relayer
 - No timeout logic — happy path only
@@ -160,13 +165,15 @@ A: Source EVM               Relayer (off-chain)         B: Moonbeam (proxy)     
 interface IInstaBridge {
     function bridgeViaWormhole(
         address asset,
-        uint256 amount
+        uint256 amount,
         uint16 destChain,
         address destAsset,
-        bytes32 recipient,
-    ) external payable;
+        bytes32 recipient
+    ) external payable returns (uint64 transferSequence, uint64 messageSequence);
 
     function completeTransfer(bytes memory vaa) external;
+
+    function quoteFee(uint256 amount) external view returns (uint256 fee);
 }
 
 // InstaTransfer — deployed on every chain
@@ -174,8 +181,9 @@ interface IInstaTransfer {
     function transfer(
         address asset,
         uint256 amount,
-        address recipient,
+        address recipient
     ) external;  // only authorized bridges
 }
 // Settlement: TokenBridge.completeTransfer() sends tokens directly to InstaTransfer — no settle() needed
+// Fee: InstaBridge deducts feeBps (default 10 = 0.1%) from amount in the fast-path message
 ```
