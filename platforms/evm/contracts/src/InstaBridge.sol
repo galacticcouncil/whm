@@ -23,11 +23,10 @@ contract InstaBridge is InstaBridgeBase {
     uint32 public constant HYDRATION_PARA_ID = 2034;
 
     function initialize(
-        address _wormholeRelayer,
         address _wormhole,
         address _tokenBridge
     ) public virtual initializer {
-        _initInstaBridge(_wormholeRelayer, _wormhole, _tokenBridge);
+        _initInstaBridge(_wormhole, _tokenBridge);
     }
 
     function bridgeViaWormhole(

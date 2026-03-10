@@ -27,8 +27,8 @@ contract MessageDispatcher is MessageReceiver {
 
     event PriceReceived(bytes32 indexed assetId, uint256 price, uint64 timestamp);
 
-    function initialize(address _wormholeRelayer, address _wormhole) public override initializer {
-        _initMessageReceiver(_wormholeRelayer, _wormhole);
+    function initialize(address _wormhole) public override initializer {
+        _initMessageReceiver(_wormhole);
     }
 
     // ─── Message routing ───────────────────────────────────────

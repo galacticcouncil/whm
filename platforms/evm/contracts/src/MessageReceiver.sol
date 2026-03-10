@@ -3,12 +3,9 @@ pragma solidity ^0.8.22;
 
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
-import {IWormholeRelayer} from "wormhole-solidity-sdk/interfaces/IWormholeRelayer.sol";
-import {IWormholeReceiver} from "wormhole-solidity-sdk/interfaces/IWormholeReceiver.sol";
 import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
-contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
-    IWormholeRelayer public wormholeRelayer;
+contract MessageReceiver is Initializable, UUPSUpgradeable {
     IWormhole public wormhole;
 
     address public owner;
@@ -36,30 +33,16 @@ contract MessageReceiver is Initializable, UUPSUpgradeable, IWormholeReceiver {
         _disableInitializers();
     }
 
-    function initialize(address _wormholeRelayer, address _wormhole) public virtual initializer {
-        _initMessageReceiver(_wormholeRelayer, _wormhole);
+    function initialize(address _wormhole) public virtual initializer {
+        _initMessageReceiver(_wormhole);
     }
 
-    function _initMessageReceiver(address _wormholeRelayer, address _wormhole) internal onlyInitializing {
-        wormholeRelayer = IWormholeRelayer(_wormholeRelayer);
+    function _initMessageReceiver(address _wormhole) internal onlyInitializing {
         wormhole = IWormhole(_wormhole);
         owner = msg.sender;
     }
 
     // ─── Receive ────────────────────────────────────────────────
-
-    function receiveWormholeMessages(
-        bytes memory payload,
-        bytes[] memory,
-        bytes32 sourceAddress,
-        uint16 sourceChain,
-        bytes32 deliveryHash
-    ) public payable override onlyAuthorizedEmitter(sourceChain, sourceAddress) {
-        require(msg.sender == address(wormholeRelayer), "Only the Wormhole relayer can call this function");
-        require(!processedVaas[deliveryHash], "VAA already processed");
-        processedVaas[deliveryHash] = true;
-        _processMessage(payload);
-    }
 
     function receiveMessage(bytes memory vaa) public {
         (IWormhole.VM memory vm, bool valid, string memory reason) = wormhole.parseAndVerifyVM(vaa);
