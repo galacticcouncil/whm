@@ -110,10 +110,100 @@ contract InstaTransferTest is Test {
         instaTransfer.transfer(address(usdc), 1_000e6, recipient);
     }
 
-    function testTransferRevertsInsufficientBalance() public {
+    function testTransferQueuesWhenInsufficientBalance() public {
+        uint256 overAmount = POOL_AMOUNT + 1e6;
+
+        vm.expectEmit(true, true, true, true);
+        emit InstaTransfer.TransferQueued(0, address(usdc), recipient, overAmount);
+
         vm.prank(bridge);
-        vm.expectRevert();
-        instaTransfer.transfer(address(usdc), POOL_AMOUNT + 1e6, recipient);
+        instaTransfer.transfer(address(usdc), overAmount, recipient);
+
+        // Recipient gets nothing yet
+        assertEq(usdc.balanceOf(recipient), 0);
+        // Pool untouched
+        assertEq(usdc.balanceOf(address(instaTransfer)), POOL_AMOUNT);
+        // Pending transfer stored
+        (address asset, uint256 amount, address rec) = instaTransfer.pendingTransfers(0);
+        assertEq(asset, address(usdc));
+        assertEq(amount, overAmount);
+        assertEq(rec, recipient);
+        assertEq(instaTransfer.nextPendingId(), 1);
+    }
+
+    // ─── Pending Transfers ────────────────────────────────────────
+
+    function testFulfillPending() public {
+        uint256 overAmount = POOL_AMOUNT + 1e6;
+
+        // Queue a transfer
+        vm.prank(bridge);
+        instaTransfer.transfer(address(usdc), overAmount, recipient);
+
+        // Replenish the pool (simulates slow bridge settlement)
+        usdc.mint(address(instaTransfer), 10e6);
+
+        // Fulfill
+        vm.expectEmit(true, true, true, true);
+        emit InstaTransfer.PendingTransferFulfilled(0, address(usdc), recipient, overAmount);
+
+        instaTransfer.fulfillPending(0);
+
+        assertEq(usdc.balanceOf(recipient), overAmount);
+        // Pending transfer deleted
+        (address asset,,) = instaTransfer.pendingTransfers(0);
+        assertEq(asset, address(0));
+    }
+
+    function testFulfillPendingRevertsNotFound() public {
+        vm.expectRevert(abi.encodeWithSelector(InstaTransfer.PendingTransferNotFound.selector, 99));
+        instaTransfer.fulfillPending(99);
+    }
+
+    function testFulfillPendingRevertsInsufficientBalance() public {
+        uint256 overAmount = POOL_AMOUNT + 1e6;
+
+        vm.prank(bridge);
+        instaTransfer.transfer(address(usdc), overAmount, recipient);
+
+        // Don't replenish — should revert
+        vm.expectRevert(InstaTransfer.InsufficientBalance.selector);
+        instaTransfer.fulfillPending(0);
+    }
+
+    function testFulfillPendingCannotDoubleFulfill() public {
+        uint256 overAmount = POOL_AMOUNT + 1e6;
+
+        vm.prank(bridge);
+        instaTransfer.transfer(address(usdc), overAmount, recipient);
+
+        usdc.mint(address(instaTransfer), 10e6);
+        instaTransfer.fulfillPending(0);
+
+        // Second attempt — pending was deleted
+        vm.expectRevert(abi.encodeWithSelector(InstaTransfer.PendingTransferNotFound.selector, 0));
+        instaTransfer.fulfillPending(0);
+    }
+
+    function testMultiplePendingTransfers() public {
+        // Drain the pool
+        vm.prank(bridge);
+        instaTransfer.transfer(address(usdc), POOL_AMOUNT, recipient);
+
+        // Queue two pending transfers
+        vm.startPrank(bridge);
+        instaTransfer.transfer(address(usdc), 5_000e6, recipient);
+        instaTransfer.transfer(address(usdc), 3_000e6, recipient);
+        vm.stopPrank();
+
+        assertEq(instaTransfer.nextPendingId(), 2);
+
+        // Replenish and fulfill both
+        usdc.mint(address(instaTransfer), 10_000e6);
+        instaTransfer.fulfillPending(0);
+        instaTransfer.fulfillPending(1);
+
+        assertEq(usdc.balanceOf(recipient), POOL_AMOUNT + 5_000e6 + 3_000e6);
     }
 
     function testTransferFuzz(uint256 amount) public {

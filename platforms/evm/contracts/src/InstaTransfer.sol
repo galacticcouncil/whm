@@ -14,9 +14,20 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
     address public owner;
     mapping(address => bool) public authorizedBridges;
 
+    struct PendingTransfer {
+        address asset;
+        uint256 amount;
+        address recipient;
+    }
+
+    uint256 public nextPendingId;
+    mapping(uint256 => PendingTransfer) public pendingTransfers;
+
     // ─── Events ──────────────────────────────────────────────────
 
     event TransferExecuted(address indexed asset, address indexed recipient, uint256 amount);
+    event TransferQueued(uint256 indexed id, address indexed asset, address indexed recipient, uint256 amount);
+    event PendingTransferFulfilled(uint256 indexed id, address indexed asset, address indexed recipient, uint256 amount);
     event Withdrawn(address indexed asset, uint256 amount, address indexed to);
 
     // ─── Errors ──────────────────────────────────────────────────
@@ -24,6 +35,8 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
     error NotOwner();
     error NotAuthorizedBridge();
     error ERC20TransferFailed();
+    error PendingTransferNotFound(uint256 id);
+    error InsufficientBalance();
 
     // ─── Modifiers ───────────────────────────────────────────────
 
@@ -49,10 +62,28 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
 
     // ─── Core ────────────────────────────────────────────────────
 
-    /// @notice Deliver tokens to recipient from the pre-funded pool.
+    /// @notice Deliver tokens to recipient. If insufficient balance, queue as pending.
     function transfer(address asset, uint256 amount, address recipient) external onlyAuthorizedBridge {
-        if (!IERC20(asset).transfer(recipient, amount)) revert ERC20TransferFailed();
-        emit TransferExecuted(asset, recipient, amount);
+        if (IERC20(asset).balanceOf(address(this)) >= amount) {
+            if (!IERC20(asset).transfer(recipient, amount)) revert ERC20TransferFailed();
+            emit TransferExecuted(asset, recipient, amount);
+        } else {
+            uint256 id = nextPendingId++;
+            pendingTransfers[id] = PendingTransfer(asset, amount, recipient);
+            emit TransferQueued(id, asset, recipient, amount);
+        }
+    }
+
+    /// @notice Fulfill a pending transfer once liquidity is available.
+    function fulfillPending(uint256 id) external {
+        PendingTransfer memory pt = pendingTransfers[id];
+        if (pt.recipient == address(0)) revert PendingTransferNotFound(id);
+        if (IERC20(pt.asset).balanceOf(address(this)) < pt.amount) revert InsufficientBalance();
+
+        delete pendingTransfers[id];
+
+        if (!IERC20(pt.asset).transfer(pt.recipient, pt.amount)) revert ERC20TransferFailed();
+        emit PendingTransferFulfilled(id, pt.asset, pt.recipient, pt.amount);
     }
 
     // ─── Upgrade ─────────────────────────────────────────────────
