@@ -19,7 +19,7 @@ interface IInstaTransfer {
 
     // ─── Core ────────────────────────────────────────────────────
 
-    function transfer(address asset, uint256 amount, address recipient) external;
+    function transfer(address recipient, address asset, uint256 amount) external;
     function fulfillPending(uint256 id) external;
 
     // ─── Views ───────────────────────────────────────────────────

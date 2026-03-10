@@ -79,7 +79,7 @@ contract InstaTransferTest is Test {
         uint256 amount = 1_000e6;
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), amount, recipient);
+        instaTransfer.transfer(recipient, address(usdc), amount);
 
         assertEq(usdc.balanceOf(recipient), amount);
         assertEq(usdc.balanceOf(address(instaTransfer)), POOL_AMOUNT - amount);
@@ -92,13 +92,13 @@ contract InstaTransferTest is Test {
         emit InstaTransfer.TransferExecuted(address(usdc), recipient, amount);
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), amount, recipient);
+        instaTransfer.transfer(recipient, address(usdc), amount);
     }
 
     function testTransferMultiple() public {
         vm.startPrank(bridge);
-        instaTransfer.transfer(address(usdc), 1_000e6, recipient);
-        instaTransfer.transfer(address(usdc), 2_000e6, recipient);
+        instaTransfer.transfer(recipient, address(usdc), 1_000e6);
+        instaTransfer.transfer(recipient, address(usdc), 2_000e6);
         vm.stopPrank();
 
         assertEq(usdc.balanceOf(recipient), 3_000e6);
@@ -107,7 +107,7 @@ contract InstaTransferTest is Test {
     function testTransferRevertsUnauthorized() public {
         vm.prank(stranger);
         vm.expectRevert(InstaTransfer.NotAuthorizedBridge.selector);
-        instaTransfer.transfer(address(usdc), 1_000e6, recipient);
+        instaTransfer.transfer(recipient, address(usdc), 1_000e6);
     }
 
     function testTransferQueuesWhenInsufficientBalance() public {
@@ -117,7 +117,7 @@ contract InstaTransferTest is Test {
         emit InstaTransfer.TransferQueued(0, address(usdc), recipient, overAmount);
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), overAmount, recipient);
+        instaTransfer.transfer(recipient, address(usdc), overAmount);
 
         // Recipient gets nothing yet
         assertEq(usdc.balanceOf(recipient), 0);
@@ -138,7 +138,7 @@ contract InstaTransferTest is Test {
 
         // Queue a transfer
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), overAmount, recipient);
+        instaTransfer.transfer(recipient, address(usdc), overAmount);
 
         // Replenish the pool (simulates slow bridge settlement)
         usdc.mint(address(instaTransfer), 10e6);
@@ -164,7 +164,7 @@ contract InstaTransferTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), overAmount, recipient);
+        instaTransfer.transfer(recipient, address(usdc), overAmount);
 
         // Don't replenish — should revert
         vm.expectRevert(InstaTransfer.InsufficientBalance.selector);
@@ -175,7 +175,7 @@ contract InstaTransferTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), overAmount, recipient);
+        instaTransfer.transfer(recipient, address(usdc), overAmount);
 
         usdc.mint(address(instaTransfer), 10e6);
         instaTransfer.fulfillPending(0);
@@ -188,12 +188,12 @@ contract InstaTransferTest is Test {
     function testMultiplePendingTransfers() public {
         // Drain the pool
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), POOL_AMOUNT, recipient);
+        instaTransfer.transfer(recipient, address(usdc), POOL_AMOUNT);
 
         // Queue two pending transfers
         vm.startPrank(bridge);
-        instaTransfer.transfer(address(usdc), 5_000e6, recipient);
-        instaTransfer.transfer(address(usdc), 3_000e6, recipient);
+        instaTransfer.transfer(recipient, address(usdc), 5_000e6);
+        instaTransfer.transfer(recipient, address(usdc), 3_000e6);
         vm.stopPrank();
 
         assertEq(instaTransfer.nextPendingId(), 2);
@@ -210,7 +210,7 @@ contract InstaTransferTest is Test {
         amount = bound(amount, 1, POOL_AMOUNT);
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), amount, recipient);
+        instaTransfer.transfer(recipient, address(usdc), amount);
 
         assertEq(usdc.balanceOf(recipient), amount);
         assertEq(usdc.balanceOf(address(instaTransfer)), POOL_AMOUNT - amount);
