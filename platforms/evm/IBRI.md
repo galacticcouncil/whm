@@ -140,7 +140,8 @@ A: Source EVM               Relayer (off-chain)         B: Moonbeam (proxy)     
 1. **InstaTransfer authorization** — only whitelisted bridge contracts can call `transfer()`. Owner manages the whitelist. This is the security boundary.
 2. **Auto-settlement** — TokenBridge recipient is set to InstaTransfer address. Tokens arrive directly when the slow transfer completes. Pool balance is the accounting.
 3. **Custom InstaTransfer impls** — base contract defines the interface (`transfer`). Chain-specific implementations inherit and override liquidity sourcing.
-4. **Timeout / bad debt** — if slow transfer never arrives, InstaTransfer needs a fallback. Options: governance clawback, insurance fund, or relayer bond.
+4. **Fee** — InstaTransfer deducts 0.1% from the transfer amount at delivery. Recipient receives `amount - fee`. Fee accrues in InstaTransfer, withdrawable by owner/protocol.
+5. **Timeout / bad debt** — if slow transfer never arrives, InstaTransfer needs a fallback. Options: governance clawback, insurance fund, or relayer bond.
 
 ## POC Scope
 
