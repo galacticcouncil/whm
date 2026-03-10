@@ -61,15 +61,7 @@ contract InstaBridge is InstaBridgeBase {
         );
 
         // 2. Fast path: instant-finality message with transfer metadata (amount after fee)
-        uint256 netAmount = amount - quoteFee(amount);
-        bytes memory payload = abi.encode(destAsset, netAmount, recipient);
-
-        uint256 messageFee = wormhole.messageFee();
-        messageSequence = wormhole.publishMessage{value: messageFee}(emitterNonce, payload, 200);
-
-        emitterNonce++;
-
-        emit BridgeInitiated(asset, amount, destChain, destAsset, recipient, transferSequence, messageSequence);
+        messageSequence = _fastTrack(asset, amount, destChain, destAsset, recipient, transferSequence);
     }
 
     function _executeTransfer(address destAsset, uint256 amount, address recipient) internal override {
