@@ -6,12 +6,12 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {MessageEmitter} from "../src/MessageEmitter.sol";
 import {MessageDispatcher} from "../src/MessageDispatcher.sol";
+import {MockWormhole} from "./mocks/MockWormhole.sol";
 
-contract MessagingTest is Test {
+contract MessagingTest is Test, MockWormhole {
     MessageEmitter public emitterContract;
     MessageDispatcher public receiverContract;
     address public wormhole = address(this);
-    address public wormholeRelayer = address(this);
 
     function setUp() public {
         MessageEmitter emitterImpl = new MessageEmitter();
@@ -24,7 +24,7 @@ contract MessagingTest is Test {
         MessageDispatcher receiverImpl = new MessageDispatcher();
         ERC1967Proxy receiverProxy = new ERC1967Proxy(
             address(receiverImpl),
-            abi.encodeCall(MessageDispatcher.initialize, (wormholeRelayer, wormhole))
+            abi.encodeCall(MessageDispatcher.initialize, (wormhole))
         );
         receiverContract = MessageDispatcher(address(receiverProxy));
     }
@@ -45,10 +45,15 @@ contract MessagingTest is Test {
     }
 
     function testReceiveMessage() public {
+        uint16 sourceChain = 14;
+        bytes32 sourceAddr = bytes32(uint256(uint160(address(this))));
+        receiverContract.setAuthorizedEmitter(sourceChain, sourceAddr);
+
         string memory message = "Hello from Moonbeam to Base!";
         bytes memory payload = abi.encode(message);
+        bytes memory vaa = abi.encode(sourceChain, sourceAddr, payload);
 
-        vm.prank(wormholeRelayer);
-        receiverContract.receiveWormholeMessages(payload, new bytes[](0), bytes32(0), 14, bytes32(0));
+        receiverContract.receiveMessage(vaa);
     }
+
 }

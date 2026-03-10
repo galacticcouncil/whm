@@ -39,11 +39,11 @@ abstract contract InstaBridgeBase is MessageReceiver {
     error InstaTransferNotSet(uint16 chainId);
     error ZeroAmount();
 
-    function _initInstaBridge(address _wormholeRelayer, address _wormhole, address _tokenBridge)
+    function _initInstaBridge(address _wormhole, address _tokenBridge)
         internal
         onlyInitializing
     {
-        _initMessageReceiver(_wormholeRelayer, _wormhole);
+        _initMessageReceiver(_wormhole);
         tokenBridge = ITokenBridge(_tokenBridge);
     }
 

@@ -6,6 +6,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {MessageReceiver} from "../src/MessageReceiver.sol";
 import {MessageDispatcher} from "../src/MessageDispatcher.sol";
+import {MockWormhole} from "./mocks/MockWormhole.sol";
 
 contract MockTransactor {
     address public lastTarget;
@@ -19,12 +20,11 @@ contract MockTransactor {
     }
 }
 
-contract MessageDispatcherTest is Test {
+contract MessageDispatcherTest is Test, MockWormhole {
     event MessageReceived(string message);
     event PriceReceived(bytes32 indexed assetId, uint256 price, uint64 timestamp);
 
     MessageDispatcher public dispatcher;
-    address public wormholeRelayer = address(this);
     address public wormhole = address(this);
     uint16 public sourceChain = 14;
     bytes32 public sourceAddress = bytes32(uint256(0xabc123));
@@ -32,10 +32,22 @@ contract MessageDispatcherTest is Test {
     function setUp() public {
         MessageDispatcher impl = new MessageDispatcher();
         ERC1967Proxy proxy =
-            new ERC1967Proxy(address(impl), abi.encodeCall(MessageDispatcher.initialize, (wormholeRelayer, wormhole)));
+            new ERC1967Proxy(address(impl), abi.encodeCall(MessageDispatcher.initialize, (wormhole)));
         dispatcher = MessageDispatcher(address(proxy));
         dispatcher.setAuthorizedEmitter(sourceChain, sourceAddress);
     }
+
+    // ─── Helpers ─────────────────────────────────────────────────
+
+    function _buildVaa(bytes memory payload) internal view returns (bytes memory) {
+        return abi.encode(sourceChain, sourceAddress, payload);
+    }
+
+    function _buildVaaWithHash(bytes memory payload, bytes32 salt) internal view returns (bytes memory) {
+        return abi.encode(sourceChain, sourceAddress, payload, salt);
+    }
+
+    // ─── Tests ───────────────────────────────────────────────────
 
     function testRoutesPriceUpdate() public {
         bytes32 assetId = keccak256("PRIME");
@@ -48,8 +60,7 @@ contract MessageDispatcherTest is Test {
 
         bytes memory payload = abi.encode(uint8(1), assetId, price, timestamp);
 
-        vm.prank(wormholeRelayer);
-        dispatcher.receiveWormholeMessages(payload, new bytes[](0), sourceAddress, sourceChain, bytes32(0));
+        dispatcher.receiveMessage(_buildVaa(payload));
 
         (uint256 storedPrice, uint64 storedTimestamp, uint64 receivedAt) = dispatcher.latestPrices(assetId);
         assertEq(storedPrice, price);
@@ -65,8 +76,7 @@ contract MessageDispatcherTest is Test {
 
         bytes memory payload = abi.encode(message, address(0xBEEF));
 
-        vm.prank(wormholeRelayer);
-        dispatcher.receiveWormholeMessages(payload, new bytes[](0), sourceAddress, sourceChain, bytes32(0));
+        dispatcher.receiveMessage(_buildVaa(payload));
     }
 
     function testSetHandler() public {
@@ -104,8 +114,7 @@ contract MessageDispatcherTest is Test {
 
         bytes memory payload = abi.encode(uint8(1), assetId, priceWith18Decimals, timestamp);
 
-        vm.prank(wormholeRelayer);
-        dispatcher.receiveWormholeMessages(payload, new bytes[](0), sourceAddress, sourceChain, bytes32(0));
+        dispatcher.receiveMessage(_buildVaa(payload));
 
         assertEq(transactor.callCount(), 1);
         assertEq(transactor.lastTarget(), oracle);
@@ -115,16 +124,14 @@ contract MessageDispatcherTest is Test {
         );
     }
 
-    function testRejectsReplayInReceiveWormholeMessages() public {
+    function testRejectsReplayInReceiveMessage() public {
         bytes memory payload = abi.encode("hello hydration");
-        bytes32 deliveryHash = keccak256("delivery-1");
+        bytes memory vaa = _buildVaa(payload);
 
-        vm.prank(wormholeRelayer);
-        dispatcher.receiveWormholeMessages(payload, new bytes[](0), sourceAddress, sourceChain, deliveryHash);
+        dispatcher.receiveMessage(vaa);
 
-        vm.prank(wormholeRelayer);
         vm.expectRevert("VAA already processed");
-        dispatcher.receiveWormholeMessages(payload, new bytes[](0), sourceAddress, sourceChain, deliveryHash);
+        dispatcher.receiveMessage(vaa);
     }
 
     function testRejectsOlderPriceUpdate() public {
@@ -136,13 +143,13 @@ contract MessageDispatcherTest is Test {
         bytes memory newerPayload = abi.encode(uint8(1), assetId, uint256(2_000_000_000_000_000_000), uint64(200));
         bytes memory olderPayload = abi.encode(uint8(1), assetId, uint256(1_000_000_000_000_000_000), uint64(100));
 
-        vm.prank(wormholeRelayer);
-        dispatcher.receiveWormholeMessages(newerPayload, new bytes[](0), sourceAddress, sourceChain, keccak256("delivery-2"));
+        dispatcher.receiveMessage(_buildVaa(newerPayload));
 
-        vm.prank(wormholeRelayer);
         vm.expectRevert(
             abi.encodeWithSelector(MessageDispatcher.StalePriceUpdate.selector, assetId, uint64(100), uint64(200))
         );
-        dispatcher.receiveWormholeMessages(olderPayload, new bytes[](0), sourceAddress, sourceChain, keccak256("delivery-3"));
+        // forge-lint: disable-next-line(unsafe-typecast)
+        dispatcher.receiveMessage(_buildVaaWithHash(olderPayload, bytes32("salt")));
     }
+
 }

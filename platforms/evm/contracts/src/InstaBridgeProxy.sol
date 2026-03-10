@@ -20,8 +20,8 @@ contract InstaBridgeProxy is InstaBridgeBase {
 
     error XcmTransactorNotSet();
 
-    function initialize(address _wormholeRelayer, address _wormhole, address _tokenBridge) public virtual initializer {
-        _initInstaBridge(_wormholeRelayer, _wormhole, _tokenBridge);
+    function initialize(address _wormhole, address _tokenBridge) public virtual initializer {
+        _initInstaBridge(_wormhole, _tokenBridge);
     }
 
     function bridgeViaWormhole(

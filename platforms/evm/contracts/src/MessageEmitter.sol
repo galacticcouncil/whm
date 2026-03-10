@@ -44,7 +44,7 @@ contract MessageEmitter is Initializable, UUPSUpgradeable {
         sequence = wormhole.publishMessage{value: cost}(
             nonce,
             abi.encode(message),
-            200 // finality: instant
+            1 // finality
         );
 
         nonce++;
