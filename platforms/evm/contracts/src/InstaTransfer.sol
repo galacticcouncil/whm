@@ -63,7 +63,7 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
     // ─── Core ────────────────────────────────────────────────────
 
     /// @notice Deliver tokens to recipient. If insufficient balance, queue as pending.
-    function transfer(address recipient, address asset, uint256 amount) external onlyAuthorizedBridge {
+    function transfer(address asset, uint256 amount, address recipient) external onlyAuthorizedBridge {
         if (IERC20(asset).balanceOf(address(this)) >= amount) {
             if (!IERC20(asset).transfer(recipient, amount)) revert ERC20TransferFailed();
             emit TransferExecuted(asset, recipient, amount);
