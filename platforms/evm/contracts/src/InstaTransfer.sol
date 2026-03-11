@@ -41,13 +41,21 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
     // ─── Modifiers ───────────────────────────────────────────────
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
+        _onlyOwner();
         _;
     }
 
     modifier onlyAuthorizedBridge() {
-        if (!authorizedBridges[msg.sender]) revert NotAuthorizedBridge();
+        _onlyAuthorizedBridge();
         _;
+    }
+
+    function _onlyOwner() internal view {
+        if (msg.sender != owner) revert NotOwner();
+    }
+
+    function _onlyAuthorizedBridge() internal view {
+        if (!authorizedBridges[msg.sender]) revert NotAuthorizedBridge();
     }
 
     // ─── Init ────────────────────────────────────────────────────
@@ -69,7 +77,7 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
             emit TransferExecuted(asset, recipient, amount);
         } else {
             uint256 id = nextPendingId++;
-            pendingTransfers[id] = PendingTransfer(asset, amount, recipient);
+            pendingTransfers[id] = PendingTransfer({asset: asset, amount: amount, recipient: recipient});
             emit TransferQueued(id, asset, recipient, amount);
         }
     }

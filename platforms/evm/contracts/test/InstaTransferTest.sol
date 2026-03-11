@@ -3,7 +3,6 @@ pragma solidity ^0.8.22;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
 import {InstaTransfer} from "../src/InstaTransfer.sol";
 
