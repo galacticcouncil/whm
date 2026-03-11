@@ -58,6 +58,24 @@ abstract contract InstaBridgeBase is MessageReceiver {
         emit TransferProcessed(destAsset, amount, recipient);
     }
 
+    function _fastTrack(
+        address asset,
+        uint256 amount,
+        uint16 destChain,
+        address destAsset,
+        bytes32 recipient,
+        uint64 transferSequence
+    ) internal returns (uint64 messageSequence) {
+        uint256 netAmount = amount - quoteFee(amount);
+        bytes memory payload = abi.encode(destAsset, netAmount, recipient);
+
+        uint256 messageFee = wormhole.messageFee();
+        messageSequence = wormhole.publishMessage{value: messageFee}(emitterNonce, payload, 200);
+
+        emitterNonce++;
+
+        emit BridgeInitiated(asset, amount, destChain, destAsset, recipient, transferSequence, messageSequence);
+    }
 
     function completeTransfer(bytes memory vaa) external {
         receiveMessage(vaa);
