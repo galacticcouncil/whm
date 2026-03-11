@@ -5,7 +5,6 @@ export type DeployerAccount = PrivateKeyAccount | HDAccount;
 export type ReceiverConfig = {
   account: DeployerAccount;
   rpcUrl: string;
-  relayer: `0x${string}`;
   sender: `0x${string}`;
   sourceChainId: number;
 };
@@ -13,7 +12,6 @@ export type ReceiverConfig = {
 export type SenderConfig = {
   account: DeployerAccount;
   rpcUrl: string;
-  relayer: `0x${string}`;
 };
 
 export type SendConfig = {

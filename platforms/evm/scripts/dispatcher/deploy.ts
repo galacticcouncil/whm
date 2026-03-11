@@ -13,11 +13,9 @@ const { getWallet } = wallet;
 
 function getConfig() {
   const rpcUrl = requiredEnv("RECEIVER_RPC");
-  const wormholeRelayer = requiredEnv("RECEIVER_WORMHOLE_RELAYER");
   const wormholeCore = requiredEnv("RECEIVER_WORMHOLE_CORE");
   const chainId = requiredEnv("RECEIVER_CHAIN_ID");
 
-  if (!isAddress(wormholeRelayer)) throw new Error("Invalid wormhole relayer address.");
   if (!isAddress(wormholeCore)) throw new Error("Invalid wormhole core address.");
 
   const privateKey = requiredArg("--pk");
@@ -31,14 +29,13 @@ function getConfig() {
     rpcUrl,
     chainId: Number(chainId),
     privateKey: privateKey as `0x${string}`,
-    wormholeRelayer: wormholeRelayer as `0x${string}`,
     wormholeCore: wormholeCore as `0x${string}`,
     proxy: proxy as `0x${string}` | undefined,
   };
 }
 
 async function main(): Promise<void> {
-  const { rpcUrl, chainId, privateKey, wormholeCore, wormholeRelayer, proxy } = getConfig();
+  const { rpcUrl, chainId, privateKey, wormholeCore, proxy } = getConfig();
 
   const { publicClient, walletClient, account } = getWallet(rpcUrl, chainId, privateKey);
   const { abi, bytecode } = messageDispatcherJson as ifs.ContractArtifact;
@@ -71,7 +68,7 @@ async function main(): Promise<void> {
     const initializeData = encodeFunctionData({
       abi,
       functionName: "initialize",
-      args: [wormholeRelayer, wormholeCore],
+      args: [wormholeCore],
     });
 
     const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson as ifs.ContractArtifact;
