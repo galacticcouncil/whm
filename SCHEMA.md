@@ -85,7 +85,6 @@
  │                  (UUPSUpgradeable)                          │
  │                                                             │
  │  Responsibilities:                                          │
- │  - Receive Wormhole relayer messages                        │
  │  - Receive direct VAA submissions                           │
  │  - Validate emitter chain & address                         │
  │  - Prevent VAA replay (hash tracking)                       │
