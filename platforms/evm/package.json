@@ -23,6 +23,8 @@
     "instaBridge:setInstaTransfer": "npx tsx scripts/instaBridge/setInstaTransfer.ts",
     "instaBridge:setFeeBps": "npx tsx scripts/instaBridge/setFeeBps.ts",
     "instaBridge:setAuthorizedEmitter": "npx tsx scripts/instaBridge/setAuthorizedEmitter.ts",
+    "instaBridge:bridgeViaWormhole": "npx tsx scripts/instaBridge/bridgeViaWormhole.ts",
+    "instaBridge:completeTransfer": "npx tsx scripts/instaBridge/completeTransfer.ts",
     "instaBridge:setXcmTransactor": "npx tsx scripts/instaBridge/setXcmTransactor.ts",
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",

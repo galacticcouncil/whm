@@ -294,15 +294,57 @@ Whitelist a trusted emitter from a source chain so the InstaBridge accepts its V
 | ---------------- | ------------------------------------------- |
 | `--pk`           | Private key used to sign the transaction    |
 | `--address`      | InstaBridge contract address                |
-| `--emitter`      | Emitter contract address (bytes32)          |
-| `--source-chain` | Source chain identifier (Wormhole chain ID) |
+| `--emitter`       | Emitter contract address (address or bytes32) |
+| `--emitter-chain` | Emitter chain identifier (Wormhole chain ID)  |
 
 ```bash
 DOTENV_CONFIG_PATH=.env.base pnpm run instaBridge:setAuthorizedEmitter -- \
  --pk your_private_key \
  --address insta_bridge_address \
  --emitter emitter_bytes32 \
- --source-chain source_chain_id
+ --emitter-chain emitter_chain_id
+```
+
+#### Bridge via Wormhole
+
+Initiate a cross-chain bridge transfer. Approves the asset, fetches the Wormhole message fee, and calls `bridgeViaWormhole`.
+
+| Flag           | Description                              |
+| -------------- | ---------------------------------------- |
+| `--pk`         | Private key used to sign the transaction |
+| `--address`    | InstaBridge contract address             |
+| `--asset`      | ERC20 token address to bridge            |
+| `--amount`     | Amount in native token units             |
+| `--dest-chain` | Destination Wormhole chain ID            |
+| `--dest-asset` | Destination asset address                |
+| `--recipient`  | Recipient address (bytes32)              |
+
+```bash
+DOTENV_CONFIG_PATH=envs/.env.base pnpm run instaBridge:bridgeViaWormhole -- \
+ --pk your_private_key \
+ --address insta_bridge_address \
+ --asset token_address \
+ --amount 1000000 \
+ --dest-chain dest_wormhole_chain_id \
+ --dest-asset dest_asset_address \
+ --recipient recipient_bytes32
+```
+
+#### Complete transfer
+
+Submit a signed VAA to complete a fast-path transfer on the destination chain.
+
+| Flag        | Description                                               |
+| ----------- | --------------------------------------------------------- |
+| `--pk`      | Private key used to sign the transaction                  |
+| `--address` | InstaBridge contract address                              |
+| `--vaa`     | Hex-encoded signed VAA from the Wormhole Guardian network |
+
+```bash
+DOTENV_CONFIG_PATH=envs/.env.base pnpm run instaBridge:completeTransfer -- \
+ --pk your_private_key \
+ --address insta_bridge_address \
+ --vaa hex_encoded_vaa
 ```
 
 #### Set XCM transactor
