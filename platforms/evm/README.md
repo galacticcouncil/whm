@@ -204,6 +204,124 @@ pnpm run dispatcher:setOracle -- \
  --asset-id asset_id
 ```
 
+### InstaBridge
+
+Bridges funds into/out of Hydration via Wormhole TokenBridge and fast-path VAAs. Each chain has its own env file (`.env.base`, `.env.moonbeam`, etc.) with `IBRI_*` variables. Select the target chain with **DOTENV_CONFIG_PATH**.
+
+| Env variable         | Description                  |
+| -------------------- | ---------------------------- |
+| `IBRI_RPC`           | Chain RPC endpoint           |
+| `IBRI_CHAIN_ID`      | Chain ID (EVM)               |
+| `IBRI_WORMHOLE_CORE` | Wormhole core bridge address |
+| `IBRI_WORMHOLE_ID`   | Wormhole chain ID            |
+| `IBRI_TOKEN_BRIDGE`  | Wormhole TokenBridge address |
+
+#### Deploy contract
+
+Deploy or upgrade the InstaBridge UUPS proxy on a source EVM chain.
+
+| Flag      | Description                                                     |
+| --------- | --------------------------------------------------------------- |
+| `--pk`    | Private key used to sign the transaction                        |
+| `--proxy` | Deploys new implementation and upgrades existing proxy in-place |
+
+```bash
+DOTENV_CONFIG_PATH=envs/.env.base pnpm run instaBridge:deploy -- \
+ --pk your_private_key \
+ --proxy insta_bridge_proxy_address
+```
+
+When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
+
+#### Deploy proxy contract
+
+Deploy or upgrade the InstaBridgeProxy UUPS proxy on Moonbeam. Routes funds out from Hydration to external chains and forwards fast-path VAAs via XCM.
+
+| Flag      | Description                                                     |
+| --------- | --------------------------------------------------------------- |
+| `--pk`    | Private key used to sign the transaction                        |
+| `--proxy` | Deploys new implementation and upgrades existing proxy in-place |
+
+```bash
+DOTENV_CONFIG_PATH=.env.moonbeam pnpm run instaBridge:deployProxy -- \
+ --pk your_private_key \
+ --proxy insta_bridge_proxy_address
+```
+
+When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
+
+#### Set InstaTransfer
+
+Register the InstaTransfer contract address for a given Wormhole chain ID.
+
+| Flag               | Description                              |
+| ------------------ | ---------------------------------------- |
+| `--pk`             | Private key used to sign the transaction |
+| `--address`        | InstaBridge contract address             |
+| `--wh-chain-id`    | Wormhole chain ID (uint16)               |
+| `--insta-transfer` | InstaTransfer address (bytes32)          |
+
+```bash
+DOTENV_CONFIG_PATH=.env.base pnpm run instaBridge:setInstaTransfer -- \
+ --pk your_private_key \
+ --address insta_bridge_address \
+ --wh-chain-id wormhole_chain_id \
+ --insta-transfer insta_transfer_bytes32
+```
+
+#### Set fee BPS
+
+Update the fee in basis points (1 bp = 0.01%, default 10 bp = 0.1%).
+
+| Flag        | Description                              |
+| ----------- | ---------------------------------------- |
+| `--pk`      | Private key used to sign the transaction |
+| `--address` | InstaBridge contract address             |
+| `--fee-bps` | Fee in basis points (uint256)            |
+
+```bash
+DOTENV_CONFIG_PATH=.env.base pnpm run instaBridge:setFeeBps -- \
+ --pk your_private_key \
+ --address insta_bridge_address \
+ --fee-bps 10
+```
+
+#### Register authorized emitter
+
+Whitelist a trusted emitter from a source chain so the InstaBridge accepts its VAAs.
+
+| Flag             | Description                                 |
+| ---------------- | ------------------------------------------- |
+| `--pk`           | Private key used to sign the transaction    |
+| `--address`      | InstaBridge contract address                |
+| `--emitter`      | Emitter contract address (bytes32)          |
+| `--source-chain` | Source chain identifier (Wormhole chain ID) |
+
+```bash
+DOTENV_CONFIG_PATH=.env.base pnpm run instaBridge:setAuthorizedEmitter -- \
+ --pk your_private_key \
+ --address insta_bridge_address \
+ --emitter emitter_bytes32 \
+ --source-chain source_chain_id
+```
+
+#### Set XCM transactor
+
+Set the XCM transactor address on InstaBridgeProxy (Moonbeam only).
+
+| Flag               | Description                              |
+| ------------------ | ---------------------------------------- |
+| `--pk`             | Private key used to sign the transaction |
+| `--address`        | InstaBridgeProxy contract address        |
+| `--xcm-transactor` | XCM transactor contract address          |
+
+```bash
+DOTENV_CONFIG_PATH=.env.moonbeam pnpm run instaBridge:setXcmTransactor -- \
+ --pk your_private_key \
+ --address insta_bridge_proxy_address \
+ --xcm-transactor xcm_transactor_address
+```
+
 ### XCM Transactor
 
 Assembles and dispatches XCM messages to execute EVM calls on Hydration parachain via the Moonbeam XCM precompile.

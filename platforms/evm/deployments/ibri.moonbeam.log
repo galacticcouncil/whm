@@ -1,0 +1,7 @@
+InstaBridgeProxy implementation: 0xbee37746c0126eb5beb23847e9ef54463a305ffe
+InstaBridgeProxy proxy: 0x54c8ff9230627ed7bd5d7704f60018e47f36f233
+InstaBridgeProxy proxy (bytes32): 0x00000000000000000000000054c8ff9230627ed7bd5d7704f60018e47f36f233
+InstaBridgeProxy owner: 0x7C0350baEd3A5016faE4560C6293d8AC8a16354F
+
+Authorized emitter set: emitterChain=30, emitter=0x00000000000000000000000073bab4cec782e1530117932cef8492ebe64e112e
+XCM transactor set: 0x8db129af6423bda0896200bea3274cb498065515

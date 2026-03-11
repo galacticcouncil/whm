@@ -18,6 +18,12 @@
     "transactor:setAuthorizedDispatcher": "npx tsx scripts/transactor/setAuthorizedDispatcher.ts",
     "transactor:setDefaults": "npx tsx scripts/transactor/setDefaults.ts",
     "transactor:transact": "npx tsx scripts/transactor/transact.ts",
+    "instaBridge:deploy": "npx tsx scripts/instaBridge/deploy.ts",
+    "instaBridge:deployProxy": "npx tsx scripts/instaBridge/deployProxy.ts",
+    "instaBridge:setInstaTransfer": "npx tsx scripts/instaBridge/setInstaTransfer.ts",
+    "instaBridge:setFeeBps": "npx tsx scripts/instaBridge/setFeeBps.ts",
+    "instaBridge:setAuthorizedEmitter": "npx tsx scripts/instaBridge/setAuthorizedEmitter.ts",
+    "instaBridge:setXcmTransactor": "npx tsx scripts/instaBridge/setXcmTransactor.ts",
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
     "account:getSecret": "npx tsx scripts/getSecret.ts"
