@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { isAddress, isHex } from "viem";
+import { isAddress } from "viem";
 
 import { args } from "@whm/common";
 import { ifs, wallet } from "../../lib";
@@ -9,6 +9,11 @@ import instaBridgeJson from "../../contracts/out/InstaBridge.sol/InstaBridge.jso
 
 const { requiredArg, requiredEnv } = args;
 const { getWallet } = wallet;
+
+function parseVaa(vaa: string): `0x${string}` {
+  if (vaa.startsWith("0x")) return vaa as `0x${string}`;
+  return `0x${Buffer.from(vaa, "base64").toString("hex")}`;
+}
 
 function getConfig() {
   const rpcUrl = requiredEnv("IBRI_RPC");
@@ -19,14 +24,13 @@ function getConfig() {
   const vaa = requiredArg("--vaa");
 
   if (!isAddress(address)) throw new Error("Invalid contract address.");
-  if (!isHex(vaa)) throw new Error("Invalid VAA (expected hex).");
 
   return {
     rpcUrl,
     chainId: Number(chainId),
     privateKey: privateKey as `0x${string}`,
     address: address as `0x${string}`,
-    vaa: vaa as `0x${string}`,
+    vaa: parseVaa(vaa),
   };
 }
 
@@ -42,6 +46,7 @@ async function main(): Promise<void> {
     abi,
     functionName: "completeTransfer",
     args: [vaa],
+    gas: 2_000_000n,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
