@@ -25,7 +25,8 @@ function getConfig() {
   if (!isAddress(address)) throw new Error("Invalid contract address.");
   if (!isAddress(asset)) throw new Error("Invalid asset address.");
   if (!isAddress(destAsset)) throw new Error("Invalid dest asset address.");
-  if (!isHex(recipient) || recipient.length !== 66) throw new Error("Invalid recipient (expected bytes32).");
+  if (!isHex(recipient) || recipient.length !== 66)
+    throw new Error("Invalid recipient (expected bytes32).");
 
   return {
     rpcUrl,
@@ -41,7 +42,8 @@ function getConfig() {
 }
 
 async function main(): Promise<void> {
-  const { address, rpcUrl, chainId, privateKey, asset, amount, destChain, destAsset, recipient } = getConfig();
+  const { address, rpcUrl, chainId, privateKey, asset, amount, destChain, destAsset, recipient } =
+    getConfig();
 
   const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
@@ -71,11 +73,11 @@ async function main(): Promise<void> {
   console.log("Approved:", approveHash);
 
   // Wormhole message fee
-  const wormholeAddr = await publicClient.readContract({
+  const wormholeAddr = (await publicClient.readContract({
     address,
     abi,
     functionName: "wormhole",
-  }) as `0x${string}`;
+  })) as `0x${string}`;
 
   const wormholeAbi = [
     {
@@ -87,11 +89,11 @@ async function main(): Promise<void> {
     },
   ] as const;
 
-  const fee = await publicClient.readContract({
+  const fee = (await publicClient.readContract({
     address: wormholeAddr,
     abi: wormholeAbi,
     functionName: "messageFee",
-  }) as bigint;
+  })) as bigint;
 
   // Bridge
   const txHash = await walletClient.writeContract({
