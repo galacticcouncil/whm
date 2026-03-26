@@ -16,21 +16,22 @@ interface IInstaTransfer {
     error NotAuthorizedBridge();
     error DispatchFailed();
     error ERC20TransferFailed();
-    error PendingTransferNotFound(uint256 id);
+    error NoPendingTransfers();
     error InsufficientBalance();
     error AssetPairNotAllowed(address sourceAsset, address destAsset);
 
     // ─── Core ────────────────────────────────────────────────────
 
     function transfer(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) external;
-    function fulfillPending(uint256 id) external;
+    function fulfillPending() external;
 
     // ─── Views ───────────────────────────────────────────────────
 
     function owner() external view returns (address);
     function authorizedBridges(address bridge) external view returns (bool);
     function allowedAssetPairs(address sourceAsset, address destAsset) external view returns (bool);
-    function nextPendingId() external view returns (uint256);
+    function pendingHead() external view returns (uint256);
+    function pendingTail() external view returns (uint256);
     function pendingTransfers(uint256 id) external view returns (address sourceAsset, address destAsset, uint256 amount, bytes32 recipient);
 
     // ─── Admin ───────────────────────────────────────────────────

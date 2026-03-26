@@ -32,7 +32,8 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
         bytes32 recipient;
     }
 
-    uint256 public nextPendingId;
+    uint256 public pendingHead;
+    uint256 public pendingTail;
     mapping(uint256 => PendingTransfer) public pendingTransfers;
 
     // ─── Events ──────────────────────────────────────────────────
@@ -49,7 +50,7 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
     error NotAuthorizedBridge();
     error DispatchFailed();
     error ERC20TransferFailed();
-    error PendingTransferNotFound(uint256 id);
+    error NoPendingTransfers();
     error InsufficientBalance();
     error AssetPairNotAllowed(address sourceAsset, address destAsset);
 
@@ -97,18 +98,21 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
             _executeTransfer(destAsset, amount, recipient);
             emit TransferExecuted(sourceAsset, destAsset, recipient, amount);
         } else {
-            uint256 id = nextPendingId++;
+            uint256 id = pendingTail++;
             pendingTransfers[id] = PendingTransfer({sourceAsset: sourceAsset, destAsset: destAsset, amount: amount, recipient: recipient});
             emit TransferQueued(id, sourceAsset, destAsset, recipient, amount);
         }
     }
 
-    /// @notice Fulfill a pending transfer once liquidity is available.
-    function fulfillPending(uint256 id) external {
+    /// @notice Fulfill the next pending transfer in queue once liquidity is available.
+    function fulfillPending() external {
+        if (pendingHead >= pendingTail) revert NoPendingTransfers();
+
+        uint256 id = pendingHead;
         PendingTransfer memory pt = pendingTransfers[id];
-        if (pt.recipient == bytes32(0)) revert PendingTransferNotFound(id);
         if (IERC20(pt.destAsset).balanceOf(address(this)) < pt.amount) revert InsufficientBalance();
 
+        pendingHead++;
         delete pendingTransfers[id];
 
         _executeTransfer(pt.destAsset, pt.amount, pt.recipient);

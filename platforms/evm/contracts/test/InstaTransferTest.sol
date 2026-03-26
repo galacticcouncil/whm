@@ -160,7 +160,8 @@ contract InstaTransferTest is Test {
         assertEq(dstAsset, address(usdc));
         assertEq(amount, overAmount);
         assertEq(rec, recipient);
-        assertEq(instaTransfer.nextPendingId(), 1);
+        assertEq(instaTransfer.pendingTail(), 1);
+        assertEq(instaTransfer.pendingHead(), 0);
     }
 
     // ─── Pending Transfers ────────────────────────────────────────
@@ -179,11 +180,12 @@ contract InstaTransferTest is Test {
         vm.expectEmit(true, true, true, true);
         emit InstaTransfer.PendingTransferFulfilled(0, address(sourceUsdc), address(usdc), recipient, overAmount);
 
-        instaTransfer.fulfillPending(0);
+        instaTransfer.fulfillPending();
 
-        // Pending transfer deleted
+        // Pending transfer deleted, head advanced
         (address srcAsset,,,) = instaTransfer.pendingTransfers(0);
         assertEq(srcAsset, address(0));
+        assertEq(instaTransfer.pendingHead(), 1);
     }
 
     function testFulfillPendingCallsDispatch() public {
@@ -197,12 +199,12 @@ contract InstaTransferTest is Test {
         // Expect a call to dispatch precompile (any calldata)
         vm.expectCall(DISPATCH_PRECOMPILE, bytes(""));
 
-        instaTransfer.fulfillPending(0);
+        instaTransfer.fulfillPending();
     }
 
-    function testFulfillPendingRevertsNotFound() public {
-        vm.expectRevert(abi.encodeWithSelector(InstaTransfer.PendingTransferNotFound.selector, 99));
-        instaTransfer.fulfillPending(99);
+    function testFulfillPendingRevertsNoPending() public {
+        vm.expectRevert(InstaTransfer.NoPendingTransfers.selector);
+        instaTransfer.fulfillPending();
     }
 
     function testFulfillPendingRevertsInsufficientBalance() public {
@@ -213,7 +215,7 @@ contract InstaTransferTest is Test {
 
         // Don't replenish — should revert
         vm.expectRevert(InstaTransfer.InsufficientBalance.selector);
-        instaTransfer.fulfillPending(0);
+        instaTransfer.fulfillPending();
     }
 
     function testFulfillPendingCannotDoubleFulfill() public {
@@ -223,11 +225,11 @@ contract InstaTransferTest is Test {
         instaTransfer.transfer(address(sourceUsdc), address(usdc), overAmount, recipient);
 
         usdc.mint(address(instaTransfer), 10e6);
-        instaTransfer.fulfillPending(0);
+        instaTransfer.fulfillPending();
 
-        // Second attempt — pending was deleted
-        vm.expectRevert(abi.encodeWithSelector(InstaTransfer.PendingTransferNotFound.selector, 0));
-        instaTransfer.fulfillPending(0);
+        // Second attempt — queue is empty
+        vm.expectRevert(InstaTransfer.NoPendingTransfers.selector);
+        instaTransfer.fulfillPending();
     }
 
     function testMultiplePendingTransfers() public {
@@ -238,15 +240,17 @@ contract InstaTransferTest is Test {
         instaTransfer.transfer(address(sourceUsdc), address(usdc), POOL_AMOUNT + 3_000e6, recipient);
         vm.stopPrank();
 
-        assertEq(instaTransfer.nextPendingId(), 3);
+        assertEq(instaTransfer.pendingTail(), 3);
+        assertEq(instaTransfer.pendingHead(), 0);
 
-        // Replenish and fulfill all
+        // Replenish and fulfill all (FIFO order)
         usdc.mint(address(instaTransfer), POOL_AMOUNT * 3 + 10_000e6);
-        instaTransfer.fulfillPending(0);
-        instaTransfer.fulfillPending(1);
-        instaTransfer.fulfillPending(2);
+        instaTransfer.fulfillPending(); // fulfills id 0
+        instaTransfer.fulfillPending(); // fulfills id 1
+        instaTransfer.fulfillPending(); // fulfills id 2
 
-        // All pending transfers deleted
+        // All pending transfers deleted, head caught up to tail
+        assertEq(instaTransfer.pendingHead(), 3);
         (address srcAsset0,,,) = instaTransfer.pendingTransfers(0);
         (address srcAsset1,,,) = instaTransfer.pendingTransfers(1);
         (address srcAsset2,,,) = instaTransfer.pendingTransfers(2);
