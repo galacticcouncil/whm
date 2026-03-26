@@ -37,6 +37,7 @@ abstract contract InstaBridgeBase is MessageReceiver {
 
     error InstaTransferNotSet(uint16 chainId);
     error ZeroAmount();
+    error AmountTooLowForFee(uint256 amount, uint256 fee);
 
     function _initInstaBridge(address _wormhole, address _tokenBridge)
         internal
@@ -66,6 +67,7 @@ abstract contract InstaBridgeBase is MessageReceiver {
     ) internal returns (uint64 messageSequence) {
         // Net amount after fee (fee stays in InstaTransfer on destination)
         uint256 fee = quoteFee(sourceAsset);
+        if (amount <= fee) revert AmountTooLowForFee(amount, fee);
         uint256 netAmount = amount - fee;
         bytes memory payload = abi.encode(sourceAsset, destAsset, netAmount, recipient);
 
