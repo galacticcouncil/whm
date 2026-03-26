@@ -16,8 +16,8 @@ function parseVaa(vaa: string): `0x${string}` {
 }
 
 function getConfig() {
-  const rpcUrl = requiredEnv("IBRI_RPC");
-  const chainId = requiredEnv("IBRI_CHAIN_ID");
+  const rpcUrl = requiredEnv("RPC");
+  const chainId = requiredEnv("CHAIN_ID");
 
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");

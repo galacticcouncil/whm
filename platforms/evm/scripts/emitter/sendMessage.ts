@@ -11,8 +11,8 @@ const { requiredArg, requiredEnv } = args;
 const { getWallet } = wallet;
 
 function getConfig() {
-  const rpcUrl = requiredEnv("EMITTER_RPC");
-  const chainId = requiredEnv("EMITTER_CHAIN_ID");
+  const rpcUrl = requiredEnv("RPC");
+  const chainId = requiredEnv("CHAIN_ID");
 
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");

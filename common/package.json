@@ -3,6 +3,7 @@
   "type": "module",
   "private": true,
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./migration": "./migration/index.ts"
   }
 }

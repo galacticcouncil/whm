@@ -19,8 +19,8 @@ function parseInput(input: string): `0x${string}` {
 }
 
 function getConfig() {
-  const rpcUrl = requiredEnv("RECEIVER_RPC");
-  const chainId = requiredEnv("RECEIVER_CHAIN_ID");
+  const rpcUrl = requiredEnv("RPC");
+  const chainId = requiredEnv("CHAIN_ID");
 
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");
