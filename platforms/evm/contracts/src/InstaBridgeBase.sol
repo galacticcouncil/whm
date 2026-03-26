@@ -22,6 +22,7 @@ abstract contract InstaBridgeBase is MessageReceiver {
     event BridgeInitiated(
         address indexed asset,
         uint256 amount,
+        uint256 fee,
         uint16 destChain,
         address destAsset,
         bytes32 recipient,
@@ -31,10 +32,8 @@ abstract contract InstaBridgeBase is MessageReceiver {
 
     event TransferProcessed(address indexed sourceAsset, address indexed destAsset, uint256 amount, bytes32 indexed recipient);
 
-    /// @notice Fee in basis points (1 bp = 0.01%, default 10 bp = 0.1%)
-    uint256 public feeBps = 10;
-
-    uint256 public constant BPS_DENOMINATOR = 10_000;
+    /// @notice Fixed fee per source asset (e.g. 1e6 for 1 USDC)
+    mapping(address => uint256) public assetFee;
 
     error InstaTransferNotSet(uint16 chainId);
     error ZeroAmount();
@@ -58,30 +57,32 @@ abstract contract InstaBridgeBase is MessageReceiver {
     }
 
     function _fastTrack(
-        address asset,
+        address sourceAsset,
         uint256 amount,
         uint16 destChain,
         address destAsset,
         bytes32 recipient,
         uint64 transferSequence
     ) internal returns (uint64 messageSequence) {
-        uint256 netAmount = amount - quoteFee(amount);
-        bytes memory payload = abi.encode(asset, destAsset, netAmount, recipient);
+        // Net amount after fee (fee stays in InstaTransfer on destination)
+        uint256 fee = quoteFee(sourceAsset);
+        uint256 netAmount = amount - fee;
+        bytes memory payload = abi.encode(sourceAsset, destAsset, netAmount, recipient);
 
         uint256 messageFee = wormhole.messageFee();
         messageSequence = wormhole.publishMessage{value: messageFee}(emitterNonce, payload, 200);
 
         emitterNonce++;
 
-        emit BridgeInitiated(asset, amount, destChain, destAsset, recipient, transferSequence, messageSequence);
+        emit BridgeInitiated(sourceAsset, amount, fee, destChain, destAsset, recipient, transferSequence, messageSequence);
     }
 
     function completeTransfer(bytes memory vaa) external {
         receiveMessage(vaa);
     }
 
-    function quoteFee(uint256 amount) public view returns (uint256 fee) {
-        fee = (amount * feeBps) / BPS_DENOMINATOR;
+    function quoteFee(address asset) public view returns (uint256 fee) {
+        fee = assetFee[asset];
     }
 
     // ─── Internal ────────────────────────────────────────────────
@@ -96,7 +97,7 @@ abstract contract InstaBridgeBase is MessageReceiver {
         instaTransfers[chainId] = addr;
     }
 
-    function setFeeBps(uint256 _feeBps) external onlyOwner {
-        feeBps = _feeBps;
+    function setAssetFee(address asset, uint256 fee) external onlyOwner {
+        assetFee[asset] = fee;
     }
 }

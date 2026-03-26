@@ -44,6 +44,7 @@ contract InstaBridge is InstaBridgeBase {
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
 
         // 1. Slow path: TokenBridge transferWithPayload via MRL
+        //    Full amount is bridged; fee stays in InstaTransfer on destination
         //    destChain  = Moonbeam wormhole chain ID (e.g. 16)
         //    recipient  = Moonbeam GMP precompile (routes via XCM to Hydration)
         //    payload    = MRL encoded destination (InstaTransfer on Hydration)
@@ -60,7 +61,8 @@ contract InstaBridge is InstaBridgeBase {
             mrlPayload
         );
 
-        // 2. Fast path: instant-finality message with transfer metadata (amount after fee)
+        // 2. Fast path: instant-finality message with net amount (after fee)
+        //    InstaTransfer sends netAmount to recipient, keeps fee
         messageSequence = _fastTrack(asset, amount, destChain, destAsset, recipient, transferSequence);
     }
 
