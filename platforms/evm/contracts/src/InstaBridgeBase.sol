@@ -29,7 +29,7 @@ abstract contract InstaBridgeBase is MessageReceiver {
         uint64 messageSequence
     );
 
-    event TransferProcessed(address indexed destAsset, uint256 amount, address indexed recipient);
+    event TransferProcessed(address indexed sourceAsset, address indexed destAsset, uint256 amount, bytes32 indexed recipient);
 
     /// @notice Fee in basis points (1 bp = 0.01%, default 10 bp = 0.1%)
     uint256 public feeBps = 10;
@@ -47,15 +47,14 @@ abstract contract InstaBridgeBase is MessageReceiver {
         tokenBridge = ITokenBridge(_tokenBridge);
     }
 
-    function _executeTransfer(address destAsset, uint256 amount, address recipient) internal virtual;
+    function _executeTransfer(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) internal virtual;
 
     function _processMessage(bytes memory payload) internal virtual override {
-        (address destAsset, uint256 amount, bytes32 recipientBytes) = abi.decode(payload, (address, uint256, bytes32));
-        address recipient = address(uint160(uint256(recipientBytes)));
+        (address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) = abi.decode(payload, (address, address, uint256, bytes32));
 
-        _executeTransfer(destAsset, amount, recipient);
+        _executeTransfer(sourceAsset, destAsset, amount, recipient);
 
-        emit TransferProcessed(destAsset, amount, recipient);
+        emit TransferProcessed(sourceAsset, destAsset, amount, recipient);
     }
 
     function _fastTrack(
@@ -67,7 +66,7 @@ abstract contract InstaBridgeBase is MessageReceiver {
         uint64 transferSequence
     ) internal returns (uint64 messageSequence) {
         uint256 netAmount = amount - quoteFee(amount);
-        bytes memory payload = abi.encode(destAsset, netAmount, recipient);
+        bytes memory payload = abi.encode(asset, destAsset, netAmount, recipient);
 
         uint256 messageFee = wormhole.messageFee();
         messageSequence = wormhole.publishMessage{value: messageFee}(emitterNonce, payload, 200);

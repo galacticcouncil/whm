@@ -53,7 +53,7 @@ contract InstaBridgeProxy is InstaBridgeBase {
         messageSequence = _fastTrack(asset, amount, destChain, destAsset, recipient, transferSequence);
     }
 
-    function _executeTransfer(address destAsset, uint256 amount, address recipient) internal override {
+    function _executeTransfer(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) internal override {
         if (xcmTransactor == address(0)) revert XcmTransactorNotSet();
 
         uint16 localChain = wormhole.chainId();
@@ -62,7 +62,7 @@ contract InstaBridgeProxy is InstaBridgeBase {
 
         address instaTransfer = _bytes32ToAddress(localInstaTransfer);
 
-        bytes memory input = abi.encodeWithSelector(IInstaTransfer.transfer.selector, destAsset, amount, recipient);
+        bytes memory input = abi.encodeWithSelector(IInstaTransfer.transfer.selector, sourceAsset, destAsset, amount, recipient);
         XcmTransactor(xcmTransactor).transact(instaTransfer, input);
     }
 

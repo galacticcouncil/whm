@@ -38,15 +38,24 @@ contract MockERC20 {
 contract InstaTransferTest is Test {
     InstaTransfer public instaTransfer;
     MockERC20 public usdc;
+    MockERC20 public sourceUsdc;
 
     address public bridge = makeAddr("bridge");
-    address public recipient = makeAddr("recipient");
+    address public recipientAddr = makeAddr("recipient");
+    bytes32 public recipient;
     address public stranger = makeAddr("stranger");
+
+    // Dispatch precompile address
+    address constant DISPATCH_PRECOMPILE = 0x0000000000000000000000000000000000000401;
 
     uint256 constant POOL_AMOUNT = 100_000e6;
 
     function setUp() public {
         usdc = new MockERC20();
+        sourceUsdc = new MockERC20();
+
+        // Convert address to bytes32 (right-padded, so we put address in low bits)
+        recipient = bytes32(uint256(uint160(recipientAddr)));
 
         InstaTransfer impl = new InstaTransfer();
         ERC1967Proxy proxy = new ERC1967Proxy(
@@ -56,8 +65,12 @@ contract InstaTransferTest is Test {
         instaTransfer = InstaTransfer(address(proxy));
 
         instaTransfer.setAuthorizedBridge(bridge, true);
+        instaTransfer.setAllowedAssetPair(address(sourceUsdc), address(usdc), true);
 
         usdc.mint(address(instaTransfer), POOL_AMOUNT);
+
+        // Mock the dispatch precompile to succeed (empty return = success)
+        vm.mockCall(DISPATCH_PRECOMPILE, bytes(""), bytes(""));
     }
 
     // ─── Deployment ──────────────────────────────────────────────
@@ -65,6 +78,9 @@ contract InstaTransferTest is Test {
     function testDeployment() public view {
         assertEq(instaTransfer.owner(), address(this));
         assertEq(instaTransfer.authorizedBridges(bridge), true);
+        assertEq(instaTransfer.DISPATCH(), DISPATCH_PRECOMPILE);
+        assertEq(instaTransfer.CURRENCIES_PALLET_INDEX(), 79);
+        assertEq(instaTransfer.CURRENCIES_TRANSFER_INDEX(), 0);
     }
 
     function testCannotReinitialize() public {
@@ -78,53 +94,70 @@ contract InstaTransferTest is Test {
         uint256 amount = 1_000e6;
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), amount, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), amount, recipient);
 
-        assertEq(usdc.balanceOf(recipient), amount);
-        assertEq(usdc.balanceOf(address(instaTransfer)), POOL_AMOUNT - amount);
+        // Pool balance reduced (used for balance check)
+        assertEq(usdc.balanceOf(address(instaTransfer)), POOL_AMOUNT);
     }
 
     function testTransferEmitsEvent() public {
         uint256 amount = 1_000e6;
 
-        vm.expectEmit(true, true, false, true);
-        emit InstaTransfer.TransferExecuted(address(usdc), recipient, amount);
+        vm.expectEmit(true, true, true, true);
+        emit InstaTransfer.TransferExecuted(address(sourceUsdc), address(usdc), recipient, amount);
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), amount, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), amount, recipient);
     }
 
-    function testTransferMultiple() public {
-        vm.startPrank(bridge);
-        instaTransfer.transfer(address(usdc), 1_000e6, recipient);
-        instaTransfer.transfer(address(usdc), 2_000e6, recipient);
-        vm.stopPrank();
+    function testTransferCallsDispatch() public {
+        uint256 amount = 1_000e6;
 
-        assertEq(usdc.balanceOf(recipient), 3_000e6);
+        // Expect a call to dispatch precompile (any calldata)
+        vm.expectCall(DISPATCH_PRECOMPILE, bytes(""));
+
+        vm.prank(bridge);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), amount, recipient);
     }
 
     function testTransferRevertsUnauthorized() public {
         vm.prank(stranger);
         vm.expectRevert(InstaTransfer.NotAuthorizedBridge.selector);
-        instaTransfer.transfer(address(usdc), 1_000e6, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), 1_000e6, recipient);
+    }
+
+    function testTransferRevertsAssetPairNotAllowed() public {
+        address disallowedSource = makeAddr("disallowedSource");
+
+        vm.prank(bridge);
+        vm.expectRevert(abi.encodeWithSelector(InstaTransfer.AssetPairNotAllowed.selector, disallowedSource, address(usdc)));
+        instaTransfer.transfer(disallowedSource, address(usdc), 1_000e6, recipient);
+    }
+
+    function testTransferRevertsOnDispatchFailure() public {
+        // Clear the mock and make dispatch revert
+        vm.mockCallRevert(DISPATCH_PRECOMPILE, bytes(""), bytes("dispatch failed"));
+
+        vm.prank(bridge);
+        vm.expectRevert(InstaTransfer.DispatchFailed.selector);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), 1_000e6, recipient);
     }
 
     function testTransferQueuesWhenInsufficientBalance() public {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.expectEmit(true, true, true, true);
-        emit InstaTransfer.TransferQueued(0, address(usdc), recipient, overAmount);
+        emit InstaTransfer.TransferQueued(0, address(sourceUsdc), address(usdc), recipient, overAmount);
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), overAmount, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), overAmount, recipient);
 
-        // Recipient gets nothing yet
-        assertEq(usdc.balanceOf(recipient), 0);
         // Pool untouched
         assertEq(usdc.balanceOf(address(instaTransfer)), POOL_AMOUNT);
         // Pending transfer stored
-        (address asset, uint256 amount, address rec) = instaTransfer.pendingTransfers(0);
-        assertEq(asset, address(usdc));
+        (address srcAsset, address dstAsset, uint256 amount, bytes32 rec) = instaTransfer.pendingTransfers(0);
+        assertEq(srcAsset, address(sourceUsdc));
+        assertEq(dstAsset, address(usdc));
         assertEq(amount, overAmount);
         assertEq(rec, recipient);
         assertEq(instaTransfer.nextPendingId(), 1);
@@ -137,21 +170,34 @@ contract InstaTransferTest is Test {
 
         // Queue a transfer
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), overAmount, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), overAmount, recipient);
 
         // Replenish the pool (simulates slow bridge settlement)
         usdc.mint(address(instaTransfer), 10e6);
 
         // Fulfill
         vm.expectEmit(true, true, true, true);
-        emit InstaTransfer.PendingTransferFulfilled(0, address(usdc), recipient, overAmount);
+        emit InstaTransfer.PendingTransferFulfilled(0, address(sourceUsdc), address(usdc), recipient, overAmount);
 
         instaTransfer.fulfillPending(0);
 
-        assertEq(usdc.balanceOf(recipient), overAmount);
         // Pending transfer deleted
-        (address asset,,) = instaTransfer.pendingTransfers(0);
-        assertEq(asset, address(0));
+        (address srcAsset,,,) = instaTransfer.pendingTransfers(0);
+        assertEq(srcAsset, address(0));
+    }
+
+    function testFulfillPendingCallsDispatch() public {
+        uint256 overAmount = POOL_AMOUNT + 1e6;
+
+        vm.prank(bridge);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), overAmount, recipient);
+
+        usdc.mint(address(instaTransfer), 10e6);
+
+        // Expect a call to dispatch precompile (any calldata)
+        vm.expectCall(DISPATCH_PRECOMPILE, bytes(""));
+
+        instaTransfer.fulfillPending(0);
     }
 
     function testFulfillPendingRevertsNotFound() public {
@@ -163,7 +209,7 @@ contract InstaTransferTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), overAmount, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), overAmount, recipient);
 
         // Don't replenish — should revert
         vm.expectRevert(InstaTransfer.InsufficientBalance.selector);
@@ -174,7 +220,7 @@ contract InstaTransferTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), overAmount, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), overAmount, recipient);
 
         usdc.mint(address(instaTransfer), 10e6);
         instaTransfer.fulfillPending(0);
@@ -185,34 +231,28 @@ contract InstaTransferTest is Test {
     }
 
     function testMultiplePendingTransfers() public {
-        // Drain the pool
-        vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), POOL_AMOUNT, recipient);
-
-        // Queue two pending transfers
+        // Queue three transfers that all exceed the pool
         vm.startPrank(bridge);
-        instaTransfer.transfer(address(usdc), 5_000e6, recipient);
-        instaTransfer.transfer(address(usdc), 3_000e6, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), POOL_AMOUNT + 1, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), POOL_AMOUNT + 5_000e6, recipient);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), POOL_AMOUNT + 3_000e6, recipient);
         vm.stopPrank();
 
-        assertEq(instaTransfer.nextPendingId(), 2);
+        assertEq(instaTransfer.nextPendingId(), 3);
 
-        // Replenish and fulfill both
-        usdc.mint(address(instaTransfer), 10_000e6);
+        // Replenish and fulfill all
+        usdc.mint(address(instaTransfer), POOL_AMOUNT * 3 + 10_000e6);
         instaTransfer.fulfillPending(0);
         instaTransfer.fulfillPending(1);
+        instaTransfer.fulfillPending(2);
 
-        assertEq(usdc.balanceOf(recipient), POOL_AMOUNT + 5_000e6 + 3_000e6);
-    }
-
-    function testTransferFuzz(uint256 amount) public {
-        amount = bound(amount, 1, POOL_AMOUNT);
-
-        vm.prank(bridge);
-        instaTransfer.transfer(address(usdc), amount, recipient);
-
-        assertEq(usdc.balanceOf(recipient), amount);
-        assertEq(usdc.balanceOf(address(instaTransfer)), POOL_AMOUNT - amount);
+        // All pending transfers deleted
+        (address srcAsset0,,,) = instaTransfer.pendingTransfers(0);
+        (address srcAsset1,,,) = instaTransfer.pendingTransfers(1);
+        (address srcAsset2,,,) = instaTransfer.pendingTransfers(2);
+        assertEq(srcAsset0, address(0));
+        assertEq(srcAsset1, address(0));
+        assertEq(srcAsset2, address(0));
     }
 
     // ─── Admin ───────────────────────────────────────────────────
@@ -263,5 +303,55 @@ contract InstaTransferTest is Test {
         vm.prank(stranger);
         vm.expectRevert(InstaTransfer.NotOwner.selector);
         instaTransfer.setOwner(stranger);
+    }
+
+    // ─── Asset Pair Validation ────────────────────────────────────
+
+    function testSetAllowedAssetPair() public {
+        address newSource = makeAddr("newSource");
+        address newDest = makeAddr("newDest");
+
+        assertEq(instaTransfer.allowedAssetPairs(newSource, newDest), false);
+
+        vm.expectEmit(true, true, false, true);
+        emit InstaTransfer.AllowedAssetPairUpdated(newSource, newDest, true);
+
+        instaTransfer.setAllowedAssetPair(newSource, newDest, true);
+        assertEq(instaTransfer.allowedAssetPairs(newSource, newDest), true);
+
+        instaTransfer.setAllowedAssetPair(newSource, newDest, false);
+        assertEq(instaTransfer.allowedAssetPairs(newSource, newDest), false);
+    }
+
+    function testSetAllowedAssetPairRevertsUnauthorized() public {
+        vm.prank(stranger);
+        vm.expectRevert(InstaTransfer.NotOwner.selector);
+        instaTransfer.setAllowedAssetPair(address(sourceUsdc), address(usdc), false);
+    }
+
+    function testTransferAfterAssetPairDisabled() public {
+        // Disable the asset pair
+        instaTransfer.setAllowedAssetPair(address(sourceUsdc), address(usdc), false);
+
+        // Transfer should now revert
+        vm.prank(bridge);
+        vm.expectRevert(abi.encodeWithSelector(InstaTransfer.AssetPairNotAllowed.selector, address(sourceUsdc), address(usdc)));
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), 1_000e6, recipient);
+    }
+
+    // ─── AccountId32 Recipient ────────────────────────────────────
+
+    function testTransferWithAccountId32() public {
+        // A typical Polkadot AccountId32 (not a valid EVM address)
+        bytes32 polkadotRecipient = bytes32(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef);
+        instaTransfer.setAllowedAssetPair(address(sourceUsdc), address(usdc), true);
+
+        uint256 amount = 1_000e6;
+
+        vm.expectEmit(true, true, true, true);
+        emit InstaTransfer.TransferExecuted(address(sourceUsdc), address(usdc), polkadotRecipient, amount);
+
+        vm.prank(bridge);
+        instaTransfer.transfer(address(sourceUsdc), address(usdc), amount, polkadotRecipient);
     }
 }
