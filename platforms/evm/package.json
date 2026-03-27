@@ -14,7 +14,9 @@
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
     "migration:run": "npx tsx migrations/run.ts",
-    "migration:dry-run": "npx tsx migrations/run.ts --dry-run"
+    "migration:dry-run": "npx tsx migrations/run.ts --dry-run",
+    "migrate:oracle-relay": "bash sh/migrate-oracle-relay.sh",
+    "migrate:insta-bridge": "bash sh/migrate-insta-bridge.sh"
   },
   "dependencies": {
     "@galacticcouncil/common": "^0.5.0",

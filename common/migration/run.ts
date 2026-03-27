@@ -8,6 +8,7 @@ export async function run(): Promise<void> {
   const environment = args.requiredArg("--env");
   const privateKey = args.requiredArg("--pk");
   const from = args.optionalArg("--from");
+  const to = args.optionalArg("--to");
   const dryRun = process.argv.includes("--dry-run");
 
   const migrationsDir = path.resolve("migrations");
@@ -18,6 +19,7 @@ export async function run(): Promise<void> {
     environment,
     privateKey,
     from: from ?? undefined,
+    to: to ?? undefined,
     dryRun,
     migrationsDir,
     deploymentsDir,

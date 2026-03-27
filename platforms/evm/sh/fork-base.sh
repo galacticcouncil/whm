@@ -3,6 +3,7 @@ set -euo pipefail
 
 RPC=https://mainnet.base.org
 CHAIN_ID=8453
+PORT=8546
 
 echo "🔱 Forking base..."
 echo "RPC: $RPC"
@@ -11,4 +12,5 @@ echo
 
 anvil \
   --fork-url $RPC \
-  --chain-id $CHAIN_ID
+  --chain-id $CHAIN_ID \
+  --port $PORT

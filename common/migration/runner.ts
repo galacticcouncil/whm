@@ -68,6 +68,10 @@ async function loadMigration(definitionsDir: string, name: string): Promise<Migr
     steps.push(stepModule.default);
   }
 
+  const names = steps.map((s) => s.name);
+  const dupe = names.find((n, i) => names.indexOf(n) !== i);
+  if (dupe) throw new Error(`Duplicate step name: "${dupe}" in migration "${name}"`);
+
   return { ...config, steps };
 }
 
@@ -109,14 +113,50 @@ function createState(migration: Migration, env: string): MigrationState {
   };
 }
 
-function buildStepContext(state: MigrationState, walletCtx: unknown): StepContext {
+function buildRef(deploymentsDir: string, environment: string) {
+  return (migration: string, step: string, env?: string): StepOutput => {
+    const targetEnv = env ?? environment;
+    const filePath = path.join(deploymentsDir, targetEnv, `${migration}.json`);
+    if (!fs.existsSync(filePath)) {
+      throw new Error(
+        `Referenced migration "${migration}" has no state for environment "${targetEnv}".\n` +
+          `  Expected: ${filePath}`,
+      );
+    }
+    const refState: MigrationState = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const stepState = refState.steps.find((s) => s.name === step);
+    if (!stepState) {
+      throw new Error(
+        `Step "${step}" not found in migration "${migration}".\n` +
+          `  Available: ${refState.steps.map((s) => s.name).join(", ")}`,
+      );
+    }
+    if (stepState.status !== "completed" || !stepState.output) {
+      throw new Error(
+        `Step "${step}" in migration "${migration}" is not completed (status: ${stepState.status}).`,
+      );
+    }
+    return stepState.output;
+  };
+}
+
+function buildStepContext(
+  state: MigrationState,
+  walletCtx: unknown,
+  deploymentsDir: string,
+): StepContext {
   const outputs: Record<string, StepOutput> = {};
   for (const step of state.steps) {
     if (step.status === "completed" && step.output) {
       outputs[step.name] = step.output;
     }
   }
-  return { outputs, wallet: walletCtx, env: process.env };
+  return {
+    outputs,
+    wallet: walletCtx,
+    env: process.env,
+    ref: buildRef(deploymentsDir, state.environment),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +169,8 @@ export interface RunOptions {
   privateKey: string;
   /** Reset this step and all subsequent steps, then run */
   from?: string;
+  /** Stop after completing this step (inclusive) */
+  to?: string;
   /** Preview steps without executing any actions */
   dryRun?: boolean;
   /** Directory containing definitions/ and envs/ folders */
@@ -138,7 +180,7 @@ export interface RunOptions {
 }
 
 export async function runMigration(options: RunOptions): Promise<void> {
-  const { migrationName, environment, privateKey, from, dryRun, migrationsDir, deploymentsDir } =
+  const { migrationName, environment, privateKey, from, to, dryRun, migrationsDir, deploymentsDir } =
     options;
 
   const definitionsDir = path.join(migrationsDir, "definitions");
@@ -199,12 +241,20 @@ export async function runMigration(options: RunOptions): Promise<void> {
   // Print overview
   console.log(`\nSteps:`);
   for (const stepState of state.steps) {
-    const icon =
-      stepState.status === "completed" ? "✓" : stepState.status === "failed" ? "✗" : "○";
+    const icon = stepState.status === "completed" ? "✓" : stepState.status === "failed" ? "✗" : "○";
     const desc = migration.steps.find((s) => s.name === stepState.name)!.description;
     console.log(`  ${icon} ${stepState.name} — ${desc}`);
   }
   console.log();
+
+  if (to) {
+    const toIdx = state.steps.findIndex((s) => s.name === to);
+    if (toIdx === -1) {
+      throw new Error(
+        `Step "${to}" not found. Available: ${state.steps.map((s) => s.name).join(", ")}`,
+      );
+    }
+  }
 
   if (dryRun) {
     console.log("Dry run — no steps executed.\n");
@@ -218,6 +268,7 @@ export async function runMigration(options: RunOptions): Promise<void> {
 
     if (stepState.status === "completed") {
       console.log(`⏭  ${step.name} (completed)`);
+      if (to && step.name === to) break;
       continue;
     }
 
@@ -226,7 +277,7 @@ export async function runMigration(options: RunOptions): Promise<void> {
     stepState.status = "pending";
 
     try {
-      const ctx = buildStepContext(state, walletCtx);
+      const ctx = buildStepContext(state, walletCtx, deploymentsDir);
       const output = await step.action(ctx);
 
       stepState.status = "completed";
@@ -237,6 +288,12 @@ export async function runMigration(options: RunOptions): Promise<void> {
       console.log(`✓  ${step.name}`);
       for (const [key, value] of Object.entries(output)) {
         console.log(`   ${key}: ${value}`);
+      }
+
+      if (to && step.name === to) {
+        saveState(deploymentsDir, state);
+        console.log(`\n⏸  Stopped after: ${to}\n`);
+        return;
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

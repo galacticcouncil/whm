@@ -2,16 +2,14 @@ import type { MigrationConfig } from "../../types";
 import { wallet } from "../../../lib";
 
 /**
- * Full Moonbeam oracle relay stack:
- *   XcmTransactor + MessageDispatcher + wiring
+ * Full chain stack:
+ *   InstaBridge + InstaTransfer + wiring
  *
- * Messages: Solana emitter → Wormhole → Moonbeam dispatcher → XCM transact → Hydration
- *
- * Env file: migrations/envs/oracle-relay.{env}.env
+ * Env file: migrations/envs/insta-bridge.{env}.env
  */
 const config: MigrationConfig = {
-  name: "oracle-relay",
-  description: "Deploy and configure Moonbeam oracle relay stack (transactor + dispatcher)",
+  name: "insta-bridge",
+  description: "Deploy and configure InstaBridge stack on Wormhole chain",
 
   setup: (env, pk) => {
     const rpcUrl = env.RPC;

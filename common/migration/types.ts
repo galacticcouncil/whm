@@ -9,6 +9,8 @@ export interface StepContext<W = unknown> {
   wallet: W;
   /** Process environment variables (loaded from env file + shell) */
   env: NodeJS.ProcessEnv;
+  /** Read-only access to a completed step from another migration (defaults to same environment) */
+  ref: (migration: string, step: string, env?: string) => StepOutput;
 }
 
 /** A single migration step — exported as default from each NNN-*.ts file */
