@@ -7,18 +7,8 @@ const step: MigrationStep = {
   name: "set-emitter",
   description: "Register InstaBridgeProxy as authorized emitter on InstaBridge",
   action: async (ctx) => {
-    const env = ctx.env;
-    const required = (key: string) => {
-      if (!env[key]) throw new Error(`Missing ${key}`);
-      return env[key];
-    };
-
     const bridgeAddress = ctx.outputs["deploy-bridge"].proxyAddress;
-    const bridgeProxyAddress = ctx.ref(
-      "insta-bridge-proxy",
-      "deploy-bridge-proxy",
-      //required("REF_PROXY_ENV"),
-    ).proxyAddress;
+    const bridgeProxyAddress = ctx.ref("insta-bridge-proxy", "deploy-bridge-proxy").proxyAddress;
 
     return await setAuthorizedEmitter({
       ...ctx.wallet,

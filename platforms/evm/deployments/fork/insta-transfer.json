@@ -1,0 +1,32 @@
+{
+  "migration": "insta-transfer",
+  "environment": "fork",
+  "startedAt": "2026-03-27T14:18:38.422Z",
+  "completedAt": "2026-03-27T14:18:38.612Z",
+  "steps": [
+    {
+      "name": "deploy-transfer",
+      "status": "completed",
+      "output": {
+        "implementationAddress": "0xa85233c63b9ee964add6f2cffe00fd84eb32338f",
+        "proxyAddress": "0x4a679253410272dd5232b3ff7cf5dbb88f295319",
+        "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      },
+      "error": null,
+      "startedAt": "2026-03-27T14:18:38.423Z",
+      "completedAt": "2026-03-27T14:18:38.605Z"
+    },
+    {
+      "name": "authorize-proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x9a7ace8868680a0cebed41a4ecb1bdd087dda3ad82e526d320d42089ebc3a8cc",
+        "bridgeAddress": "0x4260b39f5f0960277927d168a365e0ba152a7426",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-03-27T14:18:38.606Z",
+      "completedAt": "2026-03-27T14:18:38.611Z"
+    }
+  ]
+}

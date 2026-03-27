@@ -7,12 +7,6 @@ const step: MigrationStep = {
   name: "set-bridge-transfer",
   description: "Register InstaTransfer on InstaBridge",
   action: async (ctx) => {
-    const env = ctx.env;
-    const required = (key: string) => {
-      if (!env[key]) throw new Error(`Missing ${key}`);
-      return env[key];
-    };
-
     const bridgeAddress = ctx.outputs["deploy-bridge-proxy"].proxyAddress;
     const { instaTransfer, whChainId } = ctx.ref("insta-bridge", "set-transfer");
 

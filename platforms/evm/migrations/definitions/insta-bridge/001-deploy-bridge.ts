@@ -13,6 +13,7 @@ const step: MigrationStep = {
 
     return await deployInstaBridge({
       ...ctx.wallet,
+      wormholeId: Number(required("WORMHOLE_ID")),
       wormholeCore: required("WORMHOLE_CORE") as `0x${string}`,
       tokenBridge: required("TOKEN_BRIDGE") as `0x${string}`,
     });

@@ -2,7 +2,7 @@
   "migration": "oracle-relay",
   "environment": "fork",
   "startedAt": "2026-03-27T13:53:32.874Z",
-  "completedAt": "2026-03-27T13:54:44.247Z",
+  "completedAt": "2026-03-27T14:06:28.160Z",
   "steps": [
     {
       "name": "deploy-transactor",

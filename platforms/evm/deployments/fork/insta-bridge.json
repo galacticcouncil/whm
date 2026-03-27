@@ -1,0 +1,69 @@
+{
+  "migration": "insta-bridge",
+  "environment": "fork",
+  "startedAt": "2026-03-27T14:18:39.925Z",
+  "completedAt": "2026-03-27T14:18:41.014Z",
+  "steps": [
+    {
+      "name": "deploy-bridge",
+      "status": "completed",
+      "output": {
+        "implementationAddress": "0xe9f876be7da7f975c8e40f5fa3ce9426c447b374",
+        "proxyAddress": "0xf109309062a8bec2b0a0bb2f70cd36d2954b98bd",
+        "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "wormholeId": "30"
+      },
+      "error": null,
+      "startedAt": "2026-03-27T14:18:39.927Z",
+      "completedAt": "2026-03-27T14:18:40.718Z"
+    },
+    {
+      "name": "deploy-transfer",
+      "status": "completed",
+      "output": {
+        "implementationAddress": "0xcb4a4a0f29db9e89331e13d46ebc843c725fc49d",
+        "proxyAddress": "0xd33d1d5990ea091e3445c82815fa0e4bed7150cb",
+        "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      },
+      "error": null,
+      "startedAt": "2026-03-27T14:18:40.718Z",
+      "completedAt": "2026-03-27T14:18:40.997Z"
+    },
+    {
+      "name": "set-transfer",
+      "status": "completed",
+      "output": {
+        "txHash": "0x5cf4066c12f124d9d6c0155df34bd074b15c242708f736be94b68ac75b79bf56",
+        "whChainId": "30",
+        "instaTransfer": "0x000000000000000000000000d33d1d5990ea091e3445c82815fa0e4bed7150cb"
+      },
+      "error": null,
+      "startedAt": "2026-03-27T14:18:40.997Z",
+      "completedAt": "2026-03-27T14:18:41.003Z"
+    },
+    {
+      "name": "set-emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0xa2bed75cf8ed74cf17693f0900b4f8c9bf9a4050216d87896d20059763387565",
+        "emitterChain": "16",
+        "emitter": "0x00000000000000000000000059b670e9fa9d0a427751af201d676719a970857b"
+      },
+      "error": null,
+      "startedAt": "2026-03-27T14:18:41.004Z",
+      "completedAt": "2026-03-27T14:18:41.009Z"
+    },
+    {
+      "name": "set-transfer-proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x4f1ffc9355f16818c73424728d1b859d821b0524f2d2d875ea48d91cea281d8e",
+        "whChainId": "16",
+        "instaTransfer": "0x0000000000000000000000004a679253410272dd5232b3ff7cf5dbb88f295319"
+      },
+      "error": null,
+      "startedAt": "2026-03-27T14:18:41.010Z",
+      "completedAt": "2026-03-27T14:18:41.014Z"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import instaBridgeJson from "../../../contracts/out/InstaBridge.sol/InstaBridge.
 import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
 export type DeployInstaBridgeParams = WalletContext & {
+  wormholeId: number;
   wormholeCore: `0x${string}`;
   tokenBridge: `0x${string}`;
   proxy?: `0x${string}`;
@@ -16,12 +17,14 @@ export type DeployInstaBridgeResult = {
   implementationAddress: string;
   proxyAddress: string;
   ownerAddress: string;
+  wormholeId: string;
 };
 
 export async function deployInstaBridge(
   params: DeployInstaBridgeParams,
 ): Promise<DeployInstaBridgeResult> {
-  const { publicClient, walletClient, account, wormholeCore, tokenBridge, proxy } = params;
+  const { publicClient, walletClient, account, wormholeCore, tokenBridge, wormholeId, proxy } =
+    params;
   const { abi, bytecode } = instaBridgeJson as ifs.ContractArtifact;
 
   const implHash = await walletClient.deployContract({
@@ -50,6 +53,7 @@ export async function deployInstaBridge(
       implementationAddress,
       proxyAddress: proxy,
       ownerAddress: account.address,
+      wormholeId: String(wormholeId),
     };
   }
 
@@ -76,5 +80,6 @@ export async function deployInstaBridge(
     implementationAddress,
     proxyAddress: proxyReceipt.contractAddress,
     ownerAddress: account.address,
+    wormholeId: String(wormholeId),
   };
 }

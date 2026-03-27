@@ -19,7 +19,7 @@ set -euo pipefail
 #   PK_IBRIDGE      Private key for the insta-bridge deployer (<env> chain e.g. Base)
 #
 # Example:
-#   PK_PROXY=0x... PK_ITRANSFER=0x... PK_IBRIDGE=0x... \
+#   PK_IPROXY=0x... PK_ITRANSFER=0x... PK_IBRIDGE=0x... \
 #     ./migrate-insta-bridge.sh base
 
 ENV=${1:?Usage: migrate-insta-bridge.sh <env>}

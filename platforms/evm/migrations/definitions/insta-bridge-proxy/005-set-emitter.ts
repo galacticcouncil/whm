@@ -7,19 +7,13 @@ const step: MigrationStep = {
   name: "set-emitter",
   description: "Register InstaBridge as authorized emitter on InstaBridgeProxy",
   action: async (ctx) => {
-    const env = ctx.env;
-    const required = (key: string) => {
-      if (!env[key]) throw new Error(`Missing ${key}`);
-      return env[key];
-    };
-
     const bridgeProxyAddress = ctx.outputs["deploy-bridge-proxy"].proxyAddress;
-    const bridgeAddress = ctx.ref("insta-bridge", "deploy-bridge").proxyAddress;
+    const { proxyAddress: bridgeAddress, wormholeId } = ctx.ref("insta-bridge", "deploy-bridge");
 
     return await setAuthorizedEmitter({
       ...ctx.wallet,
       instaBridgeAddress: bridgeProxyAddress as `0x${string}`,
-      emitterChain: Number(required("BASE_WH_CHAIN_ID")),
+      emitterChain: Number(wormholeId),
       emitter: pad(bridgeAddress as `0x${string}`, { size: 32 }),
     });
   },
