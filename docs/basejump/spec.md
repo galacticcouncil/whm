@@ -30,49 +30,58 @@ Common storage, VAA verification & fee calculation. Subclasses implement `bridge
 
 Bridges funds **into** Hydration via Moonbeam GMP (MRL).
 
-**`bridgeViaWormhole(asset, amount, destChain, destAsset, recipient)`**
+**`bridgeViaWormhole(asset, amount, destChain, recipient)`**
 
 1. Calls `TokenBridge.transferTokensWithPayload()` — slow path via MRL. Recipient is Moonbeam GMP precompile (`0x816`), payload is SCALE-encoded `VersionedUserAction::V1` pointing to BasejumpLanding on Hydration (parachain 2034).
-2. Calls `wormhole.publishMessage()` with **consistency level 200 (instant finality)** — encodes `sourceAsset`, `destAsset`, `netAmount` (amount after fee), and `recipient`.
+2. Calls `wormhole.publishMessage()` with **consistency level 200 (instant finality)** — encodes `sourceAsset`, `netAmount` (amount after fee), and `recipient`.
 
 **`completeTransfer(vaa)`** — receives fast-path VAA, calls `BasejumpLanding.transfer()` directly on the same chain.
-
-The `destAsset` is specified by the caller when calling `bridgeViaWormhole()`. It gets encoded into the instant message payload and forwarded to `BasejumpLanding.transfer()` on the destination chain. No on-chain derivation or registry needed — the off-chain layer (SDK/frontend) resolves the correct dest asset address based on the bridge type (Wormhole wrapped address, Snowbridge asset ID, etc.) and passes it in.
 
 ### `BasejumpProxy` — Moonbeam (Hydration Proxy)
 
 Bridges funds **out** from Hydration to external Wormhole chains.
 
-**`bridgeViaWormhole(asset, amount, destChain, destAsset, recipient)`**
+**`bridgeViaWormhole(asset, amount, destChain, recipient)`**
 
 1. Calls `TokenBridge.transferTokens()` — slow path, recipient = BasejumpLanding on dest chain.
-2. Calls `wormhole.publishMessage()` with **consistency level 200** — encodes `sourceAsset`, `destAsset`, `netAmount` (amount after fee), and `recipient`.
+2. Calls `wormhole.publishMessage()` with **consistency level 200** — encodes `sourceAsset`, `netAmount` (amount after fee), and `recipient`.
 
 **`completeTransfer(vaa)`** — receives fast-path VAA, dispatches via `XcmTransactor` to BasejumpLanding on Hydration.
 
-### `BasejumpLanding` — Instant Delivery
+### `BasejumpLanding` — Instant Delivery (Hydration)
 
-Chain-agnostic transfer contract. Only callable by authorized bridge contracts. Delivers tokens to the recipient instantly using available liquidity.
+Pre-funded liquidity pool on Hydration. Only callable by authorized bridge contracts. Delivers tokens to the recipient instantly using available liquidity, or queues transfers when liquidity is insufficient.
 
-**`completeTransfer(vaa)`**
+**`transfer(sourceAsset, amount, recipient)`** — called by authorized bridges
 
-- Decodes VAA payload: `(sourceAsset, destAsset, amount, recipient)`
-- Validates `allowedAssetPairs[sourceAsset][destAsset]` — owner-managed whitelist of valid source→dest asset mappings
-- Delivers `destAsset` tokens to the recipient immediately
+- Resolves destination asset via `destAssetFor[sourceAsset]` — owner-managed mapping of source→dest asset
+- If sufficient balance: executes `currencies.transfer` via Hydration dispatch precompile (`0x0401`) to deliver `destAsset` to the recipient immediately
+- If insufficient balance: queues a `PendingTransfer` (FIFO) for later fulfillment
+
+**`fulfillPending()`** — processes the next pending transfer in queue
+
+- Checks liquidity is now available for the next queued transfer
+- Executes the transfer and removes it from the queue
+- Anyone can call this (e.g. relayer, after settlement replenishes the pool)
 
 **Settlement — automatic via TokenBridge**
 
-- `bridgeViaWormhole()` sets the TokenBridge recipient to the BasejumpLanding contract address
+- `bridgeViaWormhole()` sets the TokenBridge recipient to the BasejumpLanding contract address (via MRL on source EVMs, directly on BasejumpProxy)
 - When the slow transfer finalizes (~13 min), relayer calls `TokenBridge.completeTransfer()` and tokens land directly in BasejumpLanding's balance
 - No explicit `settle()` needed — the pool replenishes itself
+- If transfers were queued, `fulfillPending()` can be called to drain the queue
 
-**Custom implementations per chain:**
+**V1 delivery mechanism:**
+
+BasejumpLanding on Hydration executes transfers via the dispatch precompile (`0x0401`), encoding a `currencies.transfer` extrinsic (pallet index 79, call index 0) with SCALE-encoded parameters. Currency ID is derived from the last 4 bytes of the dest asset address.
+
+**Future implementations per chain:**
 
 | Chain                 | BasejumpLanding Strategy                                  |
 | --------------------- | ------------------------------------------------------- |
-| Simple (any EVM)      | Direct transfer from pre-funded pool                    |
+| Hydration (V1)        | Pre-funded pool, dispatch precompile for delivery        |
+| Simple (any EVM)      | Direct ERC20 transfer from pre-funded pool               |
 | Aave-supported chains | Flash-loan or borrow from Aave, repay on settlement     |
-| Hydration             | Borrow from Hydration money market (Omnipool / lending) |
 | Solana (Kamino)       | Borrow via Kamino, repay on settlement                  |
 
 The key insight: BasejumpLanding doesn't know or care _how_ the bridge works. It just receives authorized `transfer()` calls and fulfills them using whatever liquidity strategy makes sense for that chain.
@@ -93,8 +102,10 @@ See [schema.md](schema.md) for full architecture diagrams (both EVM → Hydratio
 3. **BasejumpLanding authorization** — only whitelisted bridge contracts can call `transfer()`. Owner manages the whitelist. This is the security boundary.
 4. **Auto-settlement** — TokenBridge recipient is set to BasejumpLanding address. Tokens arrive directly when the slow transfer completes. Pool balance is the accounting.
 5. **Fee** — Basejump deducts a per-asset fee (`assetFee[asset]`) from the transfer amount before encoding the fast-path message. TokenBridge sends the full `amount` (slow settlement), but the instant message encodes `amount - fee`. BasejumpLanding delivers the net amount; the fee accrues as surplus in BasejumpLanding's balance when the slow settlement arrives.
-6. **Future-proof transport** — want to switch from Wormhole to Snowbridge? Deploy a new bridge contract, authorize it on BasejumpLanding, done. BasejumpLanding doesn't change.
-7. **Timeout / bad debt** — if slow transfer never arrives, BasejumpLanding needs a fallback. Options: governance clawback, insurance fund, or relayer bond.
+6. **Asset mapping** — `destAsset` is not passed by the caller. BasejumpLanding maintains an owner-managed `destAssetFor[sourceAsset]` mapping that resolves the local destination asset for each source asset. The off-chain layer only needs to know the source asset address.
+7. **Future-proof transport** — want to switch from Wormhole to Snowbridge? Deploy a new bridge contract, authorize it on BasejumpLanding, done. BasejumpLanding doesn't change.
+8. **Pending queue** — when BasejumpLanding lacks liquidity, transfers are queued (FIFO) rather than reverted. `fulfillPending()` drains the queue once the pool is replenished by settlement.
+9. **Timeout / bad debt** — if slow transfer never arrives, BasejumpLanding needs a fallback. Options: governance clawback, insurance fund, or relayer bond.
 
 ## How Existing Contracts Map
 
