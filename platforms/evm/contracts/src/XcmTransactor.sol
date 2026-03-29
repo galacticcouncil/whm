@@ -38,6 +38,7 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     address public owner;
     mapping(address => bool) public authorized;
+    mapping(address => bool) public xcmOperators;
 
     // --- Runtime config (immutable across upgrades) ---
     uint32 public immutable DESTINATION_PARA_ID;
@@ -57,10 +58,12 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
     uint256 public xcmFeeAmount;
 
     event XcmDispatched(address indexed target, bytes input);
+    event XcmOperatorUpdated(address indexed operator, bool enabled);
+    event XcmDefaultsUpdated(uint64 gasLimit, uint256 maxFeePerGas, uint64 transactWeight, uint64 transactProofSize, uint256 feeAmount);
 
     error NotOwner();
     error NotAuthorized();
-    error NotAuthorizedDispatcher();
+    error NotXcmOperator();
     error InvalidFeeLocationAddress();
 
     modifier onlyOwner() {
@@ -73,8 +76,8 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
         _;
     }
 
-    modifier onlyAuthorizedDispacher() {
-        _onlyAuthorizedDispatcher();
+    modifier onlyXcmOperator() {
+        _onlyXcmOperator();
         _;
     }
 
@@ -110,7 +113,7 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
     /// @notice Dispatch an EVM call on Hydration via XCM
     /// @param target  Contract address on Hydration
     /// @param input   EVM calldata
-    function transact(address target, bytes calldata input) external onlyAuthorizedDispacher {
+    function transact(address target, bytes calldata input) external onlyAuthorized {
         bytes memory encoded = _encodeEvmCall(target, input);
         _xcmSend(encoded);
         emit XcmDispatched(target, input);
@@ -131,8 +134,8 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
         if (!authorized[msg.sender]) revert NotAuthorized();
     }
 
-    function _onlyAuthorizedDispatcher() internal view {
-        if (!authorized[msg.sender]) revert NotAuthorizedDispatcher();
+    function _onlyXcmOperator() internal view {
+        if (!xcmOperators[msg.sender]) revert NotXcmOperator();
     }
 
     function _encodeEvmCall(address target, bytes calldata input) internal view returns (bytes memory) {
@@ -183,17 +186,23 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
         authorized[addr] = enabled;
     }
 
+    function setXcmOperator(address operator, bool enabled) external onlyOwner {
+        xcmOperators[operator] = enabled;
+        emit XcmOperatorUpdated(operator, enabled);
+    }
+
     function setXcmDefaults(
         uint64 gasLimit,
         uint256 maxFeePerGas,
         uint64 transactWeightRefTime,
         uint64 transactWeightProofSize,
         uint256 feeAmount
-    ) external onlyAuthorized {
+    ) external onlyXcmOperator {
         xcmGasLimit = gasLimit;
         xcmMaxFeePerGas = maxFeePerGas;
         xcmTransactWeight = transactWeightRefTime;
         xcmTransactProofSize = transactWeightProofSize;
         xcmFeeAmount = feeAmount;
+        emit XcmDefaultsUpdated(gasLimit, maxFeePerGas, transactWeightRefTime, transactWeightProofSize, feeAmount);
     }
 }

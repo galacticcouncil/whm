@@ -22,11 +22,12 @@ contract XcmTransactorTest is Test {
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), abi.encodeCall(XcmTransactor.initialize, ()));
         transactor = XcmTransactor(address(proxy));
         transactor.setAuthorized(address(this), true);
+        transactor.setXcmOperator(address(this), true);
     }
 
     function testOnlyAuthorizedCanTransact() public {
         vm.prank(address(0xdead));
-        vm.expectRevert(XcmTransactor.NotAuthorizedDispatcher.selector);
+        vm.expectRevert(XcmTransactor.NotAuthorized.selector);
         transactor.transact(address(0xBEEF), hex"");
     }
 
@@ -44,9 +45,23 @@ contract XcmTransactorTest is Test {
         assertFalse(transactor.authorized(address(0xCAFE)));
     }
 
-    function testOnlyAuthorizedCanSetDefaults() public {
+    function testSetXcmOperator() public {
+        transactor.setXcmOperator(address(0xCAFE), true);
+        assertTrue(transactor.xcmOperators(address(0xCAFE)));
+
+        transactor.setXcmOperator(address(0xCAFE), false);
+        assertFalse(transactor.xcmOperators(address(0xCAFE)));
+    }
+
+    function testOnlyOwnerCanSetXcmOperator() public {
         vm.prank(address(0xdead));
-        vm.expectRevert(XcmTransactor.NotAuthorized.selector);
+        vm.expectRevert(XcmTransactor.NotOwner.selector);
+        transactor.setXcmOperator(address(0xCAFE), true);
+    }
+
+    function testOnlyXcmOperatorCanSetDefaults() public {
+        vm.prank(address(0xdead));
+        vm.expectRevert(XcmTransactor.NotXcmOperator.selector);
         transactor.setXcmDefaults(0, 0, 0, 0, 0);
     }
 
