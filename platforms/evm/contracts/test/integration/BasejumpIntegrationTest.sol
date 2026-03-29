@@ -553,4 +553,82 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         );
         vm.stopPrank();
     }
+
+    function testBasejumpProxyBridgeNotSupported() public {
+        vm.expectRevert(BasejumpProxy.NotSupported.selector);
+        basejumpMoonbeam.bridgeViaWormhole{value: 1 ether}(
+            address(usdcBase),
+            TRANSFER_AMOUNT,
+            BASE_CHAIN_ID,
+            hydrationRecipient
+        );
+    }
+
+    function testLocalSameChainTransfer() public {
+        // Setup: Test local same-chain transfer where Basejump calls BasejumpLanding directly
+        // Since wormhole.chainId() returns MOONBEAM_CHAIN_ID (from our mock),
+        // we simulate receiving a VAA on MOONBEAM and delivering locally
+
+        // Authorize basejumpBase to call landing directly (simulating local transfer)
+        basejumpHydration.setAuthorizedBridge(address(basejumpBase), true);
+
+        uint256 expectedNetAmount = TRANSFER_AMOUNT - BASEJUMP_FEE;
+
+        // Build VAA from MOONBEAM chain to MOONBEAM chain (same chain transfer)
+        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
+            MOONBEAM_CHAIN_ID,
+            address(basejumpBase),
+            address(usdcBase),
+            expectedNetAmount,
+            hydrationRecipient
+        );
+
+        // Authorize this emitter
+        basejumpBase.setAuthorizedEmitter(
+            MOONBEAM_CHAIN_ID,
+            BasejumpTestHelpers.addressToBytes32(address(basejumpBase))
+        );
+
+        // When completeTransfer is called on same chain, it should call landing directly
+        // via _executeTransfer -> IBasejumpLanding(basejumpLanding).transfer()
+        vm.expectEmit(true, true, false, true, address(basejumpBase));
+        emit IBasejump.TransferProcessed(address(usdcBase), expectedNetAmount, hydrationRecipient);
+
+        // This should trigger _executeTransfer which calls BasejumpLanding.transfer directly
+        basejumpBase.completeTransfer(vaa);
+
+        // The test passes if the transfer executed without reverting
+    }
+
+    function testXcmTransactorNotSet() public {
+        // Deploy a fresh BasejumpProxy without XCM transactor configured
+        BasejumpProxy freshProxy = new BasejumpProxy();
+        ERC1967Proxy freshProxyProxy = new ERC1967Proxy(
+            address(freshProxy),
+            abi.encodeCall(BasejumpProxy.initialize, (address(this), address(tokenBridge)))
+        );
+        BasejumpProxy proxy = BasejumpProxy(address(freshProxyProxy));
+
+        // Configure landing and emitter
+        proxy.setBasejumpLanding(
+            MOONBEAM_CHAIN_ID,
+            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
+        );
+        proxy.setAuthorizedEmitter(
+            BASE_CHAIN_ID,
+            BasejumpTestHelpers.addressToBytes32(address(basejumpBase))
+        );
+
+        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
+            BASE_CHAIN_ID,
+            address(basejumpBase),
+            address(usdcBase),
+            TRANSFER_AMOUNT,
+            hydrationRecipient
+        );
+
+        // Should revert with XcmTransactorNotSet when trying to execute transfer
+        vm.expectRevert(BasejumpProxy.XcmTransactorNotSet.selector);
+        proxy.completeTransfer(vaa);
+    }
 }
