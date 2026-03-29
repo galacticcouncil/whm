@@ -38,7 +38,6 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     address public owner;
     mapping(address => bool) public authorized;
-    mapping(address => bool) public authorizedDispatchers;
 
     // --- Runtime config (immutable across upgrades) ---
     uint32 public immutable DESTINATION_PARA_ID;
@@ -182,10 +181,6 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
 
     function setAuthorized(address addr, bool enabled) external onlyOwner {
         authorized[addr] = enabled;
-    }
-
-    function setAuthorizedDispatcher(address addr, bool enabled) public onlyOwner {
-        authorizedDispatchers[addr] = enabled;
     }
 
     function setXcmDefaults(
