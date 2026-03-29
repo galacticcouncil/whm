@@ -5,7 +5,7 @@ import { isAddress } from "viem";
 import { args } from "@whm/common";
 import { ifs, wallet } from "../../lib";
 
-import instaBridgeJson from "../../contracts/out/InstaBridge.sol/InstaBridge.json";
+import basejumpProxyJson from "../../contracts/out/BasejumpProxy.sol/BasejumpProxy.json";
 
 const { requiredArg, requiredEnv } = args;
 const { getWallet } = wallet;
@@ -16,42 +16,36 @@ function getConfig() {
 
   const privateKey = requiredArg("--pk");
   const address = requiredArg("--address");
-  const emitter = requiredArg("--emitter");
-  const emitterChain = requiredArg("--emitter-chain");
+  const xcmTransactor = requiredArg("--xcm-transactor");
 
   if (!isAddress(address)) throw new Error("Invalid contract address.");
-
-  const isBytes32 = emitter.startsWith("0x") && emitter.length === 66;
-  if (!isBytes32 && !isAddress(emitter)) {
-    throw new Error("Invalid emitter (expected address or bytes32).");
-  }
+  if (!isAddress(xcmTransactor)) throw new Error("Invalid XCM transactor address.");
 
   return {
     rpcUrl,
     chainId: Number(chainId),
     privateKey: privateKey as `0x${string}`,
     address: address as `0x${string}`,
-    emitter: emitter as `0x${string}`,
-    emitterChain: Number(emitterChain),
+    xcmTransactor: xcmTransactor as `0x${string}`,
   };
 }
 
 async function main(): Promise<void> {
-  const { address, rpcUrl, chainId, privateKey, emitter, emitterChain } = getConfig();
+  const { address, rpcUrl, chainId, privateKey, xcmTransactor } = getConfig();
 
   const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
-  const { abi } = instaBridgeJson as ifs.ContractArtifact;
+  const { abi } = basejumpProxyJson as ifs.ContractArtifact;
 
   const txHash = await walletClient.writeContract({
     address,
     abi,
-    functionName: "setAuthorizedEmitter",
-    args: [emitterChain, emitter],
+    functionName: "setXcmTransactor",
+    args: [xcmTransactor],
   });
 
   await publicClient.waitForTransactionReceipt({ hash: txHash });
-  console.log(`Authorized emitter set: emitterChain=${emitterChain}, emitter=${emitter}`);
+  console.log(`XCM transactor set: ${xcmTransactor}`);
 }
 
 main().catch((error) => {

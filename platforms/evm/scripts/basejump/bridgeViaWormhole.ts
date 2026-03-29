@@ -5,7 +5,7 @@ import { isAddress, isHex } from "viem";
 import { args } from "@whm/common";
 import { ifs, wallet } from "../../lib";
 
-import instaBridgeJson from "../../contracts/out/InstaBridge.sol/InstaBridge.json";
+import basejumpJson from "../../contracts/out/Basejump.sol/Basejump.json";
 
 const { requiredArg, requiredEnv } = args;
 const { getWallet } = wallet;
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
 
   const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
-  const { abi } = instaBridgeJson as ifs.ContractArtifact;
+  const { abi } = basejumpJson as ifs.ContractArtifact;
 
   // Approve
   const erc20Abi = [

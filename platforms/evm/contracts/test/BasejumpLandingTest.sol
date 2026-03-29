@@ -4,7 +4,7 @@ pragma solidity ^0.8.22;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {InstaTransfer} from "../src/InstaTransfer.sol";
+import {BasejumpLanding} from "../src/BasejumpLanding.sol";
 
 /// @dev Minimal ERC20 with mint
 contract MockERC20 {
@@ -35,8 +35,8 @@ contract MockERC20 {
     }
 }
 
-contract InstaTransferTest is Test {
-    InstaTransfer public instaTransfer;
+contract BasejumpLandingTest is Test {
+    BasejumpLanding public instaTransfer;
     MockERC20 public usdc;
     MockERC20 public sourceUsdc;
 
@@ -57,12 +57,12 @@ contract InstaTransferTest is Test {
         // Convert address to bytes32 (right-padded, so we put address in low bits)
         recipient = bytes32(uint256(uint160(recipientAddr)));
 
-        InstaTransfer impl = new InstaTransfer();
+        BasejumpLanding impl = new BasejumpLanding();
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(impl),
-            abi.encodeCall(InstaTransfer.initialize, ())
+            abi.encodeCall(BasejumpLanding.initialize, ())
         );
-        instaTransfer = InstaTransfer(address(proxy));
+        instaTransfer = BasejumpLanding(address(proxy));
 
         instaTransfer.setAuthorizedBridge(bridge, true);
         instaTransfer.setDestAsset(address(sourceUsdc), address(usdc));
@@ -104,7 +104,7 @@ contract InstaTransferTest is Test {
         uint256 amount = 1_000e6;
 
         vm.expectEmit(true, true, true, true);
-        emit InstaTransfer.TransferExecuted(address(sourceUsdc), address(usdc), recipient, amount);
+        emit BasejumpLanding.TransferExecuted(address(sourceUsdc), address(usdc), recipient, amount);
 
         vm.prank(bridge);
         instaTransfer.transfer(address(sourceUsdc), amount, recipient);
@@ -122,7 +122,7 @@ contract InstaTransferTest is Test {
 
     function testTransferRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(InstaTransfer.NotAuthorizedBridge.selector);
+        vm.expectRevert(BasejumpLanding.NotAuthorizedBridge.selector);
         instaTransfer.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
@@ -130,7 +130,7 @@ contract InstaTransferTest is Test {
         address unconfiguredSource = makeAddr("unconfiguredSource");
 
         vm.prank(bridge);
-        vm.expectRevert(abi.encodeWithSelector(InstaTransfer.AssetNotConfigured.selector, unconfiguredSource));
+        vm.expectRevert(abi.encodeWithSelector(BasejumpLanding.AssetNotConfigured.selector, unconfiguredSource));
         instaTransfer.transfer(unconfiguredSource, 1_000e6, recipient);
     }
 
@@ -139,7 +139,7 @@ contract InstaTransferTest is Test {
         vm.mockCallRevert(DISPATCH_PRECOMPILE, bytes(""), bytes("dispatch failed"));
 
         vm.prank(bridge);
-        vm.expectRevert(InstaTransfer.DispatchFailed.selector);
+        vm.expectRevert(BasejumpLanding.DispatchFailed.selector);
         instaTransfer.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
@@ -147,7 +147,7 @@ contract InstaTransferTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.expectEmit(true, true, true, true);
-        emit InstaTransfer.TransferQueued(0, address(sourceUsdc), address(usdc), recipient, overAmount);
+        emit BasejumpLanding.TransferQueued(0, address(sourceUsdc), address(usdc), recipient, overAmount);
 
         vm.prank(bridge);
         instaTransfer.transfer(address(sourceUsdc), overAmount, recipient);
@@ -177,7 +177,7 @@ contract InstaTransferTest is Test {
 
         // Fulfill
         vm.expectEmit(true, true, true, true);
-        emit InstaTransfer.PendingTransferFulfilled(0, address(sourceUsdc), address(usdc), recipient, overAmount);
+        emit BasejumpLanding.PendingTransferFulfilled(0, address(sourceUsdc), address(usdc), recipient, overAmount);
 
         instaTransfer.fulfillPending();
 
@@ -202,7 +202,7 @@ contract InstaTransferTest is Test {
     }
 
     function testFulfillPendingRevertsNoPending() public {
-        vm.expectRevert(InstaTransfer.NoPendingTransfers.selector);
+        vm.expectRevert(BasejumpLanding.NoPendingTransfers.selector);
         instaTransfer.fulfillPending();
     }
 
@@ -213,7 +213,7 @@ contract InstaTransferTest is Test {
         instaTransfer.transfer(address(sourceUsdc), overAmount, recipient);
 
         // Don't replenish — should revert
-        vm.expectRevert(InstaTransfer.InsufficientBalance.selector);
+        vm.expectRevert(BasejumpLanding.InsufficientBalance.selector);
         instaTransfer.fulfillPending();
     }
 
@@ -227,7 +227,7 @@ contract InstaTransferTest is Test {
         instaTransfer.fulfillPending();
 
         // Second attempt — queue is empty
-        vm.expectRevert(InstaTransfer.NoPendingTransfers.selector);
+        vm.expectRevert(BasejumpLanding.NoPendingTransfers.selector);
         instaTransfer.fulfillPending();
     }
 
@@ -270,14 +270,14 @@ contract InstaTransferTest is Test {
         address dest = makeAddr("dest");
 
         vm.expectEmit(true, true, false, true);
-        emit InstaTransfer.Withdrawn(address(usdc), 50_000e6, dest);
+        emit BasejumpLanding.Withdrawn(address(usdc), 50_000e6, dest);
 
         instaTransfer.withdraw(address(usdc), 50_000e6, dest);
     }
 
     function testWithdrawRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(InstaTransfer.NotOwner.selector);
+        vm.expectRevert(BasejumpLanding.NotOwner.selector);
         instaTransfer.withdraw(address(usdc), 1, stranger);
     }
 
@@ -292,7 +292,7 @@ contract InstaTransferTest is Test {
 
     function testSetAuthorizedBridgeRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(InstaTransfer.NotOwner.selector);
+        vm.expectRevert(BasejumpLanding.NotOwner.selector);
         instaTransfer.setAuthorizedBridge(bridge, false);
     }
 
@@ -304,7 +304,7 @@ contract InstaTransferTest is Test {
 
     function testSetOwnerRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(InstaTransfer.NotOwner.selector);
+        vm.expectRevert(BasejumpLanding.NotOwner.selector);
         instaTransfer.setOwner(stranger);
     }
 
@@ -317,7 +317,7 @@ contract InstaTransferTest is Test {
         assertEq(instaTransfer.destAssetFor(newSource), address(0));
 
         vm.expectEmit(true, true, false, true);
-        emit InstaTransfer.DestAssetUpdated(newSource, newDest);
+        emit BasejumpLanding.DestAssetUpdated(newSource, newDest);
 
         instaTransfer.setDestAsset(newSource, newDest);
         assertEq(instaTransfer.destAssetFor(newSource), newDest);
@@ -329,7 +329,7 @@ contract InstaTransferTest is Test {
 
     function testSetDestAssetRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(InstaTransfer.NotOwner.selector);
+        vm.expectRevert(BasejumpLanding.NotOwner.selector);
         instaTransfer.setDestAsset(address(sourceUsdc), address(usdc));
     }
 
@@ -339,7 +339,7 @@ contract InstaTransferTest is Test {
 
         // Transfer should now revert
         vm.prank(bridge);
-        vm.expectRevert(abi.encodeWithSelector(InstaTransfer.AssetNotConfigured.selector, address(sourceUsdc)));
+        vm.expectRevert(abi.encodeWithSelector(BasejumpLanding.AssetNotConfigured.selector, address(sourceUsdc)));
         instaTransfer.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
@@ -352,7 +352,7 @@ contract InstaTransferTest is Test {
         uint256 amount = 1_000e6;
 
         vm.expectEmit(true, true, true, true);
-        emit InstaTransfer.TransferExecuted(address(sourceUsdc), address(usdc), polkadotRecipient, amount);
+        emit BasejumpLanding.TransferExecuted(address(sourceUsdc), address(usdc), polkadotRecipient, amount);
 
         vm.prank(bridge);
         instaTransfer.transfer(address(sourceUsdc), amount, polkadotRecipient);

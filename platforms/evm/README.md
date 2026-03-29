@@ -204,7 +204,7 @@ pnpm run dispatcher:setOracle -- \
  --asset-id asset_id
 ```
 
-### InstaBridge
+### Basejump
 
 Bridges funds into/out of Hydration via Wormhole TokenBridge and fast-path VAAs. Each chain has its own env file (`.env.base`, `.env.moonbeam`, etc.) with `IBRI_*` variables. Select the target chain with **DOTENV_CONFIG_PATH**.
 
@@ -218,7 +218,7 @@ Bridges funds into/out of Hydration via Wormhole TokenBridge and fast-path VAAs.
 
 #### Deploy contract
 
-Deploy or upgrade the InstaBridge UUPS proxy on a source EVM chain.
+Deploy or upgrade the Basejump UUPS proxy on a source EVM chain.
 
 | Flag      | Description                                                     |
 | --------- | --------------------------------------------------------------- |
@@ -226,16 +226,16 @@ Deploy or upgrade the InstaBridge UUPS proxy on a source EVM chain.
 | `--proxy` | Deploys new implementation and upgrades existing proxy in-place |
 
 ```bash
-DOTENV_CONFIG_PATH=envs/.env.base pnpm run instaBridge:deploy -- \
+DOTENV_CONFIG_PATH=envs/.env.base pnpm run basejump:deploy -- \
  --pk your_private_key \
- --proxy insta_bridge_proxy_address
+ --proxy basejump_proxy_address
 ```
 
 When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
 
 #### Deploy proxy contract
 
-Deploy or upgrade the InstaBridgeProxy UUPS proxy on Moonbeam. Routes funds out from Hydration to external chains and forwards fast-path VAAs via XCM.
+Deploy or upgrade the BasejumpProxy UUPS proxy on Moonbeam. Routes funds out from Hydration to external chains and forwards fast-path VAAs via XCM.
 
 | Flag      | Description                                                     |
 | --------- | --------------------------------------------------------------- |
@@ -243,30 +243,30 @@ Deploy or upgrade the InstaBridgeProxy UUPS proxy on Moonbeam. Routes funds out 
 | `--proxy` | Deploys new implementation and upgrades existing proxy in-place |
 
 ```bash
-DOTENV_CONFIG_PATH=.env.moonbeam pnpm run instaBridge:deployProxy -- \
+DOTENV_CONFIG_PATH=.env.moonbeam pnpm run basejump:deployProxy -- \
  --pk your_private_key \
- --proxy insta_bridge_proxy_address
+ --proxy basejump_proxy_address
 ```
 
 When `--proxy` is used, only implementation code is upgraded. Existing proxy storage is preserved, so `initialize()` defaults are not re-applied.
 
-#### Set InstaTransfer
+#### Set BasejumpLanding
 
-Register the InstaTransfer contract address for a given Wormhole chain ID.
+Register the BasejumpLanding contract address for a given Wormhole chain ID.
 
 | Flag               | Description                              |
 | ------------------ | ---------------------------------------- |
 | `--pk`             | Private key used to sign the transaction |
-| `--address`        | InstaBridge contract address             |
+| `--address`        | Basejump contract address             |
 | `--wh-chain-id`    | Wormhole chain ID (uint16)               |
-| `--insta-transfer` | InstaTransfer address (bytes32)          |
+| `--insta-transfer` | BasejumpLanding address (bytes32)          |
 
 ```bash
-DOTENV_CONFIG_PATH=.env.base pnpm run instaBridge:setInstaTransfer -- \
+DOTENV_CONFIG_PATH=.env.base pnpm run basejump:setBasejumpLanding -- \
  --pk your_private_key \
- --address insta_bridge_address \
+ --address basejump_address \
  --wh-chain-id wormhole_chain_id \
- --insta-transfer insta_transfer_bytes32
+ --insta-transfer basejump_landing_bytes32
 ```
 
 #### Set fee BPS
@@ -276,31 +276,31 @@ Update the fee in basis points (1 bp = 0.01%, default 10 bp = 0.1%).
 | Flag        | Description                              |
 | ----------- | ---------------------------------------- |
 | `--pk`      | Private key used to sign the transaction |
-| `--address` | InstaBridge contract address             |
+| `--address` | Basejump contract address             |
 | `--fee-bps` | Fee in basis points (uint256)            |
 
 ```bash
-DOTENV_CONFIG_PATH=.env.base pnpm run instaBridge:setFeeBps -- \
+DOTENV_CONFIG_PATH=.env.base pnpm run basejump:setFeeBps -- \
  --pk your_private_key \
- --address insta_bridge_address \
+ --address basejump_address \
  --fee-bps 10
 ```
 
 #### Register authorized emitter
 
-Whitelist a trusted emitter from a source chain so the InstaBridge accepts its VAAs.
+Whitelist a trusted emitter from a source chain so the Basejump accepts its VAAs.
 
 | Flag             | Description                                 |
 | ---------------- | ------------------------------------------- |
 | `--pk`           | Private key used to sign the transaction    |
-| `--address`      | InstaBridge contract address                |
+| `--address`      | Basejump contract address                |
 | `--emitter`       | Emitter contract address (address or bytes32) |
 | `--emitter-chain` | Emitter chain identifier (Wormhole chain ID)  |
 
 ```bash
-DOTENV_CONFIG_PATH=.env.base pnpm run instaBridge:setAuthorizedEmitter -- \
+DOTENV_CONFIG_PATH=.env.base pnpm run basejump:setAuthorizedEmitter -- \
  --pk your_private_key \
- --address insta_bridge_address \
+ --address basejump_address \
  --emitter emitter_bytes32 \
  --emitter-chain emitter_chain_id
 ```
@@ -312,7 +312,7 @@ Initiate a cross-chain bridge transfer. Approves the asset, fetches the Wormhole
 | Flag           | Description                              |
 | -------------- | ---------------------------------------- |
 | `--pk`         | Private key used to sign the transaction |
-| `--address`    | InstaBridge contract address             |
+| `--address`    | Basejump contract address             |
 | `--asset`      | ERC20 token address to bridge            |
 | `--amount`     | Amount in native token units             |
 | `--dest-chain` | Destination Wormhole chain ID            |
@@ -320,9 +320,9 @@ Initiate a cross-chain bridge transfer. Approves the asset, fetches the Wormhole
 | `--recipient`  | Recipient address (bytes32)              |
 
 ```bash
-DOTENV_CONFIG_PATH=envs/.env.base pnpm run instaBridge:bridgeViaWormhole -- \
+DOTENV_CONFIG_PATH=envs/.env.base pnpm run basejump:bridgeViaWormhole -- \
  --pk your_private_key \
- --address insta_bridge_address \
+ --address basejump_address \
  --asset token_address \
  --amount 1000000 \
  --dest-chain dest_wormhole_chain_id \
@@ -337,30 +337,30 @@ Submit a signed VAA to complete a fast-path transfer on the destination chain.
 | Flag        | Description                                               |
 | ----------- | --------------------------------------------------------- |
 | `--pk`      | Private key used to sign the transaction                  |
-| `--address` | InstaBridge contract address                              |
+| `--address` | Basejump contract address                              |
 | `--vaa`     | Hex-encoded signed VAA from the Wormhole Guardian network |
 
 ```bash
-DOTENV_CONFIG_PATH=envs/.env.base pnpm run instaBridge:completeTransfer -- \
+DOTENV_CONFIG_PATH=envs/.env.base pnpm run basejump:completeTransfer -- \
  --pk your_private_key \
- --address insta_bridge_address \
+ --address basejump_address \
  --vaa hex_encoded_vaa
 ```
 
 #### Set XCM transactor
 
-Set the XCM transactor address on InstaBridgeProxy (Moonbeam only).
+Set the XCM transactor address on BasejumpProxy (Moonbeam only).
 
 | Flag               | Description                              |
 | ------------------ | ---------------------------------------- |
 | `--pk`             | Private key used to sign the transaction |
-| `--address`        | InstaBridgeProxy contract address        |
+| `--address`        | BasejumpProxy contract address        |
 | `--xcm-transactor` | XCM transactor contract address          |
 
 ```bash
-DOTENV_CONFIG_PATH=.env.moonbeam pnpm run instaBridge:setXcmTransactor -- \
+DOTENV_CONFIG_PATH=.env.moonbeam pnpm run basejump:setXcmTransactor -- \
  --pk your_private_key \
- --address insta_bridge_proxy_address \
+ --address basejump_proxy_address \
  --xcm-transactor xcm_transactor_address
 ```
 

@@ -7,17 +7,17 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {MessageReceiver} from "./MessageReceiver.sol";
 
-/// @title InstaBridgeBase — Shared logic for InstaBridge variants
+/// @title BasejumpBase — Shared logic for Basejump variants
 /// @notice Common storage, completeTransfer (VAA verification), and _processMessage.
 ///         Subclasses implement bridgeViaWormhole (outbound) and _executeTransfer (inbound).
-abstract contract InstaBridgeBase is MessageReceiver {
+abstract contract BasejumpBase is MessageReceiver {
     using SafeERC20 for IERC20;
 
     ITokenBridge public tokenBridge;
     uint32 public emitterNonce;
 
-    /// @notice chainId → InstaTransfer address (bytes32 for cross-chain compat)
-    mapping(uint16 => bytes32) public instaTransfers;
+    /// @notice chainId → BasejumpLanding address (bytes32 for cross-chain compat)
+    mapping(uint16 => bytes32) public basejumpLandings;
 
     event BridgeInitiated(
         address indexed asset,
@@ -34,11 +34,11 @@ abstract contract InstaBridgeBase is MessageReceiver {
     /// @notice Fixed fee per source asset (e.g. 1e6 for 1 USDC)
     mapping(address => uint256) public assetFee;
 
-    error InstaTransferNotSet(uint16 chainId);
+    error BasejumpLandingNotSet(uint16 chainId);
     error ZeroAmount();
     error AmountTooLowForFee(uint256 amount, uint256 fee);
 
-    function _initInstaBridge(address _wormhole, address _tokenBridge)
+    function _initBasejump(address _wormhole, address _tokenBridge)
         internal
         onlyInitializing
     {
@@ -63,7 +63,7 @@ abstract contract InstaBridgeBase is MessageReceiver {
         bytes32 recipient,
         uint64 transferSequence
     ) internal returns (uint64 messageSequence) {
-        // Net amount after fee (fee stays in InstaTransfer on destination)
+        // Net amount after fee (fee stays in BasejumpLanding on destination)
         uint256 fee = quoteFee(sourceAsset);
         if (amount <= fee) revert AmountTooLowForFee(amount, fee);
         uint256 netAmount = amount - fee;
@@ -93,8 +93,8 @@ abstract contract InstaBridgeBase is MessageReceiver {
 
     // ─── Admin ───────────────────────────────────────────────────
 
-    function setInstaTransfer(uint16 chainId, bytes32 addr) external onlyOwner {
-        instaTransfers[chainId] = addr;
+    function setBasejumpLanding(uint16 chainId, bytes32 addr) external onlyOwner {
+        basejumpLandings[chainId] = addr;
     }
 
     function setAssetFee(address asset, uint256 fee) external onlyOwner {

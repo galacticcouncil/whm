@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-interface IInstaTransfer {
+interface IBasejumpLanding {
     // ─── Events ──────────────────────────────────────────────────
 
     event TransferExecuted(address indexed sourceAsset, address indexed destAsset, bytes32 indexed recipient, uint256 amount);

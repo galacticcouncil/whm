@@ -6,12 +6,12 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeab
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {ScaleCodec} from "./utils/ScaleCodec.sol";
 
-/// @title InstaTransfer - Instant token delivery for cross-chain bridges on Hydration
+/// @title BasejumpLanding - Instant token delivery for cross-chain bridges on Hydration
 /// @notice Pre-funded liquidity pool. Authorized bridges call transfer() to
 ///         deliver tokens instantly via currencies.transfer extrinsic.
-///         Fees are deducted on the InstaBridge side. Replay protection is
+///         Fees are deducted on the Basejump side. Replay protection is
 ///         handled by the bridge layer (MessageReceiver.processedVaas).
-contract InstaTransfer is Initializable, UUPSUpgradeable {
+contract BasejumpLanding is Initializable, UUPSUpgradeable {
     /// @notice Hydration dispatch precompile at 0x0401 (1025 decimal)
     address public constant DISPATCH = 0x0000000000000000000000000000000000000401;
 

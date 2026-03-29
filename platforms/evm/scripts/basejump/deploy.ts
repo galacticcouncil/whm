@@ -5,7 +5,7 @@ import { encodeFunctionData, isAddress, pad } from "viem";
 import { args } from "@whm/common";
 import { ifs, wallet } from "../../lib";
 
-import instaBridgeJson from "../../contracts/out/InstaBridge.sol/InstaBridge.json";
+import basejumpJson from "../../contracts/out/Basejump.sol/Basejump.json";
 import erc1967ProxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
 const { requiredArg, optionalArg, requiredEnv } = args;
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   const { rpcUrl, chainId, privateKey, wormholeCore, tokenBridge, proxy } = getConfig();
 
   const { publicClient, walletClient, account } = getWallet(rpcUrl, chainId, privateKey);
-  const { abi, bytecode } = instaBridgeJson as ifs.ContractArtifact;
+  const { abi, bytecode } = basejumpJson as ifs.ContractArtifact;
 
   const implDeployHash = await walletClient.deployContract({
     abi,
@@ -65,8 +65,8 @@ async function main(): Promise<void> {
 
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
-    console.log("InstaBridge implementation:", implementationAddress);
-    console.log("InstaBridge proxy:", proxy, "(upgraded)");
+    console.log("Basejump implementation:", implementationAddress);
+    console.log("Basejump proxy:", proxy, "(upgraded)");
   } else {
     const initializeData = encodeFunctionData({
       abi,
@@ -91,10 +91,10 @@ async function main(): Promise<void> {
 
     const proxyAddress = proxyDeployReceipt.contractAddress;
 
-    console.log("InstaBridge implementation:", implementationAddress);
-    console.log("InstaBridge proxy:", proxyAddress);
-    console.log("InstaBridge proxy (bytes32):", pad(proxyAddress));
-    console.log("InstaBridge owner:", account.address);
+    console.log("Basejump implementation:", implementationAddress);
+    console.log("Basejump proxy:", proxyAddress);
+    console.log("Basejump proxy (bytes32):", pad(proxyAddress));
+    console.log("Basejump owner:", account.address);
   }
 }
 

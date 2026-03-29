@@ -4,16 +4,16 @@ pragma solidity ^0.8.22;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {InstaBridgeBase} from "./InstaBridgeBase.sol";
+import {BasejumpBase} from "./BasejumpBase.sol";
 import {XcmTransactor} from "./XcmTransactor.sol";
 
-import {IInstaTransfer} from "./interfaces/IInstaTransfer.sol";
+import {IBasejumpLanding} from "./interfaces/IBasejumpLanding.sol";
 
-/// @title InstaBridgeProxy — Moonchain deployment (Hydration proxy)
+/// @title BasejumpProxy — Moonchain deployment (Hydration proxy)
 /// @notice Bridges funds OUT from Hydration to external wormhole chains.
 ///         - bridgeViaWormhole: called via XCM from Hydration, sends tokens out
-///         - completeTransfer: receives fast-path VAA, forwards to Hydration InstaTransfer via XCM
-contract InstaBridgeProxy is InstaBridgeBase {
+///         - completeTransfer: receives fast-path VAA, forwards to Hydration BasejumpLanding via XCM
+contract BasejumpProxy is BasejumpBase {
     using SafeERC20 for IERC20;
 
     address public xcmTransactor;
@@ -21,7 +21,7 @@ contract InstaBridgeProxy is InstaBridgeBase {
     error XcmTransactorNotSet();
 
     function initialize(address _wormhole, address _tokenBridge) public virtual initializer {
-        _initInstaBridge(_wormhole, _tokenBridge);
+        _initBasejump(_wormhole, _tokenBridge);
     }
 
     function bridgeViaWormhole(
@@ -32,18 +32,18 @@ contract InstaBridgeProxy is InstaBridgeBase {
     ) external payable returns (uint64 transferSequence, uint64 messageSequence) {
         if (amount == 0) revert ZeroAmount();
 
-        bytes32 destInstaTransfer = instaTransfers[destChain];
-        if (destInstaTransfer == bytes32(0)) revert InstaTransferNotSet(destChain);
+        bytes32 destBasejumpLanding = basejumpLandings[destChain];
+        if (destBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(destChain);
 
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
 
-        // 1. Slow path: TokenBridge transfer (recipient = InstaTransfer on dest chain)
+        // 1. Slow path: TokenBridge transfer (recipient = BasejumpLanding on dest chain)
         IERC20(asset).forceApprove(address(tokenBridge), amount);
         transferSequence = tokenBridge.transferTokens(
             asset,
             amount,
             destChain,
-            destInstaTransfer,
+            destBasejumpLanding,
             0,
             emitterNonce
         );
@@ -56,13 +56,13 @@ contract InstaBridgeProxy is InstaBridgeBase {
         if (xcmTransactor == address(0)) revert XcmTransactorNotSet();
 
         uint16 localChain = wormhole.chainId();
-        bytes32 localInstaTransfer = instaTransfers[localChain];
-        if (localInstaTransfer == bytes32(0)) revert InstaTransferNotSet(localChain);
+        bytes32 localBasejumpLanding = basejumpLandings[localChain];
+        if (localBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(localChain);
 
-        address instaTransfer = _bytes32ToAddress(localInstaTransfer);
+        address basejumpLanding = _bytes32ToAddress(localBasejumpLanding);
 
-        bytes memory input = abi.encodeWithSelector(IInstaTransfer.transfer.selector, sourceAsset, amount, recipient);
-        XcmTransactor(xcmTransactor).transact(instaTransfer, input);
+        bytes memory input = abi.encodeWithSelector(IBasejumpLanding.transfer.selector, sourceAsset, amount, recipient);
+        XcmTransactor(xcmTransactor).transact(basejumpLanding, input);
     }
 
     // ─── Admin ──────────────────────────────────────────────────

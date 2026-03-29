@@ -5,14 +5,14 @@ import { isAddress } from "viem";
 import { args } from "@whm/common";
 import { ifs, wallet } from "../../lib";
 
-import instaTransferJson from "../../contracts/out/InstaTransfer.sol/InstaTransfer.json";
+import basejumpLandingJson from "../../contracts/out/BasejumpLanding.sol/BasejumpLanding.json";
 
 const { requiredArg, requiredEnv } = args;
 const { getWallet } = wallet;
 
 function getConfig() {
-  const rpcUrl = requiredEnv("INSTA_TRANSFER_RPC");
-  const chainId = requiredEnv("INSTA_TRANSFER_CHAIN_ID");
+  const rpcUrl = requiredEnv("BASEJUMP_LANDING_RPC");
+  const chainId = requiredEnv("BASEJUMP_LANDING_CHAIN_ID");
 
   const privateKey = requiredEnv("PRIVATE_KEY");
   const proxyAddress = requiredArg("--proxy");
@@ -38,7 +38,7 @@ async function main(): Promise<void> {
 
   const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
-  const { abi } = instaTransferJson as ifs.ContractArtifact;
+  const { abi } = basejumpLandingJson as ifs.ContractArtifact;
 
   const hash = await walletClient.writeContract({
     address: proxyAddress,
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
 
   await publicClient.waitForTransactionReceipt({ hash });
 
-  console.log(`InstaTransfer ${proxyAddress}: setAuthorizedBridge(${bridgeAddress}, ${enabled})`);
+  console.log(`BasejumpLanding ${proxyAddress}: setAuthorizedBridge(${bridgeAddress}, ${enabled})`);
 }
 
 main().catch((error) => {

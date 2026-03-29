@@ -4,16 +4,16 @@ pragma solidity ^0.8.22;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {InstaBridgeBase} from "./InstaBridgeBase.sol";
+import {BasejumpBase} from "./BasejumpBase.sol";
 import {MrlPayload} from "./utils/MrlPayload.sol";
 
-import {IInstaTransfer} from "./interfaces/IInstaTransfer.sol";
+import {IBasejumpLanding} from "./interfaces/IBasejumpLanding.sol";
 
-/// @title InstaBridge — Source EVM chain deployment (Base, Ethereum, etc.)
+/// @title Basejump — Source EVM chain deployment (Base, Ethereum, etc.)
 /// @notice Bridges funds INTO Hydration via Moonbeam GMP (MRL).
 ///         - bridgeViaWormhole: transferTokensWithPayload + MRL payload → Moonbeam GMP → XCM → Hydration
-///         - completeTransfer: receives fast-path VAA, calls InstaTransfer directly on this chain
-contract InstaBridge is InstaBridgeBase {
+///         - completeTransfer: receives fast-path VAA, calls BasejumpLanding directly on this chain
+contract Basejump is BasejumpBase {
     using SafeERC20 for IERC20;
 
     /// @notice Moonbeam GMP precompile address (TokenBridge recipient for MRL routing)
@@ -26,7 +26,7 @@ contract InstaBridge is InstaBridgeBase {
         address _wormhole,
         address _tokenBridge
     ) public virtual initializer {
-        _initInstaBridge(_wormhole, _tokenBridge);
+        _initBasejump(_wormhole, _tokenBridge);
     }
 
     function bridgeViaWormhole(
@@ -37,18 +37,18 @@ contract InstaBridge is InstaBridgeBase {
     ) external payable returns (uint64 transferSequence, uint64 messageSequence) {
         if (amount == 0) revert ZeroAmount();
 
-        bytes32 destInstaTransfer = instaTransfers[destChain];
-        if (destInstaTransfer == bytes32(0)) revert InstaTransferNotSet(destChain);
+        bytes32 destBasejumpLanding = basejumpLandings[destChain];
+        if (destBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(destChain);
 
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
 
         // 1. Slow path: TokenBridge transferWithPayload via MRL
-        //    Full amount is bridged; fee stays in InstaTransfer on destination
+        //    Full amount is bridged; fee stays in BasejumpLanding on destination
         //    destChain  = Moonbeam wormhole chain ID (e.g. 16)
         //    recipient  = Moonbeam GMP precompile (routes via XCM to Hydration)
-        //    payload    = MRL encoded destination (InstaTransfer on Hydration)
-        address instaTransfer = _bytes32ToAddress(destInstaTransfer);
-        bytes memory mrlPayload = MrlPayload.encodeEth(HYDRATION_PARA_ID, instaTransfer);
+        //    payload    = MRL encoded destination (BasejumpLanding on Hydration)
+        address basejumpLanding = _bytes32ToAddress(destBasejumpLanding);
+        bytes memory mrlPayload = MrlPayload.encodeEth(HYDRATION_PARA_ID, basejumpLanding);
 
         IERC20(asset).forceApprove(address(tokenBridge), amount);
         transferSequence = tokenBridge.transferTokensWithPayload(
@@ -61,17 +61,17 @@ contract InstaBridge is InstaBridgeBase {
         );
 
         // 2. Fast path: instant-finality message with net amount (after fee)
-        //    InstaTransfer sends netAmount to recipient, keeps fee
+        //    BasejumpLanding sends netAmount to recipient, keeps fee
         messageSequence = _fastTrack(asset, amount, destChain, recipient, transferSequence);
     }
 
     function _executeTransfer(address sourceAsset, uint256 amount, bytes32 recipient) internal override {
         uint16 localChain = wormhole.chainId();
-        bytes32 localInstaTransfer = instaTransfers[localChain];
-        if (localInstaTransfer == bytes32(0)) revert InstaTransferNotSet(localChain);
+        bytes32 localBasejumpLanding = basejumpLandings[localChain];
+        if (localBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(localChain);
 
-        address instaTransfer = _bytes32ToAddress(localInstaTransfer);
-        IInstaTransfer(instaTransfer).transfer(sourceAsset, amount, recipient);
+        address basejumpLanding = _bytes32ToAddress(localBasejumpLanding);
+        IBasejumpLanding(basejumpLanding).transfer(sourceAsset, amount, recipient);
     }
 
 }
