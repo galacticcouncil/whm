@@ -33,7 +33,6 @@ contract InstaBridge is InstaBridgeBase {
         address asset,
         uint256 amount,
         uint16 destChain,
-        address destAsset,
         bytes32 recipient
     ) external payable returns (uint64 transferSequence, uint64 messageSequence) {
         if (amount == 0) revert ZeroAmount();
@@ -63,16 +62,16 @@ contract InstaBridge is InstaBridgeBase {
 
         // 2. Fast path: instant-finality message with net amount (after fee)
         //    InstaTransfer sends netAmount to recipient, keeps fee
-        messageSequence = _fastTrack(asset, amount, destChain, destAsset, recipient, transferSequence);
+        messageSequence = _fastTrack(asset, amount, destChain, recipient, transferSequence);
     }
 
-    function _executeTransfer(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) internal override {
+    function _executeTransfer(address sourceAsset, uint256 amount, bytes32 recipient) internal override {
         uint16 localChain = wormhole.chainId();
         bytes32 localInstaTransfer = instaTransfers[localChain];
         if (localInstaTransfer == bytes32(0)) revert InstaTransferNotSet(localChain);
 
         address instaTransfer = _bytes32ToAddress(localInstaTransfer);
-        IInstaTransfer(instaTransfer).transfer(sourceAsset, destAsset, amount, recipient);
+        IInstaTransfer(instaTransfer).transfer(sourceAsset, amount, recipient);
     }
 
 }

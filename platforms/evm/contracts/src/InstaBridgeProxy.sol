@@ -28,7 +28,6 @@ contract InstaBridgeProxy is InstaBridgeBase {
         address asset,
         uint256 amount,
         uint16 destChain,
-        address destAsset,
         bytes32 recipient
     ) external payable returns (uint64 transferSequence, uint64 messageSequence) {
         if (amount == 0) revert ZeroAmount();
@@ -50,10 +49,10 @@ contract InstaBridgeProxy is InstaBridgeBase {
         );
 
         // 2. Fast path: instant-finality message with transfer metadata (amount after fee)
-        messageSequence = _fastTrack(asset, amount, destChain, destAsset, recipient, transferSequence);
+        messageSequence = _fastTrack(asset, amount, destChain, recipient, transferSequence);
     }
 
-    function _executeTransfer(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) internal override {
+    function _executeTransfer(address sourceAsset, uint256 amount, bytes32 recipient) internal override {
         if (xcmTransactor == address(0)) revert XcmTransactorNotSet();
 
         uint16 localChain = wormhole.chainId();
@@ -62,7 +61,7 @@ contract InstaBridgeProxy is InstaBridgeBase {
 
         address instaTransfer = _bytes32ToAddress(localInstaTransfer);
 
-        bytes memory input = abi.encodeWithSelector(IInstaTransfer.transfer.selector, sourceAsset, destAsset, amount, recipient);
+        bytes memory input = abi.encodeWithSelector(IInstaTransfer.transfer.selector, sourceAsset, amount, recipient);
         XcmTransactor(xcmTransactor).transact(instaTransfer, input);
     }
 

@@ -24,13 +24,12 @@ abstract contract InstaBridgeBase is MessageReceiver {
         uint256 amount,
         uint256 fee,
         uint16 destChain,
-        address destAsset,
         bytes32 recipient,
         uint64 transferSequence,
         uint64 messageSequence
     );
 
-    event TransferProcessed(address indexed sourceAsset, address indexed destAsset, uint256 amount, bytes32 indexed recipient);
+    event TransferProcessed(address indexed sourceAsset, uint256 amount, bytes32 indexed recipient);
 
     /// @notice Fixed fee per source asset (e.g. 1e6 for 1 USDC)
     mapping(address => uint256) public assetFee;
@@ -47,21 +46,20 @@ abstract contract InstaBridgeBase is MessageReceiver {
         tokenBridge = ITokenBridge(_tokenBridge);
     }
 
-    function _executeTransfer(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) internal virtual;
+    function _executeTransfer(address sourceAsset, uint256 amount, bytes32 recipient) internal virtual;
 
     function _processMessage(bytes memory payload) internal virtual override {
-        (address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) = abi.decode(payload, (address, address, uint256, bytes32));
+        (address sourceAsset, uint256 amount, bytes32 recipient) = abi.decode(payload, (address, uint256, bytes32));
 
-        _executeTransfer(sourceAsset, destAsset, amount, recipient);
+        _executeTransfer(sourceAsset, amount, recipient);
 
-        emit TransferProcessed(sourceAsset, destAsset, amount, recipient);
+        emit TransferProcessed(sourceAsset, amount, recipient);
     }
 
     function _fastTrack(
         address sourceAsset,
         uint256 amount,
         uint16 destChain,
-        address destAsset,
         bytes32 recipient,
         uint64 transferSequence
     ) internal returns (uint64 messageSequence) {
@@ -69,14 +67,14 @@ abstract contract InstaBridgeBase is MessageReceiver {
         uint256 fee = quoteFee(sourceAsset);
         if (amount <= fee) revert AmountTooLowForFee(amount, fee);
         uint256 netAmount = amount - fee;
-        bytes memory payload = abi.encode(sourceAsset, destAsset, netAmount, recipient);
+        bytes memory payload = abi.encode(sourceAsset, netAmount, recipient);
 
         uint256 messageFee = wormhole.messageFee();
         messageSequence = wormhole.publishMessage{value: messageFee}(emitterNonce, payload, 200);
 
         emitterNonce++;
 
-        emit BridgeInitiated(sourceAsset, amount, fee, destChain, destAsset, recipient, transferSequence, messageSequence);
+        emit BridgeInitiated(sourceAsset, amount, fee, destChain, recipient, transferSequence, messageSequence);
     }
 
     function completeTransfer(bytes memory vaa) external {

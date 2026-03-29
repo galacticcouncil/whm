@@ -23,11 +23,10 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
 
     address public owner;
     mapping(address => bool) public authorizedBridges;
-    mapping(address => mapping(address => bool)) public allowedAssetPairs;
+    mapping(address => address) public destAssetFor;
 
     struct PendingTransfer {
         address sourceAsset;
-        address destAsset;
         uint256 amount;
         bytes32 recipient;
     }
@@ -42,7 +41,7 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
     event TransferQueued(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
     event PendingTransferFulfilled(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
     event Withdrawn(address indexed asset, uint256 amount, address indexed to);
-    event AllowedAssetPairUpdated(address indexed sourceAsset, address indexed destAsset, bool enabled);
+    event DestAssetUpdated(address indexed sourceAsset, address indexed destAsset);
 
     // ─── Errors ──────────────────────────────────────────────────
 
@@ -52,7 +51,7 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
     error ERC20TransferFailed();
     error NoPendingTransfers();
     error InsufficientBalance();
-    error AssetPairNotAllowed(address sourceAsset, address destAsset);
+    error AssetNotConfigured(address sourceAsset);
 
     // ─── Modifiers ───────────────────────────────────────────────
 
@@ -87,19 +86,19 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
     // ─── Core ────────────────────────────────────────────────────
 
     /// @notice Deliver tokens to recipient. If insufficient balance, queue as pending.
-    /// @param sourceAsset The source chain asset address (for validation)
-    /// @param destAsset The destination asset address (encodes currency ID in last 4 bytes)
+    /// @param sourceAsset The source chain asset address (destAsset derived from destAssetFor mapping)
     /// @param amount The amount to transfer
     /// @param recipient The recipient as bytes32 (AccountId32)
-    function transfer(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient) external onlyAuthorizedBridge {
-        if (!allowedAssetPairs[sourceAsset][destAsset]) revert AssetPairNotAllowed(sourceAsset, destAsset);
+    function transfer(address sourceAsset, uint256 amount, bytes32 recipient) external onlyAuthorizedBridge {
+        address destAsset = destAssetFor[sourceAsset];
+        if (destAsset == address(0)) revert AssetNotConfigured(sourceAsset);
 
         if (IERC20(destAsset).balanceOf(address(this)) >= amount) {
             _executeTransfer(destAsset, amount, recipient);
             emit TransferExecuted(sourceAsset, destAsset, recipient, amount);
         } else {
             uint256 id = pendingTail++;
-            pendingTransfers[id] = PendingTransfer({sourceAsset: sourceAsset, destAsset: destAsset, amount: amount, recipient: recipient});
+            pendingTransfers[id] = PendingTransfer({sourceAsset: sourceAsset, amount: amount, recipient: recipient});
             emit TransferQueued(id, sourceAsset, destAsset, recipient, amount);
         }
     }
@@ -110,13 +109,14 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
 
         uint256 id = pendingHead;
         PendingTransfer memory pt = pendingTransfers[id];
-        if (IERC20(pt.destAsset).balanceOf(address(this)) < pt.amount) revert InsufficientBalance();
+        address destAsset = destAssetFor[pt.sourceAsset];
+        if (IERC20(destAsset).balanceOf(address(this)) < pt.amount) revert InsufficientBalance();
 
         pendingHead++;
         delete pendingTransfers[id];
 
-        _executeTransfer(pt.destAsset, pt.amount, pt.recipient);
-        emit PendingTransferFulfilled(id, pt.sourceAsset, pt.destAsset, pt.recipient, pt.amount);
+        _executeTransfer(destAsset, pt.amount, pt.recipient);
+        emit PendingTransferFulfilled(id, pt.sourceAsset, destAsset, pt.recipient, pt.amount);
     }
 
     /// @notice Execute currencies.transfer via dispatch precompile
@@ -157,9 +157,9 @@ contract InstaTransfer is Initializable, UUPSUpgradeable {
         authorizedBridges[bridge] = enabled;
     }
 
-    function setAllowedAssetPair(address sourceAsset, address destAsset, bool enabled) external onlyOwner {
-        allowedAssetPairs[sourceAsset][destAsset] = enabled;
-        emit AllowedAssetPairUpdated(sourceAsset, destAsset, enabled);
+    function setDestAsset(address sourceAsset, address destAsset) external onlyOwner {
+        destAssetFor[sourceAsset] = destAsset;
+        emit DestAssetUpdated(sourceAsset, destAsset);
     }
 
     /// @notice Emergency withdrawal of ERC20 tokens
