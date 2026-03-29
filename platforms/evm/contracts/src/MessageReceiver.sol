@@ -9,7 +9,6 @@ contract MessageReceiver is Initializable, UUPSUpgradeable {
     IWormhole public wormhole;
 
     address public owner;
-    mapping(address => bool) public authorized;
     mapping(uint16 => bytes32) public authorizedEmitters;
 
     mapping(bytes32 => bool) public processedVaas;

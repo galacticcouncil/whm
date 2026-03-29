@@ -15,6 +15,8 @@ contract MessageDispatcher is MessageReceiver {
     uint8 constant ACTION_PRICE_UPDATE = 1;
     uint256 constant ORACLE_PRICE_SCALE_DIVISOR = 1e10;
 
+    uint64 public maxPriceAge = 300; // 5 minutes default
+
     /// @notice action -> handler contract (e.g. ACTION_PRICE_UPDATE -> XcmTransactor)
     mapping(uint8 => address) public handlers;
 
@@ -46,10 +48,8 @@ contract MessageDispatcher is MessageReceiver {
     function _handlePriceUpdate(bytes memory payload) internal virtual {
         (, bytes32 assetId, uint256 price, uint64 timestamp) = abi.decode(payload, (uint8, bytes32, uint256, uint64));
         uint64 latestTimestamp = latestPrices[assetId].timestamp;
-        if (timestamp < latestTimestamp) revert StalePriceUpdate(assetId, timestamp, latestTimestamp);
-
-        latestPrices[assetId] = PriceData({price: price, timestamp: timestamp, receivedAt: uint64(block.timestamp)});
-        emit PriceReceived(assetId, price, timestamp);
+        if (timestamp <= latestTimestamp) revert StalePriceUpdate(assetId, timestamp, latestTimestamp);
+        require(block.timestamp - timestamp <= maxPriceAge, "Price too stale");
 
         address handler = handlers[ACTION_PRICE_UPDATE];
         address oracle = oracles[assetId];
@@ -57,8 +57,11 @@ contract MessageDispatcher is MessageReceiver {
         if (handler == address(0)) revert HandlerNotSet(ACTION_PRICE_UPDATE);
         if (oracle == address(0)) revert OracleNotSet(assetId);
 
+        latestPrices[assetId] = PriceData({price: price, timestamp: timestamp, receivedAt: uint64(block.timestamp)});
+        emit PriceReceived(assetId, price, timestamp);
+
         uint256 scaledPrice = price / ORACLE_PRICE_SCALE_DIVISOR;
-        require(scaledPrice <= uint256(type(int256).max), "Price exceeds int256 range");
+        require(scaledPrice > 0, "Price too low to scale");
         bytes memory input = abi.encodeWithSignature("setPrice(int256)", int256(scaledPrice));
         XcmTransactor(handler).transact(oracle, input);
     }

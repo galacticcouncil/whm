@@ -43,18 +43,20 @@ contract BasejumpProxy is BasejumpBase {
         uint256 actualAmount = balanceAfter - balanceBefore;
         require(actualAmount > 0, "Zero amount received");
 
-        // 1. Slow path: TokenBridge transfer (recipient = BasejumpLanding on dest chain)
-        IERC20(asset).forceApprove(address(tokenBridge), amount);
+        // 1. Slow path: TokenBridge transferWithPayload via MRL
+        //    Full amount is bridged; fee stays in BasejumpLanding on destination
+        IERC20(asset).forceApprove(address(tokenBridge), actualAmount);
         transferSequence = tokenBridge.transferTokens(
             asset,
-            amount,
+            actualAmount,
             destChain,
             destBasejumpLanding,
             0,
             emitterNonce
         );
 
-        // 2. Fast path: instant-finality message with transfer metadata (amount after fee)
+        // 2. Fast path: instant-finality message with net amount (after fee)
+        //    BasejumpLanding sends netAmount to recipient, keeps fee
         messageSequence = _fastTrack(asset, actualAmount, destChain, recipient, transferSequence);
     }
 
