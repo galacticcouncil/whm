@@ -1,93 +1,93 @@
 {
   "migration": "insta-bridge-proxy",
   "environment": "fork",
-  "startedAt": "2026-03-27T14:18:36.650Z",
-  "completedAt": "2026-03-27T14:18:42.572Z",
+  "startedAt": "2026-03-28T10:58:39.739Z",
+  "completedAt": "2026-03-28T10:58:46.413Z",
   "steps": [
     {
       "name": "deploy-transactor",
       "status": "completed",
       "output": {
-        "implementationAddress": "0x9a9f2ccfde556a7e9ff0848998aa4a0cfd8863ae",
-        "proxyAddress": "0x68b1d87f95878fe05b998f19b66f4baba5de1aed",
+        "implementationAddress": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+        "proxyAddress": "0x2279b7a0a67db372996a5fab50d91eaa73d2ebe6",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-        "mda": "5DZjk6sZ25ST9R9k2deKZndTCsVXuvu3aG9VYK7ECWjD8TtZ",
-        "mdaH160": "0x4260b39f5f0960277927d168a365e0ba152a7426"
+        "mda": "5EGAA1NN6974demxzmZukNYR7THkssUZUcBwo4SMgMkLd2y3",
+        "mdaH160": "0x6134b24bf61e471042fb8a13bb68f83400d43124"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:36.652Z",
-      "completedAt": "2026-03-27T14:18:36.900Z"
+      "startedAt": "2026-03-28T10:58:39.740Z",
+      "completedAt": "2026-03-28T10:58:40.212Z"
     },
     {
       "name": "deploy-bridge-proxy",
       "status": "completed",
       "output": {
-        "implementationAddress": "0xc6e7df5e7b4f2a278906862b61205850344d4e7d",
-        "proxyAddress": "0x59b670e9fa9d0a427751af201d676719a970857b",
+        "implementationAddress": "0x610178da211fef7d417bc0e6fed39f05609ad788",
+        "proxyAddress": "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:36.900Z",
-      "completedAt": "2026-03-27T14:18:37.109Z"
+      "startedAt": "2026-03-28T10:58:40.212Z",
+      "completedAt": "2026-03-28T10:58:40.354Z"
     },
     {
       "name": "authorize-bridge-proxy",
       "status": "completed",
       "output": {
-        "txHash": "0x63fd35ebcbb69e28972124fcc327dca2d41e1bbd4d8873ab4463f2a4c859870c",
-        "operator": "0x59b670e9fa9d0a427751af201d676719a970857b",
+        "txHash": "0xffd621d5a28720a27ed5221d7390d377231586acffbeac3d62110e630cd548a4",
+        "operator": "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
         "enabled": "true"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:37.110Z",
-      "completedAt": "2026-03-27T14:18:37.115Z"
+      "startedAt": "2026-03-28T10:58:40.354Z",
+      "completedAt": "2026-03-28T10:58:40.360Z"
     },
     {
       "name": "set-xcm-transactor",
       "status": "completed",
       "output": {
-        "txHash": "0x25d5887523c061750a98f58a1d48513fc3c870f22e917fa2af5eecb0f348b187",
-        "xcmTransactor": "0x68b1d87f95878fe05b998f19b66f4baba5de1aed"
+        "txHash": "0xd151d42676640300da85dbfc57a6a94a177cf100d82a9fd198d75c566c4bfc49",
+        "xcmTransactor": "0x2279b7a0a67db372996a5fab50d91eaa73d2ebe6"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:37.115Z",
-      "completedAt": "2026-03-27T14:18:37.119Z"
+      "startedAt": "2026-03-28T10:58:40.360Z",
+      "completedAt": "2026-03-28T10:58:40.367Z"
     },
     {
       "name": "set-emitter",
       "status": "completed",
       "output": {
-        "txHash": "0x692bfb1425e6406cbfa4dd27d98ede974b2c7668f91e64b8290045518bbb65b3",
+        "txHash": "0x3a5c9824f30f3bdfff926a3556778c40876cba2a314eff3736fa908eacf6ea38",
         "emitterChain": "30",
-        "emitter": "0x000000000000000000000000f109309062a8bec2b0a0bb2f70cd36d2954b98bd"
+        "emitter": "0x0000000000000000000000002637ecb3583940177c0f753f6abc68a2886c8b93"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:42.517Z",
-      "completedAt": "2026-03-27T14:18:42.558Z"
+      "startedAt": "2026-03-28T10:58:46.356Z",
+      "completedAt": "2026-03-28T10:58:46.399Z"
     },
     {
       "name": "set-transfer",
       "status": "completed",
       "output": {
-        "txHash": "0x73eeaf7d494d7b1ebeab6827ea07d0d183c5084826f51f613d63118b946983e7",
+        "txHash": "0x55b9126734e51e829a8c85b39017ba870244a47f5d48f59d6ffd15d1640ed09d",
         "whChainId": "16",
-        "instaTransfer": "0x0000000000000000000000004a679253410272dd5232b3ff7cf5dbb88f295319"
+        "instaTransfer": "0x000000000000000000000000dc64a140aa3e981100a9beca4e685f962f0cf6c9"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:42.558Z",
-      "completedAt": "2026-03-27T14:18:42.566Z"
+      "startedAt": "2026-03-28T10:58:46.399Z",
+      "completedAt": "2026-03-28T10:58:46.407Z"
     },
     {
       "name": "set-bridge-transfer",
       "status": "completed",
       "output": {
-        "txHash": "0x89f6a3a1979b1c948d7130e486e3571e1a4af1d782b8527b945482ebb034fc4a",
+        "txHash": "0x736d7eb984a50bec2d34c21438a5d9aa87f512e0702091c95720b7750079a43a",
         "whChainId": "30",
-        "instaTransfer": "0x000000000000000000000000d33d1d5990ea091e3445c82815fa0e4bed7150cb"
+        "instaTransfer": "0x00000000000000000000000088dde934c4ccbb44f4742b6258f267b6ea6dead5"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:42.567Z",
-      "completedAt": "2026-03-27T14:18:42.572Z"
+      "startedAt": "2026-03-28T10:58:46.408Z",
+      "completedAt": "2026-03-28T10:58:46.412Z"
     }
   ]
 }

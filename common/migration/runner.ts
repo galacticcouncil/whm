@@ -169,10 +169,8 @@ export interface RunOptions {
   privateKey: string;
   /** Reset this step and all subsequent steps, then run */
   from?: string;
-  /** Stop after completing this step (inclusive) */
-  to?: string;
-  /** Preview steps without executing any actions */
-  dryRun?: boolean;
+  /** Pause after completing this step (inclusive) */
+  pauseAt?: string;
   /** Directory containing definitions/ and envs/ folders */
   migrationsDir: string;
   /** Directory for state output files */
@@ -180,7 +178,7 @@ export interface RunOptions {
 }
 
 export async function runMigration(options: RunOptions): Promise<void> {
-  const { migrationName, environment, privateKey, from, to, dryRun, migrationsDir, deploymentsDir } =
+  const { migrationName, environment, privateKey, from, pauseAt, migrationsDir, deploymentsDir } =
     options;
 
   const definitionsDir = path.join(migrationsDir, "definitions");
@@ -247,18 +245,13 @@ export async function runMigration(options: RunOptions): Promise<void> {
   }
   console.log();
 
-  if (to) {
-    const toIdx = state.steps.findIndex((s) => s.name === to);
-    if (toIdx === -1) {
+  if (pauseAt) {
+    const stopIdx = state.steps.findIndex((s) => s.name === pauseAt);
+    if (stopIdx === -1) {
       throw new Error(
-        `Step "${to}" not found. Available: ${state.steps.map((s) => s.name).join(", ")}`,
+        `Step "${pauseAt}" not found. Available: ${state.steps.map((s) => s.name).join(", ")}`,
       );
     }
-  }
-
-  if (dryRun) {
-    console.log("Dry run — no steps executed.\n");
-    return;
   }
 
   // Execute steps sequentially
@@ -268,7 +261,7 @@ export async function runMigration(options: RunOptions): Promise<void> {
 
     if (stepState.status === "completed") {
       console.log(`⏭  ${step.name} (completed)`);
-      if (to && step.name === to) break;
+      if (pauseAt && step.name === pauseAt) break;
       continue;
     }
 
@@ -290,9 +283,9 @@ export async function runMigration(options: RunOptions): Promise<void> {
         console.log(`   ${key}: ${value}`);
       }
 
-      if (to && step.name === to) {
+      if (pauseAt && step.name === pauseAt) {
         saveState(deploymentsDir, state);
-        console.log(`\n⏸  Stopped after: ${to}\n`);
+        console.log(`\n⏸  Paused after: ${pauseAt}\n`);
         return;
       }
     } catch (err) {

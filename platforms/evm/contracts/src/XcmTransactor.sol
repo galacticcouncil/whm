@@ -133,7 +133,7 @@ contract XcmTransactor is Initializable, UUPSUpgradeable {
     }
 
     function _onlyAuthorizedDispatcher() internal view {
-        if (!authorized[msg.sender]) revert NotAuthorizedDispatcher();
+        if (!authorizedDispatchers[msg.sender]) revert NotAuthorizedDispatcher();
     }
 
     function _encodeEvmCall(address target, bytes calldata input) internal view returns (bytes memory) {

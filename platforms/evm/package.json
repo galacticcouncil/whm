@@ -5,16 +5,10 @@
   "scripts": {
     "build": "cd contracts && forge build",
     "test": "cd contracts && forge test",
-    "script:account:get-secret": "npx tsx scripts/getSecret.ts",
-    "script:emitter:send-message": "npx tsx scripts/emitter/sendMessage.ts",
-    "script:receiver:receive-message": "npx tsx scripts/receiver/receiveMessage.ts",
-    "script:transactor:transact": "npx tsx scripts/transactor/transact.ts",
-    "script:insta-bridge:bridge-via-wormhole": "npx tsx scripts/instaBridge/bridgeViaWormhole.ts",
-    "script:insta-bridge:complete-transfer": "npx tsx scripts/instaBridge/completeTransfer.ts",
+    "migration:run": "npx tsx migrations/run.ts",
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
-    "migration:run": "npx tsx migrations/run.ts",
-    "migration:dry-run": "npx tsx migrations/run.ts --dry-run",
+    "fork:hydration": "bash sh/fork-hydration.sh",
     "migrate:oracle-relay": "bash sh/migrate-oracle-relay.sh",
     "migrate:insta-bridge": "bash sh/migrate-insta-bridge.sh"
   },

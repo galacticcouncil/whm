@@ -53,19 +53,21 @@ pnpm run test:validator
 
 ## Scripts
 
+Standalone operational scripts. Use **DOTENV_CONFIG_PATH** for targeting .env variables.
+
 ### Account
 
 #### Get secret
 
 Derive a wallet secret from a mnemonic seed and account address.
 
-| Flag        | Description     |
-| ----------- | --------------- |
+| Flag        | Description      |
+| ----------- | ---------------- |
 | `--seed`    | Account mnemonic |
 | `--address` | Account address  |
 
 ```bash
-pnpm run account:getSecret -- \
+npx tsx scripts/getSecret.ts \
  --seed your_account_seed \
  --address your_account_address
 ```
@@ -81,7 +83,7 @@ Convert a Solana public key to its bytes32 hex representation (used for cross-ch
 | `--id` | Solana public key string |
 
 ```bash
-pnpm run asset:getBytes32 -- \
+npx tsx scripts/getBytes32.ts \
  --id your_public_key
 ```
 
@@ -94,7 +96,7 @@ To run scripts against local validator use **DOTENV_CONFIG_PATH=.env.fork**.
 Spawn a local Solana test validator pre-loaded with the message-emitter program and Wormhole accounts.
 
 ```bash
-pnpm emitter:runValidator
+npx tsx scripts/emitter/runValidator.ts
 ```
 
 #### Deploy program
@@ -107,7 +109,7 @@ Deploy the message-emitter program to the configured cluster.
 | `--test` | Use in local environment to airdrop sol  |
 
 ```bash
-pnpm emitter:deploy -- \
+npx tsx scripts/emitter/deploy.ts \
  --pk your_private_key \
  --test true
 ```
@@ -123,7 +125,7 @@ Close the deployed program and reclaim rent lamports to a recipient account.
 | `--recipient` | Recipient account for reclaimed lamports (defaults to authority)      |
 
 ```bash
-pnpm emitter:close -- \
+npx tsx scripts/emitter/close.ts \
  --pk your_private_key \
  --programId your_program_id \
  --recipient your_wallet_address
@@ -139,7 +141,7 @@ Publish a string message as a Wormhole VAA through the Core Bridge.
 | `--message` | Message payload to send (string or hex-encoded data) |
 
 ```bash
-pnpm emitter:sendMessage -- \
+npx tsx scripts/emitter/sendMessage.ts \
  --pk your_private_key \
  --message your_message
 ```
@@ -153,6 +155,6 @@ Read the latest oracle price and publish it as a Wormhole VAA.
 | `--pk` | Private key used to sign the transaction |
 
 ```bash
-pnpm emitter:sendPrice -- \
+npx tsx scripts/emitter/sendPrice.ts \
  --pk your_private_key
 ```

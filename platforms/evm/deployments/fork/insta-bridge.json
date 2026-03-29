@@ -1,69 +1,69 @@
 {
   "migration": "insta-bridge",
   "environment": "fork",
-  "startedAt": "2026-03-27T14:18:39.925Z",
-  "completedAt": "2026-03-27T14:18:41.014Z",
+  "startedAt": "2026-03-28T10:58:43.120Z",
+  "completedAt": "2026-03-28T10:58:44.784Z",
   "steps": [
     {
       "name": "deploy-bridge",
       "status": "completed",
       "output": {
-        "implementationAddress": "0xe9f876be7da7f975c8e40f5fa3ce9426c447b374",
-        "proxyAddress": "0xf109309062a8bec2b0a0bb2f70cd36d2954b98bd",
+        "implementationAddress": "0x65b604fbbee5cc867d93ffea6d17839ee3217b24",
+        "proxyAddress": "0x2637ecb3583940177c0f753f6abc68a2886c8b93",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
         "wormholeId": "30"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:39.927Z",
-      "completedAt": "2026-03-27T14:18:40.718Z"
+      "startedAt": "2026-03-28T10:58:43.122Z",
+      "completedAt": "2026-03-28T10:58:44.204Z"
     },
     {
       "name": "deploy-transfer",
       "status": "completed",
       "output": {
-        "implementationAddress": "0xcb4a4a0f29db9e89331e13d46ebc843c725fc49d",
-        "proxyAddress": "0xd33d1d5990ea091e3445c82815fa0e4bed7150cb",
+        "implementationAddress": "0x44ad48b048954a4b58629acb6f7674b6f917249f",
+        "proxyAddress": "0x88dde934c4ccbb44f4742b6258f267b6ea6dead5",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:40.718Z",
-      "completedAt": "2026-03-27T14:18:40.997Z"
+      "startedAt": "2026-03-28T10:58:44.205Z",
+      "completedAt": "2026-03-28T10:58:44.767Z"
     },
     {
       "name": "set-transfer",
       "status": "completed",
       "output": {
-        "txHash": "0x5cf4066c12f124d9d6c0155df34bd074b15c242708f736be94b68ac75b79bf56",
+        "txHash": "0xc9a323561aff8a54830d91faf3792bee3df605dd8c607c35f3bbb2983c95a926",
         "whChainId": "30",
-        "instaTransfer": "0x000000000000000000000000d33d1d5990ea091e3445c82815fa0e4bed7150cb"
+        "instaTransfer": "0x00000000000000000000000088dde934c4ccbb44f4742b6258f267b6ea6dead5"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:40.997Z",
-      "completedAt": "2026-03-27T14:18:41.003Z"
+      "startedAt": "2026-03-28T10:58:44.767Z",
+      "completedAt": "2026-03-28T10:58:44.774Z"
     },
     {
       "name": "set-emitter",
       "status": "completed",
       "output": {
-        "txHash": "0xa2bed75cf8ed74cf17693f0900b4f8c9bf9a4050216d87896d20059763387565",
+        "txHash": "0x3fbd8bec8a14e72090aa8603ca02a0e6de686dd1bd1e66c4afe35bcecf1ceaa4",
         "emitterChain": "16",
-        "emitter": "0x00000000000000000000000059b670e9fa9d0a427751af201d676719a970857b"
+        "emitter": "0x000000000000000000000000b7f8bc63bbcad18155201308c8f3540b07f84f5e"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:41.004Z",
-      "completedAt": "2026-03-27T14:18:41.009Z"
+      "startedAt": "2026-03-28T10:58:44.774Z",
+      "completedAt": "2026-03-28T10:58:44.779Z"
     },
     {
       "name": "set-transfer-proxy",
       "status": "completed",
       "output": {
-        "txHash": "0x4f1ffc9355f16818c73424728d1b859d821b0524f2d2d875ea48d91cea281d8e",
+        "txHash": "0xecac492dfdcebadaf2e8b8231d7ac077e6e86fabea1c5a31fc503e281cc2c302",
         "whChainId": "16",
-        "instaTransfer": "0x0000000000000000000000004a679253410272dd5232b3ff7cf5dbb88f295319"
+        "instaTransfer": "0x000000000000000000000000dc64a140aa3e981100a9beca4e685f962f0cf6c9"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:41.010Z",
-      "completedAt": "2026-03-27T14:18:41.014Z"
+      "startedAt": "2026-03-28T10:58:44.779Z",
+      "completedAt": "2026-03-28T10:58:44.784Z"
     }
   ]
 }

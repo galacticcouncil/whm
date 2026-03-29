@@ -37,8 +37,8 @@ run() {
   npx tsx "$MIGRATIONS_DIR/run.ts" --migration "$migration" --env "$ENV" --pk "$pk" "$@"
 }
 
-echo "=== 1/4: insta-bridge-proxy (up to set-xcm-transactor) ==="
-run insta-bridge-proxy "$PK_IPROXY" --to set-xcm-transactor
+echo "=== 1/4: insta-bridge-proxy (init) ==="
+run insta-bridge-proxy "$PK_IPROXY" --pause-at set-xcm-transactor
 
 echo "=== 2/4: insta-transfer ==="
 run insta-transfer "$PK_ITRANSFER"
@@ -46,7 +46,7 @@ run insta-transfer "$PK_ITRANSFER"
 echo "=== 3/4: insta-bridge ==="
 run insta-bridge "$PK_IBRIDGE"
 
-echo "=== 4/4: insta-bridge-proxy (resume from set-emitter) ==="
+echo "=== 4/4: insta-bridge-proxy (resume) ==="
 run insta-bridge-proxy "$PK_IPROXY"
 
 echo "=== Done ==="

@@ -1,10 +1,49 @@
 # WHM (Wormhole Messaging)
 
-Generic cross-chain messaging framework built on Wormhole. A Solana program ABI-encodes arbitrary payloads and publishes them as VAAs. On Moonbeam, upgradeable EVM contracts receive, validate, and route messages, then dispatch actions to destination parachains via XCM. The action-based routing is extensible — new message types plug in without changing the core pipeline.
+Cross-chain infrastructure built on Wormhole connecting EVM chains, Solana, and Hydration via Moonbeam. Handles oracle price relay, instant token bridging, and extensible message routing — all through upgradeable contracts and off-chain agents.
 
-The first use case is **oracle price relay**: the Solana program reads Kamino Scope oracle prices and broadcasts them through Wormhole to Moonbeam, which forwards price updates to Hydration's on-chain oracle via XCM.
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              MONOREPO (pnpm)                                    │
+│                                                                                 │
+│  ┌──────────┐   ┌──────────────────────────┐   ┌────────────────────────────┐   │
+│  │  common/ │   │    platforms/solana/     │   │      platforms/evm/        │   │
+│  │          │   │                          │   │                            │   │
+│  │  - args  │◄──┤  Anchor Program (Rust)   │   │  Foundry Contracts (Sol)   │──►│
+│  │  - utils │   │  TypeScript Scripts      │   │  TypeScript Scripts        │   │
+│  │  - migr. │   └──────────────────────────┘   └────────────────────────────┘   │
+│  └──────────┘                                                                   │
+│                                                                                 │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │                          agents/ (off-chain)                             │   │
+│  │                                                                          │   │
+│  │  ┌──────────────────┐   ┌──────────────────┐   ┌───────────────────┐     │   │
+│  │  │  Broadcaster     │   │  Relayer         │   │  <<Custom>>       │     │   │
+│  │  │                  │   │                  │   │                   │     │   │
+│  │  │  Triggers price  │   │  Polls Wormhole  │   │                   │     │   │
+│  │  │  broadcasts on   │   │  for signed VAAs │   │                   │     │   │
+│  │  │  Solana          │   │  → submits to    │   │                   │     │   │
+│  │  │                  │   │    Evm/Solana/.. │   │                   │     │   │
+│  │  └──────────────────┘   └──────────────────┘   └───────────────────┘     │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
 
-See [SCHEMA.md](SCHEMA.md) for the full architecture diagram.
+## Use Cases
+
+### Oracle Relay
+
+Solana program reads Kamino Scope oracle prices and broadcasts them through Wormhole to Moonbeam, which forwards price updates to Hydration's on-chain oracle via XCM.
+
+- [Spec](docs/oracle/spec.md)
+- [Schema](docs/oracle/schema.md)
+
+### Insta Bridge
+
+Instant cross-chain token bridging between EVM chains and Hydration via Moonbeam. Users get tokens on the destination chain immediately (~60s) while the slow Wormhole Token Bridge transfer settles in the background (~13 min).
+
+- [Spec](docs/instabridge/spec.md)
+- [Schema](docs/instabridge.schema.md)
 
 ## Setup
 

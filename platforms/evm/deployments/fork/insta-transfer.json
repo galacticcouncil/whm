@@ -1,32 +1,32 @@
 {
   "migration": "insta-transfer",
   "environment": "fork",
-  "startedAt": "2026-03-27T14:18:38.422Z",
-  "completedAt": "2026-03-27T14:18:38.612Z",
+  "startedAt": "2026-03-28T10:58:41.649Z",
+  "completedAt": "2026-03-28T10:58:41.835Z",
   "steps": [
     {
       "name": "deploy-transfer",
       "status": "completed",
       "output": {
-        "implementationAddress": "0xa85233c63b9ee964add6f2cffe00fd84eb32338f",
-        "proxyAddress": "0x4a679253410272dd5232b3ff7cf5dbb88f295319",
+        "implementationAddress": "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
+        "proxyAddress": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:38.423Z",
-      "completedAt": "2026-03-27T14:18:38.605Z"
+      "startedAt": "2026-03-28T10:58:41.650Z",
+      "completedAt": "2026-03-28T10:58:41.828Z"
     },
     {
       "name": "authorize-proxy",
       "status": "completed",
       "output": {
-        "txHash": "0x9a7ace8868680a0cebed41a4ecb1bdd087dda3ad82e526d320d42089ebc3a8cc",
-        "bridgeAddress": "0x4260b39f5f0960277927d168a365e0ba152a7426",
+        "txHash": "0x910674efd7ea699ca7810c4dbc1e50f2157821a1418d90334b0685fed638118e",
+        "bridgeAddress": "0x6134b24bf61e471042fb8a13bb68f83400d43124",
         "enabled": "true"
       },
       "error": null,
-      "startedAt": "2026-03-27T14:18:38.606Z",
-      "completedAt": "2026-03-27T14:18:38.611Z"
+      "startedAt": "2026-03-28T10:58:41.829Z",
+      "completedAt": "2026-03-28T10:58:41.835Z"
     }
   ]
 }
