@@ -38,12 +38,12 @@ Solana program reads Kamino Scope oracle prices and broadcasts them through Worm
 - [Spec](docs/oracle/spec.md)
 - [Schema](docs/oracle/schema.md)
 
-### Insta Bridge
+### Basejump
 
 Instant cross-chain token bridging between EVM chains and Hydration via Moonbeam. Users get tokens on the destination chain immediately (~60s) while the slow Wormhole Token Bridge transfer settles in the background (~13 min).
 
-- [Spec](docs/instabridge/spec.md)
-- [Schema](docs/instabridge.schema.md)
+- [Spec](docs/basejump/spec.md)
+- [Schema](docs/basejump/schema.md)
 
 ## Setup
 

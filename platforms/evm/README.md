@@ -54,19 +54,19 @@ PK=0x... pnpm run migrate:oracle-relay -- fork
 
 ### basejump
 
-Deploy the full InstaBridge stack across three chains — InstaBridgeProxy (Moonbeam), InstaTransfer (Hydration), and InstaBridge (Base or other EVM chain). The script coordinates the deployment sequence, pausing between phases to wire cross-chain references.
+Deploy the full Basejump stack across three chains — BasejumpProxy (Moonbeam), BasejumpLanding (Hydration), and Basejump (Base or other EVM chain). The script coordinates the deployment sequence, pausing between phases to wire cross-chain references.
 
-Env files: `insta-bridge-proxy.fork.env`, `insta-transfer.fork.env`, `insta-bridge.fork.env`
+Env files: `basejump-proxy.fork.env`, `basejump-landing.fork.env`, `basejump.fork.env`
 
-| Env variable   | Description                                              |
-| -------------- | -------------------------------------------------------- |
-| `PK_IPROXY`    | Private key for the InstaBridgeProxy deployer (Moonbeam) |
-| `PK_ITRANSFER` | Private key for the InstaTransfer deployer (Hydration)   |
-| `PK_IBRIDGE`   | Private key for the InstaBridge deployer (e.g. Base)     |
+| Env variable | Description                                              |
+| ------------ | -------------------------------------------------------- |
+| `PK_PROXY`   | Private key for the BasejumpProxy deployer (Moonbeam)    |
+| `PK_LANDING` | Private key for the BasejumpLanding deployer (Hydration) |
+| `PK`         | Private key for the Basejump deployer (e.g. Base)        |
 
 ```bash
-PK_IPROXY=0x... PK_ITRANSFER=0x... PK_IBRIDGE=0x... \
-  pnpm run migrate:insta-bridge -- fork
+PK=0x... PK_PROXY=0x... PK_LANDING=0x... \
+  pnpm run migrate:basejump -- fork
 ```
 
 ## Scripts

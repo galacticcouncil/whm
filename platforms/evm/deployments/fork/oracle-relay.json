@@ -1,82 +1,82 @@
 {
   "migration": "oracle-relay",
   "environment": "fork",
-  "startedAt": "2026-03-27T13:53:32.874Z",
-  "completedAt": "2026-03-27T14:06:28.160Z",
+  "startedAt": "2026-03-29T16:32:34.990Z",
+  "completedAt": "2026-03-29T16:32:35.369Z",
   "steps": [
     {
       "name": "deploy-transactor",
       "status": "completed",
       "output": {
-        "implementationAddress": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
-        "proxyAddress": "0x2279b7a0a67db372996a5fab50d91eaa73d2ebe6",
+        "implementationAddress": "0x09635f643e140090a9a8dcd712ed6285858cebef",
+        "proxyAddress": "0xc5a5c42992decbae36851359345fe25997f5c42d",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-        "mda": "5EGAA1NN6974demxzmZukNYR7THkssUZUcBwo4SMgMkLd2y3",
-        "mdaH160": "0x6134b24bf61e471042fb8a13bb68f83400d43124"
+        "mda": "5FLCgj2AFSyZXwgCt24J2TzjtQskvY9CfNLkSsS5NaYvay7K",
+        "mdaH160": "0x90866d50a83ecda78451d281d2a128f7afb8eaee"
       },
       "error": null,
-      "startedAt": "2026-03-27T13:53:32.876Z",
-      "completedAt": "2026-03-27T13:53:33.329Z"
+      "startedAt": "2026-03-29T16:32:34.992Z",
+      "completedAt": "2026-03-29T16:32:35.238Z"
     },
     {
       "name": "deploy-dispatcher",
       "status": "completed",
       "output": {
-        "implementationAddress": "0x610178da211fef7d417bc0e6fed39f05609ad788",
-        "proxyAddress": "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
+        "implementationAddress": "0xe6e340d132b5f46d1e472debcd681b2abc16e57e",
+        "proxyAddress": "0xc3e53f4d16ae77db1c982e75a937b9f60fe63690",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
       },
       "error": null,
-      "startedAt": "2026-03-27T13:53:33.329Z",
-      "completedAt": "2026-03-27T13:53:33.455Z"
+      "startedAt": "2026-03-29T16:32:35.238Z",
+      "completedAt": "2026-03-29T16:32:35.348Z"
     },
     {
       "name": "authorize-dispatcher",
       "status": "completed",
       "output": {
-        "txHash": "0x5bd5b61ea05a6a9a98aeeeb87bc1739ccb5d52b000dfe555da6c9b72b512edf6",
-        "operator": "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
+        "txHash": "0x24bb2fc389d7b7e47dfa9ad4b34eb5f9b1d8ea5c2d251039b716021a30e9ca92",
+        "operator": "0xc3e53f4d16ae77db1c982e75a937b9f60fe63690",
         "enabled": "true"
       },
       "error": null,
-      "startedAt": "2026-03-27T13:53:33.456Z",
-      "completedAt": "2026-03-27T13:53:33.461Z"
+      "startedAt": "2026-03-29T16:32:35.349Z",
+      "completedAt": "2026-03-29T16:32:35.353Z"
     },
     {
       "name": "register-emitter",
       "status": "completed",
       "output": {
-        "txHash": "0x233195dbcd3d6fdbf08e44f8a0f9003bae15afb91c893c35f0fd7509a975267e",
+        "txHash": "0x4db39f52d3fa06d7455f5dde7e23dd7b09b48ae197392de6c903b04202e2fdad",
         "emitterBytes32": "0x1a7d87b78e17674ccdf71c221454194f103eef9631b7c805750159522df5b937",
         "sourceChain": "1"
       },
       "error": null,
-      "startedAt": "2026-03-27T13:53:33.461Z",
-      "completedAt": "2026-03-27T13:53:33.466Z"
+      "startedAt": "2026-03-29T16:32:35.354Z",
+      "completedAt": "2026-03-29T16:32:35.358Z"
     },
     {
       "name": "set-handler",
       "status": "completed",
       "output": {
-        "txHash": "0x0578bce263cf23f5f6703c6be5ae9698ec0340806e58b6bb085e5c775c306f1a",
+        "txHash": "0x945e6ced9ef53cacb51971d2f70f64aa06a6f33803cd6ed0d64dfce81f221796",
         "actionId": "1",
-        "handler": "0x2279b7a0a67db372996a5fab50d91eaa73d2ebe6"
+        "handler": "0xc5a5c42992decbae36851359345fe25997f5c42d"
       },
       "error": null,
-      "startedAt": "2026-03-27T13:53:33.466Z",
-      "completedAt": "2026-03-27T13:53:33.470Z"
+      "startedAt": "2026-03-29T16:32:35.359Z",
+      "completedAt": "2026-03-29T16:32:35.363Z"
     },
     {
       "name": "set-oracle-prime",
       "status": "completed",
       "output": {
-        "txHash": "0x63a07eec6ccaaca98300674bf5bf16f64d31fee0caa7b30d20fd036e5a70d017",
+        "txHash": "0xbf2e4aec1abd56f6ff1de0e05c54d1256537fb5a37b0ff79865cf72e1201935e",
         "assetId": "0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da",
         "oracle": "0x82022F77ae239Ad99bB1F2aC0d8DaFF6Cc976a07"
       },
       "error": null,
-      "startedAt": "2026-03-27T13:53:33.470Z",
-      "completedAt": "2026-03-27T13:53:33.475Z"
+      "startedAt": "2026-03-29T16:32:35.364Z",
+      "completedAt": "2026-03-29T16:32:35.368Z"
     }
   ]
 }

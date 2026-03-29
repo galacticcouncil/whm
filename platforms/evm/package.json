@@ -10,7 +10,7 @@
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
     "fork:hydration": "bash sh/fork-hydration.sh",
     "migrate:oracle-relay": "bash sh/migrate-oracle-relay.sh",
-    "migrate:insta-bridge": "bash sh/migrate-insta-bridge.sh"
+    "migrate:basejump": "bash sh/migrate-basejump.sh"
   },
   "dependencies": {
     "@galacticcouncil/common": "^0.5.0",

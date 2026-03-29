@@ -1,0 +1,69 @@
+{
+  "migration": "basejump",
+  "environment": "fork",
+  "startedAt": "2026-03-29T16:32:06.394Z",
+  "completedAt": "2026-03-29T16:32:07.639Z",
+  "steps": [
+    {
+      "name": "deploy-bridge",
+      "status": "completed",
+      "output": {
+        "implementationAddress": "0xe9f876be7da7f975c8e40f5fa3ce9426c447b374",
+        "proxyAddress": "0xf109309062a8bec2b0a0bb2f70cd36d2954b98bd",
+        "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "wormholeId": "30"
+      },
+      "error": null,
+      "startedAt": "2026-03-29T16:32:06.396Z",
+      "completedAt": "2026-03-29T16:32:06.771Z"
+    },
+    {
+      "name": "deploy-transfer",
+      "status": "completed",
+      "output": {
+        "implementationAddress": "0xcb4a4a0f29db9e89331e13d46ebc843c725fc49d",
+        "proxyAddress": "0xd33d1d5990ea091e3445c82815fa0e4bed7150cb",
+        "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      },
+      "error": null,
+      "startedAt": "2026-03-29T16:32:06.772Z",
+      "completedAt": "2026-03-29T16:32:07.620Z"
+    },
+    {
+      "name": "set-transfer",
+      "status": "completed",
+      "output": {
+        "txHash": "0x531421e7c0b2a763271c63d8349d9402079415c0d835fc37f5e94a6271b61ca9",
+        "whChainId": "30",
+        "basejumpLanding": "0x000000000000000000000000d33d1d5990ea091e3445c82815fa0e4bed7150cb"
+      },
+      "error": null,
+      "startedAt": "2026-03-29T16:32:07.620Z",
+      "completedAt": "2026-03-29T16:32:07.627Z"
+    },
+    {
+      "name": "set-emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0x761ff758806fdb4db498536000ebe9f67fd9283c2bbc4356deffca89097eb522",
+        "emitterChain": "16",
+        "emitter": "0x00000000000000000000000059b670e9fa9d0a427751af201d676719a970857b"
+      },
+      "error": null,
+      "startedAt": "2026-03-29T16:32:07.628Z",
+      "completedAt": "2026-03-29T16:32:07.633Z"
+    },
+    {
+      "name": "set-transfer-proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x40c05c7dab4f84e4070d02323a91e48c63f971938556318f7cb4a9fa4b6891cc",
+        "whChainId": "16",
+        "basejumpLanding": "0x000000000000000000000000a513e6e4b8f2a923d98304ec87f64353c4d5c853"
+      },
+      "error": null,
+      "startedAt": "2026-03-29T16:32:07.633Z",
+      "completedAt": "2026-03-29T16:32:07.638Z"
+    }
+  ]
+}

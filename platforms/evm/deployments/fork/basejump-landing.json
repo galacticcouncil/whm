@@ -1,0 +1,32 @@
+{
+  "migration": "basejump-landing",
+  "environment": "fork",
+  "startedAt": "2026-03-29T16:32:04.730Z",
+  "completedAt": "2026-03-29T16:32:05.098Z",
+  "steps": [
+    {
+      "name": "deploy-transfer",
+      "status": "completed",
+      "output": {
+        "implementationAddress": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+        "proxyAddress": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+        "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      },
+      "error": null,
+      "startedAt": "2026-03-29T16:32:04.731Z",
+      "completedAt": "2026-03-29T16:32:05.092Z"
+    },
+    {
+      "name": "authorize-proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x0004ee53195148759669efd917dafa5fcc8b7c745ef08b82550fbb89da3b6df5",
+        "bridgeAddress": "0x4260b39f5f0960277927d168a365e0ba152a7426",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-03-29T16:32:05.092Z",
+      "completedAt": "2026-03-29T16:32:05.098Z"
+    }
+  ]
+}

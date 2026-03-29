@@ -33,8 +33,8 @@ contract BasejumpProxy is BasejumpBase {
     ) external payable override returns (uint64 transferSequence, uint64 messageSequence) {
         if (amount == 0) revert ZeroAmount();
 
-        bytes32 destInstaTransfer = basejumpLandings[destChain];
-        if (destInstaTransfer == bytes32(0)) revert BasejumpLandingNotSet(destChain);
+        bytes32 destBasejumpLanding = basejumpLandings[destChain];
+        if (destBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(destChain);
 
         // Measure actual received amount (handles fee-on-transfer tokens)
         uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
@@ -43,13 +43,13 @@ contract BasejumpProxy is BasejumpBase {
         uint256 actualAmount = balanceAfter - balanceBefore;
         require(actualAmount > 0, "Zero amount received");
 
-        // 1. Slow path: TokenBridge transfer (recipient = InstaTransfer on dest chain)
+        // 1. Slow path: TokenBridge transfer (recipient = BasejumpLanding on dest chain)
         IERC20(asset).forceApprove(address(tokenBridge), amount);
         transferSequence = tokenBridge.transferTokens(
             asset,
             amount,
             destChain,
-            destInstaTransfer,
+            destBasejumpLanding,
             0,
             emitterNonce
         );

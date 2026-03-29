@@ -555,7 +555,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
     }
 
     function testBasejumpProxyBridgeNotSupported() public {
-        vm.expectRevert(BasejumpProxy.NotSupported.selector);
+        vm.expectRevert(abi.encodeWithSelector(IBasejump.BasejumpLandingNotSet.selector, BASE_CHAIN_ID));
         basejumpMoonbeam.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             TRANSFER_AMOUNT,
