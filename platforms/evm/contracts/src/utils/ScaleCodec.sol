@@ -79,6 +79,17 @@ library ScaleCodec {
         return r;
     }
 
+    /// @notice Encode uint32 as 4-byte little-endian (SCALE u32)
+    function u32Le(uint32 value) internal pure returns (bytes memory) {
+        bytes memory r = new bytes(4);
+        for (uint256 i; i < 4; i++) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            r[i] = bytes1(uint8(value));
+            value >>= 8;
+        }
+        return r;
+    }
+
     /// @notice Encode bytes as SCALE Vec<u8> (compact length prefix + raw data)
     function encodeVecU8(bytes memory data) internal pure returns (bytes memory) {
         return abi.encodePacked(compactU32(uint32(data.length)), data);

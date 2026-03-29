@@ -1,26 +1,21 @@
 import "dotenv/config";
 
-import { encodeFunctionData, isAddress, pad } from "viem";
+import { encodeFunctionData, isAddress } from "viem";
 
 import { args } from "@whm/common";
 import { ifs, wallet } from "../../lib";
 
-import instaBridgeProxyJson from "../../contracts/out/InstaBridgeProxy.sol/InstaBridgeProxy.json";
+import basejumpLandingJson from "../../contracts/out/BasejumpLanding.sol/BasejumpLanding.json";
 import erc1967ProxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
-const { requiredArg, optionalArg, requiredEnv } = args;
+const { optionalArg, requiredEnv } = args;
 const { getWallet } = wallet;
 
 function getConfig() {
-  const rpcUrl = requiredEnv("IBRI_RPC");
-  const wormholeCore = requiredEnv("IBRI_WORMHOLE_CORE");
-  const tokenBridge = requiredEnv("IBRI_TOKEN_BRIDGE");
-  const chainId = requiredEnv("IBRI_CHAIN_ID");
+  const rpcUrl = requiredEnv("BASEJUMP_LANDING_RPC");
+  const chainId = requiredEnv("BASEJUMP_LANDING_CHAIN_ID");
 
-  if (!isAddress(wormholeCore)) throw new Error("Invalid wormhole core address.");
-  if (!isAddress(tokenBridge)) throw new Error("Invalid token bridge address.");
-
-  const privateKey = requiredArg("--pk");
+  const privateKey = requiredEnv("PRIVATE_KEY");
 
   const proxy = optionalArg("--proxy");
   if (proxy && !isAddress(proxy)) {
@@ -31,17 +26,16 @@ function getConfig() {
     rpcUrl,
     chainId: Number(chainId),
     privateKey: privateKey as `0x${string}`,
-    wormholeCore: wormholeCore as `0x${string}`,
-    tokenBridge: tokenBridge as `0x${string}`,
     proxy: proxy as `0x${string}` | undefined,
   };
 }
 
 async function main(): Promise<void> {
-  const { rpcUrl, chainId, privateKey, wormholeCore, tokenBridge, proxy } = getConfig();
+  const { rpcUrl, chainId, privateKey, proxy } = getConfig();
 
   const { publicClient, walletClient, account } = getWallet(rpcUrl, chainId, privateKey);
-  const { abi, bytecode } = instaBridgeProxyJson as ifs.ContractArtifact;
+
+  const { abi, bytecode } = basejumpLandingJson as ifs.ContractArtifact;
 
   const implDeployHash = await walletClient.deployContract({
     abi,
@@ -65,13 +59,13 @@ async function main(): Promise<void> {
 
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
-    console.log("InstaBridgeProxy implementation:", implementationAddress);
-    console.log("InstaBridgeProxy proxy:", proxy, "(upgraded)");
+    console.log("BasejumpLanding implementation:", implementationAddress);
+    console.log("BasejumpLanding proxy:", proxy, "(upgraded)");
   } else {
     const initializeData = encodeFunctionData({
       abi,
       functionName: "initialize",
-      args: [wormholeCore, tokenBridge],
+      args: [],
     });
 
     const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson as ifs.ContractArtifact;
@@ -85,16 +79,16 @@ async function main(): Promise<void> {
     const proxyDeployReceipt = await publicClient.waitForTransactionReceipt({
       hash: proxyDeployHash,
     });
+
     if (!proxyDeployReceipt.contractAddress) {
       throw new Error("Proxy deployment failed! Contract address missing.");
     }
 
-    const proxyAddress = proxyDeployReceipt.contractAddress;
+    const basejumpLandingAddress = proxyDeployReceipt.contractAddress;
 
-    console.log("InstaBridgeProxy implementation:", implementationAddress);
-    console.log("InstaBridgeProxy proxy:", proxyAddress);
-    console.log("InstaBridgeProxy proxy (bytes32):", pad(proxyAddress));
-    console.log("InstaBridgeProxy owner:", account.address);
+    console.log("BasejumpLanding implementation:", implementationAddress);
+    console.log("BasejumpLanding proxy:", basejumpLandingAddress);
+    console.log("BasejumpLanding owner:", account.address);
   }
 }
 
