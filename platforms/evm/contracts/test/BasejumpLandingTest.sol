@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {BasejumpLanding} from "../src/BasejumpLanding.sol";
+import {IBasejumpLanding} from "../src/interfaces/IBasejumpLanding.sol";
 
 /// @dev Minimal ERC20 with mint
 contract MockERC20 {
@@ -104,7 +105,7 @@ contract BasejumpLandingTest is Test {
         uint256 amount = 1_000e6;
 
         vm.expectEmit(true, true, true, true);
-        emit BasejumpLanding.TransferExecuted(address(sourceUsdc), address(usdc), recipient, amount);
+        emit IBasejumpLanding.TransferExecuted(address(sourceUsdc), address(usdc), recipient, amount);
 
         vm.prank(bridge);
         instaTransfer.transfer(address(sourceUsdc), amount, recipient);
@@ -122,7 +123,7 @@ contract BasejumpLandingTest is Test {
 
     function testTransferRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(BasejumpLanding.NotAuthorizedBridge.selector);
+        vm.expectRevert(IBasejumpLanding.NotAuthorizedBridge.selector);
         instaTransfer.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
@@ -130,7 +131,7 @@ contract BasejumpLandingTest is Test {
         address unconfiguredSource = makeAddr("unconfiguredSource");
 
         vm.prank(bridge);
-        vm.expectRevert(abi.encodeWithSelector(BasejumpLanding.AssetNotConfigured.selector, unconfiguredSource));
+        vm.expectRevert(abi.encodeWithSelector(IBasejumpLanding.AssetNotConfigured.selector, unconfiguredSource));
         instaTransfer.transfer(unconfiguredSource, 1_000e6, recipient);
     }
 
@@ -139,7 +140,7 @@ contract BasejumpLandingTest is Test {
         vm.mockCallRevert(DISPATCH_PRECOMPILE, bytes(""), bytes("dispatch failed"));
 
         vm.prank(bridge);
-        vm.expectRevert(BasejumpLanding.DispatchFailed.selector);
+        vm.expectRevert(IBasejumpLanding.DispatchFailed.selector);
         instaTransfer.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
@@ -147,7 +148,7 @@ contract BasejumpLandingTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.expectEmit(true, true, true, true);
-        emit BasejumpLanding.TransferQueued(0, address(sourceUsdc), address(usdc), recipient, overAmount);
+        emit IBasejumpLanding.TransferQueued(0, address(sourceUsdc), address(usdc), recipient, overAmount);
 
         vm.prank(bridge);
         instaTransfer.transfer(address(sourceUsdc), overAmount, recipient);
@@ -177,7 +178,7 @@ contract BasejumpLandingTest is Test {
 
         // Fulfill
         vm.expectEmit(true, true, true, true);
-        emit BasejumpLanding.PendingTransferFulfilled(0, address(sourceUsdc), address(usdc), recipient, overAmount);
+        emit IBasejumpLanding.PendingTransferFulfilled(0, address(sourceUsdc), address(usdc), recipient, overAmount);
 
         instaTransfer.fulfillPending();
 
@@ -202,7 +203,7 @@ contract BasejumpLandingTest is Test {
     }
 
     function testFulfillPendingRevertsNoPending() public {
-        vm.expectRevert(BasejumpLanding.NoPendingTransfers.selector);
+        vm.expectRevert(IBasejumpLanding.NoPendingTransfers.selector);
         instaTransfer.fulfillPending();
     }
 
@@ -213,7 +214,7 @@ contract BasejumpLandingTest is Test {
         instaTransfer.transfer(address(sourceUsdc), overAmount, recipient);
 
         // Don't replenish — should revert
-        vm.expectRevert(BasejumpLanding.InsufficientBalance.selector);
+        vm.expectRevert(IBasejumpLanding.InsufficientBalance.selector);
         instaTransfer.fulfillPending();
     }
 
@@ -227,7 +228,7 @@ contract BasejumpLandingTest is Test {
         instaTransfer.fulfillPending();
 
         // Second attempt — queue is empty
-        vm.expectRevert(BasejumpLanding.NoPendingTransfers.selector);
+        vm.expectRevert(IBasejumpLanding.NoPendingTransfers.selector);
         instaTransfer.fulfillPending();
     }
 
@@ -270,14 +271,14 @@ contract BasejumpLandingTest is Test {
         address dest = makeAddr("dest");
 
         vm.expectEmit(true, true, false, true);
-        emit BasejumpLanding.Withdrawn(address(usdc), 50_000e6, dest);
+        emit IBasejumpLanding.Withdrawn(address(usdc), 50_000e6, dest);
 
         instaTransfer.withdraw(address(usdc), 50_000e6, dest);
     }
 
     function testWithdrawRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(BasejumpLanding.NotOwner.selector);
+        vm.expectRevert(IBasejumpLanding.NotOwner.selector);
         instaTransfer.withdraw(address(usdc), 1, stranger);
     }
 
@@ -292,7 +293,7 @@ contract BasejumpLandingTest is Test {
 
     function testSetAuthorizedBridgeRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(BasejumpLanding.NotOwner.selector);
+        vm.expectRevert(IBasejumpLanding.NotOwner.selector);
         instaTransfer.setAuthorizedBridge(bridge, false);
     }
 
@@ -304,7 +305,7 @@ contract BasejumpLandingTest is Test {
 
     function testSetOwnerRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(BasejumpLanding.NotOwner.selector);
+        vm.expectRevert(IBasejumpLanding.NotOwner.selector);
         instaTransfer.setOwner(stranger);
     }
 
@@ -317,7 +318,7 @@ contract BasejumpLandingTest is Test {
         assertEq(instaTransfer.destAssetFor(newSource), address(0));
 
         vm.expectEmit(true, true, false, true);
-        emit BasejumpLanding.DestAssetUpdated(newSource, newDest);
+        emit IBasejumpLanding.DestAssetUpdated(newSource, newDest);
 
         instaTransfer.setDestAsset(newSource, newDest);
         assertEq(instaTransfer.destAssetFor(newSource), newDest);
@@ -329,7 +330,7 @@ contract BasejumpLandingTest is Test {
 
     function testSetDestAssetRevertsUnauthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(BasejumpLanding.NotOwner.selector);
+        vm.expectRevert(IBasejumpLanding.NotOwner.selector);
         instaTransfer.setDestAsset(address(sourceUsdc), address(usdc));
     }
 
@@ -339,7 +340,7 @@ contract BasejumpLandingTest is Test {
 
         // Transfer should now revert
         vm.prank(bridge);
-        vm.expectRevert(abi.encodeWithSelector(BasejumpLanding.AssetNotConfigured.selector, address(sourceUsdc)));
+        vm.expectRevert(abi.encodeWithSelector(IBasejumpLanding.AssetNotConfigured.selector, address(sourceUsdc)));
         instaTransfer.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
@@ -352,7 +353,7 @@ contract BasejumpLandingTest is Test {
         uint256 amount = 1_000e6;
 
         vm.expectEmit(true, true, true, true);
-        emit BasejumpLanding.TransferExecuted(address(sourceUsdc), address(usdc), polkadotRecipient, amount);
+        emit IBasejumpLanding.TransferExecuted(address(sourceUsdc), address(usdc), polkadotRecipient, amount);
 
         vm.prank(bridge);
         instaTransfer.transfer(address(sourceUsdc), amount, polkadotRecipient);

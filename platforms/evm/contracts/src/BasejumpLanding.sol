@@ -3,15 +3,19 @@ pragma solidity ^0.8.22;
 
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
-import {IERC20} from "forge-std/interfaces/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ScaleCodec} from "./utils/ScaleCodec.sol";
+
+import {IBasejumpLanding} from "./interfaces/IBasejumpLanding.sol";
 
 /// @title BasejumpLanding - Instant token delivery for cross-chain bridges on Hydration
 /// @notice Pre-funded liquidity pool. Authorized bridges call transfer() to
 ///         deliver tokens instantly via currencies.transfer extrinsic.
 ///         Fees are deducted on the Basejump side. Replay protection is
 ///         handled by the bridge layer (MessageReceiver.processedVaas).
-contract BasejumpLanding is Initializable, UUPSUpgradeable {
+contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
+    using SafeERC20 for IERC20;
     /// @notice Hydration dispatch precompile at 0x0401 (1025 decimal)
     address public constant DISPATCH = 0x0000000000000000000000000000000000000401;
 
@@ -34,24 +38,6 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable {
     uint256 public pendingHead;
     uint256 public pendingTail;
     mapping(uint256 => PendingTransfer) public pendingTransfers;
-
-    // ─── Events ──────────────────────────────────────────────────
-
-    event TransferExecuted(address indexed sourceAsset, address indexed destAsset, bytes32 indexed recipient, uint256 amount);
-    event TransferQueued(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
-    event PendingTransferFulfilled(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
-    event Withdrawn(address indexed asset, uint256 amount, address indexed to);
-    event DestAssetUpdated(address indexed sourceAsset, address indexed destAsset);
-
-    // ─── Errors ──────────────────────────────────────────────────
-
-    error NotOwner();
-    error NotAuthorizedBridge();
-    error DispatchFailed();
-    error ERC20TransferFailed();
-    error NoPendingTransfers();
-    error InsufficientBalance();
-    error AssetNotConfigured(address sourceAsset);
 
     // ─── Modifiers ───────────────────────────────────────────────
 
@@ -164,7 +150,7 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable {
 
     /// @notice Emergency withdrawal of ERC20 tokens
     function withdraw(address asset, uint256 amount, address to) external onlyOwner {
-        if (!IERC20(asset).transfer(to, amount)) revert ERC20TransferFailed();
+        IERC20(asset).safeTransfer(to, amount);
         emit Withdrawn(asset, amount, to);
     }
 }

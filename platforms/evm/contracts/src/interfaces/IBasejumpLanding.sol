@@ -15,7 +15,6 @@ interface IBasejumpLanding {
     error NotOwner();
     error NotAuthorizedBridge();
     error DispatchFailed();
-    error ERC20TransferFailed();
     error NoPendingTransfers();
     error InsufficientBalance();
     error AssetNotConfigured(address sourceAsset);

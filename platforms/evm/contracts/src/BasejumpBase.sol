@@ -6,11 +6,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {MessageReceiver} from "./MessageReceiver.sol";
+import {IBasejump} from "./interfaces/IBasejump.sol";
 
 /// @title BasejumpBase — Shared logic for Basejump variants
 /// @notice Common storage, completeTransfer (VAA verification), and _processMessage.
 ///         Subclasses implement bridgeViaWormhole (outbound) and _executeTransfer (inbound).
-abstract contract BasejumpBase is MessageReceiver {
+abstract contract BasejumpBase is MessageReceiver, IBasejump {
     using SafeERC20 for IERC20;
 
     ITokenBridge public tokenBridge;
@@ -19,24 +20,8 @@ abstract contract BasejumpBase is MessageReceiver {
     /// @notice chainId → BasejumpLanding address (bytes32 for cross-chain compat)
     mapping(uint16 => bytes32) public basejumpLandings;
 
-    event BridgeInitiated(
-        address indexed asset,
-        uint256 amount,
-        uint256 fee,
-        uint16 destChain,
-        bytes32 recipient,
-        uint64 transferSequence,
-        uint64 messageSequence
-    );
-
-    event TransferProcessed(address indexed sourceAsset, uint256 amount, bytes32 indexed recipient);
-
     /// @notice Fixed fee per source asset (e.g. 1e6 for 1 USDC)
     mapping(address => uint256) public assetFee;
-
-    error BasejumpLandingNotSet(uint16 chainId);
-    error ZeroAmount();
-    error AmountTooLowForFee(uint256 amount, uint256 fee);
 
     function _initBasejump(address _wormhole, address _tokenBridge)
         internal
