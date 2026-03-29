@@ -19,42 +19,19 @@ contract BasejumpProxy is BasejumpBase {
     address public xcmTransactor;
 
     error XcmTransactorNotSet();
+    error NotSupported();
 
     function initialize(address _wormhole, address _tokenBridge) public virtual initializer {
         _initBasejump(_wormhole, _tokenBridge);
     }
 
     function bridgeViaWormhole(
-        address asset,
-        uint256 amount,
-        uint16 destChain,
-        bytes32 recipient
-    ) external payable returns (uint64 transferSequence, uint64 messageSequence) {
-        if (amount == 0) revert ZeroAmount();
-
-        bytes32 destBasejumpLanding = basejumpLandings[destChain];
-        if (destBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(destChain);
-
-        // Measure actual received amount (handles fee-on-transfer tokens)
-        uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
-        IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-        uint256 balanceAfter = IERC20(asset).balanceOf(address(this));
-        uint256 actualAmount = balanceAfter - balanceBefore;
-        require(actualAmount > 0, "Zero amount received");
-
-        // 1. Slow path: TokenBridge transfer (recipient = BasejumpLanding on dest chain)
-        IERC20(asset).forceApprove(address(tokenBridge), actualAmount);
-        transferSequence = tokenBridge.transferTokens(
-            asset,
-            actualAmount,
-            destChain,
-            destBasejumpLanding,
-            0,
-            emitterNonce
-        );
-
-        // 2. Fast path: instant-finality message with transfer metadata (amount after fee)
-        messageSequence = _fastTrack(asset, actualAmount, destChain, recipient, transferSequence);
+        address,
+        uint256,
+        uint16,
+        bytes32
+    ) external payable override returns (uint64, uint64) {
+        revert NotSupported();
     }
 
     function _executeTransfer(address sourceAsset, uint256 amount, bytes32 recipient) internal override {
