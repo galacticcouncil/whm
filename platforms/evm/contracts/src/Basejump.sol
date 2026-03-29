@@ -40,7 +40,12 @@ contract Basejump is BasejumpBase {
         bytes32 destBasejumpLanding = basejumpLandings[destChain];
         if (destBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(destChain);
 
+        // Measure actual received amount (handles fee-on-transfer tokens)
+        uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = IERC20(asset).balanceOf(address(this));
+        uint256 actualAmount = balanceAfter - balanceBefore;
+        require(actualAmount > 0, "Zero amount received");
 
         // 1. Slow path: TokenBridge transferWithPayload via MRL
         //    Full amount is bridged; fee stays in BasejumpLanding on destination
@@ -50,10 +55,10 @@ contract Basejump is BasejumpBase {
         address basejumpLanding = _bytes32ToAddress(destBasejumpLanding);
         bytes memory mrlPayload = MrlPayload.encodeEth(HYDRATION_PARA_ID, basejumpLanding);
 
-        IERC20(asset).forceApprove(address(tokenBridge), amount);
+        IERC20(asset).forceApprove(address(tokenBridge), actualAmount);
         transferSequence = tokenBridge.transferTokensWithPayload(
             asset,
-            amount,
+            actualAmount,
             destChain,
             GMP_PRECOMPILE,
             emitterNonce,
@@ -62,7 +67,7 @@ contract Basejump is BasejumpBase {
 
         // 2. Fast path: instant-finality message with net amount (after fee)
         //    BasejumpLanding sends netAmount to recipient, keeps fee
-        messageSequence = _fastTrack(asset, amount, destChain, recipient, transferSequence);
+        messageSequence = _fastTrack(asset, actualAmount, destChain, recipient, transferSequence);
     }
 
     function _executeTransfer(address sourceAsset, uint256 amount, bytes32 recipient) internal override {

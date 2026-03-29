@@ -118,6 +118,8 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
         // Currency ID is derived from the last 4 bytes of the asset address
         uint32 currencyId = uint32(uint160(asset));
 
+        require(amount <= type(uint128).max, "Amount exceeds uint128");
+
         return abi.encodePacked(
             CURRENCIES_PALLET_INDEX,
             CURRENCIES_TRANSFER_INDEX,
