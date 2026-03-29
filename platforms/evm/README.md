@@ -52,7 +52,7 @@ Env files: `oracle-relay.fork.env`
 PK=0x... pnpm run migrate:oracle-relay -- fork
 ```
 
-### insta-bridge
+### basejump
 
 Deploy the full InstaBridge stack across three chains — InstaBridgeProxy (Moonbeam), InstaTransfer (Hydration), and InstaBridge (Base or other EVM chain). The script coordinates the deployment sequence, pausing between phases to wire cross-chain references.
 
@@ -164,7 +164,7 @@ npx tsx scripts/transactor/transact.ts \
   --input encoded_calldata_hex
 ```
 
-### InstaBridge
+### Basejump
 
 #### Bridge via Wormhole
 
@@ -178,7 +178,7 @@ Initiate a cross-chain bridge transfer. Approves the asset, fetches the Wormhole
 | Flag           | Description                              |
 | -------------- | ---------------------------------------- |
 | `--pk`         | Private key used to sign the transaction |
-| `--address`    | InstaBridge contract address             |
+| `--address`    | Basejump contract address                |
 | `--asset`      | ERC20 token address to bridge            |
 | `--amount`     | Amount in native token units             |
 | `--dest-chain` | Destination Wormhole chain ID            |
@@ -186,13 +186,12 @@ Initiate a cross-chain bridge transfer. Approves the asset, fetches the Wormhole
 | `--recipient`  | Recipient address (bytes32)              |
 
 ```bash
-npx tsx scripts/instaBridge/bridgeViaWormhole.ts \
+npx tsx scripts/basejump/bridgeViaWormhole.ts \
   --pk your_private_key \
-  --address insta_bridge_address \
+  --address basejump_address \
   --asset token_address \
   --amount 1000000 \
   --dest-chain dest_wormhole_chain_id \
-  --dest-asset dest_asset_address \
   --recipient recipient_bytes32
 ```
 
@@ -208,12 +207,12 @@ Submit a signed VAA to complete a fast-path transfer on the destination chain.
 | Flag        | Description                                               |
 | ----------- | --------------------------------------------------------- |
 | `--pk`      | Private key used to sign the transaction                  |
-| `--address` | InstaBridge contract address                              |
+| `--address` | Basejump contract address                                 |
 | `--vaa`     | Hex-encoded signed VAA from the Wormhole Guardian network |
 
 ```bash
-npx tsx scripts/instaBridge/completeTransfer.ts \
+npx tsx scripts/basejump/completeTransfer.ts \
   --pk your_private_key \
-  --address insta_bridge_address \
+  --address basejump_address \
   --vaa hex_encoded_vaa
 ```

@@ -5,7 +5,7 @@ import { isAddress, isHex } from "viem";
 import { args } from "@whm/common";
 import { ifs, wallet } from "../../lib";
 
-import instaBridgeJson from "../../contracts/out/InstaBridge.sol/InstaBridge.json";
+import basejumpJson from "../../contracts/out/Basejump.sol/Basejump.json";
 
 const { requiredArg, requiredEnv } = args;
 const { getWallet } = wallet;
@@ -19,12 +19,10 @@ function getConfig() {
   const asset = requiredArg("--asset");
   const amount = requiredArg("--amount");
   const destChain = requiredArg("--dest-chain");
-  const destAsset = requiredArg("--dest-asset");
   const recipient = requiredArg("--recipient");
 
   if (!isAddress(address)) throw new Error("Invalid contract address.");
   if (!isAddress(asset)) throw new Error("Invalid asset address.");
-  if (!isAddress(destAsset)) throw new Error("Invalid dest asset address.");
   if (!isHex(recipient) || recipient.length !== 66)
     throw new Error("Invalid recipient (expected bytes32).");
 
@@ -36,18 +34,17 @@ function getConfig() {
     asset: asset as `0x${string}`,
     amount: BigInt(amount),
     destChain: Number(destChain),
-    destAsset: destAsset as `0x${string}`,
     recipient: recipient as `0x${string}`,
   };
 }
 
 async function main(): Promise<void> {
-  const { address, rpcUrl, chainId, privateKey, asset, amount, destChain, destAsset, recipient } =
+  const { address, rpcUrl, chainId, privateKey, asset, amount, destChain, recipient } =
     getConfig();
 
   const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
 
-  const { abi } = instaBridgeJson as ifs.ContractArtifact;
+  const { abi } = basejumpJson as ifs.ContractArtifact;
 
   // Approve
   const erc20Abi = [
@@ -100,14 +97,14 @@ async function main(): Promise<void> {
     address,
     abi,
     functionName: "bridgeViaWormhole",
-    args: [asset, amount, destChain, destAsset, recipient],
+    args: [asset, amount, destChain, recipient],
     value: fee,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
   console.log(`Bridge initiated: tx=${receipt.transactionHash}`);
   console.log(`  asset=${asset}, amount=${amount}`);
-  console.log(`  destChain=${destChain}, destAsset=${destAsset}, recipient=${recipient}`);
+  console.log(`  destChain=${destChain}, recipient=${recipient}`);
 }
 
 main().catch((error) => {

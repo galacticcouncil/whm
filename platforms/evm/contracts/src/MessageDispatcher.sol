@@ -58,7 +58,7 @@ contract MessageDispatcher is MessageReceiver {
         if (oracle == address(0)) revert OracleNotSet(assetId);
 
         uint256 scaledPrice = price / ORACLE_PRICE_SCALE_DIVISOR;
-        // forge-lint: disable-next-line(unsafe-typecast)
+        require(scaledPrice <= uint256(type(int256).max), "Price exceeds int256 range");
         bytes memory input = abi.encodeWithSignature("setPrice(int256)", int256(scaledPrice));
         XcmTransactor(handler).transact(oracle, input);
     }
