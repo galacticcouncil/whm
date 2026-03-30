@@ -1,57 +1,57 @@
 {
   "migration": "basejump-proxy",
   "environment": "fork",
-  "startedAt": "2026-03-30T15:20:41.007Z",
-  "completedAt": "2026-03-30T15:20:41.420Z",
+  "startedAt": "2026-03-30T18:53:08.064Z",
+  "completedAt": "2026-03-30T18:53:08.376Z",
   "steps": [
     {
       "name": "deploy-proxy",
       "status": "completed",
       "output": {
-        "implAddress": "0xf5059a5d33d5853360d16c683c16e67980206f36",
-        "proxyAddress": "0x95401dc811bb5740090279ba06cfa8fcf6113778",
+        "implAddress": "0xdc11f7e700a4c898ae5caddb1082cffa76512add",
+        "proxyAddress": "0x51a1ceb83b83f1985a81c295d1ff28afef186e02",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
       },
       "error": null,
-      "startedAt": "2026-03-30T15:20:41.009Z",
-      "completedAt": "2026-03-30T15:20:41.263Z"
+      "startedAt": "2026-03-30T18:53:08.065Z",
+      "completedAt": "2026-03-30T18:53:08.234Z"
     },
     {
       "name": "deploy-transactor",
       "status": "completed",
       "output": {
-        "implAddress": "0x998abeb3e57409262ae5b751f60747921b33613e",
-        "proxyAddress": "0x70e0ba845a1a0f2da3359c97e0285013525ffc49",
+        "implAddress": "0x36b58f5c1969b7b6591d752ea6f5486d069010ab",
+        "proxyAddress": "0x8198f5d8f8cffe8f9c413d98a0a55aeb8ab9fbb7",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-        "mda": "5G6JUREpNeKUH2yBbBVUb41PerVKC5qbK6hjABv81K5FJpCp",
-        "mdaH160": "0xb228b555699c3d130ad739ce6d6514e389da9560"
+        "mda": "5D5m6xwq4zmSZmGddDMmci22hfKeSaVW27cs31CBs7XQAZZT",
+        "mdaH160": "0x2d0a6853dc5553b48f329e2a9becc2cf4e3c12f6"
       },
       "error": null,
-      "startedAt": "2026-03-30T15:20:41.264Z",
-      "completedAt": "2026-03-30T15:20:41.409Z"
+      "startedAt": "2026-03-30T18:53:08.234Z",
+      "completedAt": "2026-03-30T18:53:08.366Z"
     },
     {
       "name": "authorize-proxy",
       "status": "completed",
       "output": {
-        "txHash": "0x57e0b3f7a6eb82e575eee9bbd7b6e1e406950cb5a00748a225d2bad833135389",
-        "operator": "0x95401dc811bb5740090279ba06cfa8fcf6113778",
+        "txHash": "0x2e7fbc1d8a0556eec9199870e07515166470e4444a498e85a736aaee34fb0987",
+        "operator": "0x51a1ceb83b83f1985a81c295d1ff28afef186e02",
         "enabled": "true"
       },
       "error": null,
-      "startedAt": "2026-03-30T15:20:41.410Z",
-      "completedAt": "2026-03-30T15:20:41.415Z"
+      "startedAt": "2026-03-30T18:53:08.366Z",
+      "completedAt": "2026-03-30T18:53:08.371Z"
     },
     {
       "name": "set-xcm-transactor",
       "status": "completed",
       "output": {
-        "txHash": "0x8b3e9f643102ff4a57b39982ea59d0af9d36e36c9e9298f9d381df5daf1c5b3b",
-        "xcmTransactor": "0x70e0ba845a1a0f2da3359c97e0285013525ffc49"
+        "txHash": "0x06327591b50d0c8f9611dbf9393b4f725cde73afafa280e856863103bf62e467",
+        "xcmTransactor": "0x8198f5d8f8cffe8f9c413d98a0a55aeb8ab9fbb7"
       },
       "error": null,
-      "startedAt": "2026-03-30T15:20:41.415Z",
-      "completedAt": "2026-03-30T15:20:41.419Z"
+      "startedAt": "2026-03-30T18:53:08.371Z",
+      "completedAt": "2026-03-30T18:53:08.375Z"
     }
   ]
 }

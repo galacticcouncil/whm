@@ -1,32 +1,32 @@
 {
   "migration": "basejump-landing",
   "environment": "fork",
-  "startedAt": "2026-03-30T15:20:42.726Z",
-  "completedAt": "2026-03-30T15:20:43.058Z",
+  "startedAt": "2026-03-30T18:53:09.634Z",
+  "completedAt": "2026-03-30T18:53:09.814Z",
   "steps": [
     {
       "name": "deploy",
       "status": "completed",
       "output": {
-        "implAddress": "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
-        "proxyAddress": "0xa51c1fc2f0d1a1b8494ed1fe312d7c3a78ed91c0",
+        "implAddress": "0xc6e7df5e7b4f2a278906862b61205850344d4e7d",
+        "proxyAddress": "0x59b670e9fa9d0a427751af201d676719a970857b",
         "ownerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
       },
       "error": null,
-      "startedAt": "2026-03-30T15:20:42.728Z",
-      "completedAt": "2026-03-30T15:20:43.051Z"
+      "startedAt": "2026-03-30T18:53:09.635Z",
+      "completedAt": "2026-03-30T18:53:09.807Z"
     },
     {
       "name": "authorize-proxy",
       "status": "completed",
       "output": {
-        "txHash": "0x8e41eca65704c9ac0e1a6ed6e231e011b30277bbeeef79703f78552531e09305",
-        "bridgeAddress": "0xb228b555699c3d130ad739ce6d6514e389da9560",
+        "txHash": "0x93cfd5fa8ebb241a08b2661ce9822ab84c24b09b429ba2c125efda353f70a818",
+        "bridgeAddress": "0x2d0a6853dc5553b48f329e2a9becc2cf4e3c12f6",
         "enabled": "true"
       },
       "error": null,
-      "startedAt": "2026-03-30T15:20:43.052Z",
-      "completedAt": "2026-03-30T15:20:43.057Z"
+      "startedAt": "2026-03-30T18:53:09.808Z",
+      "completedAt": "2026-03-30T18:53:09.814Z"
     }
   ]
 }

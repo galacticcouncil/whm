@@ -7,7 +7,7 @@ const step: MigrationStep = {
     const action = ctx.env.LANDING_DEPLOY_ACTION;
     if (!action) return {}; // No Landing
 
-    const { deploy } = await import(`../../actions/${action}/deploy`);
+    const { deploy } = await import(`../../actions/basejumpLanding/${action}`);
 
     return await deploy({
       ...ctx.wallet,

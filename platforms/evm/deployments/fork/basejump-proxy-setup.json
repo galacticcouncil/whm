@@ -1,32 +1,32 @@
 {
   "migration": "basejump-proxy-setup",
   "environment": "fork",
-  "startedAt": "2026-03-30T15:20:45.996Z",
-  "completedAt": "2026-03-30T15:20:46.048Z",
+  "startedAt": "2026-03-30T18:53:12.791Z",
+  "completedAt": "2026-03-30T18:53:12.847Z",
   "steps": [
     {
       "name": "set-emitter",
       "status": "completed",
       "output": {
-        "txHash": "0x0e38a0fbfe0d8dd588b8760da1e4964d43fc31e603612656fb25f65f3222de6f",
+        "txHash": "0x928a91002d6b9a8777224db7eefc6bf9012cf2d16652257ca2e58900dbd7a3ce",
         "emitterChain": "30",
-        "emitter": "0x000000000000000000000000b59da747e222749ba440b270cbdac75770647f89"
+        "emitter": "0x0000000000000000000000007ea0937749d718632f1eda6c8a0fc7116087cd8c"
       },
       "error": null,
-      "startedAt": "2026-03-30T15:20:45.998Z",
-      "completedAt": "2026-03-30T15:20:46.039Z"
+      "startedAt": "2026-03-30T18:53:12.793Z",
+      "completedAt": "2026-03-30T18:53:12.837Z"
     },
     {
       "name": "set-landing",
       "status": "completed",
       "output": {
-        "txHash": "0xe9376e55cfd74151ebf0a1bd4822e2c40309cee4b245fefc4dab29ab96573169",
+        "txHash": "0x78b1305eaf016a13aef8c04c89947094b1ae35bf2b42b27b315925f69cf83b09",
         "fromWhChain": "30",
-        "landing": "0x000000000000000000000000a51c1fc2f0d1a1b8494ed1fe312d7c3a78ed91c0"
+        "landing": "0x00000000000000000000000059b670e9fa9d0a427751af201d676719a970857b"
       },
       "error": null,
-      "startedAt": "2026-03-30T15:20:46.040Z",
-      "completedAt": "2026-03-30T15:20:46.048Z"
+      "startedAt": "2026-03-30T18:53:12.837Z",
+      "completedAt": "2026-03-30T18:53:12.846Z"
     }
   ]
 }
