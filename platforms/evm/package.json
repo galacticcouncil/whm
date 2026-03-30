@@ -9,6 +9,7 @@
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
     "fork:hydration": "bash sh/fork-hydration.sh",
+    "fork:all": "run-p fork:base fork:moonbeam fork:hydration",
     "migrate:oracle-relay": "bash sh/migrate-oracle-relay.sh",
     "migrate:basejump": "bash sh/migrate-basejump.sh"
   },
@@ -16,5 +17,8 @@
     "@galacticcouncil/common": "^0.5.0",
     "@whm/common": "workspace:*",
     "viem": "^2.38.3"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
   }
 }
