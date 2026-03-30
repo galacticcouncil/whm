@@ -64,6 +64,20 @@ Env files: `basejump-proxy.env`, `basejump-landing.env`, `basejump.env`, `baseju
 | `PK_LANDING` | Private key for the BasejumpLanding deployer (Hydration) |
 | `PK`         | Private key for the Basejump deployer (e.g. Base)        |
 
+**Optional configuration (basejump-landing.env):**
+
+| Env variable | Description                                              |
+| ------------ | -------------------------------------------------------- |
+| `SOURCE_ASSET` | Source chain asset address to map (e.g., Base EURC)   |
+| `DEST_ASSET`   | Destination asset address on Hydration (e.g., Hydration EURC) |
+
+**Optional configuration (basejump.env):**
+
+| Env variable | Description                                              |
+| ------------ | -------------------------------------------------------- |
+| `FEE_ASSET`  | Asset address to set fee for                             |
+| `FEE_AMOUNT` | Fee amount in token units (e.g., 100000 for 0.1 EURC)    |
+
 ```bash
 PK=0x... PK_PROXY=0x... PK_LANDING=0x... \
   pnpm run migrate:basejump -- fork
