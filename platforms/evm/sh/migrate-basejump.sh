@@ -4,10 +4,10 @@ set -euo pipefail
 # Usage: migrate-basejump.sh <env>
 #
 # Runs the full basejump migration sequence in order:
-#   1. basejump-proxy        — up to and including set-xcm-transactor
+#   1. basejump-proxy        — up to and including set-xcm-transactor (skips if done)
 #   2. basejump-landing      — full migration
 #   3. basejump              — full migration
-#   4. basejump-proxy        — resumes from set-emitter to completion
+#   4. basejump-proxy-setup  — per-chain wiring (emitter + landing)
 #
 # Arguments:
 #   <env>   Environment name (e.g. base, fork, moonbeam). Must match an env
@@ -24,29 +24,40 @@ set -euo pipefail
 
 ENV=${1:?Usage: migrate-basejump.sh <env>}
 
+if [ "$ENV" = "fork" ]; then
+  PROXY_ENV="fork"
+else
+  PROXY_ENV="moon"
+fi
+
 PK_PROXY=${PK_PROXY:?Missing PK_PROXY}
 PK_LANDING=${PK_LANDING:?Missing PK_LANDING}
 PK=${PK:?Missing PK}
 
 MIGRATIONS_DIR="$(cd "$(dirname "$0")/.." && pwd)/migrations"
 
-run() {
-  local migration=$1
-  local pk=$2
-  shift 2
-  npx tsx "$MIGRATIONS_DIR/run.ts" --migration "$migration" --env "$ENV" --pk "$pk" "$@"
-}
-
 echo "=== 1/4: basejump-proxy (init) ==="
-run basejump-proxy "$PK_PROXY" --pause-at set-xcm-transactor
+npx tsx "$MIGRATIONS_DIR/run.ts" \
+  --migration "basejump-proxy" \
+  --env "$PROXY_ENV" \
+  --pk "$PK_PROXY"
 
 echo "=== 2/4: basejump-landing ==="
-run basejump-landing "$PK_LANDING"
+npx tsx "$MIGRATIONS_DIR/run.ts" \
+  --migration "basejump-landing" \
+  --env "$ENV" \
+  --pk "$PK_LANDING"
 
 echo "=== 3/4: basejump ==="
-run basejump "$PK"
+npx tsx "$MIGRATIONS_DIR/run.ts" \
+  --migration "basejump" \
+  --env "$ENV" \
+  --pk "$PK"
 
-echo "=== 4/4: basejump-proxy (resume) ==="
-run basejump-proxy "$PK_PROXY"
+echo "=== 4/4: basejump-proxy-setup ==="
+npx tsx "$MIGRATIONS_DIR/run.ts" \
+  --migration "basejump-proxy-setup" \
+  --env "$ENV" \
+  --pk "$PK_PROXY"
 
 echo "=== Done ==="

@@ -30,23 +30,33 @@ Common storage, VAA verification & fee calculation. Subclasses implement `bridge
 
 Bridges funds **into** Hydration via Moonbeam GMP (MRL).
 
-**`bridgeViaWormhole(asset, amount, destChain, recipient)`**
+**Storage:**
+- `landing` (bytes32) — BasejumpLanding on the current chain (for same-chain fast-path delivery)
+- `landingDest` (bytes32) — BasejumpLanding on Hydration (MRL slow-path destination)
 
-1. Calls `TokenBridge.transferTokensWithPayload()` — slow path via MRL. Recipient is Moonbeam GMP precompile (`0x816`), payload is SCALE-encoded `VersionedUserAction::V1` pointing to BasejumpLanding on Hydration (parachain 2034).
+**`bridgeViaWormhole(asset, amount, recipient)`**
+
+1. Calls `TokenBridge.transferTokensWithPayload()` — slow path via MRL. Recipient is Moonbeam GMP precompile (`0x816`), payload is SCALE-encoded `VersionedUserAction::V1` pointing to `landingDest` on Hydration (parachain 2034).
 2. Calls `wormhole.publishMessage()` with **consistency level 200 (instant finality)** — encodes `sourceAsset`, `netAmount` (amount after fee), and `recipient`.
 
-**`completeTransfer(vaa)`** — receives fast-path VAA, calls `BasejumpLanding.transfer()` directly on the same chain.
+Destination chain is hardcoded as `MOONBEAM_WORMHOLE_ID = 16` — all transfers from source EVMs route through Moonbeam.
+
+**`completeTransfer(vaa)`** — receives fast-path VAA, calls `BasejumpLanding.transfer()` via `landing` on the same chain.
 
 ### `BasejumpProxy` — Moonbeam (Hydration Proxy)
 
 Bridges funds **out** from Hydration to external Wormhole chains.
 
+**Storage:**
+- `landings` (mapping uint16 → bytes32) — source chain ID → BasejumpLanding on Hydration (inbound fast-path delivery). Keyed by source chain so transfers from different chains can route to different landing contracts.
+- `landingsDest` (mapping uint16 → bytes32) — dest chain ID → BasejumpLanding on destination (outbound slow-path recipient)
+
 **`bridgeViaWormhole(asset, amount, destChain, recipient)`**
 
-1. Calls `TokenBridge.transferTokens()` — slow path, recipient = BasejumpLanding on dest chain.
+1. Calls `TokenBridge.transferTokens()` — slow path, recipient = `landingsDest[destChain]`.
 2. Calls `wormhole.publishMessage()` with **consistency level 200** — encodes `sourceAsset`, `netAmount` (amount after fee), and `recipient`.
 
-**`completeTransfer(vaa)`** — receives fast-path VAA, dispatches via `XcmTransactor` to BasejumpLanding on Hydration.
+**`completeTransfer(vaa)`** — receives fast-path VAA, looks up `landings[sourceChain]` (from VAA emitter chain ID) and dispatches via `XcmTransactor` to the corresponding BasejumpLanding on Hydration.
 
 ### `BasejumpLanding` — Instant Delivery (Hydration)
 
@@ -92,7 +102,9 @@ See [schema.md](schema.md) for full architecture diagrams (both EVM → Hydratio
 
 ## Interface
 
-- [IBasejump.sol](../../platforms/evm/contracts/src/interfaces/IBasejump.sol)
+- [IBasejumpBase.sol](../../platforms/evm/contracts/src/interfaces/IBasejumpBase.sol) — shared events, errors, `completeTransfer`, `quoteFee`
+- [IBasejump.sol](../../platforms/evm/contracts/src/interfaces/IBasejump.sol) — extends IBasejumpBase with `bridgeViaWormhole(asset, amount, recipient)`
+- [IBasejumpProxy.sol](../../platforms/evm/contracts/src/interfaces/IBasejumpProxy.sol) — extends IBasejumpBase with `bridgeViaWormhole(asset, amount, destChain, recipient)`
 - [IBasejumpLanding.sol](../../platforms/evm/contracts/src/interfaces/IBasejumpLanding.sol)
 
 ## Key Design Decisions

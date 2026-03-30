@@ -17,7 +17,7 @@ export type DeployTransactorParams = WalletContext & {
 };
 
 export type DeployTransactorResult = {
-  implementationAddress: string;
+  implAddress: string;
   proxyAddress: string;
   ownerAddress: string;
   mda: string;
@@ -51,7 +51,7 @@ export async function deployTransactor(
   if (!implReceipt.contractAddress) {
     throw new Error("Implementation deployment failed — no contract address.");
   }
-  const implementationAddress = implReceipt.contractAddress;
+  const implAddress = implReceipt.contractAddress;
 
   // Upgrade existing proxy
   if (proxy) {
@@ -59,7 +59,7 @@ export async function deployTransactor(
       address: proxy,
       abi,
       functionName: "upgradeToAndCall",
-      args: [implementationAddress, "0x"],
+      args: [implAddress, "0x"],
     });
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
@@ -67,7 +67,7 @@ export async function deployTransactor(
     const mdaH160 = acc.getMultilocationDerivatedAccount(sourceParaId, proxy, 1, true);
 
     return {
-      implementationAddress,
+      implAddress,
       proxyAddress: proxy,
       ownerAddress: account.address,
       mda,
@@ -82,7 +82,7 @@ export async function deployTransactor(
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,
     bytecode: proxyBytecode.object,
-    args: [implementationAddress, initializeData],
+    args: [implAddress, initializeData],
   });
   const proxyReceipt = await publicClient.waitForTransactionReceipt({ hash: proxyHash });
   if (!proxyReceipt.contractAddress) {
@@ -103,5 +103,5 @@ export async function deployTransactor(
   const mda = acc.getMultilocationDerivatedAccount(sourceParaId, proxyAddress, 1, false);
   const mdaH160 = acc.getMultilocationDerivatedAccount(sourceParaId, proxyAddress, 1, true);
 
-  return { implementationAddress, proxyAddress, ownerAddress: account.address, mda, mdaH160 };
+  return { implAddress, proxyAddress, ownerAddress: account.address, mda, mdaH160 };
 }

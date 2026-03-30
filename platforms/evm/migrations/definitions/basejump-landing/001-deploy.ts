@@ -1,11 +1,11 @@
 import type { MigrationStep } from "../../types";
-import { deployBasejumpLanding } from "../../actions/basejumpLanding/deploy";
+import { deploy } from "../../actions/basejumpLanding/deploy";
 
 const step: MigrationStep = {
-  name: "deploy-transfer",
+  name: "deploy",
   description: "Deploy BasejumpLanding UUPS proxy",
   action: async (ctx) => {
-    return await deployBasejumpLanding({
+    return await deploy({
       ...ctx.wallet,
     });
   },

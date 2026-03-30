@@ -21,7 +21,7 @@ contract MockTransactor {
 }
 
 contract MessageDispatcherTest is Test, MockWormhole {
-    event MessageReceived(string message);
+    event MessageReceived(uint16 sourceChain, string message);
     event PriceReceived(bytes32 indexed assetId, uint256 price, uint64 timestamp);
 
     MessageDispatcher public dispatcher;
@@ -52,7 +52,7 @@ contract MessageDispatcherTest is Test, MockWormhole {
     function testRoutesPriceUpdate() public {
         bytes32 assetId = keccak256("PRIME");
         uint256 price = 1_234_000_000_000_000_000;
-        uint64 timestamp = 1_739_355_200;
+        uint64 timestamp = uint64(block.timestamp);
         MockTransactor transactor = new MockTransactor();
 
         dispatcher.setHandler(1, address(transactor));
@@ -72,7 +72,7 @@ contract MessageDispatcherTest is Test, MockWormhole {
         string memory message = "hello hydration";
 
         vm.expectEmit(address(dispatcher));
-        emit MessageReceived(message);
+        emit MessageReceived(sourceChain, message);
 
         bytes memory payload = abi.encode(message, address(0xBEEF));
 
@@ -107,7 +107,7 @@ contract MessageDispatcherTest is Test, MockWormhole {
         bytes32 assetId = keccak256("PRIME");
         address oracle = address(0xBEEF);
         uint256 priceWith18Decimals = 1_016_434_800_000_000_000; // 1.0164348 * 1e18
-        uint64 timestamp = 1_739_355_200;
+        uint64 timestamp = uint64(block.timestamp);
 
         dispatcher.setHandler(1, address(transactor));
         dispatcher.setOracle(assetId, oracle);
@@ -140,13 +140,14 @@ contract MessageDispatcherTest is Test, MockWormhole {
         dispatcher.setHandler(1, address(transactor));
         dispatcher.setOracle(assetId, address(0xBEEF));
 
-        bytes memory newerPayload = abi.encode(uint8(1), assetId, uint256(2_000_000_000_000_000_000), uint64(200));
-        bytes memory olderPayload = abi.encode(uint8(1), assetId, uint256(1_000_000_000_000_000_000), uint64(100));
+        uint64 ts = uint64(block.timestamp);
+        bytes memory newerPayload = abi.encode(uint8(1), assetId, uint256(2_000_000_000_000_000_000), ts);
+        bytes memory olderPayload = abi.encode(uint8(1), assetId, uint256(1_000_000_000_000_000_000), ts - 1);
 
         dispatcher.receiveMessage(_buildVaa(newerPayload));
 
         vm.expectRevert(
-            abi.encodeWithSelector(MessageDispatcher.StalePriceUpdate.selector, assetId, uint64(100), uint64(200))
+            abi.encodeWithSelector(MessageDispatcher.StalePriceUpdate.selector, assetId, ts - 1, ts)
         );
         // forge-lint: disable-next-line(unsafe-typecast)
         dispatcher.receiveMessage(_buildVaaWithHash(olderPayload, bytes32("salt")));

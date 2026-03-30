@@ -6,19 +6,17 @@ import type { WalletContext } from "../../types";
 import basejumpLandingJson from "../../../contracts/out/BasejumpLanding.sol/BasejumpLanding.json";
 import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
-export type DeployBasejumpLandingParams = WalletContext & {
+export type DeployParams = WalletContext & {
   proxy?: `0x${string}`;
 };
 
-export type DeployBasejumpLandingResult = {
-  implementationAddress: string;
+export type DeployResult = {
+  implAddress: string;
   proxyAddress: string;
   ownerAddress: string;
 };
 
-export async function deployBasejumpLanding(
-  params: DeployBasejumpLandingParams,
-): Promise<DeployBasejumpLandingResult> {
+export async function deploy(params: DeployParams): Promise<DeployResult> {
   const { publicClient, walletClient, account, proxy } = params;
   const { abi, bytecode } = basejumpLandingJson as ifs.ContractArtifact;
 
@@ -33,19 +31,19 @@ export async function deployBasejumpLanding(
     throw new Error("Implementation deployment failed — no contract address.");
   }
 
-  const implementationAddress = implReceipt.contractAddress;
+  const implAddress = implReceipt.contractAddress;
 
   if (proxy) {
     const upgradeHash = await walletClient.writeContract({
       address: proxy,
       abi,
       functionName: "upgradeToAndCall",
-      args: [implementationAddress, "0x"],
+      args: [implAddress, "0x"],
     });
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
     return {
-      implementationAddress,
+      implAddress,
       proxyAddress: proxy,
       ownerAddress: account.address,
     };
@@ -62,7 +60,7 @@ export async function deployBasejumpLanding(
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,
     bytecode: proxyBytecode.object,
-    args: [implementationAddress, initializeData],
+    args: [implAddress, initializeData],
   });
 
   const proxyReceipt = await publicClient.waitForTransactionReceipt({ hash: proxyHash });
@@ -71,7 +69,7 @@ export async function deployBasejumpLanding(
   }
 
   return {
-    implementationAddress,
+    implAddress,
     proxyAddress: proxyReceipt.contractAddress,
     ownerAddress: account.address,
   };

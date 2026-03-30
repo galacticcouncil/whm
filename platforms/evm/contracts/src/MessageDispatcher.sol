@@ -35,13 +35,13 @@ contract MessageDispatcher is MessageReceiver {
 
     // ─── Message routing ───────────────────────────────────────
 
-    function _processMessage(bytes memory payload) internal virtual override {
+    function _processMessage(uint16 sourceChain, bytes memory payload) internal virtual override {
         uint8 action = uint8(payload[31]);
 
         if (action == ACTION_PRICE_UPDATE) {
             _handlePriceUpdate(payload);
         } else {
-            super._processMessage(payload);
+            super._processMessage(sourceChain, payload);
         }
     }
 

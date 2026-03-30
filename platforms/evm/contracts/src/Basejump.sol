@@ -7,13 +7,14 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {BasejumpBase} from "./BasejumpBase.sol";
 import {MrlPayload} from "./utils/MrlPayload.sol";
 
+import {IBasejump} from "./interfaces/IBasejump.sol";
 import {IBasejumpLanding} from "./interfaces/IBasejumpLanding.sol";
 
 /// @title Basejump — Source EVM chain deployment (Base, Ethereum, etc.)
 /// @notice Bridges funds INTO Hydration via Moonbeam GMP (MRL).
 ///         - bridgeViaWormhole: transferTokensWithPayload + MRL payload → Moonbeam GMP → XCM → Hydration
-///         - completeTransfer: receives fast-path VAA, calls BasejumpLanding directly on this chain
-contract Basejump is BasejumpBase {
+///         - completeTransfer: receives fast-path VAA, calls Landing directly on this chain
+contract Basejump is BasejumpBase, IBasejump {
     using SafeERC20 for IERC20;
 
     /// @notice Moonbeam GMP precompile address (TokenBridge recipient for MRL routing)
@@ -21,6 +22,15 @@ contract Basejump is BasejumpBase {
 
     /// @notice Hydration parachain ID for MRL payload encoding
     uint32 public constant HYDRATION_PARA_ID = 2034;
+
+    /// @notice Moonbeam wormhole id
+    uint16 public constant MOONBEAM_WORMHOLE_ID = 16;
+
+    /// @notice Landing on the current chain (for fast-path delivery)
+    bytes32 public landing;
+
+    /// @notice Landing on Hydration (MRL slow-path destination)
+    bytes32 public landingDest;
 
     function initialize(
         address _wormhole,
@@ -32,13 +42,10 @@ contract Basejump is BasejumpBase {
     function bridgeViaWormhole(
         address asset,
         uint256 amount,
-        uint16 destChain,
         bytes32 recipient
     ) external payable returns (uint64 transferSequence, uint64 messageSequence) {
         if (amount == 0) revert ZeroAmount();
-
-        bytes32 destBasejumpLanding = basejumpLandings[destChain];
-        if (destBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(destChain);
+        if (landingDest == bytes32(0)) revert BasejumpLandingNotSet(MOONBEAM_WORMHOLE_ID);
 
         // Measure actual received amount (handles fee-on-transfer tokens)
         uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
@@ -49,17 +56,15 @@ contract Basejump is BasejumpBase {
 
         // 1. Slow path: TokenBridge transferWithPayload via MRL
         //    Full amount is bridged; fee stays in BasejumpLanding on destination
-        //    destChain  = Moonbeam wormhole chain ID (e.g. 16)
         //    recipient  = Moonbeam GMP precompile (routes via XCM to Hydration)
         //    payload    = MRL encoded destination (BasejumpLanding on Hydration)
-        address basejumpLanding = _bytes32ToAddress(destBasejumpLanding);
-        bytes memory mrlPayload = MrlPayload.encodeEth(HYDRATION_PARA_ID, basejumpLanding);
+        bytes memory mrlPayload = MrlPayload.encodeEth(HYDRATION_PARA_ID, _bytes32ToAddress(landingDest));
 
         IERC20(asset).forceApprove(address(tokenBridge), actualAmount);
         transferSequence = tokenBridge.transferTokensWithPayload(
             asset,
             actualAmount,
-            destChain,
+            MOONBEAM_WORMHOLE_ID,
             GMP_PRECOMPILE,
             emitterNonce,
             mrlPayload
@@ -67,16 +72,22 @@ contract Basejump is BasejumpBase {
 
         // 2. Fast path: instant-finality message with net amount (after fee)
         //    BasejumpLanding sends netAmount to recipient, keeps fee
-        messageSequence = _fastTrack(asset, actualAmount, destChain, recipient, transferSequence);
+        messageSequence = _fastTrack(asset, actualAmount, MOONBEAM_WORMHOLE_ID, recipient, transferSequence);
     }
 
-    function _executeTransfer(address sourceAsset, uint256 amount, bytes32 recipient) internal override {
-        uint16 localChain = wormhole.chainId();
-        bytes32 localBasejumpLanding = basejumpLandings[localChain];
-        if (localBasejumpLanding == bytes32(0)) revert BasejumpLandingNotSet(localChain);
+    function _executeTransfer(uint16, address sourceAsset, uint256 amount, bytes32 recipient) internal override {
+        if (landing == bytes32(0)) revert BasejumpLandingNotSet(wormhole.chainId());
 
-        address basejumpLanding = _bytes32ToAddress(localBasejumpLanding);
-        IBasejumpLanding(basejumpLanding).transfer(sourceAsset, amount, recipient);
+        IBasejumpLanding(_bytes32ToAddress(landing)).transfer(sourceAsset, amount, recipient);
     }
 
+    // ─── Admin ──────────────────────────────────────────────────
+
+    function setLanding(bytes32 _landing) external onlyOwner {
+        landing = _landing;
+    }
+
+    function setLandingDest(bytes32 _landingDest) external onlyOwner {
+        landingDest = _landingDest;
+    }
 }

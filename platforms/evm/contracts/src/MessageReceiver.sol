@@ -13,7 +13,7 @@ contract MessageReceiver is Initializable, UUPSUpgradeable {
 
     mapping(bytes32 => bool) public processedVaas;
 
-    event MessageReceived(string message);
+    event MessageReceived(uint16 sourceChain, string message);
 
     error NotOwner();
     error NotAuthorizedEmitter();
@@ -51,7 +51,7 @@ contract MessageReceiver is Initializable, UUPSUpgradeable {
         processedVaas[vm.hash] = true;
 
         _onlyAuthorizedEmitter(vm.emitterChainId, vm.emitterAddress);
-        _processMessage(vm.payload);
+        _processMessage(vm.emitterChainId, vm.payload);
     }
 
     // ─── Internal ───────────────────────────────────────────────
@@ -64,9 +64,9 @@ contract MessageReceiver is Initializable, UUPSUpgradeable {
         if (authorizedEmitters[sourceChain] != sourceAddress) revert NotAuthorizedEmitter();
     }
 
-    function _processMessage(bytes memory payload) internal virtual {
+    function _processMessage(uint16 sourceChain, bytes memory payload) internal virtual {
         (string memory message) = abi.decode(payload, (string));
-        emit MessageReceived(message);
+        emit MessageReceived(sourceChain, message);
     }
 
     // ─── Upgrade ────────────────────────────────────────────────

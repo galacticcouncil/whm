@@ -15,7 +15,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 function loadEnvFile(envsDir: string, migration: string, env: string): void {
-  const filePath = path.join(envsDir, `${migration}.${env}.env`);
+  const filePath = path.join(envsDir, env, `${migration}.env`);
   if (!fs.existsSync(filePath)) {
     throw new Error(`Env file not found: ${filePath}`);
   }

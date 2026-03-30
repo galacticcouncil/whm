@@ -1,4 +1,4 @@
-import { encodeFunctionData, pad } from "viem";
+import { encodeFunctionData } from "viem";
 
 import type { ifs } from "../../../lib";
 import type { WalletContext } from "../../types";
@@ -6,21 +6,19 @@ import type { WalletContext } from "../../types";
 import basejumpProxyJson from "../../../contracts/out/BasejumpProxy.sol/BasejumpProxy.json";
 import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
-export type DeployBasejumpProxyParams = WalletContext & {
+export type DeployProxyParams = WalletContext & {
   wormholeCore: `0x${string}`;
   tokenBridge: `0x${string}`;
   proxy?: `0x${string}`;
 };
 
-export type DeployBasejumpProxyResult = {
-  implementationAddress: string;
+export type DeployProxyResult = {
+  implAddress: string;
   proxyAddress: string;
   ownerAddress: string;
 };
 
-export async function deployBasejumpProxy(
-  params: DeployBasejumpProxyParams,
-): Promise<DeployBasejumpProxyResult> {
+export async function deployProxy(params: DeployProxyParams): Promise<DeployProxyResult> {
   const { publicClient, walletClient, account, wormholeCore, tokenBridge, proxy } = params;
   const { abi, bytecode } = basejumpProxyJson as ifs.ContractArtifact;
 
@@ -35,19 +33,19 @@ export async function deployBasejumpProxy(
     throw new Error("Implementation deployment failed — no contract address.");
   }
 
-  const implementationAddress = implReceipt.contractAddress;
+  const implAddress = implReceipt.contractAddress;
 
   if (proxy) {
     const upgradeHash = await walletClient.writeContract({
       address: proxy,
       abi,
       functionName: "upgradeToAndCall",
-      args: [implementationAddress, "0x"],
+      args: [implAddress, "0x"],
     });
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
     return {
-      implementationAddress,
+      implAddress: implAddress,
       proxyAddress: proxy,
       ownerAddress: account.address,
     };
@@ -64,7 +62,7 @@ export async function deployBasejumpProxy(
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,
     bytecode: proxyBytecode.object,
-    args: [implementationAddress, initializeData],
+    args: [implAddress, initializeData],
   });
 
   const proxyReceipt = await publicClient.waitForTransactionReceipt({ hash: proxyHash });
@@ -73,7 +71,7 @@ export async function deployBasejumpProxy(
   }
 
   return {
-    implementationAddress,
+    implAddress: implAddress,
     proxyAddress: proxyReceipt.contractAddress,
     ownerAddress: account.address,
   };

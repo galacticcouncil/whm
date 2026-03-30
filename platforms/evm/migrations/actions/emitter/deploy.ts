@@ -12,14 +12,12 @@ export type DeployEmitterParams = WalletContext & {
 };
 
 export type DeployEmitterResult = {
-  implementationAddress: string;
+  implAddress: string;
   proxyAddress: string;
   ownerAddress: string;
 };
 
-export async function deployEmitter(
-  params: DeployEmitterParams,
-): Promise<DeployEmitterResult> {
+export async function deployEmitter(params: DeployEmitterParams): Promise<DeployEmitterResult> {
   const { publicClient, walletClient, account, wormholeCore, proxy } = params;
   const { abi, bytecode } = messageEmitterJson as ifs.ContractArtifact;
 
@@ -33,7 +31,7 @@ export async function deployEmitter(
   if (!implReceipt.contractAddress) {
     throw new Error("Implementation deployment failed — no contract address.");
   }
-  const implementationAddress = implReceipt.contractAddress;
+  const implAddress = implReceipt.contractAddress;
 
   // Upgrade existing proxy
   if (proxy) {
@@ -41,11 +39,11 @@ export async function deployEmitter(
       address: proxy,
       abi,
       functionName: "upgradeToAndCall",
-      args: [implementationAddress, "0x"],
+      args: [implAddress, "0x"],
     });
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
-    return { implementationAddress, proxyAddress: proxy, ownerAddress: account.address };
+    return { implAddress, proxyAddress: proxy, ownerAddress: account.address };
   }
 
   // Deploy new proxy
@@ -59,7 +57,7 @@ export async function deployEmitter(
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,
     bytecode: proxyBytecode.object,
-    args: [implementationAddress, initializeData],
+    args: [implAddress, initializeData],
   });
   const proxyReceipt = await publicClient.waitForTransactionReceipt({ hash: proxyHash });
   if (!proxyReceipt.contractAddress) {
@@ -67,7 +65,7 @@ export async function deployEmitter(
   }
 
   return {
-    implementationAddress,
+    implAddress,
     proxyAddress: proxyReceipt.contractAddress,
     ownerAddress: account.address,
   };

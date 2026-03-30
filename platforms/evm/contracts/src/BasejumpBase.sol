@@ -6,19 +6,16 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {MessageReceiver} from "./MessageReceiver.sol";
-import {IBasejump} from "./interfaces/IBasejump.sol";
+import {IBasejumpBase} from "./interfaces/IBasejumpBase.sol";
 
 /// @title BasejumpBase — Shared logic for Basejump variants
 /// @notice Common storage, completeTransfer (VAA verification), and _processMessage.
 ///         Subclasses implement bridgeViaWormhole (outbound) and _executeTransfer (inbound).
-abstract contract BasejumpBase is MessageReceiver, IBasejump {
+abstract contract BasejumpBase is MessageReceiver, IBasejumpBase {
     using SafeERC20 for IERC20;
 
     ITokenBridge public tokenBridge;
     uint32 public emitterNonce;
-
-    /// @notice chainId → BasejumpLanding address (bytes32 for cross-chain compat)
-    mapping(uint16 => bytes32) public basejumpLandings;
 
     /// @notice Fixed fee per source asset (e.g. 1e6 for 1 USDC)
     mapping(address => uint256) public assetFee;
@@ -31,12 +28,12 @@ abstract contract BasejumpBase is MessageReceiver, IBasejump {
         tokenBridge = ITokenBridge(_tokenBridge);
     }
 
-    function _executeTransfer(address sourceAsset, uint256 amount, bytes32 recipient) internal virtual;
+    function _executeTransfer(uint16 sourceChain, address sourceAsset, uint256 amount, bytes32 recipient) internal virtual;
 
-    function _processMessage(bytes memory payload) internal virtual override {
+    function _processMessage(uint16 sourceChain, bytes memory payload) internal virtual override {
         (address sourceAsset, uint256 amount, bytes32 recipient) = abi.decode(payload, (address, uint256, bytes32));
 
-        _executeTransfer(sourceAsset, amount, recipient);
+        _executeTransfer(sourceChain, sourceAsset, amount, recipient);
 
         emit TransferProcessed(sourceAsset, amount, recipient);
     }
@@ -77,10 +74,6 @@ abstract contract BasejumpBase is MessageReceiver, IBasejump {
     }
 
     // ─── Admin ───────────────────────────────────────────────────
-
-    function setBasejumpLanding(uint16 chainId, bytes32 addr) external onlyOwner {
-        basejumpLandings[chainId] = addr;
-    }
 
     function setAssetFee(address asset, uint256 fee) external onlyOwner {
         assetFee[asset] = fee;

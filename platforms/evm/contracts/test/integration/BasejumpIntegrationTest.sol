@@ -9,7 +9,7 @@ import {BasejumpProxy} from "../../src/BasejumpProxy.sol";
 import {BasejumpLanding} from "../../src/BasejumpLanding.sol";
 import {XcmTransactor, Multilocation, Weight} from "../../src/XcmTransactor.sol";
 
-import {IBasejump} from "../../src/interfaces/IBasejump.sol";
+import {IBasejumpBase} from "../../src/interfaces/IBasejumpBase.sol";
 import {IBasejumpLanding} from "../../src/interfaces/IBasejumpLanding.sol";
 
 import {MockWormhole} from "../mocks/MockWormhole.sol";
@@ -154,8 +154,10 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
 
         // 7. Configure cross-chain relationships
         // Basejump (Base) config
-        basejumpBase.setBasejumpLanding(
-            MOONBEAM_CHAIN_ID,
+        basejumpBase.setLanding(
+            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
+        );
+        basejumpBase.setLandingDest(
             BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
         );
         basejumpBase.setAssetFee(address(usdcBase), BASEJUMP_FEE);
@@ -165,8 +167,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         );
 
         // BasejumpProxy (Moonbeam) config
-        basejumpMoonbeam.setBasejumpLanding(
-            MOONBEAM_CHAIN_ID,
+        basejumpMoonbeam.setLanding(
+            BASE_CHAIN_ID,
             BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
         );
         basejumpMoonbeam.setAuthorizedEmitter(
@@ -210,13 +212,18 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
 
         // Verify cross-chain mappings
         assertEq(
-            basejumpBase.basejumpLandings(MOONBEAM_CHAIN_ID),
+            basejumpBase.landing(),
             BasejumpTestHelpers.addressToBytes32(address(basejumpHydration)),
             "Basejump landing not set on Base"
         );
+        assertEq(
+            basejumpBase.landingDest(),
+            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration)),
+            "Basejump landingDest not set on Base"
+        );
 
         assertEq(
-            basejumpMoonbeam.basejumpLandings(MOONBEAM_CHAIN_ID),
+            basejumpMoonbeam.landings(BASE_CHAIN_ID),
             BasejumpTestHelpers.addressToBytes32(address(basejumpHydration)),
             "Basejump landing not set on Moonbeam"
         );
@@ -267,7 +274,6 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         (uint64 transferSeq,) = basejumpBase.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             amount,
-            MOONBEAM_CHAIN_ID,
             hydrationRecipient
         );
         vm.stopPrank();
@@ -289,7 +295,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
 
         // ─── Step 4: Deliver to BasejumpProxy on Moonbeam ──────────
         vm.expectEmit(true, true, false, true, address(basejumpMoonbeam));
-        emit IBasejump.TransferProcessed(address(usdcBase), expectedNetAmount, hydrationRecipient);
+        emit IBasejumpBase.TransferProcessed(address(usdcBase), expectedNetAmount, hydrationRecipient);
 
         basejumpMoonbeam.completeTransfer(vaa);
 
@@ -336,7 +342,6 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         (uint64 transferSeq,) = basejumpBase.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             amount,
-            MOONBEAM_CHAIN_ID,
             hydrationRecipient
         );
         vm.stopPrank();
@@ -520,11 +525,10 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         vm.startPrank(user);
         usdcBase.approve(address(basejumpBase), 1000e6);
 
-        vm.expectRevert(IBasejump.ZeroAmount.selector);
+        vm.expectRevert(IBasejumpBase.ZeroAmount.selector);
         basejumpBase.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             0,
-            MOONBEAM_CHAIN_ID,
             hydrationRecipient
         );
         vm.stopPrank();
@@ -543,19 +547,18 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         usdcBase.approve(address(basejump), TRANSFER_AMOUNT);
 
         vm.expectRevert(
-            abi.encodeWithSelector(IBasejump.BasejumpLandingNotSet.selector, MOONBEAM_CHAIN_ID)
+            abi.encodeWithSelector(IBasejumpBase.BasejumpLandingNotSet.selector, MOONBEAM_CHAIN_ID)
         );
         basejump.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             TRANSFER_AMOUNT,
-            MOONBEAM_CHAIN_ID,
             hydrationRecipient
         );
         vm.stopPrank();
     }
 
     function testBasejumpProxyBridgeNotSupported() public {
-        vm.expectRevert(abi.encodeWithSelector(IBasejump.BasejumpLandingNotSet.selector, BASE_CHAIN_ID));
+        vm.expectRevert(abi.encodeWithSelector(IBasejumpBase.BasejumpLandingNotSet.selector, BASE_CHAIN_ID));
         basejumpMoonbeam.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             TRANSFER_AMOUNT,
@@ -592,7 +595,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         // When completeTransfer is called on same chain, it should call landing directly
         // via _executeTransfer -> IBasejumpLanding(basejumpLanding).transfer()
         vm.expectEmit(true, true, false, true, address(basejumpBase));
-        emit IBasejump.TransferProcessed(address(usdcBase), expectedNetAmount, hydrationRecipient);
+        emit IBasejumpBase.TransferProcessed(address(usdcBase), expectedNetAmount, hydrationRecipient);
 
         // This should trigger _executeTransfer which calls BasejumpLanding.transfer directly
         basejumpBase.completeTransfer(vaa);
@@ -610,8 +613,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         BasejumpProxy proxy = BasejumpProxy(address(freshProxyProxy));
 
         // Configure landing and emitter
-        proxy.setBasejumpLanding(
-            MOONBEAM_CHAIN_ID,
+        proxy.setLanding(
+            BASE_CHAIN_ID,
             BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
         );
         proxy.setAuthorizedEmitter(

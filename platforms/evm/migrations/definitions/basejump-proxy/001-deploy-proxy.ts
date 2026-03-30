@@ -1,9 +1,9 @@
 import type { MigrationStep } from "../../types";
-import { deployBasejump } from "../../actions/basejump/deploy";
+import { deployProxy } from "../../actions/basejump/deployProxy";
 
 const step: MigrationStep = {
-  name: "deploy-bridge",
-  description: "Deploy Basejump UUPS proxy",
+  name: "deploy-proxy",
+  description: "Deploy BasejumpProxy UUPS proxy",
   action: async (ctx) => {
     const env = ctx.env;
     const required = (key: string) => {
@@ -11,9 +11,8 @@ const step: MigrationStep = {
       return env[key];
     };
 
-    return await deployBasejump({
+    return await deployProxy({
       ...ctx.wallet,
-      wormholeId: Number(required("WORMHOLE_ID")),
       wormholeCore: required("WORMHOLE_CORE") as `0x${string}`,
       tokenBridge: required("TOKEN_BRIDGE") as `0x${string}`,
     });

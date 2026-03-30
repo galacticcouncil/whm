@@ -12,7 +12,7 @@ export type DeployDispatcherParams = WalletContext & {
 };
 
 export type DeployDispatcherResult = {
-  implementationAddress: string;
+  implAddress: string;
   proxyAddress: string;
   ownerAddress: string;
 };
@@ -38,7 +38,7 @@ export async function deployDispatcher(
     throw new Error("Implementation deployment failed — no contract address.");
   }
 
-  const implementationAddress = implReceipt.contractAddress;
+  const implAddress = implReceipt.contractAddress;
 
   // Upgrade existing proxy
   if (proxy) {
@@ -46,12 +46,12 @@ export async function deployDispatcher(
       address: proxy,
       abi,
       functionName: "upgradeToAndCall",
-      args: [implementationAddress, "0x"],
+      args: [implAddress, "0x"],
     });
     await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
     return {
-      implementationAddress,
+      implAddress,
       proxyAddress: proxy,
       ownerAddress: account.address,
     };
@@ -69,7 +69,7 @@ export async function deployDispatcher(
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,
     bytecode: proxyBytecode.object,
-    args: [implementationAddress, initializeData],
+    args: [implAddress, initializeData],
   });
 
   const proxyReceipt = await publicClient.waitForTransactionReceipt({
@@ -81,7 +81,7 @@ export async function deployDispatcher(
   }
 
   return {
-    implementationAddress,
+    implAddress,
     proxyAddress: proxyReceipt.contractAddress,
     ownerAddress: account.address,
   };
