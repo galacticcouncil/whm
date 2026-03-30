@@ -31,11 +31,11 @@ abstract contract BasejumpBase is MessageReceiver, IBasejumpBase {
     function _executeTransfer(uint16 sourceChain, address sourceAsset, uint256 amount, bytes32 recipient) internal virtual;
 
     function _processMessage(uint16 sourceChain, bytes memory payload) internal virtual override {
-        (address sourceAsset, uint256 amount, bytes32 recipient) = abi.decode(payload, (address, uint256, bytes32));
+        IBasejumpBase.TransferPayload memory transfer = abi.decode(payload, (IBasejumpBase.TransferPayload));
 
-        _executeTransfer(sourceChain, sourceAsset, amount, recipient);
+        _executeTransfer(sourceChain, transfer.sourceAsset, transfer.amount, transfer.recipient);
 
-        emit TransferProcessed(sourceAsset, amount, recipient);
+        emit TransferProcessed(transfer.sourceAsset, transfer.amount, transfer.recipient);
     }
 
     function _fastTrack(
@@ -49,7 +49,15 @@ abstract contract BasejumpBase is MessageReceiver, IBasejumpBase {
         uint256 fee = quoteFee(sourceAsset);
         if (amount <= fee) revert AmountTooLowForFee(amount, fee);
         uint256 netAmount = amount - fee;
-        bytes memory payload = abi.encode(sourceAsset, netAmount, recipient);
+
+        IBasejumpBase.TransferPayload memory transfer = IBasejumpBase.TransferPayload({
+            sourceAsset: sourceAsset,
+            amount: netAmount,
+            recipient: recipient,
+            transferSequence: transferSequence
+        });
+
+        bytes memory payload = abi.encode(transfer);
 
         uint256 messageFee = wormhole.messageFee();
         messageSequence = wormhole.publishMessage{value: messageFee}(emitterNonce, payload, 200);

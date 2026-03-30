@@ -290,7 +290,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             expectedNetAmount,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         // ─── Step 4: Deliver to BasejumpProxy on Moonbeam ──────────
@@ -356,7 +357,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             expectedNet,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         basejumpMoonbeam.completeTransfer(vaa);
@@ -380,7 +382,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             largeAmount,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         // Deliver to BasejumpProxy
@@ -419,7 +422,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             largeAmount,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         basejumpMoonbeam.completeTransfer(vaa);
@@ -456,7 +460,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             TRANSFER_AMOUNT,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         // First delivery succeeds
@@ -489,7 +494,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             unknownAsset,
             TRANSFER_AMOUNT,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         basejumpMoonbeam.completeTransfer(vaa);
@@ -510,7 +516,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             TRANSFER_AMOUNT,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         basejumpMoonbeam.completeTransfer(vaa);
@@ -583,7 +590,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             expectedNetAmount,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         // Authorize this emitter
@@ -627,7 +635,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             TRANSFER_AMOUNT,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         // Should revert with XcmTransactorNotSet when trying to execute transfer
@@ -645,7 +654,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(basejumpBase),
             address(usdcBase),
             TRANSFER_AMOUNT - BASEJUMP_FEE,
-            hydrationRecipient
+            hydrationRecipient,
+            0
         );
 
         // Process the VAA

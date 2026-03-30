@@ -2,6 +2,15 @@
 pragma solidity ^0.8.22;
 
 interface IBasejumpBase {
+    // ─── Structs ─────────────────────────────────────────────────
+
+    struct TransferPayload {
+        address sourceAsset;
+        uint256 amount;
+        bytes32 recipient;
+        uint64 transferSequence;
+    }
+
     // ─── Events ──────────────────────────────────────────────────
 
     event BridgeInitiated(
