@@ -168,22 +168,20 @@ npx tsx scripts/transactor/transact.ts \
 
 #### Bridge via Wormhole
 
-Initiate a cross-chain bridge transfer. Approves the asset, fetches the Wormhole message fee, and calls `bridgeViaWormhole`.
+Initiate a cross-chain bridge transfer. Approves the asset, fetches the Wormhole message fee, and calls `bridgeViaWormhole`. Bridges to Hydration via Moonbeam (destination is hardcoded).
 
 | Env variable | Description        |
 | ------------ | ------------------ |
 | `RPC`        | Chain RPC endpoint |
 | `CHAIN_ID`   | Chain ID (EVM)     |
 
-| Flag           | Description                              |
-| -------------- | ---------------------------------------- |
-| `--pk`         | Private key used to sign the transaction |
-| `--address`    | Basejump contract address                |
-| `--asset`      | ERC20 token address to bridge            |
-| `--amount`     | Amount in native token units             |
-| `--dest-chain` | Destination Wormhole chain ID            |
-| `--dest-asset` | Destination asset address                |
-| `--recipient`  | Recipient address (bytes32)              |
+| Flag        | Description                              |
+| ----------- | ---------------------------------------- |
+| `--pk`      | Private key used to sign the transaction |
+| `--address` | Basejump contract address                |
+| `--asset`   | ERC20 token address to bridge            |
+| `--amount`  | Amount in native token units             |
+| `--recipient` | Recipient address (bytes32)            |
 
 ```bash
 npx tsx scripts/basejump/bridgeViaWormhole.ts \
@@ -191,7 +189,6 @@ npx tsx scripts/basejump/bridgeViaWormhole.ts \
   --address basejump_address \
   --asset token_address \
   --amount 1000000 \
-  --dest-chain dest_wormhole_chain_id \
   --recipient recipient_bytes32
 ```
 

@@ -18,7 +18,6 @@ function getConfig() {
   const address = requiredArg("--address");
   const asset = requiredArg("--asset");
   const amount = requiredArg("--amount");
-  const destChain = requiredArg("--dest-chain");
   const recipient = requiredArg("--recipient");
 
   if (!isAddress(address)) throw new Error("Invalid contract address.");
@@ -33,13 +32,12 @@ function getConfig() {
     address: address as `0x${string}`,
     asset: asset as `0x${string}`,
     amount: BigInt(amount),
-    destChain: Number(destChain),
     recipient: recipient as `0x${string}`,
   };
 }
 
 async function main(): Promise<void> {
-  const { address, rpcUrl, chainId, privateKey, asset, amount, destChain, recipient } =
+  const { address, rpcUrl, chainId, privateKey, asset, amount, recipient } =
     getConfig();
 
   const { publicClient, walletClient } = getWallet(rpcUrl, chainId, privateKey);
@@ -92,19 +90,19 @@ async function main(): Promise<void> {
     functionName: "messageFee",
   })) as bigint;
 
-  // Bridge
+  // Bridge (destChain removed - Basejump now hardcodes MOONBEAM_WORMHOLE_ID)
   const txHash = await walletClient.writeContract({
     address,
     abi,
     functionName: "bridgeViaWormhole",
-    args: [asset, amount, destChain, recipient],
+    args: [asset, amount, recipient],
     value: fee,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
   console.log(`Bridge initiated: tx=${receipt.transactionHash}`);
   console.log(`  asset=${asset}, amount=${amount}`);
-  console.log(`  destChain=${destChain}, recipient=${recipient}`);
+  console.log(`  recipient=${recipient}`);
 }
 
 main().catch((error) => {
