@@ -18,6 +18,8 @@ contract BasejumpProxy is BasejumpBase {
 
     address public xcmTransactor;
 
+    event VaaResetForRecovery(bytes32 indexed vaaHash);
+
     error XcmTransactorNotSet();
     error NotSupported();
 
@@ -71,14 +73,18 @@ contract BasejumpProxy is BasejumpBase {
 
         bytes memory input = abi.encodeWithSelector(IBasejumpLanding.transfer.selector, sourceAsset, amount, recipient);
 
-        // SECURITY NOTE: If XCM execution fails on Hydration (congestion, gas limits, etc.),
-        // the VAA has already been marked as processed in receiveMessage() (line 52 MessageReceiver.sol).
-        // This creates a permanent fund loss scenario with no recovery mechanism.
-        // TODO: Implement recovery system - options:
-        //   1. Event-based retry mechanism with off-chain relayer
-        //   2. Failed transfer storage with manual admin recovery
-        //   3. XCM execution status verification before marking VAA as processed
         XcmTransactor(xcmTransactor).transact(basejumpLanding, input);
+    }
+
+    // ─── Recovery ───────────────────────────────────────────────
+
+    /// @notice Reset a processed VAA flag to allow replay
+    /// @dev EMERGENCY USE ONLY: Use when XCM execution failed on Hydration after VAA was marked processed
+    /// @param vaaHash The hash of the VAA to reset (from wormhole.parseAndVerifyVM(vaa).hash)
+    function resetProcessedVaa(bytes32 vaaHash) external onlyOwner {
+        require(processedVaas[vaaHash], "VAA not processed");
+        processedVaas[vaaHash] = false;
+        emit VaaResetForRecovery(vaaHash);
     }
 
     // ─── Admin ──────────────────────────────────────────────────

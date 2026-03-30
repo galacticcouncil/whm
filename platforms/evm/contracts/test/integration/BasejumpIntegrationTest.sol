@@ -631,4 +631,34 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         vm.expectRevert(BasejumpProxy.XcmTransactorNotSet.selector);
         proxy.completeTransfer(vaa);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // RECOVERY TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function testResetProcessedVaa() public {
+        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
+            BASE_CHAIN_ID,
+            address(basejumpBase),
+            address(usdcBase),
+            TRANSFER_AMOUNT - BASEJUMP_FEE,
+            hydrationRecipient
+        );
+
+        // Process the VAA
+        basejumpMoonbeam.completeTransfer(vaa);
+
+        // Get the VAA hash by parsing (simulating what admin would do)
+        bytes32 vaaHash = keccak256(vaa);
+
+        // Replay should fail (already processed)
+        vm.expectRevert("VAA already processed");
+        basejumpMoonbeam.completeTransfer(vaa);
+
+        // Reset it (as owner)
+        basejumpMoonbeam.resetProcessedVaa(vaaHash);
+
+        // Now should be able to replay
+        basejumpMoonbeam.completeTransfer(vaa);
+    }
 }
