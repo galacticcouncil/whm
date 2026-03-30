@@ -4,14 +4,14 @@ set -euo pipefail
 # Usage: migrate-basejump.sh <env>
 #
 # Runs the full basejump migration sequence in order:
-#   1. basejump-proxy        — up to and including set-xcm-transactor (skips if done)
-#   2. basejump-landing      — full migration
-#   3. basejump              — full migration
+#   1. basejump-proxy        — proxy + transactor setup
+#   2. basejump-landing      — hydration landing
+#   3. basejump              — dest bridge + lending (if any)
 #   4. basejump-proxy-setup  — per-chain wiring (emitter + landing)
 #
 # Arguments:
-#   <env>   Environment name (e.g. base, fork, moonbeam). Must match an env
-#           file in migrations/envs/<migration>.<env>.env
+#   <env>   Environment name (e.g. base, fork, moon). Must match an env
+#           file in migrations/envs/<env>/<migration>.env
 #
 # Required environment variables:
 #   PK_PROXY       Private key for the basejump-proxy deployer (Moonbeam)

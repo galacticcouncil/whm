@@ -54,9 +54,9 @@ PK=0x... pnpm run migrate:oracle-relay -- fork
 
 ### basejump
 
-Deploy the full Basejump stack across three chains — BasejumpProxy (Moonbeam), BasejumpLanding (Hydration), and Basejump (Base or other EVM chain). The script coordinates the deployment sequence, pausing between phases to wire cross-chain references.
+Deploy the full Basejump stack across three chains — BasejumpProxy (Moonbeam), BasejumpLanding (Hydration), and Basejump (Base or other EVM chain). The script coordinates the deployment sequence and wire cross-chain references.
 
-Env files: `basejump-proxy.fork.env`, `basejump-landing.fork.env`, `basejump.fork.env`
+Env files: `basejump-proxy.env`, `basejump-landing.env`, `basejump.env`, `basejump-proxy-setup.env`
 
 | Env variable | Description                                              |
 | ------------ | -------------------------------------------------------- |
