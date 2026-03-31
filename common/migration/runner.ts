@@ -200,15 +200,30 @@ export async function runMigration(options: RunOptions): Promise<void> {
   if (state) {
     console.log(`\nResuming migration: ${migration.name} [${environment}]`);
 
-    // Guard: migration definition must match persisted state
+    // Guard: existing steps must not change, but new steps may be appended
     const existingNames = state.steps.map((s) => s.name);
     const definedNames = migration.steps.map((s) => s.name);
-    if (JSON.stringify(existingNames) !== JSON.stringify(definedNames)) {
+
+    const existingPrefix = definedNames.slice(0, existingNames.length);
+    if (JSON.stringify(existingNames) !== JSON.stringify(existingPrefix)) {
       throw new Error(
         "Migration steps changed since last run. " +
           "Delete the state file to start fresh, or restore the original definition.\n" +
           `  State file: ${stateFilePath(deploymentsDir, migration.name, environment)}`,
       );
+    }
+
+    // Append newly added steps to state
+    for (let i = existingNames.length; i < definedNames.length; i++) {
+      state.steps.push({
+        name: definedNames[i],
+        status: "pending",
+        output: null,
+        error: null,
+        startedAt: null,
+        completedAt: null,
+      });
+      state.completedAt = null;
     }
   } else {
     state = createState(migration, environment);

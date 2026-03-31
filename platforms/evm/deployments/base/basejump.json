@@ -65,7 +65,7 @@
       "completedAt": "2026-03-31T01:06:32.184Z"
     },
     {
-      "name": "set-asset-fee",
+      "name": "set-asset-fee_EURC",
       "status": "completed",
       "output": {
         "txHash": "0x9a0977773dde1cf76f43f91740352e0f36111d45ec49eccd420769ab469ec1fb",

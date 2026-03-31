@@ -2,17 +2,16 @@ import type { MigrationStep } from "../../types";
 import { setDestAsset } from "../../actions/basejumpLanding/setDestAsset";
 
 const step: MigrationStep = {
-  name: "set-dest-asset",
+  name: "set-dest-asset_EURC",
   description: "Configure asset mappings on BasejumpLanding",
   action: async (ctx) => {
     const basejumpLandingAddress = ctx.outputs["deploy"].proxyAddress;
-    
-    // Parse asset mappings from env (format: SOURCE_ASSET_1=0x...,DEST_ASSET_1=0x...)
-    const sourceAsset = ctx.env.SOURCE_ASSET;
-    const destAsset = ctx.env.DEST_ASSET;
-    
+
+    const sourceAsset = ctx.env.EURC_SOURCE_ASSET;
+    const destAsset = ctx.env.EURC_DEST_ASSET;
+
     if (!sourceAsset || !destAsset) {
-      console.log("  ⚠️  No asset mapping configured (SOURCE_ASSET/DEST_ASSET not set)");
+      console.log("  ⚠️  No asset mapping configured");
       return {}; // Skip if not configured
     }
 

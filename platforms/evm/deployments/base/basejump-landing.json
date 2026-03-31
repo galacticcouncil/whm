@@ -29,7 +29,7 @@
       "completedAt": "2026-03-31T01:04:07.691Z"
     },
     {
-      "name": "set-dest-asset",
+      "name": "set-dest-asset_EURC",
       "status": "completed",
       "output": {
         "txHash": "0xfdb976023dd9be1370be5712db2168a0b30f50bf318f8c539798326a59c47c4e",

@@ -5,7 +5,10 @@ const step: MigrationStep = {
   description: "Deploy BasejumpLanding variant UUPS proxy",
   action: async (ctx) => {
     const action = ctx.env.LANDING_DEPLOY_ACTION;
-    if (!action) return {}; // No Landing
+    if (!action) {
+      console.log("  ⚠️  No landing deploy");
+      return {};
+    }
 
     const { deploy } = await import(`../../actions/basejumpLanding/${action}`);
 
