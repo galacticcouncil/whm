@@ -24,6 +24,15 @@ set -euo pipefail
 
 ENV=${1:?Usage: migrate-basejump.sh <env>}
 
+# Load .env file if it exists
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  echo "📄 Loading .env file..."
+  set -a  # Export all variables
+  source "$SCRIPT_DIR/.env"
+  set +a  # Stop exporting
+fi
+
 if [ "$ENV" = "fork" ]; then
   PROXY_ENV="fork"
   PK=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
