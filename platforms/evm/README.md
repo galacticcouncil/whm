@@ -30,6 +30,7 @@ pnpm run test
 ## Local Forks
 
 Run individual forks:
+
 ```bash
 pnpm run fork:base
 pnpm run fork:moonbeam
@@ -37,11 +38,13 @@ pnpm run fork:hydration
 ```
 
 Or run all forks together in parallel:
+
 ```bash
 pnpm run fork:all
 ```
 
 Ports:
+
 - Moonbeam: `http://127.0.0.1:8545`
 - Base: `http://127.0.0.1:8546`
 - Hydration: `http://127.0.0.1:8547`
@@ -71,6 +74,7 @@ Deploy the full Basejump stack across three chains — BasejumpProxy (Moonbeam),
 Env files: `basejump-proxy.env`, `basejump-landing.env`, `basejump.env`, `basejump-proxy-setup.env`
 
 **Environment variables can be provided via:**
+
 1. Command line (as shown below)
 2. `.env` file in `platforms/evm/` directory (automatically loaded if present)
 
@@ -82,25 +86,31 @@ Env files: `basejump-proxy.env`, `basejump-landing.env`, `basejump.env`, `baseju
 
 **Optional configuration (basejump-landing.env):**
 
-| Env variable | Description                                              |
-| ------------ | -------------------------------------------------------- |
-| `SOURCE_ASSET` | Source chain asset address to map (e.g., Base EURC)   |
-| `DEST_ASSET`   | Destination asset address on Hydration (e.g., Hydration EURC) |
+See basejump-landing `set-dest-asset_{{asset}}.ts` definition.
+
+| Env variable             | Description                                                   |
+| ------------------------ | ------------------------------------------------------------- |
+| `{{asset}}_SOURCE_ASSET` | Source chain asset address to map (e.g., Base EURC)           |
+| `{{asset}}_DEST_ASSET`   | Destination asset address on Hydration (e.g., Hydration EURC) |
 
 **Optional configuration (basejump.env):**
 
-| Env variable | Description                                              |
-| ------------ | -------------------------------------------------------- |
-| `FEE_ASSET`  | Asset address to set fee for                             |
-| `FEE_AMOUNT` | Fee amount in token units (e.g., 100000 for 0.1 EURC)    |
+See basejump `set-asset-fee_{{asset}}.ts` definition.
+
+| Env variable           | Description                                           |
+| ---------------------- | ----------------------------------------------------- |
+| `{{asset}}_FEE_ASSET`  | Asset address to set fee for                          |
+| `{{asset}}_FEE_AMOUNT` | Fee amount in token units (e.g., 100000 for 0.1 EURC) |
 
 **Via command line:**
+
 ```bash
 PK=0x... PK_PROXY=0x... PK_LANDING=0x... \
   pnpm run migrate:basejump -- base
 ```
 
 **Via .env file:**
+
 ```bash
 # Create .env file in platforms/evm/
 # PK_PROXY=0x...
@@ -216,13 +226,13 @@ Initiate a cross-chain bridge transfer. Approves the asset, fetches the Wormhole
 | `RPC`        | Chain RPC endpoint |
 | `CHAIN_ID`   | Chain ID (EVM)     |
 
-| Flag        | Description                              |
-| ----------- | ---------------------------------------- |
-| `--pk`      | Private key used to sign the transaction |
-| `--address` | Basejump contract address                |
-| `--asset`   | ERC20 token address to bridge            |
-| `--amount`  | Amount in native token units             |
-| `--recipient` | Recipient address (bytes32)            |
+| Flag          | Description                              |
+| ------------- | ---------------------------------------- |
+| `--pk`        | Private key used to sign the transaction |
+| `--address`   | Basejump contract address                |
+| `--asset`     | ERC20 token address to bridge            |
+| `--amount`    | Amount in native token units             |
+| `--recipient` | Recipient address (bytes32)              |
 
 ```bash
 npx tsx scripts/basejump/bridgeViaWormhole.ts \
