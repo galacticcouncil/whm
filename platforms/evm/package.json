@@ -11,7 +11,8 @@
     "fork:hydration": "bash sh/fork-hydration.sh",
     "fork:all": "run-p fork:base fork:moonbeam fork:hydration",
     "migrate:oracle-relay": "bash sh/migrate-oracle-relay.sh",
-    "migrate:basejump": "bash sh/migrate-basejump.sh"
+    "migrate:basejump": "bash sh/migrate-basejump.sh",
+    "migrate:basejump:fork": "bash sh/migrate-basejump.sh fork"
   },
   "dependencies": {
     "@galacticcouncil/common": "^0.5.0",
