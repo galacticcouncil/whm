@@ -1,0 +1,44 @@
+{
+  "migration": "basejump-landing",
+  "environment": "base",
+  "startedAt": "2026-03-31T01:01:09.906Z",
+  "completedAt": "2026-03-31T01:13:59.176Z",
+  "steps": [
+    {
+      "name": "deploy",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x42c8040e88f99f0d4595ae2132badadab1ba0c15",
+        "proxyAddress": "0x70e9b12c3b19cb5f0e59984a5866278ab69df976",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:01:09.907Z",
+      "completedAt": "2026-03-31T01:01:19.369Z"
+    },
+    {
+      "name": "authorize-proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0xb27a34e47c5dc631d624e3a896aaed9ee688622dc9bc3a5d4bf9c8f23ba6e16c",
+        "bridgeAddress": "0x10c06f418a082e636ee932ce8f9c5e791b925b51",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:03:54.729Z",
+      "completedAt": "2026-03-31T01:04:07.691Z"
+    },
+    {
+      "name": "set-dest-asset",
+      "status": "completed",
+      "output": {
+        "txHash": "0xfdb976023dd9be1370be5712db2168a0b30f50bf318f8c539798326a59c47c4e",
+        "sourceAsset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+        "destAsset": "0x000000000000000000000000000000010000002a"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:13:38.313Z",
+      "completedAt": "2026-03-31T01:13:43.137Z"
+    }
+  ]
+}

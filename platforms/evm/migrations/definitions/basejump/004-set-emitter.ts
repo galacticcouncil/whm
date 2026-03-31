@@ -7,8 +7,11 @@ const step: MigrationStep = {
   name: "set-emitter",
   description: "Register BasejumpProxy as authorized emitter on Basejump",
   action: async (ctx) => {
+    const proxyEnv = ctx.env.PROXY_ENV;
+    if (!proxyEnv) throw new Error("Missing PROXY_ENV");
+
     const basejumpAddress = ctx.outputs["deploy"].proxyAddress;
-    const emitterAddress = ctx.ref("basejump-proxy", "deploy-proxy").proxyAddress;
+    const emitterAddress = ctx.ref("basejump-proxy", "deploy-proxy", proxyEnv).proxyAddress;
 
     return await setAuthorizedEmitter({
       ...ctx.wallet,

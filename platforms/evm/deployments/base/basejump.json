@@ -1,0 +1,80 @@
+{
+  "migration": "basejump",
+  "environment": "base",
+  "startedAt": "2026-03-31T01:05:21.040Z",
+  "completedAt": "2026-03-31T01:14:00.007Z",
+  "steps": [
+    {
+      "name": "deploy",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xedece54767182abc1b04fe699a96cf7e97a3ccf2",
+        "proxyAddress": "0xf5b9334e44f800382cb47fc19669401d694e529b",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0",
+        "wormholeId": "30"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:05:21.041Z",
+      "completedAt": "2026-03-31T01:05:27.071Z"
+    },
+    {
+      "name": "deploy-landing",
+      "status": "completed",
+      "output": {},
+      "error": null,
+      "startedAt": "2026-03-31T01:05:27.073Z",
+      "completedAt": "2026-03-31T01:05:27.073Z"
+    },
+    {
+      "name": "set-landing",
+      "status": "completed",
+      "output": {},
+      "error": null,
+      "startedAt": "2026-03-31T01:05:27.074Z",
+      "completedAt": "2026-03-31T01:05:27.074Z"
+    },
+    {
+      "name": "set-emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0xceda169f34dc682312c72fb1fe10d211c79c1b9236e536574bcde8ad4986cd3a",
+        "emitterChain": "16",
+        "emitter": "0x000000000000000000000000f5b9334e44f800382cb47fc19669401d694e529b"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:26.566Z",
+      "completedAt": "2026-03-31T01:06:29.187Z"
+    },
+    {
+      "name": "set-landing-dest",
+      "status": "completed",
+      "output": {
+        "txHash": "0x08b3eef28f5554aec7b137d8b033577c7243c48a70ae068a01cec4e97000e582",
+        "landingDest": "0x00000000000000000000000070e9b12c3b19cb5f0e59984a5866278ab69df976"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:29.188Z",
+      "completedAt": "2026-03-31T01:06:32.183Z"
+    },
+    {
+      "name": "authorize-bridge",
+      "status": "completed",
+      "output": {},
+      "error": null,
+      "startedAt": "2026-03-31T01:06:32.184Z",
+      "completedAt": "2026-03-31T01:06:32.184Z"
+    },
+    {
+      "name": "set-asset-fee",
+      "status": "completed",
+      "output": {
+        "txHash": "0x9a0977773dde1cf76f43f91740352e0f36111d45ec49eccd420769ab469ec1fb",
+        "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+        "fee": "100000"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:32.184Z",
+      "completedAt": "2026-03-31T01:06:34.974Z"
+    }
+  ]
+}

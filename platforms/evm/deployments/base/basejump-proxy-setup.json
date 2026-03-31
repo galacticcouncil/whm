@@ -1,0 +1,32 @@
+{
+  "migration": "basejump-proxy-setup",
+  "environment": "base",
+  "startedAt": "2026-03-31T01:06:36.571Z",
+  "completedAt": "2026-03-31T01:14:00.837Z",
+  "steps": [
+    {
+      "name": "set-emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0x19fe2f4c2226e25e7651e80d78ac4ab5f5bcad11c67d88458cbfa013431fc58a",
+        "emitterChain": "30",
+        "emitter": "0x000000000000000000000000f5b9334e44f800382cb47fc19669401d694e529b"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:36.572Z",
+      "completedAt": "2026-03-31T01:06:45.441Z"
+    },
+    {
+      "name": "set-landing",
+      "status": "completed",
+      "output": {
+        "txHash": "0x7910451b80242e2a08d82ed07ec48bca27c937af636692083e01ea81ff71cdb5",
+        "fromWhChain": "30",
+        "landing": "0x00000000000000000000000070e9b12c3b19cb5f0e59984a5866278ab69df976"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:45.442Z",
+      "completedAt": "2026-03-31T01:06:49.948Z"
+    }
+  ]
+}

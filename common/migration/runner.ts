@@ -27,7 +27,8 @@ function loadEnvFile(envsDir: string, migration: string, env: string): void {
     const eqIdx = trimmed.indexOf("=");
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx).trim();
-    const value = trimmed.slice(eqIdx + 1).trim();
+    const raw = trimmed.slice(eqIdx + 1).trim();
+    const value = raw.replace(/\s+#.*$/, "");
     // Shell env vars take precedence over file values
     if (!process.env[key]) {
       process.env[key] = value;
