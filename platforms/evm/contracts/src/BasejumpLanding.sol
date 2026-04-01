@@ -113,7 +113,7 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
     }
 
     /// @notice Encode a currencies.transfer extrinsic
-    /// @dev Format: pallet_index + call_index + dest (MultiAddress::Id) + currency_id (u32 LE) + amount (Compact<u128>)
+    /// @dev Format: pallet_index + call_index + dest (AccountId32) + currency_id (u32 LE) + amount (Compact<u128>)
     function _encodeCurrenciesTransfer(address asset, bytes32 recipient, uint256 amount) internal pure returns (bytes memory) {
         // Currency ID is derived from the last 4 bytes of the asset address
         uint32 currencyId = uint32(uint160(asset));
@@ -123,7 +123,7 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
         return abi.encodePacked(
             CURRENCIES_PALLET_INDEX,
             CURRENCIES_TRANSFER_INDEX,
-            ScaleCodec.multiAddressId(recipient),   // dest: MultiAddress::Id(AccountId32)
+            recipient,                              // dest: AccountId32 (raw 32 bytes)
             ScaleCodec.u32Le(currencyId),           // currency_id: u32 (little-endian)
             ScaleCodec.compactU128(uint128(amount)) // amount: Compact<u128>
         );
