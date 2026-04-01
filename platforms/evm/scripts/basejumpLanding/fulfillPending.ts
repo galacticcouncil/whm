@@ -29,11 +29,23 @@ function getConfig() {
 
 async function main() {
   const config = getConfig();
-  const { publicClient, walletClient } = getWallet(config.rpcUrl, config.chainId, config.privateKey);
+  const { publicClient, walletClient } = getWallet(
+    config.rpcUrl,
+    config.chainId,
+    config.privateKey,
+  );
   const { abi } = basejumpLandingJson as ifs.ContractArtifact;
 
-  const head = await publicClient.readContract({ address: config.proxy, abi, functionName: "pendingHead" }) as bigint;
-  const tail = await publicClient.readContract({ address: config.proxy, abi, functionName: "pendingTail" }) as bigint;
+  const head = (await publicClient.readContract({
+    address: config.proxy,
+    abi,
+    functionName: "pendingHead",
+  })) as bigint;
+  const tail = (await publicClient.readContract({
+    address: config.proxy,
+    abi,
+    functionName: "pendingTail",
+  })) as bigint;
 
   console.log(`Pending: ${tail - head} (head=${head}, tail=${tail})`);
 
@@ -43,10 +55,20 @@ async function main() {
   }
 
   for (let i = head; i < tail; i++) {
-    const pt = await publicClient.readContract({ address: config.proxy, abi, functionName: "pendingTransfers", args: [i] }) as [string, bigint, string];
+    const pt = (await publicClient.readContract({
+      address: config.proxy,
+      abi,
+      functionName: "pendingTransfers",
+      args: [i],
+    })) as [string, bigint, string];
     console.log(`\n[${i}] sourceAsset=${pt[0]} amount=${pt[1]} recipient=${pt[2]}`);
 
-    const destAsset = await publicClient.readContract({ address: config.proxy, abi, functionName: "destAssetFor", args: [pt[0]] }) as string;
+    const destAsset = (await publicClient.readContract({
+      address: config.proxy,
+      abi,
+      functionName: "destAssetFor",
+      args: [pt[0]],
+    })) as string;
     console.log(`     destAsset=${destAsset}`);
 
     console.log("     Fulfilling...");

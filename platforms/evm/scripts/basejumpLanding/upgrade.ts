@@ -33,7 +33,11 @@ function getConfig() {
 
 async function main() {
   const config = getConfig();
-  const { publicClient, walletClient, account } = getWallet(config.rpcUrl, config.chainId, config.privateKey);
+  const { publicClient, walletClient, account } = getWallet(
+    config.rpcUrl,
+    config.chainId,
+    config.privateKey,
+  );
   const { abi, bytecode } = basejumpLandingJson as ifs.ContractArtifact;
 
   console.log("Deploying new BasejumpLanding implementation...");

@@ -9,62 +9,65 @@
  *   npx tsx scripts/basejump/verifyDispatch.ts
  */
 
-import { ApiPromise, WsProvider, Keyring } from "@polkadot/api";
+import { hydration, HydrationApis } from "@galacticcouncil/descriptors";
+
+import { createClient, Enum } from "polkadot-api";
+import { getWsProvider } from "polkadot-api/ws-provider";
+
+type DryRunResult = HydrationApis["DryRunApi"]["dry_run_call"]["Value"];
+
+// Well-known dev accounts (no balance on mainnet — which is what we want)
+const ALICE = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
+const BOB = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty";
 
 async function main() {
-  const api = await ApiPromise.create({
-    provider: new WsProvider("wss://rpc.hydradx.cloud"),
-    noInitWarn: true,
-  });
-
-  const keyring = new Keyring({ type: "sr25519" });
-  // Use Alice's well-known dev key — won't have balance on mainnet, which is what we want
-  const alice = keyring.addFromUri("//Alice");
+  const client = createClient(getWsProvider("wss://hydration-rpc.n.dwellir.com"));
+  const api = client.getTypedApi(hydration);
 
   // Build a currencies.transfer call (EURC, currency ID 42)
-  const recipient = "0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48"; // Bob
-  const currencyId = 42;
-  const amount = 1_000_000n;
+  const tx = api.tx.Currencies.transfer({
+    dest: BOB,
+    currency_id: 42,
+    amount: 1_000_000n,
+  });
 
-  const call = api.tx.currencies.transfer(recipient, currencyId, amount);
-
-  console.log("Call hex:", call.method.toHex());
+  const encodedCall = await tx.getEncodedData();
+  console.log("Call hex:", encodedCall.asHex());
   console.log("Dry-running currencies.transfer on Hydration...\n");
 
-  // Use payment.queryInfo to verify the call is decodable
-  try {
-    const info = await call.paymentInfo(alice);
-    console.log("OK  Call is valid (runtime decoded it successfully)");
-    console.log(`    weight: ${info.weight.toString()}`);
-    console.log(`    partialFee: ${info.partialFee.toString()}`);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("decode") || msg.includes("invalid")) {
-      console.error("FAIL  Call encoding is invalid:", msg);
-      await api.disconnect();
-      process.exit(1);
-    }
-    console.log("WARN  paymentInfo failed (but not a decode error):", msg);
+  const info = await tx.getPaymentInfo(ALICE);
+  console.log("OK  Call is valid (runtime decoded it successfully)");
+  console.log(
+    `    weight: { ref_time: ${info.weight.ref_time}, proof_size: ${info.weight.proof_size} }`,
+  );
+  console.log(`    partialFee: ${info.partial_fee}`);
+
+  const rawOrigin = Enum("Signed", ALICE);
+  const origin = Enum("system", rawOrigin);
+  const dryRun = await client.getUnsafeApi().apis.DryRunApi.dry_run_call(origin, tx.decodedCall);
+
+  const result = dryRun as DryRunResult;
+  const error =
+    result.success && !result.value.execution_result.success
+      ? result.value.execution_result.value.error
+      : null;
+
+  console.log("\nDry-run result:", JSON.stringify(result), null, 2);
+
+  if (error) {
+    console.log(
+      "OK  Dispatch failed as expected (insufficient balance):",
+      JSON.stringify(error, null, 2),
+    );
+  } else {
+    console.log("OK  Dispatch succeeded (unexpected — Alice shouldn't have balance)");
   }
 
-  // Dry-run to check dispatch result
-  try {
-    const dryRun = await api.rpc.system.dryRun(call.toHex(), undefined as any);
-    console.log("\nDry-run result:", dryRun.toHuman());
-
-    if (dryRun.isOk) {
-      console.log("OK  Dispatch succeeded (unexpected — Alice shouldn't have balance)");
-    } else {
-      const error = dryRun.asErr.toHuman();
-      console.log("OK  Dispatch failed as expected (insufficient balance):", JSON.stringify(error));
-    }
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log("\nWARN  dryRun not available:", msg);
-  }
-
-  await api.disconnect();
+  client.destroy();
   console.log("\nDone.");
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
