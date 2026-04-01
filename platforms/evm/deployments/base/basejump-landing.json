@@ -8,7 +8,7 @@
       "name": "deploy",
       "status": "completed",
       "output": {
-        "implAddress": "0x42c8040e88f99f0d4595ae2132badadab1ba0c15",
+        "implAddress": "0x4ea0d58ab1551b5794bca0d2327dbedc85bae31f",
         "proxyAddress": "0x70e9b12c3b19cb5f0e59984a5866278ab69df976",
         "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
       },
