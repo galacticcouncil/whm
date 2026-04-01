@@ -32,13 +32,13 @@
       "name": "set-dest-asset_EURC",
       "status": "completed",
       "output": {
-        "txHash": "0xfdb976023dd9be1370be5712db2168a0b30f50bf318f8c539798326a59c47c4e",
+        "txHash": "0x10792effa973a1b56e8949b8db85adb0e807e3262b71878a2ef18cd1678d936e",
         "sourceAsset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
-        "destAsset": "0x000000000000000000000000000000010000002a"
+        "destAsset": "0x000000000000000000000000000000010000002c"
       },
       "error": null,
-      "startedAt": "2026-03-31T01:13:38.313Z",
-      "completedAt": "2026-03-31T01:13:43.137Z"
+      "startedAt": "2026-04-01T04:17:02.012Z",
+      "completedAt": "2026-04-01T04:17:13.575Z"
     }
   ]
 }
