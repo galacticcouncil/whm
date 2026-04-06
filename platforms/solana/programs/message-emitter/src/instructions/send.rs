@@ -5,9 +5,11 @@ use wormhole_anchor_sdk::wormhole::{
 
 use crate::helpers::{abi_encode_price_payload, abi_encode_string};
 use crate::oracle::{normalize_to_18dec, read_price};
-use crate::state::PriceFeed;
+use crate::stake_pool;
+use crate::state::{PriceFeed, StakePoolFeed};
 
-const ACTION_PRICE_UPDATE: u8 = 1;
+const ACTION_ORACLE_PRICE: u8 = 1;
+const ACTION_STAKE_RATE: u8 = 2;
 
 #[cfg(feature = "local-logs")]
 macro_rules! dev_msg {
@@ -76,6 +78,20 @@ pub struct SendPrice<'info> {
     pub wormhole: SendMessage<'info>,
 }
 
+#[derive(Accounts)]
+pub struct SendRate<'info> {
+    /// Owner-registered binding: asset_id <-> stake pool.
+    #[account(seeds = [b"stake_pool_feed".as_ref(), stake_pool_feed.asset_id.as_ref()], bump)]
+    pub stake_pool_feed: Account<'info, StakePoolFeed>,
+
+    /// CHECK: SPL Stake Pool account — must match the registered stake_pool pubkey.
+    #[account(address = stake_pool_feed.stake_pool)]
+    pub stake_pool: UncheckedAccount<'info>,
+
+    /// Embedded Wormhole accounts (config, payer, bridge, emitter, etc.)
+    pub wormhole: SendMessage<'info>,
+}
+
 pub(crate) fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
     let payload = abi_encode_string(&message);
     post_wormhole_message(&ctx.accounts, ctx.bumps.emitter, payload)
@@ -104,10 +120,38 @@ pub(crate) fn send_price(ctx: Context<SendPrice>) -> Result<()> {
     dev_msg!("send_price: usd_price_18dec={}", usd_price);
 
     let payload = abi_encode_price_payload(
-        ACTION_PRICE_UPDATE,
+        ACTION_ORACLE_PRICE,
         feed.asset_id,
         usd_price,
         price_entry.unix_timestamp,
+    );
+
+    post_wormhole_message(&ctx.accounts.wormhole, ctx.bumps.wormhole.emitter, payload)
+}
+
+pub(crate) fn send_rate(ctx: Context<SendRate>) -> Result<()> {
+    let feed = &ctx.accounts.stake_pool_feed;
+
+    let pool_data = ctx.accounts.stake_pool.try_borrow_data()?;
+    let pool = stake_pool::read_stake_pool(&pool_data)?;
+    drop(pool_data);
+
+    let rate = stake_pool::compute_rate(&pool)?;
+    let timestamp = ctx.accounts.wormhole.clock.unix_timestamp as u64;
+
+    dev_msg!(
+        "send_rate: total_lamports={} pool_token_supply={} epoch={}",
+        pool.total_lamports,
+        pool.pool_token_supply,
+        pool.last_update_epoch
+    );
+    dev_msg!("send_rate: rate_18dec={}", rate);
+
+    let payload = abi_encode_price_payload(
+        ACTION_STAKE_RATE,
+        feed.asset_id,
+        rate,
+        timestamp,
     );
 
     post_wormhole_message(&ctx.accounts.wormhole, ctx.bumps.wormhole.emitter, payload)

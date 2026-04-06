@@ -1,21 +1,21 @@
 use anchor_lang::prelude::*;
 
-// ── Scope oracle byte layout (matches Kamino Scope zero_copy structs) ──────
+// ── Kamino Scope OraclePrices byte layout ────────────────────────────────────
+//
+//   discriminator:     [u8; 8]    offset   0
+//   oracle_mappings:   Pubkey     offset   8
+//   prices[]:          DatedPrice offset  40  (512 entries)
+//
+//   DatedPrice (56 bytes each):
+//     price.value:       u64      offset  +0
+//     price.exp:         u64      offset  +8
+//     last_updated_slot: u64      offset +16
+//     unix_timestamp:    u64      offset +24
+//     generic_data:      [u8; 24] offset +32
 
-/// Byte size of the Anchor discriminator.
 const DISCRIMINATOR_LEN: usize = 8;
-/// Byte size of the `oracle_mappings` Pubkey field in OraclePrices.
 const HEADER_LEN: usize = 32;
-/// Where the prices array starts inside the OraclePrices account.
 const PRICES_OFFSET: usize = DISCRIMINATOR_LEN + HEADER_LEN;
-
-/// Size of a single `DatedPrice` entry.
-///   Price { value: u64, exp: u64 }  = 16
-///   last_updated_slot: u64          =  8
-///   unix_timestamp:    u64          =  8
-///   generic_data:      [u8; 24]     = 24
-///                                   -----
-///                                     56
 const DATED_PRICE_LEN: usize = 56;
 
 #[derive(Clone, Copy, Debug)]

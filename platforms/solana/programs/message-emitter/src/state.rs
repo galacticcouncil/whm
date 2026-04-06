@@ -14,3 +14,12 @@ pub struct PriceFeed {
     pub asset_id: [u8; 32],
     pub price_index: u16,
 }
+
+/// Owner-created binding between a stake pool and an asset identity.
+/// Seeds: [b"stake_pool_feed", asset_id]
+#[account]
+#[derive(InitSpace)]
+pub struct StakePoolFeed {
+    pub asset_id: [u8; 32],
+    pub stake_pool: Pubkey,
+}
