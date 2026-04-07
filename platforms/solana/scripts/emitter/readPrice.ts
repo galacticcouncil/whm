@@ -1,6 +1,8 @@
 // Standalone script to read PRIME price from Kamino Scope oracle
 // Uses direct RPC calls without dependencies
 
+import "dotenv/config";
+
 const SCOPE_ORACLE_PRICES = "3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH";
 
 // PRIME price index in Scope oracle (from deploy.ts)
@@ -62,14 +64,11 @@ async function main(): Promise<void> {
       jsonrpc: "2.0",
       id: 1,
       method: "getAccountInfo",
-      params: [
-        SCOPE_ORACLE_PRICES,
-        { encoding: "base64", commitment: "confirmed" }
-      ],
+      params: [SCOPE_ORACLE_PRICES, { encoding: "base64", commitment: "confirmed" }],
     }),
   });
 
-  const result = await response.json() as any;
+  const result = (await response.json()) as any;
 
   if (result.error) {
     throw new Error(`RPC error: ${result.error.message}`);

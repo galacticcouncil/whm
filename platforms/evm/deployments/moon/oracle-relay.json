@@ -1,0 +1,94 @@
+{
+  "migration": "oracle-relay",
+  "environment": "moon",
+  "startedAt": "2026-04-07T14:52:40.132Z",
+  "completedAt": "2026-04-07T14:53:34.005Z",
+  "steps": [
+    {
+      "name": "deploy-transactor",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x97cd0d08c376005d09afcc47fa9ce0c384fba406",
+        "proxyAddress": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2",
+        "mda": "5EYBt64mQETWJMf46H7T5VZfrAGrjctf9kbyFtSZGDg6bGpo",
+        "mdaH160": "0x6d6e6e7dc8aba5b44845dda12e7d41846d91c653"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:52:40.134Z",
+      "completedAt": "2026-04-07T14:52:52.145Z"
+    },
+    {
+      "name": "deploy-dispatcher",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x1dad5d9a19059dbde9ede98df771bee81e27d214",
+        "proxyAddress": "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:52:52.147Z",
+      "completedAt": "2026-04-07T14:53:02.880Z"
+    },
+    {
+      "name": "authorize-dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0xa36a0908fb37428d9dddf952eb10e0f24f9fac5b1f7d388410155a2fa89774dd",
+        "operator": "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:02.880Z",
+      "completedAt": "2026-04-07T14:53:08.179Z"
+    },
+    {
+      "name": "register-emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0x812b5d8520979c7e4644ba036fbcdab10b335874b25a6b7b267cf5201cee65c6",
+        "emitterBytes32": "0x21d702429f18a7d34b8b701d584e1e329367a19d84b5d6efee4311c8bd5e87e3",
+        "sourceChain": "1"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:08.180Z",
+      "completedAt": "2026-04-07T14:53:13.475Z"
+    },
+    {
+      "name": "set-handler-price",
+      "status": "completed",
+      "output": {
+        "txHash": "0xa9603e3cad3a764b031fb9c6dab84d16298c55a3b33b5d9cf86e8f418bab66b8",
+        "actionId": "1",
+        "handler": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:13.475Z",
+      "completedAt": "2026-04-07T14:53:23.307Z"
+    },
+    {
+      "name": "set-handler-rate",
+      "status": "completed",
+      "output": {
+        "txHash": "0x73b5f8d4a4da53617e75a629a88839a460febe618723db8aa03e4d252824cd7a",
+        "actionId": "2",
+        "handler": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:23.308Z",
+      "completedAt": "2026-04-07T14:53:28.605Z"
+    },
+    {
+      "name": "set-oracle-prime",
+      "status": "completed",
+      "output": {
+        "txHash": "0x773000c924d3bd4aaf551b00b6f1de9161eeb70080591150b75e47b65fb44d80",
+        "assetId": "0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da",
+        "oracle": "0x82022F77ae239Ad99bB1F2aC0d8DaFF6Cc976a07"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:28.606Z",
+      "completedAt": "2026-04-07T14:53:34.004Z"
+    }
+  ]
+}

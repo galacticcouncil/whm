@@ -11,7 +11,7 @@ pub use instructions::register_price_feed::*;
 pub use instructions::register_pool_feed::*;
 pub use instructions::send::*;
 
-declare_id!("BwqNpyPVEYwdy4EbbTCdiWmGNQn9kqf2p47zZcaV7irC");
+declare_id!("GfWB1ZsKatgasDDXw8JDrw6DzA8PXEv53SFyMSbgyiJZ");
 
 #[program]
 pub mod message_emitter {

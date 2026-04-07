@@ -1,9 +1,0 @@
-MessageDispatcher implementation: 0xe3ed8e1217ab419123d54e2f0850bc736b595d68
-MessageDispatcher proxy: 0x27afd50e83379a53458446e9d5f4a557b5f55c19
-MessageDispatcher owner: 0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2
-
-Dispatcher handler set: action=1, handler=0xd1dc3517732c98502b5c1ba2389aca9e9016d89a
-Dispatcher oracle set: assetId=0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da, oracle=0x82022F77ae239Ad99bB1F2aC0d8DaFF6Cc976a07
-
-MessageEmitter registered: 0x1a7d87b78e17674ccdf71c221454194f103eef9631b7c805750159522df5b937 (1)
-

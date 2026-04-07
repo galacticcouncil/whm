@@ -12,8 +12,8 @@ contract MessageDispatcher is MessageReceiver {
     }
     mapping(bytes32 => PriceData) public latestPrices;
 
-    uint8 constant ACTION_ORACLE_PRICE = 1;
-    uint8 constant ACTION_STAKE_RATE = 2;
+    uint8 constant ACTION_PRICE_UPDATE = 1;
+    uint8 constant ACTION_RATE_UPDATE = 2;
     uint256 constant PRICE_SCALE_DIVISOR = 1e10;
 
     uint64 public maxPriceAge = 300; // 5 minutes default
@@ -39,14 +39,14 @@ contract MessageDispatcher is MessageReceiver {
     function _processMessage(uint16 sourceChain, bytes memory payload) internal virtual override {
         uint8 action = uint8(payload[31]);
 
-        if (action == ACTION_ORACLE_PRICE || action == ACTION_STAKE_RATE) {
-            _handlePricePayload(action, payload);
+        if (action == ACTION_PRICE_UPDATE || action == ACTION_RATE_UPDATE) {
+            _handleOracleUpdate(action, payload);
         } else {
             super._processMessage(sourceChain, payload);
         }
     }
 
-    function _handlePricePayload(uint8 action, bytes memory payload) internal virtual {
+    function _handleOracleUpdate(uint8 action, bytes memory payload) internal virtual {
         (, bytes32 assetId, uint256 price, uint64 timestamp) = abi.decode(payload, (uint8, bytes32, uint256, uint64));
         uint64 latestTimestamp = latestPrices[assetId].timestamp;
         if (timestamp <= latestTimestamp) revert StalePriceUpdate(assetId, timestamp, latestTimestamp);
