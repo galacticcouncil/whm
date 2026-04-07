@@ -51,7 +51,7 @@ contract MessageReceiver is Initializable, UUPSUpgradeable {
         processedVaas[vm.hash] = true;
 
         _onlyAuthorizedEmitter(vm.emitterChainId, vm.emitterAddress);
-        _processMessage(vm.emitterChainId, vm.payload);
+        _processMessage(vm);
     }
 
     // ─── Internal ───────────────────────────────────────────────
@@ -64,9 +64,9 @@ contract MessageReceiver is Initializable, UUPSUpgradeable {
         if (authorizedEmitters[sourceChain] != sourceAddress) revert NotAuthorizedEmitter();
     }
 
-    function _processMessage(uint16 sourceChain, bytes memory payload) internal virtual {
-        (string memory message) = abi.decode(payload, (string));
-        emit MessageReceived(sourceChain, message);
+    function _processMessage(IWormhole.VM memory vm) internal virtual {
+        (string memory message) = abi.decode(vm.payload, (string));
+        emit MessageReceived(vm.emitterChainId, message);
     }
 
     // ─── Upgrade ────────────────────────────────────────────────

@@ -2,7 +2,7 @@
   "migration": "oracle-relay",
   "environment": "moon",
   "startedAt": "2026-04-07T14:52:40.132Z",
-  "completedAt": "2026-04-07T14:53:34.005Z",
+  "completedAt": "2026-04-07T15:55:38.333Z",
   "steps": [
     {
       "name": "deploy-transactor",
@@ -22,7 +22,7 @@
       "name": "deploy-dispatcher",
       "status": "completed",
       "output": {
-        "implAddress": "0x1dad5d9a19059dbde9ede98df771bee81e27d214",
+        "implAddress": "0x9e3bcae89844c3555e61eb4884d7668d9bfd4f2a",
         "proxyAddress": "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c",
         "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
       },

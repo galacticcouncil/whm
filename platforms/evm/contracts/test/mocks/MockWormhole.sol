@@ -10,7 +10,7 @@ abstract contract MockWormhole {
     // forge-lint: disable-next-line(mixed-case-function)
     function parseAndVerifyVM(bytes calldata encodedVM) // forge-lint: disable-line(mixed-case-variable)
         external
-        pure
+        view
         returns (IWormhole.VM memory _vm, bool valid, string memory reason)
     {
         (uint16 emitterChainId, bytes32 emitterAddress, bytes memory payload) =
@@ -20,6 +20,7 @@ abstract contract MockWormhole {
         _vm.emitterAddress = emitterAddress;
         _vm.payload = payload;
         _vm.hash = keccak256(encodedVM);
+        _vm.timestamp = uint32(block.timestamp);
 
         valid = true;
         reason = "";

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
+import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 import {MessageReceiver} from "./MessageReceiver.sol";
 import {XcmTransactor} from "./XcmTransactor.sol";
 
@@ -16,7 +17,7 @@ contract MessageDispatcher is MessageReceiver {
     uint8 constant ACTION_RATE_UPDATE = 2;
     uint256 constant PRICE_SCALE_DIVISOR = 1e10;
 
-    uint64 public maxPriceAge = 300; // 5 minutes default
+    uint64 public maxPriceAge;
 
     /// @notice action -> handler contract (e.g. ACTION_PRICE_UPDATE -> XcmTransactor)
     mapping(uint8 => address) public handlers;
@@ -32,25 +33,27 @@ contract MessageDispatcher is MessageReceiver {
 
     function initialize(address _wormhole) public override initializer {
         _initMessageReceiver(_wormhole);
+        maxPriceAge = 300; // 5 minutes default
     }
 
     // ─── Message routing ───────────────────────────────────────
 
-    function _processMessage(uint16 sourceChain, bytes memory payload) internal virtual override {
-        uint8 action = uint8(payload[31]);
+    function _processMessage(IWormhole.VM memory vm) internal virtual override {
+        uint8 action = uint8(vm.payload[31]);
 
         if (action == ACTION_PRICE_UPDATE || action == ACTION_RATE_UPDATE) {
-            _handleOracleUpdate(action, payload);
+            _handleOracleUpdate(action, vm);
         } else {
-            super._processMessage(sourceChain, payload);
+            super._processMessage(vm);
         }
     }
 
-    function _handleOracleUpdate(uint8 action, bytes memory payload) internal virtual {
-        (, bytes32 assetId, uint256 price, uint64 timestamp) = abi.decode(payload, (uint8, bytes32, uint256, uint64));
+    function _handleOracleUpdate(uint8 action, IWormhole.VM memory vm) internal virtual {
+        (, bytes32 assetId, uint256 price,) = abi.decode(vm.payload, (uint8, bytes32, uint256, uint64));
+        uint64 vaaTimestamp = uint64(vm.timestamp);
         uint64 latestTimestamp = latestPrices[assetId].timestamp;
-        if (timestamp <= latestTimestamp) revert StalePriceUpdate(assetId, timestamp, latestTimestamp);
-        require(block.timestamp - timestamp <= maxPriceAge, "Price too stale");
+        if (vaaTimestamp <= latestTimestamp) revert StalePriceUpdate(assetId, vaaTimestamp, latestTimestamp);
+        require(block.timestamp - vaaTimestamp <= maxPriceAge, "Price too stale");
 
         address handler = handlers[action];
         address oracle = oracles[assetId];
@@ -58,8 +61,8 @@ contract MessageDispatcher is MessageReceiver {
         if (handler == address(0)) revert HandlerNotSet(action);
         if (oracle == address(0)) revert OracleNotSet(assetId);
 
-        latestPrices[assetId] = PriceData({price: price, timestamp: timestamp, receivedAt: uint64(block.timestamp)});
-        emit PriceReceived(assetId, price, timestamp);
+        latestPrices[assetId] = PriceData({price: price, timestamp: vaaTimestamp, receivedAt: uint64(block.timestamp)});
+        emit PriceReceived(assetId, price, vaaTimestamp);
 
         uint256 scaledPrice = price / PRICE_SCALE_DIVISOR;
         require(scaledPrice > 0, "Price too low to scale");
@@ -75,5 +78,9 @@ contract MessageDispatcher is MessageReceiver {
 
     function setOracle(bytes32 assetId, address oracle) external onlyOwner {
         oracles[assetId] = oracle;
+    }
+
+    function setMaxPriceAge(uint64 _maxPriceAge) external onlyOwner {
+        maxPriceAge = _maxPriceAge;
     }
 }

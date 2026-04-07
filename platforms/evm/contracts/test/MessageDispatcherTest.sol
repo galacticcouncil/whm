@@ -64,7 +64,7 @@ contract MessageDispatcherTest is Test, MockWormhole {
 
         (uint256 storedPrice, uint64 storedTimestamp, uint64 receivedAt) = dispatcher.latestPrices(assetId);
         assertEq(storedPrice, price);
-        assertEq(storedTimestamp, timestamp);
+        assertEq(storedTimestamp, uint64(block.timestamp));
         assertEq(receivedAt, uint64(block.timestamp));
     }
 
@@ -142,14 +142,17 @@ contract MessageDispatcherTest is Test, MockWormhole {
 
         uint64 ts = uint64(block.timestamp);
         bytes memory newerPayload = abi.encode(uint8(1), assetId, uint256(2_000_000_000_000_000_000), ts);
-        bytes memory olderPayload = abi.encode(uint8(1), assetId, uint256(1_000_000_000_000_000_000), ts - 1);
 
+        // Send newer price at current timestamp
         dispatcher.receiveMessage(_buildVaa(newerPayload));
+
+        // Rewind time so the next VAA has an older vm.timestamp
+        vm.warp(block.timestamp - 1);
+        bytes memory olderPayload = abi.encode(uint8(1), assetId, uint256(1_000_000_000_000_000_000), ts - 1);
 
         vm.expectRevert(
             abi.encodeWithSelector(MessageDispatcher.StalePriceUpdate.selector, assetId, ts - 1, ts)
         );
-        // forge-lint: disable-next-line(unsafe-typecast)
         dispatcher.receiveMessage(_buildVaaWithHash(olderPayload, bytes32("salt")));
     }
 
