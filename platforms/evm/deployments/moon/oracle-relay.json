@@ -2,7 +2,7 @@
   "migration": "oracle-relay",
   "environment": "moon",
   "startedAt": "2026-04-07T14:52:40.132Z",
-  "completedAt": "2026-04-07T15:55:38.333Z",
+  "completedAt": "2026-04-07T17:28:26.686Z",
   "steps": [
     {
       "name": "deploy-transactor",
@@ -89,6 +89,30 @@
       "error": null,
       "startedAt": "2026-04-07T14:53:28.606Z",
       "completedAt": "2026-04-07T14:53:34.004Z"
+    },
+    {
+      "name": "set-oracle-sol",
+      "status": "completed",
+      "output": {
+        "txHash": "0x337ef9d6e1233a53cacd2823877ae6d425d346133c2b9ba58753286d7ccbcbe0",
+        "assetId": "0x069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001",
+        "oracle": "0x3928A0C729819B3999006D9fd0eB8e2562006384"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T17:28:06.785Z",
+      "completedAt": "2026-04-07T17:28:21.365Z"
+    },
+    {
+      "name": "set-oracle-jitosol",
+      "status": "completed",
+      "output": {
+        "txHash": "0x05b65ba5591f3b0fbb9da424a557cd687298f3cb35e6726d8e4862e42d0e8891",
+        "assetId": "0xfcd141e9832caf10ad917495ca0f271b5b293cd47027ea737007ed40eb39a0bd",
+        "oracle": "0x58469121FeD2F06183e7cF741a1219b6A20923eE"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T17:28:21.366Z",
+      "completedAt": "2026-04-07T17:28:26.686Z"
     }
   ]
 }

@@ -6,6 +6,7 @@
     "build": "cd contracts && forge build",
     "test": "cd contracts && forge test",
     "migration:run": "npx tsx migrations/run.ts",
+    "check:oracles": "bash sh/check-oracles.sh",
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
     "fork:hydration": "bash sh/fork-hydration.sh",
