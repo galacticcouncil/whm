@@ -12,8 +12,9 @@ contract MessageDispatcher is MessageReceiver {
     }
     mapping(bytes32 => PriceData) public latestPrices;
 
-    uint8 constant ACTION_PRICE_UPDATE = 1;
-    uint256 constant ORACLE_PRICE_SCALE_DIVISOR = 1e10;
+    uint8 constant ACTION_ORACLE_PRICE = 1;
+    uint8 constant ACTION_STAKE_RATE = 2;
+    uint256 constant PRICE_SCALE_DIVISOR = 1e10;
 
     uint64 public maxPriceAge = 300; // 5 minutes default
 
@@ -38,29 +39,29 @@ contract MessageDispatcher is MessageReceiver {
     function _processMessage(uint16 sourceChain, bytes memory payload) internal virtual override {
         uint8 action = uint8(payload[31]);
 
-        if (action == ACTION_PRICE_UPDATE) {
-            _handlePriceUpdate(payload);
+        if (action == ACTION_ORACLE_PRICE || action == ACTION_STAKE_RATE) {
+            _handlePricePayload(action, payload);
         } else {
             super._processMessage(sourceChain, payload);
         }
     }
 
-    function _handlePriceUpdate(bytes memory payload) internal virtual {
+    function _handlePricePayload(uint8 action, bytes memory payload) internal virtual {
         (, bytes32 assetId, uint256 price, uint64 timestamp) = abi.decode(payload, (uint8, bytes32, uint256, uint64));
         uint64 latestTimestamp = latestPrices[assetId].timestamp;
         if (timestamp <= latestTimestamp) revert StalePriceUpdate(assetId, timestamp, latestTimestamp);
         require(block.timestamp - timestamp <= maxPriceAge, "Price too stale");
 
-        address handler = handlers[ACTION_PRICE_UPDATE];
+        address handler = handlers[action];
         address oracle = oracles[assetId];
-        
-        if (handler == address(0)) revert HandlerNotSet(ACTION_PRICE_UPDATE);
+
+        if (handler == address(0)) revert HandlerNotSet(action);
         if (oracle == address(0)) revert OracleNotSet(assetId);
 
         latestPrices[assetId] = PriceData({price: price, timestamp: timestamp, receivedAt: uint64(block.timestamp)});
         emit PriceReceived(assetId, price, timestamp);
 
-        uint256 scaledPrice = price / ORACLE_PRICE_SCALE_DIVISOR;
+        uint256 scaledPrice = price / PRICE_SCALE_DIVISOR;
         require(scaledPrice > 0, "Price too low to scale");
         bytes memory input = abi.encodeWithSignature("setPrice(int256)", int256(scaledPrice));
         XcmTransactor(handler).transact(oracle, input);

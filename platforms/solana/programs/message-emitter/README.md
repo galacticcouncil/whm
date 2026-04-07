@@ -6,28 +6,82 @@ On Solana, cross-chain messaging works through the Wormhole Core Bridge's `post_
 
 ## Implementation
 
-### Program state: `Config` (PDA, seeds: `[b"config"]`)
+### Program state
 
-| Field            | Type       | Description                                   |
-| ---------------- | ---------- | --------------------------------------------- |
-| `owner`          | `Pubkey`   | Admin who can update config                   |
-| `wormhole`       | `Pubkey`   | Wormhole Core Bridge program ID               |
-| `target_chain`   | `u16`      | Wormhole chain ID of receiver (16 = Moonbeam) |
-| `target_address` | `[u8; 32]` | Receiver contract address in Wormhole format  |
+#### `Config` (PDA, seeds: `[b"config"]`)
+
+| Field   | Type     | Description                 |
+| ------- | -------- | --------------------------- |
+| `owner` | `Pubkey` | Admin who can update config |
+
+#### `PriceFeed` (PDA, seeds: `[b"price_feed", asset_id]`)
+
+| Field         | Type       | Description                         |
+| ------------- | ---------- | ----------------------------------- |
+| `asset_id`    | `[u8; 32]` | Asset identity (pubkey bytes)       |
+| `price_index` | `u16`      | Kamino Scope oracle index for asset |
+
+#### `StakePoolFeed` (PDA, seeds: `[b"stake_pool_feed", asset_id]`)
+
+| Field        | Type       | Description                    |
+| ------------ | ---------- | ------------------------------ |
+| `asset_id`   | `[u8; 32]` | Asset identity (pubkey bytes)  |
+| `stake_pool` | `Pubkey`   | SPL Stake Pool account address |
 
 ### Instructions
 
-#### 1. `initialize(target_chain: u16, target_address: [u8; 32])`
+#### 1. `initialize()`
 
 - Creates the `Config` PDA
-- Stores owner, Wormhole program ID, target chain/address
+- Stores owner
 - One-time setup
 
-#### 2. `send_message(message: String)`
+#### 2. `register_price_feed(asset_id, price_index)`
+
+- Creates a `PriceFeed` PDA binding an asset to a Kamino Scope oracle index
+- Owner-only
+
+#### 3. `register_pool_feed(asset_id, stake_pool)`
+
+- Creates a `StakePoolFeed` PDA binding an asset to an SPL Stake Pool
+- Owner-only
+
+#### 4. `send_message(message: String)`
 
 - **Permissionless** (matches EVM sender - anyone can send and pay the fee)
 - ABI-encodes the message string for EVM receiver compatibility
 - CPI to Wormhole Core Bridge `post_message`
+
+#### 5. `send_price()`
+
+- **Permissionless**
+- Reads `DatedPrice` from Kamino Scope oracle at the registered `price_index`
+- Normalizes price to 18 decimals
+- ABI-encodes payload with `ACTION_ORACLE_PRICE` (1)
+- CPI to Wormhole Core Bridge `post_message`
+
+#### 6. `send_rate()`
+
+- **Permissionless**
+- Reads `total_lamports` and `pool_token_supply` from the registered SPL Stake Pool
+- Computes asset/SOL rate (`total_lamports / pool_token_supply`) normalized to 18 decimals
+- ABI-encodes payload with `ACTION_STAKE_RATE` (2)
+- CPI to Wormhole Core Bridge `post_message`
+
+### Payload format
+
+Both `send_price` and `send_rate` produce the same ABI-encoded layout, decoded on EVM as:
+
+```
+abi.decode(payload, (uint8, bytes32, uint256, uint64))
+```
+
+| Field     | Type      | Description                           |
+| --------- | --------- | ------------------------------------- |
+| action    | `uint8`   | 1 = oracle price, 2 = stake pool rate |
+| assetId   | `bytes32` | Asset identity (Solana pubkey bytes)  |
+| price     | `uint256` | Value normalized to 18 decimals       |
+| timestamp | `uint64`  | Oracle timestamp or clock timestamp   |
 
 ### Wormhole Core Bridge CPI (`post_message`)
 
@@ -43,24 +97,23 @@ On Solana, cross-chain messaging works through the Wormhole Core Bridge's `post_
 8. `rent` - Rent sysvar
 9. `system_program` - System program
 
-**Instruction data format:**
-
-```
-[0x01]                    // PostMessage instruction index
-[nonce: u32 LE]           // Message nonce (0)
-[payload_len: u32 LE]     // Borsh Vec length prefix
-[payload bytes]           // ABI-encoded message
-[consistency_level: u8]   // 1 = confirmed finality
-```
-
 ### ABI encoding (EVM compatibility)
 
-The Moonbeam receiver does `abi.decode(payload, (string))`. The Solana message-emitter program must produce valid ABI encoding:
+**String encoding** (`send_message`):
 
 ```
 bytes  0-31: offset to string data = 0x20 (32, big-endian)
 bytes 32-63: string byte length (big-endian u256)
 bytes 64+:   UTF-8 string data, zero-padded to 32-byte boundary
+```
+
+**Price/rate encoding** (`send_price`, `send_rate`):
+
+```
+bytes   0-31:  action    (uint8, left-padded to 32 bytes)
+bytes  32-63:  assetId   (bytes32)
+bytes  64-95:  price     (uint256, 18-decimal normalised, big-endian)
+bytes  96-127: timestamp (uint64, left-padded to 32 bytes)
 ```
 
 ### Key design decisions
@@ -72,6 +125,10 @@ bytes 64+:   UTF-8 string data, zero-padded to 32-byte boundary
 - **Payload encodes only the message string** - matches what the receiver decodes. The EVM sender also encodes `msg.sender` but the receiver ignores it
 
 - **Emitter PDA as message source** - the Wormhole guardian network uses this as the sender identity. The Moonbeam receiver must register this emitter address (in bytes32 format) via `setAuthorizedEmitter(1, emitterBytes32)` where Wormhole chain ID `1` = Solana
+
+- **Two feed types** - `PriceFeed` for oracle-sourced USD prices (Kamino Scope), `StakePoolFeed` for on-chain SOL exchange rates (SPL Stake Pool). Separate PDAs keep concerns clean — `price_index` is meaningless for stake pools and `stake_pool` is meaningless for oracle feeds
+
+- **Stake pool address validated on-chain** - `SendRate` enforces `#[account(address = stake_pool_feed.stake_pool)]` so the caller cannot pass a different stake pool than what the owner registered
 
 ### Scope oracle mappings
 

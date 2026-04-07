@@ -14,18 +14,31 @@ Three layers — Solana emitter, Moonbeam dispatcher stack, and off-chain agents
 
 ### Solana — Message Emitter (Anchor Program)
 
-Reads prices from Kamino Scope and publishes them as Wormhole VAAs.
+Reads prices and exchange rates from on-chain sources and publishes them as Wormhole VAAs.
 
-**`send_price(asset_id)`**
+**`send_price()`** — Oracle price (action 1)
 
-1. Reads `DatedPrice` from Kamino Scope oracle for the registered price feed
+1. Reads `DatedPrice` from Kamino Scope oracle at the registered `price_index`
 2. Normalizes price to 18 decimals
 3. ABI-encodes payload: `(action: u8, assetId: bytes32, price: u256, timestamp: u64)`
+4. Calls `wormhole.post_message()` — published as a signed VAA
+
+**`send_rate()`** — Stake pool rate (action 2)
+
+1. Reads `total_lamports` and `pool_token_supply` from a registered SPL Stake Pool
+2. Computes asset/SOL rate (`total_lamports / pool_token_supply`) normalized to 18 decimals
+3. ABI-encodes payload with same format as `send_price` but action = 2
 4. Calls `wormhole.post_message()` — published as a signed VAA
 
 **`register_price_feed(asset_id, oracle_index)`**
 
 - Creates a PDA `[price_feed, asset_id]` mapping an asset to its Kamino Scope oracle index
+- Owner-only
+
+**`register_pool_feed(asset_id, stake_pool)`**
+
+- Creates a PDA `[stake_pool_feed, asset_id]` mapping an asset to its SPL Stake Pool
+- Stake pool address is validated on-chain when sending (`send_rate`)
 - Owner-only
 
 ### Moonbeam — MessageReceiver (base)
@@ -45,7 +58,8 @@ Routes validated messages by action type to registered handlers.
 
 | Action                | ID  | Handler       |
 | --------------------- | --- | ------------- |
-| `ACTION_PRICE_UPDATE` | 1   | XcmTransactor |
+| `ACTION_ORACLE_PRICE` | 1   | XcmTransactor |
+| `ACTION_STAKE_RATE`   | 2   | XcmTransactor |
 
 **Price update flow:**
 
@@ -82,7 +96,7 @@ Dispatches EVM calls to Hydration parachain via Moonbeam's XCM precompile (0x081
 
 ### Off-chain Agents
 
-**Broadcaster** — Periodically calls `send_price()` on the Solana emitter program, triggering a new price VAA.
+**Broadcaster** — Periodically calls `send_price()` and `send_rate()` on the Solana emitter program, triggering new VAAs for oracle prices and stake pool rates.
 
 **Relayer** — Polls Wormhole for signed VAAs from the emitter, then submits them to `MessageDispatcher.receiveMessage()` on Moonbeam.
 
