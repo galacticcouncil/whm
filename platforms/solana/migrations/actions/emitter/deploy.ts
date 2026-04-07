@@ -19,6 +19,9 @@ export async function deploy(params: DeployParams): Promise<StepOutput> {
     const sig = await connection.requestAirdrop(wallet.publicKey, 10 * anchor.web3.LAMPORTS_PER_SOL);
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
     await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
+
+    const balance = await connection.getBalance(wallet.publicKey);
+    console.log("Balance:", balance / anchor.web3.LAMPORTS_PER_SOL, "SOL");
   }
 
   // Write temp keypair file for anchor CLI
@@ -73,6 +76,13 @@ export async function deploy(params: DeployParams): Promise<StepOutput> {
     console.log("Config initialized:", configPda.toBase58());
     console.log("  Owner:", wallet.publicKey.toBase58());
     console.log("  Tx:", initializeTx);
+  }
+
+  if (airdrop) {
+    const remaining = await connection.getBalance(wallet.publicKey);
+    const cost = 10 - remaining / anchor.web3.LAMPORTS_PER_SOL;
+    console.log("Remaining:", remaining / anchor.web3.LAMPORTS_PER_SOL, "SOL");
+    console.log("Deploy cost:", cost.toFixed(4), "SOL");
   }
 
   return {

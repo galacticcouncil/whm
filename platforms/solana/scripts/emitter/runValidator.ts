@@ -5,6 +5,7 @@ const { PublicKey, Connection } = anchor.web3;
 const RPC = "https://api.mainnet-beta.solana.com";
 const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth");
 const SCOPE_ORACLE_PRICES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH");
+const JITO_STAKE_POOL = new PublicKey("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb");
 
 // Wormhole PDAs
 const [BRIDGE_CONFIG] = PublicKey.findProgramAddressSync(
@@ -42,6 +43,7 @@ async function main() {
     "Fee Collector": FEE_COLLECTOR.toBase58(),
     "Guardian Set": guardianSet.toBase58(),
     "Scope Oracle Prices": SCOPE_ORACLE_PRICES.toBase58(),
+    "Jito Stake Pool": JITO_STAKE_POOL.toBase58(),
   };
 
   console.log("\nCloning from mainnet:");
@@ -69,6 +71,8 @@ async function main() {
     guardianSet.toBase58(),
     "--clone",
     SCOPE_ORACLE_PRICES.toBase58(),
+    "--clone",
+    JITO_STAKE_POOL.toBase58(),
   ];
 
   console.log(`> ${args.join(" ")}\n`);

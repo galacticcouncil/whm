@@ -3,14 +3,14 @@ import * as anchor from "@coral-xyz/anchor";
 import type { SolanaContext } from "../../types";
 import type { StepOutput } from "@whm/common/migration";
 
-interface RegisterAssetParams extends SolanaContext {
+interface RegisterPriceFeedParams extends SolanaContext {
   /** Solana public key of the asset (base58) */
   assetId: string;
   /** Scope oracle price index */
   priceIndex: number;
 }
 
-export async function registerAsset(params: RegisterAssetParams): Promise<StepOutput> {
+export async function registerPriceFeed(params: RegisterPriceFeedParams): Promise<StepOutput> {
   const { connection, wallet, program, assetId, priceIndex } = params;
 
   const assetPubkey = new anchor.web3.PublicKey(assetId);

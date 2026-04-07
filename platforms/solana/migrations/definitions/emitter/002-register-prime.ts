@@ -1,5 +1,5 @@
 import type { MigrationStep } from "../../types";
-import { registerAsset } from "../../actions/emitter/registerAsset";
+import { registerPriceFeed } from "../../actions/emitter/registerPriceFeed";
 
 const step: MigrationStep = {
   name: "register-prime",
@@ -10,7 +10,7 @@ const step: MigrationStep = {
     if (!assetId) throw new Error("Missing PRIME_ASSET_ID");
     if (!priceIndex) throw new Error("Missing PRIME_PRICE_INDEX");
 
-    return await registerAsset({
+    return await registerPriceFeed({
       ...ctx.wallet,
       assetId,
       priceIndex: Number(priceIndex),

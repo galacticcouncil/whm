@@ -6,3 +6,6 @@ node_modules/
 # Compiler
 target
 **/*.rs.bk
+
+# Fork deployment
+deployments/fork/

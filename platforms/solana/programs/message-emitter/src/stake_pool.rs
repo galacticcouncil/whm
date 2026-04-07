@@ -43,20 +43,21 @@ pub fn read_stake_pool(data: &[u8]) -> Result<StakePoolRate> {
     Ok(StakePoolRate { total_lamports, pool_token_supply, last_update_epoch })
 }
 
-/// Compute pool_token_supply / total_lamports normalised to 18 decimals.
+/// Compute total_lamports / pool_token_supply normalised to 18 decimals.
+/// This gives the asset/SOL rate (how much SOL per 1 pool token).
 ///
-/// Example: supply=8832203569191933  lamports=11231388894232904
-///          → 786349849… (≈ 0.786349849 × 10^18)
+/// Example: lamports=11231388894232904  supply=8832203569191933
+///          → 1_271_640_628… (≈ 1.271640628 × 10^18)
 pub fn compute_rate(pool: &StakePoolRate) -> Result<u128> {
-    require!(pool.total_lamports > 0, StakePoolReadError::ZeroLamports);
+    require!(pool.pool_token_supply > 0, StakePoolReadError::ZeroSupply);
 
-    let supply = pool.pool_token_supply as u128;
     let lamports = pool.total_lamports as u128;
+    let supply = pool.pool_token_supply as u128;
 
-    let rate = supply
+    let rate = lamports
         .checked_mul(10u128.pow(18))
         .ok_or(error!(StakePoolReadError::Overflow))?
-        / lamports;
+        / supply;
 
     Ok(rate)
 }
@@ -66,7 +67,7 @@ pub enum StakePoolReadError {
     #[msg("Stake pool account data too short")]
     InvalidData,
     #[msg("Stake pool total lamports is zero")]
-    ZeroLamports,
+    ZeroSupply,
     #[msg("Arithmetic overflow")]
     Overflow,
 }
@@ -119,10 +120,9 @@ mod tests {
             last_update_epoch: 952,
         };
         let rate = compute_rate(&pool).unwrap();
-        // 8832203569191933 * 10^18 / 11231388894232904 ≈ 786349849…
-        // Verify first 4 significant digits
-        assert!(rate > 786_000_000_000_000_000);
-        assert!(rate < 787_000_000_000_000_000);
+        // 11231388894232904 * 10^18 / 8832203569191933 ≈ 1_271_640_628…
+        assert!(rate > 1_271_000_000_000_000_000);
+        assert!(rate < 1_272_000_000_000_000_000);
     }
 
     #[test]
@@ -137,13 +137,13 @@ mod tests {
     }
 
     #[test]
-    fn invariant_compute_rate_zero_lamports_errors() {
+    fn invariant_compute_rate_zero_supply_errors() {
         let pool = StakePoolRate {
-            total_lamports: 0,
-            pool_token_supply: 100,
+            total_lamports: 100,
+            pool_token_supply: 0,
             last_update_epoch: 0,
         };
         let err = compute_rate(&pool).unwrap_err();
-        assert_anchor_error_name(err, "ZeroLamports");
+        assert_anchor_error_name(err, "ZeroSupply");
     }
 }

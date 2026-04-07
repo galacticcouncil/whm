@@ -51,6 +51,35 @@ cd platforms/solana
 pnpm run test:validator
 ```
 
+## Migrations
+
+See [migration docs](../../docs/migration.md) for general usage, flags, and how the runner works.
+
+Resumable, step-based deployment using the shared migration runner. Run from `platforms/solana/`.
+
+| Flag          | Description                          |
+| ------------- | ------------------------------------ |
+| `--migration` | Migration name (e.g. `emitter`)      |
+| `--env`       | Environment (`fork` or `prod`)       |
+| `--pk`        | Private key (BS58)                   |
+| `--from`      | (optional) Reset and retry from step |
+| `--pause-at`  | (optional) Pause after step          |
+
+```bash
+npx tsx migrations/run.ts \
+ --migration emitter \
+ --env fork \
+ --pk your_private_key
+```
+
+Migration steps for `emitter`:
+
+| Step               | Description                                       |
+| ------------------ | ------------------------------------------------- |
+| `deploy`           | Deploy message-emitter program, initialize config |
+| `register-prime`   | Register PRIME price feed (Scope oracle)          |
+| `register-jitosol` | Register JitoSOL pool feed (SPL Stake Pool)       |
+
 ## Scripts
 
 Standalone operational scripts. Use **DOTENV_CONFIG_PATH** for targeting .env variables.
@@ -146,15 +175,32 @@ npx tsx scripts/emitter/sendMessage.ts \
  --message your_message
 ```
 
-#### Broadcast price
+#### Broadcast oracle price
 
-Read the latest oracle price and publish it as a Wormhole VAA.
+Read the latest Scope oracle price for a registered asset and publish it as a Wormhole VAA.
 
-| Flag   | Description                              |
-| ------ | ---------------------------------------- |
-| `--pk` | Private key used to sign the transaction |
+| Flag      | Description                               |
+| --------- | ----------------------------------------- |
+| `--pk`    | Private key used to sign the transaction  |
+| `--asset` | Solana public key of the registered asset |
 
 ```bash
 npx tsx scripts/emitter/sendPrice.ts \
- --pk your_private_key
+ --pk your_private_key \
+ --asset 3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7
+```
+
+#### Broadcast stake pool rate
+
+Read the SOL exchange rate from a registered SPL Stake Pool and publish it as a Wormhole VAA.
+
+| Flag      | Description                               |
+| --------- | ----------------------------------------- |
+| `--pk`    | Private key used to sign the transaction  |
+| `--asset` | Solana public key of the registered asset |
+
+```bash
+npx tsx scripts/emitter/sendRate.ts \
+ --pk your_private_key \
+ --asset J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn
 ```

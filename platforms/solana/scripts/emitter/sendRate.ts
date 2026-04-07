@@ -12,7 +12,6 @@ const { requiredEnv, requiredArg } = args;
 const { Keypair, PublicKey, Connection } = anchor.web3;
 
 const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth");
-const SCOPE_ORACLE_PRICES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH");
 
 function getConfig() {
   const rpcUrl = requiredEnv("RPC_URL");
@@ -40,10 +39,13 @@ async function main(): Promise<void> {
 
   const assetPubkey = new PublicKey(assetId);
 
-  const [priceFeed] = PublicKey.findProgramAddressSync(
-    [Buffer.from("price_feed"), assetPubkey.toBytes()],
+  const [stakePoolFeed] = PublicKey.findProgramAddressSync(
+    [Buffer.from("stake_pool_feed"), assetPubkey.toBytes()],
     program.programId,
   );
+
+  // Resolve stake pool address from on-chain PDA
+  const feedData = await program.account.stakePoolFeed.fetch(stakePoolFeed);
 
   const [emitter] = PublicKey.findProgramAddressSync([Buffer.from("emitter")], program.programId);
   const [wormholeSequence] = PublicKey.findProgramAddressSync(
@@ -54,14 +56,14 @@ async function main(): Promise<void> {
   console.log("Program ID:", program.programId.toBase58());
   console.log("Payer:", wallet.publicKey.toBase58());
   console.log("Asset ID:", assetPubkey.toBase58());
-  console.log("Price Feed PDA:", priceFeed.toBase58());
-  console.log("Scope Prices:", SCOPE_ORACLE_PRICES.toBase58());
+  console.log("Pool Feed PDA:", stakePoolFeed.toBase58());
+  console.log("Stake Pool:", feedData.stakePool.toBase58());
 
   const tx = await program.methods
-    .sendPrice()
+    .sendRate()
     .accountsPartial({
-      priceFeed,
-      scopePrices: SCOPE_ORACLE_PRICES,
+      stakePoolFeed,
+      stakePool: feedData.stakePool,
       wormhole: {
         payer: wallet.publicKey,
         wormholeMessage: wormholeMessage.publicKey,
