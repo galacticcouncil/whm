@@ -3,6 +3,7 @@ pragma solidity ^0.8.22;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
 import {BasejumpBase} from "./BasejumpBase.sol";
 import {XcmTransactor} from "./XcmTransactor.sol";
@@ -85,12 +86,29 @@ contract BasejumpProxy is BasejumpBase, IBasejumpProxy {
     // ─── Recovery ───────────────────────────────────────────────
 
     /// @notice Reset a processed VAA flag to allow replay
-    /// @dev EMERGENCY USE ONLY: Use when XCM execution failed on Hydration after VAA was marked processed
+    /// @dev VULNERABLE: After reset, anyone can call completeTransfer(vaa) to replay.
+    ///      Use fix_resetProcessedVaa instead for atomic recovery.
     /// @param vaaHash The hash of the VAA to reset (from wormhole.parseAndVerifyVM(vaa).hash)
     function resetProcessedVaa(bytes32 vaaHash) external onlyOwner {
         require(processedVaas[vaaHash], "VAA not processed");
         processedVaas[vaaHash] = false;
         emit VaaResetForRecovery(vaaHash);
+    }
+
+    /// @notice Atomic VAA recovery: resets the processed flag and immediately
+    ///         re-processes the VAA in the same transaction, preventing front-running.
+    /// @dev Replaces resetProcessedVaa for safe recovery. The full VAA bytes are
+    ///      required (not just the hash) so the message can be re-verified and re-executed.
+    /// @param vaa The raw VAA bytes to recover
+    function fix_resetProcessedVaa(bytes memory vaa) external onlyOwner {
+        (IWormhole.VM memory vm, bool valid, string memory reason) = wormhole.parseAndVerifyVM(vaa);
+        require(valid, reason);
+        require(processedVaas[vm.hash], "VAA not processed");
+
+        processedVaas[vm.hash] = false;
+        this.receiveMessage(vaa);
+
+        emit VaaResetForRecovery(vm.hash);
     }
 
     // ─── Admin ──────────────────────────────────────────────────
