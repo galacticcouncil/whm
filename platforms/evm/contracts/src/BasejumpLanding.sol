@@ -39,6 +39,10 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
     uint256 public pendingTail;
     mapping(uint256 => PendingTransfer) public pendingTransfers;
 
+    /// @notice Stores the resolved destAsset at queue time for fix_transfer.
+    ///         Separate mapping preserves storage layout compatibility with existing PendingTransfer struct.
+    mapping(uint256 => address) public pendingResolvedDestAsset;
+
     // ─── Modifiers ───────────────────────────────────────────────
 
     modifier onlyOwner() {
@@ -87,6 +91,49 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
             pendingTransfers[id] = PendingTransfer({sourceAsset: sourceAsset, amount: amount, recipient: recipient});
             emit TransferQueued(id, sourceAsset, destAsset, recipient, amount);
         }
+    }
+
+    /// @notice Fixed transfer that snapshots destAsset at queue time, so admin
+    ///         changes to destAssetFor between queueing and fulfillment don't
+    ///         cause the wrong token to be delivered.
+    function fix_transfer(address sourceAsset, uint256 amount, bytes32 recipient) external onlyAuthorizedBridge {
+        address destAsset = destAssetFor[sourceAsset];
+        if (destAsset == address(0)) revert AssetNotConfigured(sourceAsset);
+
+        if (IERC20(destAsset).balanceOf(address(this)) >= amount) {
+            _executeTransfer(destAsset, amount, recipient);
+            emit TransferExecuted(sourceAsset, destAsset, recipient, amount);
+        } else {
+            uint256 id = pendingTail++;
+            pendingTransfers[id] = PendingTransfer({sourceAsset: sourceAsset, amount: amount, recipient: recipient});
+            pendingResolvedDestAsset[id] = destAsset; // ← snapshot at queue time
+            emit TransferQueued(id, sourceAsset, destAsset, recipient, amount);
+        }
+    }
+
+    /// @notice Fixed fulfillPending that uses the destAsset snapshotted at queue time
+    ///         (from fix_transfer) instead of re-reading the mutable destAssetFor mapping.
+    function fix_fulfillPendingWithSnapshot(uint256 id) external {
+        require(id >= pendingHead && id < pendingTail, "Invalid pending ID");
+
+        PendingTransfer memory pt = pendingTransfers[id];
+        require(pt.amount > 0, "Already fulfilled or empty");
+
+        // Use the snapshotted destAsset from queue time, NOT the current mapping
+        address destAsset = pendingResolvedDestAsset[id];
+        require(destAsset != address(0), "No snapshot - use fix_transfer to queue");
+        if (IERC20(destAsset).balanceOf(address(this)) < pt.amount) revert InsufficientBalance();
+
+        delete pendingTransfers[id];
+        delete pendingResolvedDestAsset[id];
+
+        // Advance head past consecutive empty slots
+        while (pendingHead < pendingTail && pendingTransfers[pendingHead].amount == 0) {
+            pendingHead++;
+        }
+
+        _executeTransfer(destAsset, pt.amount, pt.recipient);
+        emit PendingTransferFulfilled(id, pt.sourceAsset, destAsset, pt.recipient, pt.amount);
     }
 
     /// @notice Fulfill the next pending transfer in queue once liquidity is available.
