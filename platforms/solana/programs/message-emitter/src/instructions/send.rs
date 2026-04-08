@@ -71,7 +71,8 @@ pub struct SendPrice<'info> {
     #[account(seeds = [b"price_feed".as_ref(), price_feed.asset_id.as_ref()], bump)]
     pub price_feed: Account<'info, PriceFeed>,
 
-    /// CHECK: Kamino Scope OraclePrices account.
+    /// CHECK: Kamino Scope OraclePrices account — must match the registered address.
+    #[account(address = price_feed.scope_prices)]
     pub scope_prices: UncheckedAccount<'info>,
 
     /// Embedded Wormhole accounts (config, payer, bridge, emitter, etc.)

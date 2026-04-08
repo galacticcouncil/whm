@@ -27,9 +27,11 @@ pub(crate) fn register_price_feed(
     ctx: Context<RegisterPriceFeed>,
     asset_id: [u8; 32],
     price_index: u16,
+    scope_prices: Pubkey,
 ) -> Result<()> {
     let feed = &mut ctx.accounts.price_feed;
     feed.asset_id = asset_id;
     feed.price_index = price_index;
+    feed.scope_prices = scope_prices;
     Ok(())
 }

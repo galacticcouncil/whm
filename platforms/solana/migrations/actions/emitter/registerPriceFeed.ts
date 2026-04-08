@@ -8,10 +8,13 @@ interface RegisterPriceFeedParams extends SolanaContext {
   assetId: string;
   /** Scope oracle price index */
   priceIndex: number;
+  /** Scope OraclePrices account address (base58) */
+  scopePrices: string;
 }
 
 export async function registerPriceFeed(params: RegisterPriceFeedParams): Promise<StepOutput> {
-  const { connection, wallet, program, assetId, priceIndex } = params;
+  const { connection, wallet, program, assetId, priceIndex, scopePrices } = params;
+  const scopePricesPubkey = new anchor.web3.PublicKey(scopePrices);
 
   const assetPubkey = new anchor.web3.PublicKey(assetId);
   const assetIdBytes = Array.from(assetPubkey.toBytes());
@@ -39,7 +42,7 @@ export async function registerPriceFeed(params: RegisterPriceFeedParams): Promis
   }
 
   const tx = await program.methods
-    .registerPriceFeed(assetIdBytes, priceIndex)
+    .registerPriceFeed(assetIdBytes, priceIndex, scopePricesPubkey)
     .accounts({ owner: wallet.publicKey })
     .rpc();
 

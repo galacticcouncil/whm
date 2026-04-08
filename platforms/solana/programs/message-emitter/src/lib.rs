@@ -11,7 +11,7 @@ pub use instructions::register_price_feed::*;
 pub use instructions::register_pool_feed::*;
 pub use instructions::send::*;
 
-declare_id!("GfWB1ZsKatgasDDXw8JDrw6DzA8PXEv53SFyMSbgyiJZ");
+declare_id!("3C7vHjyefdDqWqzU2hxwUCFQD9kMiD1SCWWqmEj6HrQG");
 
 #[program]
 pub mod message_emitter {
@@ -25,8 +25,9 @@ pub mod message_emitter {
         ctx: Context<RegisterPriceFeed>,
         asset_id: [u8; 32],
         price_index: u16,
+        scope_prices: Pubkey,
     ) -> Result<()> {
-        instructions::register_price_feed::register_price_feed(ctx, asset_id, price_index)
+        instructions::register_price_feed::register_price_feed(ctx, asset_id, price_index, scope_prices)
     }
 
     pub fn register_pool_feed(

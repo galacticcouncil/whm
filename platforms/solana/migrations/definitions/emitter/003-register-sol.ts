@@ -7,13 +7,16 @@ const step: MigrationStep = {
   action: async (ctx) => {
     const assetId = ctx.env.SOL_ASSET_ID;
     const priceIndex = ctx.env.SOL_PRICE_INDEX;
+    const scopePrices = ctx.env.SCOPE_ORACLE_PRICES;
     if (!assetId) throw new Error("Missing SOL_ASSET_ID");
     if (!priceIndex) throw new Error("Missing SOL_PRICE_INDEX");
+    if (!scopePrices) throw new Error("Missing SCOPE_ORACLE_PRICES");
 
     return await registerPriceFeed({
       ...ctx.wallet,
       assetId,
       priceIndex: Number(priceIndex),
+      scopePrices,
     });
   },
 };
