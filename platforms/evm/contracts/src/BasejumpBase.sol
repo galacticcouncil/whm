@@ -37,6 +37,9 @@ abstract contract BasejumpBase is MessageReceiver, IBasejumpBase {
         emit TransferProcessed(transfer.sourceAsset, transfer.amount, transfer.recipient);
     }
 
+    /// @dev VULNERABLE: Forwards only messageFee to Wormhole. Any excess msg.value
+    ///      is permanently locked — no refund, no ETH withdrawal function.
+    ///      See fix_fastTrack for the safe version.
     function _fastTrack(
         address sourceAsset,
         uint256 amount,
@@ -56,6 +59,34 @@ abstract contract BasejumpBase is MessageReceiver, IBasejumpBase {
         bytes memory payload = abi.encode(transfer);
 
         uint256 messageFee = wormhole.messageFee();
+        messageSequence = wormhole.publishMessage{value: messageFee}(emitterNonce, payload, 200);
+
+        emitterNonce++;
+
+        emit BridgeInitiated(sourceAsset, amount, fee, destChain, recipient, transferSequence, messageSequence);
+    }
+
+    /// @notice Fixed fast-track that enforces exact msg.value == messageFee,
+    ///         preventing excess ETH from being permanently locked in the contract.
+    function fix_fastTrack(
+        address sourceAsset,
+        uint256 amount,
+        uint16 destChain,
+        bytes32 recipient,
+        uint64 transferSequence
+    ) internal returns (uint64 messageSequence) {
+        uint256 fee = quoteFee(sourceAsset);
+        if (amount <= fee) revert AmountTooLowForFee(amount, fee);
+        uint256 netAmount = amount - fee;
+
+        IBasejumpBase.TransferPayload memory transfer = IBasejumpBase.TransferPayload({
+            sourceAsset: sourceAsset, amount: netAmount, recipient: recipient, transferSequence: transferSequence
+        });
+
+        bytes memory payload = abi.encode(transfer);
+
+        uint256 messageFee = wormhole.messageFee();
+        require(msg.value == messageFee, "msg.value must equal message fee");
         messageSequence = wormhole.publishMessage{value: messageFee}(emitterNonce, payload, 200);
 
         emitterNonce++;
