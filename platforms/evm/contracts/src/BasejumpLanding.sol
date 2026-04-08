@@ -90,6 +90,8 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
     }
 
     /// @notice Fulfill the next pending transfer in queue once liquidity is available.
+    /// @dev VULNERABLE: Strict FIFO — a single large/unfulfillable entry blocks all subsequent transfers.
+    ///      Use fix_fulfillPending(id) for out-of-order fulfillment.
     function fulfillPending() external {
         if (pendingHead >= pendingTail) revert NoPendingTransfers();
 
@@ -103,6 +105,46 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
 
         _executeTransfer(destAsset, pt.amount, pt.recipient);
         emit PendingTransferFulfilled(id, pt.sourceAsset, destAsset, pt.recipient, pt.amount);
+    }
+
+    /// @notice Fulfill any pending transfer by ID, regardless of queue position.
+    ///         Allows out-of-order fulfillment so a large stuck entry doesn't block smaller ones.
+    /// @param id The pending transfer ID to fulfill
+    function fix_fulfillPending(uint256 id) external {
+        require(id >= pendingHead && id < pendingTail, "Invalid pending ID");
+
+        PendingTransfer memory pt = pendingTransfers[id];
+        require(pt.amount > 0, "Already fulfilled or empty");
+
+        address destAsset = destAssetFor[pt.sourceAsset];
+        if (destAsset == address(0)) revert AssetNotConfigured(pt.sourceAsset);
+        if (IERC20(destAsset).balanceOf(address(this)) < pt.amount) revert InsufficientBalance();
+
+        delete pendingTransfers[id];
+
+        // Advance head past any consecutive empty slots
+        while (pendingHead < pendingTail && pendingTransfers[pendingHead].amount == 0) {
+            pendingHead++;
+        }
+
+        _executeTransfer(destAsset, pt.amount, pt.recipient);
+        emit PendingTransferFulfilled(id, pt.sourceAsset, destAsset, pt.recipient, pt.amount);
+    }
+
+    /// @notice Owner can skip/cancel a pending transfer that is permanently stuck
+    ///         (e.g., blacklisted recipient, misconfigured asset, amount too large).
+    /// @param id The pending transfer ID to cancel
+    function fix_skipPending(uint256 id) external onlyOwner {
+        require(id >= pendingHead && id < pendingTail, "Invalid pending ID");
+        require(pendingTransfers[id].amount > 0, "Already fulfilled or empty");
+
+        emit PendingTransferSkipped(id, pendingTransfers[id].sourceAsset, pendingTransfers[id].recipient);
+        delete pendingTransfers[id];
+
+        // Advance head past any consecutive empty slots
+        while (pendingHead < pendingTail && pendingTransfers[pendingHead].amount == 0) {
+            pendingHead++;
+        }
     }
 
     /// @notice Execute currencies.transfer via dispatch precompile
