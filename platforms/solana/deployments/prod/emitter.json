@@ -1,65 +1,65 @@
 {
   "migration": "emitter",
   "environment": "prod",
-  "startedAt": "2026-04-08T08:33:07.676Z",
-  "completedAt": "2026-04-08T08:33:47.631Z",
+  "startedAt": "2026-04-10T13:47:32.751Z",
+  "completedAt": "2026-04-10T13:48:10.803Z",
   "steps": [
     {
       "name": "deploy",
       "status": "completed",
       "output": {
-        "programId": "3C7vHjyefdDqWqzU2hxwUCFQD9kMiD1SCWWqmEj6HrQG",
-        "emitterPda": "471e7Aa7nSh22xtdezDPHrkbXNmYheK2DirbRvTug7ta",
-        "emitterBytes32": "0x2e1d44de45b366cc9f959b2f0fe82c0956dd223f4cbf1f57eeeeb1cb38e3675f",
-        "configPda": "EzrhK67NV3xH2s14JejxkuYstAndfV6FLuucmq9ho8er",
+        "programId": "3E7Hqr4TUkAqPyCZtNgdaGeCjTt7rkLH7RjECA3hxbBS",
+        "emitterPda": "DTsF8F7KNQEwoUZwf5WcezgRfKDetwdPyMp16dF2ptNt",
+        "emitterBytes32": "0xb92e279a1f46f6204224573cd75a58146956f2c76a9261bf830cb1045f80b7c9",
+        "configPda": "2py9s1hxm3myz5H6NDZ2xyE9WLj7ZDbUwjpwJJoaUVS3",
         "ownerAddress": "6db8TCH51fK4Pq2LkBdMaMFPfXD17GjfLD8TaMPWNuiq",
-        "initializeTx": "3BrGKpj1N4vfjG6M27ZjjF67EbNR8hJbZjUAwFJfEX3uYY7V18e11Ja7FoXm7J3zDjC5Z6WSe8HnZitQLxrqKDS1"
+        "initializeTx": "4TpCoY5hYJhRCWXchBbLmw66aac97FtKexUXZfvfY6JwxhguzMZWCBmSrddbL93Jrq6mKz35Yx5pgtNittMoJK6S"
       },
       "error": null,
-      "startedAt": "2026-04-08T08:33:07.677Z",
-      "completedAt": "2026-04-08T08:33:44.798Z"
+      "startedAt": "2026-04-10T13:47:32.752Z",
+      "completedAt": "2026-04-10T13:48:08.424Z"
     },
     {
       "name": "register-prime",
       "status": "completed",
       "output": {
-        "priceFeedPda": "GTNzC8FxWd4WNQYgte34AZ3XuRMd4ixgtUbL2okYzNez",
+        "priceFeedPda": "9XrbC41SHirGrK7zZfKH7w7HGKJZwexPTXb2QuDcsyhc",
         "assetId": "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7",
         "assetIdBytes32": "0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da",
         "priceIndex": "190",
-        "tx": "2T7NtfS7q6x7VXPFo2zv15wQwxQoLVv6Co466tdg38reZx98ZTLozDJp5Rnt8YTrWQjYbcZJ8fsrQgHh3n4S5Fk3"
+        "tx": "4ZSmTGoqzULWsr9XURwzCSFXJRRoJC5vJ6UrUwv3AZnWZrTZ9reW61PkxWzFjJDJzrddoAuGNs9vhL7ybVus6T5Q"
       },
       "error": null,
-      "startedAt": "2026-04-08T08:33:44.801Z",
-      "completedAt": "2026-04-08T08:33:46.096Z"
+      "startedAt": "2026-04-10T13:48:08.424Z",
+      "completedAt": "2026-04-10T13:48:09.304Z"
     },
     {
       "name": "register-sol",
       "status": "completed",
       "output": {
-        "priceFeedPda": "GXNMzK1gii2PvB2QTT9FoUwdDDZvht4oScyvjibBnck2",
+        "priceFeedPda": "CFG52gHsKncCkciPFPtNXGX5fkPnpd99ZGPnco1uHTaq",
         "assetId": "So11111111111111111111111111111111111111112",
         "assetIdBytes32": "0x069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001",
         "priceIndex": "1",
-        "tx": "32aXEjLCQyemFvye2raQGBe6gND2kEDSEgdQfQTzomqGxJn9ZitE2vKsepD3bgP2JnUXBfrn8uWYBoMeJg47RYLd"
+        "tx": "4ahsxPWh8sCWEzef5rvVdmAkaFS4MDkqdm4vV4dnV3zyjWEUqG4qaQdUzZriZtHHUfCPnKKVq97EmQA4G5MW7vSh"
       },
       "error": null,
-      "startedAt": "2026-04-08T08:33:46.097Z",
-      "completedAt": "2026-04-08T08:33:46.839Z"
+      "startedAt": "2026-04-10T13:48:09.305Z",
+      "completedAt": "2026-04-10T13:48:10.066Z"
     },
     {
       "name": "register-jitosol",
       "status": "completed",
       "output": {
-        "poolFeedPda": "EmsdK6e4AiY9WMwYdYHBkiB5ojWTNwRRu6pp55TsgBb9",
+        "poolFeedPda": "9PCAfDaugbhDBnLPHbUMwhVKusKgirosQuLRg13xz5K9",
         "assetId": "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn",
         "assetIdBytes32": "0xfcd141e9832caf10ad917495ca0f271b5b293cd47027ea737007ed40eb39a0bd",
         "stakePool": "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb",
-        "tx": "3dQ4eJ2mXDwKAV9EGo6JWj5yaC8WwQoDDDNkvfNKeX62Vey8AzVCVreV3pXXqqEVxwYAQpKgMLW1oJRbURTnbg3y"
+        "tx": "2iYLJ4P79wFtVVtYgoPyav6HoLtqKvoibAbsGha9qNh8VuDRtmq3zr2mTfG9WNMXowAYKWsbHEr9UGWccAFc5qJa"
       },
       "error": null,
-      "startedAt": "2026-04-08T08:33:46.840Z",
-      "completedAt": "2026-04-08T08:33:47.631Z"
+      "startedAt": "2026-04-10T13:48:10.066Z",
+      "completedAt": "2026-04-10T13:48:10.802Z"
     }
   ]
 }

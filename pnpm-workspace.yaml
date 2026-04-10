@@ -2,6 +2,7 @@ packages:
   - common
   - platforms/evm
   - platforms/solana
+  - agents/broadcaster
 
 onlyBuiltDependencies:
   - esbuild

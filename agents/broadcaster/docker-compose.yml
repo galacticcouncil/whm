@@ -1,0 +1,22 @@
+version: "3.3"
+services:
+  broadcaster:
+    image: galacticcouncil/broadcaster:latest
+    environment:
+      - RPC_URL=
+      - PRIVATE_KEY=
+    volumes:
+      - db:/app/data
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+networks:
+  default:
+    driver: overlay
+volumes:
+  db:
+    driver: local

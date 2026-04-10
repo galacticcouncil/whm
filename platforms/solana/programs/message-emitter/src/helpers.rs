@@ -1,32 +1,3 @@
-/// ABI-encode a string so that `abi.decode(payload, (string))` works on the EVM side.
-///
-/// Layout (Solidity ABI encoding of a single dynamic `string`):
-///   bytes  0..32  : offset to string data = 0x20
-///   bytes 32..64  : string byte-length (big-endian u256)
-///   bytes 64..64+N: UTF-8 data, zero-padded to next 32-byte boundary
-pub fn abi_encode_string(s: &str) -> Vec<u8> {
-    let bytes = s.as_bytes();
-    let padded_len = (bytes.len() + 31) / 32 * 32;
-
-    let mut encoded = Vec::with_capacity(64 + padded_len);
-
-    // Offset to string data (always 32 for a single dynamic arg)
-    let mut offset = [0u8; 32];
-    offset[31] = 0x20;
-    encoded.extend_from_slice(&offset);
-
-    // String byte-length as big-endian u256
-    let mut length = [0u8; 32];
-    length[24..32].copy_from_slice(&(bytes.len() as u64).to_be_bytes());
-    encoded.extend_from_slice(&length);
-
-    // String data + zero padding
-    encoded.extend_from_slice(bytes);
-    encoded.resize(64 + padded_len, 0);
-
-    encoded
-}
-
 /// ABI-encode a price payload so the EVM receiver can decode it as:
 ///   `abi.decode(payload, (uint8, bytes32, uint256, uint64))`
 ///
@@ -67,29 +38,6 @@ pub fn abi_encode_price_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn invariant_abi_encode_string_layout_holds_for_multiple_lengths() {
-        for len in 0usize..130usize {
-            let s = String::from_utf8(vec![b'a'; len]).unwrap();
-            let encoded = abi_encode_string(&s);
-            let padded_len = len.div_ceil(32) * 32;
-
-            assert_eq!(encoded.len(), 64 + padded_len);
-
-            assert!(encoded[0..31].iter().all(|b| *b == 0));
-            assert_eq!(encoded[31], 0x20);
-
-            assert!(encoded[32..56].iter().all(|b| *b == 0));
-            assert_eq!(
-                u64::from_be_bytes(encoded[56..64].try_into().unwrap()),
-                len as u64
-            );
-
-            assert_eq!(&encoded[64..64 + len], s.as_bytes());
-            assert!(encoded[64 + len..].iter().all(|b| *b == 0));
-        }
-    }
 
     #[test]
     fn invariant_abi_encode_price_payload_roundtrips_fields() {

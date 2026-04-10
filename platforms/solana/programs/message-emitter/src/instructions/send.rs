@@ -3,7 +3,7 @@ use wormhole_anchor_sdk::wormhole::{
     self, program::Wormhole, BridgeData, FeeCollector, Finality, SEED_PREFIX_EMITTER,
 };
 
-use crate::helpers::{abi_encode_price_payload, abi_encode_string};
+use crate::helpers::abi_encode_price_payload;
 use crate::oracle::{normalize_to_18dec, read_price};
 use crate::stake_pool;
 use crate::state::{PriceFeed, StakePoolFeed};
@@ -91,11 +91,6 @@ pub struct SendRate<'info> {
 
     /// Embedded Wormhole accounts (config, payer, bridge, emitter, etc.)
     pub wormhole: SendMessage<'info>,
-}
-
-pub(crate) fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
-    let payload = abi_encode_string(&message);
-    post_wormhole_message(&ctx.accounts, ctx.bumps.emitter, payload)
 }
 
 pub(crate) fn send_price(ctx: Context<SendPrice>) -> Result<()> {

@@ -160,21 +160,6 @@ npx tsx scripts/emitter/close.ts \
  --recipient your_wallet_address
 ```
 
-#### Broadcast message
-
-Publish a string message as a Wormhole VAA through the Core Bridge.
-
-| Flag        | Description                                          |
-| ----------- | ---------------------------------------------------- |
-| `--pk`      | Private key used to sign the transaction             |
-| `--message` | Message payload to send (string or hex-encoded data) |
-
-```bash
-npx tsx scripts/emitter/sendMessage.ts \
- --pk your_private_key \
- --message your_message
-```
-
 #### Broadcast oracle price
 
 Read the latest Scope oracle price for a registered asset and publish it as a Wormhole VAA.

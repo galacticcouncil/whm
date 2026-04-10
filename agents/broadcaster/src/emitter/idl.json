@@ -1,0 +1,716 @@
+{
+  "address": "3E7Hqr4TUkAqPyCZtNgdaGeCjTt7rkLH7RjECA3hxbBS",
+  "metadata": {
+    "name": "message_emitter",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "register_pool_feed",
+      "discriminator": [
+        65,
+        105,
+        241,
+        97,
+        83,
+        107,
+        121,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "stake_pool_feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "asset_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "register_price_feed",
+      "discriminator": [
+        18,
+        130,
+        99,
+        48,
+        173,
+        153,
+        230,
+        220
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "price_feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  105,
+                  99,
+                  101,
+                  95,
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "asset_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "price_index",
+          "type": "u16"
+        },
+        {
+          "name": "scope_prices",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "send_price",
+      "discriminator": [
+        53,
+        172,
+        65,
+        183,
+        30,
+        133,
+        37,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "price_feed",
+          "docs": [
+            "Owner-registered binding: asset_id <-> oracle indexes."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  105,
+                  99,
+                  101,
+                  95,
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "price_feed.asset_id",
+                "account": "PriceFeed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "scope_prices"
+        },
+        {
+          "name": "wormhole",
+          "accounts": [
+            {
+              "name": "config",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      99,
+                      111,
+                      110,
+                      102,
+                      105,
+                      103
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "payer",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "wormhole_bridge",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      66,
+                      114,
+                      105,
+                      100,
+                      103,
+                      101
+                    ]
+                  }
+                ],
+                "program": {
+                  "kind": "account",
+                  "path": "wormhole_program"
+                }
+              }
+            },
+            {
+              "name": "wormhole_message",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "emitter",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      109,
+                      105,
+                      116,
+                      116,
+                      101,
+                      114
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "wormhole_sequence",
+              "writable": true
+            },
+            {
+              "name": "wormhole_fee_collector",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      102,
+                      101,
+                      101,
+                      95,
+                      99,
+                      111,
+                      108,
+                      108,
+                      101,
+                      99,
+                      116,
+                      111,
+                      114
+                    ]
+                  }
+                ],
+                "program": {
+                  "kind": "account",
+                  "path": "wormhole_program"
+                }
+              }
+            },
+            {
+              "name": "clock",
+              "address": "SysvarC1ock11111111111111111111111111111111"
+            },
+            {
+              "name": "rent",
+              "address": "SysvarRent111111111111111111111111111111111"
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            },
+            {
+              "name": "wormhole_program",
+              "address": "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth"
+            }
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "send_rate",
+      "discriminator": [
+        40,
+        41,
+        129,
+        253,
+        162,
+        155,
+        233,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "stake_pool_feed",
+          "docs": [
+            "Owner-registered binding: asset_id <-> stake pool."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  102,
+                  101,
+                  101,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_pool_feed.asset_id",
+                "account": "StakePoolFeed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool"
+        },
+        {
+          "name": "wormhole",
+          "accounts": [
+            {
+              "name": "config",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      99,
+                      111,
+                      110,
+                      102,
+                      105,
+                      103
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "payer",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "wormhole_bridge",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      66,
+                      114,
+                      105,
+                      100,
+                      103,
+                      101
+                    ]
+                  }
+                ],
+                "program": {
+                  "kind": "account",
+                  "path": "wormhole_program"
+                }
+              }
+            },
+            {
+              "name": "wormhole_message",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "emitter",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      109,
+                      105,
+                      116,
+                      116,
+                      101,
+                      114
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "wormhole_sequence",
+              "writable": true
+            },
+            {
+              "name": "wormhole_fee_collector",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      102,
+                      101,
+                      101,
+                      95,
+                      99,
+                      111,
+                      108,
+                      108,
+                      101,
+                      99,
+                      116,
+                      111,
+                      114
+                    ]
+                  }
+                ],
+                "program": {
+                  "kind": "account",
+                  "path": "wormhole_program"
+                }
+              }
+            },
+            {
+              "name": "clock",
+              "address": "SysvarC1ock11111111111111111111111111111111"
+            },
+            {
+              "name": "rent",
+              "address": "SysvarRent111111111111111111111111111111111"
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            },
+            {
+              "name": "wormhole_program",
+              "address": "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth"
+            }
+          ]
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "PriceFeed",
+      "discriminator": [
+        189,
+        103,
+        252,
+        23,
+        152,
+        35,
+        243,
+        156
+      ]
+    },
+    {
+      "name": "StakePoolFeed",
+      "discriminator": [
+        55,
+        185,
+        108,
+        120,
+        25,
+        141,
+        201,
+        34
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidData",
+      "msg": "Stake pool account data too short"
+    },
+    {
+      "code": 6001,
+      "name": "ZeroSupply",
+      "msg": "Stake pool total lamports is zero"
+    },
+    {
+      "code": 6002,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PriceFeed",
+      "docs": [
+        "Owner-created binding between an oracle index, scope oracle account, and an asset identity.",
+        "Seeds: [b\"price_feed\", asset_id]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asset_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "price_index",
+            "type": "u16"
+          },
+          {
+            "name": "scope_prices",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakePoolFeed",
+      "docs": [
+        "Owner-created binding between a stake pool and an asset identity.",
+        "Seeds: [b\"stake_pool_feed\", asset_id]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asset_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "stake_pool",
+            "type": "pubkey"
+          }
+        ]
+      }
+    }
+  ]
+}

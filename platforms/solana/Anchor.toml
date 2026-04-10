@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-message-emitter = "3C7vHjyefdDqWqzU2hxwUCFQD9kMiD1SCWWqmEj6HrQG"
+message-emitter = "3E7Hqr4TUkAqPyCZtNgdaGeCjTt7rkLH7RjECA3hxbBS"
 
 [registry]
 url = "https://api.apr.dev"

@@ -11,7 +11,7 @@ pub use instructions::register_price_feed::*;
 pub use instructions::register_pool_feed::*;
 pub use instructions::send::*;
 
-declare_id!("3C7vHjyefdDqWqzU2hxwUCFQD9kMiD1SCWWqmEj6HrQG");
+declare_id!("3E7Hqr4TUkAqPyCZtNgdaGeCjTt7rkLH7RjECA3hxbBS");
 
 #[program]
 pub mod message_emitter {
@@ -36,10 +36,6 @@ pub mod message_emitter {
         stake_pool: Pubkey,
     ) -> Result<()> {
         instructions::register_pool_feed::register_pool_feed(ctx, asset_id, stake_pool)
-    }
-
-    pub fn send_message(ctx: Context<SendMessage>, message: String) -> Result<()> {
-        instructions::send::send_message(ctx, message)
     }
 
     pub fn send_price(ctx: Context<SendPrice>) -> Result<()> {
