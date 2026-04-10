@@ -2,7 +2,7 @@
   "migration": "basejump-landing",
   "environment": "base",
   "startedAt": "2026-03-31T01:01:09.906Z",
-  "completedAt": "2026-03-31T01:13:59.176Z",
+  "completedAt": "2026-04-10T03:10:27.537Z",
   "steps": [
     {
       "name": "deploy",
@@ -39,6 +39,18 @@
       "error": null,
       "startedAt": "2026-04-01T04:17:02.012Z",
       "completedAt": "2026-04-01T04:17:13.575Z"
+    },
+    {
+      "name": "transfer-ownership",
+      "status": "completed",
+      "output": {
+        "txHash": "0xb1f562e1f1392ac8aab4a70493938d15987ec9c68c22afc2635d743b00b9c985",
+        "contract": "0x70e9b12c3b19cb5f0e59984a5866278ab69df976",
+        "newOwner": "0xaa7e0000000000000000000000000000000aa7e1"
+      },
+      "error": null,
+      "startedAt": "2026-04-10T03:10:12.913Z",
+      "completedAt": "2026-04-10T03:10:27.536Z"
     }
   ]
 }

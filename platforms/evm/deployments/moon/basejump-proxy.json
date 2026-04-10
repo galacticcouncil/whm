@@ -2,7 +2,7 @@
   "migration": "basejump-proxy",
   "environment": "moon",
   "startedAt": "2026-03-31T00:48:39.852Z",
-  "completedAt": "2026-03-31T01:13:58.351Z",
+  "completedAt": "2026-04-10T03:09:47.093Z",
   "steps": [
     {
       "name": "deploy-proxy",
@@ -52,6 +52,22 @@
       "error": null,
       "startedAt": "2026-03-31T00:49:15.727Z",
       "completedAt": "2026-03-31T00:49:20.245Z"
+    },
+    {
+      "name": "transfer-ownership",
+      "status": "completed",
+      "output": {
+        "operatorTxHash": "0x1d4af15fe9d1d03cbdfd67b82ec1f72dc0aa3866b4098c3c72bcab3783d80dab",
+        "xcmOperator": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0",
+        "proxyTxHash": "0x6f0fc228fa8794aaaf2d3577d1e9236c5e4ab551f2396ab481e40fa7ae8977b7",
+        "transactorTxHash": "0x7dce4dafa81f3997c5c855bd114a8fa0f983d0a0e90ce79432dbbb360187a79c",
+        "proxyAddress": "0xf5b9334e44f800382cb47fc19669401d694e529b",
+        "transactorAddress": "0xdd11a22a428fd884a9f2feb3028cba541fc4ab87",
+        "newOwner": "0xb041705871c4c5537a1a57edd4d62f66217522a7"
+      },
+      "error": null,
+      "startedAt": "2026-04-10T03:09:20.983Z",
+      "completedAt": "2026-04-10T03:09:47.092Z"
     }
   ]
 }
