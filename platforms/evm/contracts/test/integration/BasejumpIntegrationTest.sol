@@ -7,7 +7,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {Basejump} from "../../src/Basejump.sol";
 import {BasejumpProxy} from "../../src/BasejumpProxy.sol";
 import {BasejumpLanding} from "../../src/BasejumpLanding.sol";
-import {XcmTransactor} from "../../src/XcmTransactor.sol";
+import {XcmTransactor, Multilocation, Weight} from "../../src/XcmTransactor.sol";
 
 import {IBasejumpBase} from "../../src/interfaces/IBasejumpBase.sol";
 import {IBasejumpLanding} from "../../src/interfaces/IBasejumpLanding.sol";

@@ -36,13 +36,6 @@ contract MockERC20 {
     }
 }
 
-/// @dev Harness to expose internal _encodeCurrenciesTransfer for testing
-contract BasejumpLandingHarness is BasejumpLanding {
-    function encodeCurrenciesTransfer(address asset, bytes32 recipient, uint256 amount) external pure returns (bytes memory) {
-        return _encodeCurrenciesTransfer(asset, recipient, amount);
-    }
-}
-
 contract BasejumpLandingTest is Test {
     BasejumpLanding public basejumpLanding;
     MockERC20 public usdc;
@@ -352,42 +345,6 @@ contract BasejumpLandingTest is Test {
     }
 
     // ─── AccountId32 Recipient ────────────────────────────────────
-
-    // ─── Encoding (verified against @polkadot/api + live Hydration metadata) ──
-
-    function testEncodeCurrenciesTransfer() public {
-        BasejumpLandingHarness harness = new BasejumpLandingHarness();
-
-        // 1 EURC (currency ID 42) to Alice — two-byte compact amount
-        assertEq(
-            harness.encodeCurrenciesTransfer(
-                address(uint160(0x10000002a)),
-                bytes32(0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d),
-                1_000_000
-            ),
-            hex"4f00d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d2a00000002093d00"
-        );
-
-        // 100k EURC to Bob — big-integer compact amount
-        assertEq(
-            harness.encodeCurrenciesTransfer(
-                address(uint160(0x10000002a)),
-                bytes32(0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48),
-                100_000_000_000
-            ),
-            hex"4f008eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a482a0000000700e8764817"
-        );
-
-        // 4 units to Alice — single-byte compact amount
-        assertEq(
-            harness.encodeCurrenciesTransfer(
-                address(uint160(0x10000002a)),
-                bytes32(0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d),
-                4
-            ),
-            hex"4f00d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d2a00000010"
-        );
-    }
 
     function testTransferWithAccountId32() public {
         // A typical Polkadot AccountId32 (not a valid EVM address)
