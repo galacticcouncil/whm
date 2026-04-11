@@ -24,7 +24,7 @@ export const common = {
 export const config = {
   ...common,
   outfile: "dist/index.js",
-  format: "esm",
+  format: "cjs",
   platform: "node",
   logLevel: "info",
 };

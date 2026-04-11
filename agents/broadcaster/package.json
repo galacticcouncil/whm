@@ -1,6 +1,5 @@
 {
   "name": "@whm/broadcaster",
-  "type": "module",
   "private": true,
   "scripts": {
     "start": "node dist/index.js",
@@ -11,14 +10,13 @@
     "sync-idl": "npm run sync-idl-json && npm run sync-idl-types",
     "sync-idl-json": "cp ../../platforms/solana/target/idl/message_emitter.json src/emitter/idl.json",
     "sync-idl-types": "cp ../../platforms/solana/target/types/message_emitter.ts src/emitter/types.ts",
-    "docker:build:arm64": "docker buildx build --no-cache --platform linux/arm64 -t galacticcouncil/broadcaster:local --load .",
-    "docker:build:amd64": "docker buildx build --no-cache --platform linux/amd64 -t galacticcouncil/broadcaster:latest --load .",
-    "docker:push:amd64": "docker buildx build --platform linux/amd64 -t galacticcouncil/broadcaster:latest --push .",
-    "docker:deploy": "docker stack deploy -c docker-compose.yml whm"
+    "docker:build": "docker build -t galacticcouncil/broadcaster:latest .",
+    "docker:deploy": "docker buildx build --platform linux/amd64,linux/arm64 -t galacticcouncil/broadcaster:latest --push .",
+    "docker:up": "docker stack deploy -c docker-compose.yml whm"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
-    "winston": "^3.8.2",
-    "humanize-duration-ts": "~2.1.1"
+    "humanize-duration-ts": "~2.1.1",
+    "winston": "^3.8.2"
   }
 }
