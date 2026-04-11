@@ -1,0 +1,43 @@
+version: '3.3'
+services:
+  app:
+    image: lumir/mrelayer:latest
+    environment:
+      ETH_FROM_SEQ: '269891'
+      PRIVKEY: YOUR_PRIVATE_KEY
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+    networks:
+      - default
+    logging:
+      driver: json-file
+  redis:
+    image: redis:latest
+    volumes:
+      - db:/data
+    networks:
+      - default
+    logging:
+      driver: json-file
+  spy:
+    image: ghcr.io/wormhole-foundation/guardiand:latest
+    command:
+      - spy
+      - --nodeKey
+      - /node.key
+      - --spyRPC
+      - '[::]:7073'
+      - --network
+      - /wormhole/mainnet/2
+      - --bootstrap
+      - /dns4/wormhole-v2-mainnet-bootstrap.xlabs.xyz/udp/8999/quic/p2p/12D3KooWNQ9tVrcb64tw6bNs2CaNrUGPM7yRrKvBBheQ5yCyPHKC,/dns4/wormhole.mcf.rocks/udp/8999/quic/p2p/12D3KooWDZVv7BhZ8yFLkarNdaSWaB43D6UbQwExJ8nnGAEmfHcU,/dns4/wormhole-v2-mainnet-bootstrap.staking.fund/udp/8999/quic/p2p/12D3KooWG8obDX9DNi1KUwZNu9xkGwfKqTp2GFwuuHpWZ3nQruS1
+    networks:
+      - default
+    logging:
+      driver: json-file
+networks:
+  default:
+    driver: overlay
+volumes:
+  db:
+    driver: local
