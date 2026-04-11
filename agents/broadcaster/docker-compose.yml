@@ -5,8 +5,9 @@ services:
     environment:
       - RPC_URL=
       - PRIVATE_KEY=
+      - REFRESH_INTERVAL=
     volumes:
-      - db:/app/data
+      - db:/app/.db
     networks:
       - default
     logging:

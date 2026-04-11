@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/message_emitter.json`.
  */
 export type MessageEmitter = {
-  "address": "3E7Hqr4TUkAqPyCZtNgdaGeCjTt7rkLH7RjECA3hxbBS",
+  "address": "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz",
   "metadata": {
     "name": "messageEmitter",
     "version": "0.1.0",
@@ -289,55 +289,67 @@ export type MessageEmitter = {
           "name": "wormhole",
           "accounts": [
             {
-              "name": "config",
-              "pda": {
-                "seeds": [
-                  {
-                    "kind": "const",
-                    "value": [
-                      99,
-                      111,
-                      110,
-                      102,
-                      105,
-                      103
-                    ]
-                  }
-                ]
-              }
-            },
-            {
               "name": "payer",
               "writable": true,
               "signer": true
             },
             {
-              "name": "wormholeBridge",
+              "name": "wormholePostMessageShim",
+              "address": "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX"
+            },
+            {
+              "name": "bridge",
+              "writable": true,
+              "address": "2yVjuQwpsvdsrywzsJJVs9Ueh4zayyo5DYJbBNc3DDpn"
+            },
+            {
+              "name": "message",
               "writable": true,
               "pda": {
                 "seeds": [
                   {
-                    "kind": "const",
-                    "value": [
-                      66,
-                      114,
-                      105,
-                      100,
-                      103,
-                      101
-                    ]
+                    "kind": "account",
+                    "path": "emitter"
                   }
                 ],
                 "program": {
-                  "kind": "account",
-                  "path": "wormholeProgram"
+                  "kind": "const",
+                  "value": [
+                    206,
+                    93,
+                    34,
+                    116,
+                    131,
+                    143,
+                    202,
+                    41,
+                    198,
+                    209,
+                    143,
+                    152,
+                    10,
+                    211,
+                    213,
+                    245,
+                    235,
+                    78,
+                    129,
+                    210,
+                    121,
+                    29,
+                    243,
+                    98,
+                    128,
+                    136,
+                    144,
+                    147,
+                    38,
+                    68,
+                    208,
+                    24
+                  ]
                 }
               }
-            },
-            {
-              "name": "wormholeMessage",
-              "writable": true,
-              "signer": true
             },
             {
               "name": "emitter",
@@ -359,46 +371,17 @@ export type MessageEmitter = {
               }
             },
             {
-              "name": "wormholeSequence",
+              "name": "sequence",
               "writable": true
             },
             {
-              "name": "wormholeFeeCollector",
+              "name": "feeCollector",
               "writable": true,
-              "pda": {
-                "seeds": [
-                  {
-                    "kind": "const",
-                    "value": [
-                      102,
-                      101,
-                      101,
-                      95,
-                      99,
-                      111,
-                      108,
-                      108,
-                      101,
-                      99,
-                      116,
-                      111,
-                      114
-                    ]
-                  }
-                ],
-                "program": {
-                  "kind": "account",
-                  "path": "wormholeProgram"
-                }
-              }
+              "address": "9bFNrXNb2WTx8fMHXCheaZqkLZ3YCCaiqTftHxeintHy"
             },
             {
               "name": "clock",
               "address": "SysvarC1ock11111111111111111111111111111111"
-            },
-            {
-              "name": "rent",
-              "address": "SysvarRent111111111111111111111111111111111"
             },
             {
               "name": "systemProgram",
@@ -407,6 +390,9 @@ export type MessageEmitter = {
             {
               "name": "wormholeProgram",
               "address": "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth"
+            },
+            {
+              "name": "wormholePostMessageShimEa"
             }
           ]
         }
@@ -468,55 +454,67 @@ export type MessageEmitter = {
           "name": "wormhole",
           "accounts": [
             {
-              "name": "config",
-              "pda": {
-                "seeds": [
-                  {
-                    "kind": "const",
-                    "value": [
-                      99,
-                      111,
-                      110,
-                      102,
-                      105,
-                      103
-                    ]
-                  }
-                ]
-              }
-            },
-            {
               "name": "payer",
               "writable": true,
               "signer": true
             },
             {
-              "name": "wormholeBridge",
+              "name": "wormholePostMessageShim",
+              "address": "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX"
+            },
+            {
+              "name": "bridge",
+              "writable": true,
+              "address": "2yVjuQwpsvdsrywzsJJVs9Ueh4zayyo5DYJbBNc3DDpn"
+            },
+            {
+              "name": "message",
               "writable": true,
               "pda": {
                 "seeds": [
                   {
-                    "kind": "const",
-                    "value": [
-                      66,
-                      114,
-                      105,
-                      100,
-                      103,
-                      101
-                    ]
+                    "kind": "account",
+                    "path": "emitter"
                   }
                 ],
                 "program": {
-                  "kind": "account",
-                  "path": "wormholeProgram"
+                  "kind": "const",
+                  "value": [
+                    206,
+                    93,
+                    34,
+                    116,
+                    131,
+                    143,
+                    202,
+                    41,
+                    198,
+                    209,
+                    143,
+                    152,
+                    10,
+                    211,
+                    213,
+                    245,
+                    235,
+                    78,
+                    129,
+                    210,
+                    121,
+                    29,
+                    243,
+                    98,
+                    128,
+                    136,
+                    144,
+                    147,
+                    38,
+                    68,
+                    208,
+                    24
+                  ]
                 }
               }
-            },
-            {
-              "name": "wormholeMessage",
-              "writable": true,
-              "signer": true
             },
             {
               "name": "emitter",
@@ -538,46 +536,17 @@ export type MessageEmitter = {
               }
             },
             {
-              "name": "wormholeSequence",
+              "name": "sequence",
               "writable": true
             },
             {
-              "name": "wormholeFeeCollector",
+              "name": "feeCollector",
               "writable": true,
-              "pda": {
-                "seeds": [
-                  {
-                    "kind": "const",
-                    "value": [
-                      102,
-                      101,
-                      101,
-                      95,
-                      99,
-                      111,
-                      108,
-                      108,
-                      101,
-                      99,
-                      116,
-                      111,
-                      114
-                    ]
-                  }
-                ],
-                "program": {
-                  "kind": "account",
-                  "path": "wormholeProgram"
-                }
-              }
+              "address": "9bFNrXNb2WTx8fMHXCheaZqkLZ3YCCaiqTftHxeintHy"
             },
             {
               "name": "clock",
               "address": "SysvarC1ock11111111111111111111111111111111"
-            },
-            {
-              "name": "rent",
-              "address": "SysvarRent111111111111111111111111111111111"
             },
             {
               "name": "systemProgram",
@@ -586,6 +555,9 @@ export type MessageEmitter = {
             {
               "name": "wormholeProgram",
               "address": "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth"
+            },
+            {
+              "name": "wormholePostMessageShimEa"
             }
           ]
         }

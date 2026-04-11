@@ -1,5 +1,5 @@
 {
-  "address": "3E7Hqr4TUkAqPyCZtNgdaGeCjTt7rkLH7RjECA3hxbBS",
+  "address": "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz",
   "metadata": {
     "name": "message_emitter",
     "version": "0.1.0",
@@ -283,55 +283,67 @@
           "name": "wormhole",
           "accounts": [
             {
-              "name": "config",
-              "pda": {
-                "seeds": [
-                  {
-                    "kind": "const",
-                    "value": [
-                      99,
-                      111,
-                      110,
-                      102,
-                      105,
-                      103
-                    ]
-                  }
-                ]
-              }
-            },
-            {
               "name": "payer",
               "writable": true,
               "signer": true
             },
             {
-              "name": "wormhole_bridge",
+              "name": "wormhole_post_message_shim",
+              "address": "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX"
+            },
+            {
+              "name": "bridge",
+              "writable": true,
+              "address": "2yVjuQwpsvdsrywzsJJVs9Ueh4zayyo5DYJbBNc3DDpn"
+            },
+            {
+              "name": "message",
               "writable": true,
               "pda": {
                 "seeds": [
                   {
-                    "kind": "const",
-                    "value": [
-                      66,
-                      114,
-                      105,
-                      100,
-                      103,
-                      101
-                    ]
+                    "kind": "account",
+                    "path": "emitter"
                   }
                 ],
                 "program": {
-                  "kind": "account",
-                  "path": "wormhole_program"
+                  "kind": "const",
+                  "value": [
+                    206,
+                    93,
+                    34,
+                    116,
+                    131,
+                    143,
+                    202,
+                    41,
+                    198,
+                    209,
+                    143,
+                    152,
+                    10,
+                    211,
+                    213,
+                    245,
+                    235,
+                    78,
+                    129,
+                    210,
+                    121,
+                    29,
+                    243,
+                    98,
+                    128,
+                    136,
+                    144,
+                    147,
+                    38,
+                    68,
+                    208,
+                    24
+                  ]
                 }
               }
-            },
-            {
-              "name": "wormhole_message",
-              "writable": true,
-              "signer": true
             },
             {
               "name": "emitter",
@@ -353,46 +365,17 @@
               }
             },
             {
-              "name": "wormhole_sequence",
+              "name": "sequence",
               "writable": true
             },
             {
-              "name": "wormhole_fee_collector",
+              "name": "fee_collector",
               "writable": true,
-              "pda": {
-                "seeds": [
-                  {
-                    "kind": "const",
-                    "value": [
-                      102,
-                      101,
-                      101,
-                      95,
-                      99,
-                      111,
-                      108,
-                      108,
-                      101,
-                      99,
-                      116,
-                      111,
-                      114
-                    ]
-                  }
-                ],
-                "program": {
-                  "kind": "account",
-                  "path": "wormhole_program"
-                }
-              }
+              "address": "9bFNrXNb2WTx8fMHXCheaZqkLZ3YCCaiqTftHxeintHy"
             },
             {
               "name": "clock",
               "address": "SysvarC1ock11111111111111111111111111111111"
-            },
-            {
-              "name": "rent",
-              "address": "SysvarRent111111111111111111111111111111111"
             },
             {
               "name": "system_program",
@@ -401,6 +384,9 @@
             {
               "name": "wormhole_program",
               "address": "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth"
+            },
+            {
+              "name": "wormhole_post_message_shim_ea"
             }
           ]
         }
@@ -462,55 +448,67 @@
           "name": "wormhole",
           "accounts": [
             {
-              "name": "config",
-              "pda": {
-                "seeds": [
-                  {
-                    "kind": "const",
-                    "value": [
-                      99,
-                      111,
-                      110,
-                      102,
-                      105,
-                      103
-                    ]
-                  }
-                ]
-              }
-            },
-            {
               "name": "payer",
               "writable": true,
               "signer": true
             },
             {
-              "name": "wormhole_bridge",
+              "name": "wormhole_post_message_shim",
+              "address": "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX"
+            },
+            {
+              "name": "bridge",
+              "writable": true,
+              "address": "2yVjuQwpsvdsrywzsJJVs9Ueh4zayyo5DYJbBNc3DDpn"
+            },
+            {
+              "name": "message",
               "writable": true,
               "pda": {
                 "seeds": [
                   {
-                    "kind": "const",
-                    "value": [
-                      66,
-                      114,
-                      105,
-                      100,
-                      103,
-                      101
-                    ]
+                    "kind": "account",
+                    "path": "emitter"
                   }
                 ],
                 "program": {
-                  "kind": "account",
-                  "path": "wormhole_program"
+                  "kind": "const",
+                  "value": [
+                    206,
+                    93,
+                    34,
+                    116,
+                    131,
+                    143,
+                    202,
+                    41,
+                    198,
+                    209,
+                    143,
+                    152,
+                    10,
+                    211,
+                    213,
+                    245,
+                    235,
+                    78,
+                    129,
+                    210,
+                    121,
+                    29,
+                    243,
+                    98,
+                    128,
+                    136,
+                    144,
+                    147,
+                    38,
+                    68,
+                    208,
+                    24
+                  ]
                 }
               }
-            },
-            {
-              "name": "wormhole_message",
-              "writable": true,
-              "signer": true
             },
             {
               "name": "emitter",
@@ -532,46 +530,17 @@
               }
             },
             {
-              "name": "wormhole_sequence",
+              "name": "sequence",
               "writable": true
             },
             {
-              "name": "wormhole_fee_collector",
+              "name": "fee_collector",
               "writable": true,
-              "pda": {
-                "seeds": [
-                  {
-                    "kind": "const",
-                    "value": [
-                      102,
-                      101,
-                      101,
-                      95,
-                      99,
-                      111,
-                      108,
-                      108,
-                      101,
-                      99,
-                      116,
-                      111,
-                      114
-                    ]
-                  }
-                ],
-                "program": {
-                  "kind": "account",
-                  "path": "wormhole_program"
-                }
-              }
+              "address": "9bFNrXNb2WTx8fMHXCheaZqkLZ3YCCaiqTftHxeintHy"
             },
             {
               "name": "clock",
               "address": "SysvarC1ock11111111111111111111111111111111"
-            },
-            {
-              "name": "rent",
-              "address": "SysvarRent111111111111111111111111111111111"
             },
             {
               "name": "system_program",
@@ -580,6 +549,9 @@
             {
               "name": "wormhole_program",
               "address": "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth"
+            },
+            {
+              "name": "wormhole_post_message_shim_ea"
             }
           ]
         }

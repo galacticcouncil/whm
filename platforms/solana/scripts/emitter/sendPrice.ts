@@ -14,6 +14,8 @@ const { PublicKey, Connection, Keypair } = anchor.web3;
 const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth");
 const SHIM_PROGRAM_ID = new PublicKey("EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX");
 
+const SCOPE_ORACLE_PRICES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH");
+
 function getConfig() {
   const rpcUrl = requiredEnv("RPC_URL");
   const privateKey = requiredArg("--pk");
@@ -65,7 +67,7 @@ async function main(): Promise<void> {
     .sendPrice()
     .accountsPartial({
       priceFeed,
-      scopePrices: (await program.account.priceFeed.fetch(priceFeed)).scopePrices,
+      scopePrices: SCOPE_ORACLE_PRICES,
       wormhole: {
         payer: wallet.publicKey,
         message,

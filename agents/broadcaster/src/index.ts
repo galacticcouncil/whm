@@ -23,8 +23,8 @@ const config = {
   privateKey: requiredEnv("PRIVATE_KEY"),
   changeThreshold: 0.05,
   checkIntervalMs: 60 * 1_000,
-  fullRefreshMs: 24 * 60 * 60 * 1_000,
-  stateFile: process.env.STATE_FILE ?? "/app/data/db.json",
+  fullRefreshMs: Number(process.env.REFRESH_INTERVAL ?? 24) * 60 * 60 * 1_000,
+  stateFile: ".db/state.json",
 };
 
 function buildProgram(): Program<MessageEmitter> {

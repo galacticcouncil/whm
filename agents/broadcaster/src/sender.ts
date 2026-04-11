@@ -4,32 +4,46 @@ import type { Program } from "@coral-xyz/anchor";
 import type { MessageEmitter } from "./emitter/types.js";
 import type { PriceFeedEntry, RateFeedEntry, FeedEntry } from "./feeds.js";
 import { assetIdStr } from "./feeds.js";
+
 import log from "./logger.js";
 
-const { Keypair, PublicKey } = anchor.web3;
+const { PublicKey } = anchor.web3;
 
 const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth");
+const SHIM_PROGRAM_ID = new PublicKey("EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX");
 
 export async function sendUpdate(
   program: Program<MessageEmitter>,
   feed: FeedEntry,
 ): Promise<string> {
-  if (feed.kind === "price") {
-    return sendPriceUpdate(program, feed);
+  switch (feed.kind) {
+    case "price": {
+      return sendPriceUpdate(program, feed);
+    }
+    case "rate": {
+      return sendRateUpdate(program, feed);
+    }
+    default:
+      throw new Error(`Unknown feed kind: ${(feed as any).kind}`);
   }
-  return sendRateUpdate(program, feed);
 }
 
 async function sendPriceUpdate(
   program: Program<MessageEmitter>,
   feed: PriceFeedEntry,
 ): Promise<string> {
-  const wormholeMessage = Keypair.generate();
   const payer = (program.provider as anchor.AnchorProvider).wallet.publicKey;
+
   const [emitter] = PublicKey.findProgramAddressSync([Buffer.from("emitter")], program.programId);
-  const [wormholeSequence] = PublicKey.findProgramAddressSync(
+  const [message] = PublicKey.findProgramAddressSync([emitter.toBytes()], SHIM_PROGRAM_ID);
+  const [sequence] = PublicKey.findProgramAddressSync(
     [Buffer.from("Sequence"), emitter.toBytes()],
     WORMHOLE_PROGRAM_ID,
+  );
+
+  const [shimEventAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("__event_authority")],
+    SHIM_PROGRAM_ID,
   );
 
   const tx = await program.methods
@@ -39,11 +53,12 @@ async function sendPriceUpdate(
       scopePrices: feed.scopePrices,
       wormhole: {
         payer,
-        wormholeMessage: wormholeMessage.publicKey,
-        wormholeSequence,
+        message,
+        sequence,
+        wormholePostMessageShim: SHIM_PROGRAM_ID,
+        wormholePostMessageShimEa: shimEventAuthority,
       },
     })
-    .signers([wormholeMessage])
     .rpc();
 
   log.info(`  sendPrice ${assetIdStr(feed.assetId)} tx: ${tx}`);
@@ -54,12 +69,18 @@ async function sendRateUpdate(
   program: Program<MessageEmitter>,
   feed: RateFeedEntry,
 ): Promise<string> {
-  const wormholeMessage = Keypair.generate();
   const payer = (program.provider as anchor.AnchorProvider).wallet.publicKey;
+
   const [emitter] = PublicKey.findProgramAddressSync([Buffer.from("emitter")], program.programId);
-  const [wormholeSequence] = PublicKey.findProgramAddressSync(
+  const [message] = PublicKey.findProgramAddressSync([emitter.toBytes()], SHIM_PROGRAM_ID);
+  const [sequence] = PublicKey.findProgramAddressSync(
     [Buffer.from("Sequence"), emitter.toBytes()],
     WORMHOLE_PROGRAM_ID,
+  );
+
+  const [shimEventAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("__event_authority")],
+    SHIM_PROGRAM_ID,
   );
 
   const tx = await program.methods
@@ -69,11 +90,12 @@ async function sendRateUpdate(
       stakePool: feed.stakePool,
       wormhole: {
         payer,
-        wormholeMessage: wormholeMessage.publicKey,
-        wormholeSequence,
+        message,
+        sequence,
+        wormholePostMessageShim: SHIM_PROGRAM_ID,
+        wormholePostMessageShimEa: shimEventAuthority,
       },
     })
-    .signers([wormholeMessage])
     .rpc();
 
   log.info(`  sendRate ${assetIdStr(feed.assetId)} tx: ${tx}`);
