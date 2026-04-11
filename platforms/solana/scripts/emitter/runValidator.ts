@@ -4,6 +4,7 @@ const { PublicKey, Connection } = anchor.web3;
 
 const RPC = "https://api.mainnet-beta.solana.com";
 const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth");
+const SHIM_PROGRAM_ID = new PublicKey("EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX");
 const SCOPE_ORACLE_PRICES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH");
 const JITO_STAKE_POOL = new PublicKey("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb");
 
@@ -39,6 +40,7 @@ async function main() {
 
   const accounts = {
     "Wormhole Program": WORMHOLE_PROGRAM_ID.toBase58(),
+    "Shim Program": SHIM_PROGRAM_ID.toBase58(),
     "Bridge Config": BRIDGE_CONFIG.toBase58(),
     "Fee Collector": FEE_COLLECTOR.toBase58(),
     "Guardian Set": guardianSet.toBase58(),
@@ -63,6 +65,8 @@ async function main() {
     "--reset",
     "--clone-upgradeable-program",
     WORMHOLE_PROGRAM_ID.toBase58(),
+    "--clone-upgradeable-program",
+    SHIM_PROGRAM_ID.toBase58(),
     "--clone",
     BRIDGE_CONFIG.toBase58(),
     "--clone",

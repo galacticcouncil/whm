@@ -9,10 +9,10 @@ import messageEmitterIdl from "../../target/idl/message_emitter.json";
 import { MessageEmitter } from "../../target/types/message_emitter";
 
 const { requiredEnv, requiredArg } = args;
-const { Keypair, PublicKey, Connection } = anchor.web3;
+const { PublicKey, Connection, Keypair } = anchor.web3;
 
 const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth");
-const SCOPE_ORACLE_PRICES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH");
+const SHIM_PROGRAM_ID = new PublicKey("EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX");
 
 function getConfig() {
   const rpcUrl = requiredEnv("RPC_URL");
@@ -36,7 +36,6 @@ async function main(): Promise<void> {
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
 
   const program = new Program<MessageEmitter>(messageEmitterIdl, provider);
-  const wormholeMessage = Keypair.generate();
 
   const assetPubkey = new PublicKey(assetId);
 
@@ -46,29 +45,35 @@ async function main(): Promise<void> {
   );
 
   const [emitter] = PublicKey.findProgramAddressSync([Buffer.from("emitter")], program.programId);
-  const [wormholeSequence] = PublicKey.findProgramAddressSync(
+  const [message] = PublicKey.findProgramAddressSync([emitter.toBytes()], SHIM_PROGRAM_ID);
+  const [sequence] = PublicKey.findProgramAddressSync(
     [Buffer.from("Sequence"), emitter.toBytes()],
     WORMHOLE_PROGRAM_ID,
+  );
+
+  const [shimEventAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("__event_authority")],
+    SHIM_PROGRAM_ID,
   );
 
   console.log("Program ID:", program.programId.toBase58());
   console.log("Payer:", wallet.publicKey.toBase58());
   console.log("Asset ID:", assetPubkey.toBase58());
   console.log("Price Feed PDA:", priceFeed.toBase58());
-  console.log("Scope Prices:", SCOPE_ORACLE_PRICES.toBase58());
 
   const tx = await program.methods
     .sendPrice()
     .accountsPartial({
       priceFeed,
-      scopePrices: SCOPE_ORACLE_PRICES,
+      scopePrices: (await program.account.priceFeed.fetch(priceFeed)).scopePrices,
       wormhole: {
         payer: wallet.publicKey,
-        wormholeMessage: wormholeMessage.publicKey,
-        wormholeSequence,
+        message,
+        sequence,
+        wormholePostMessageShim: SHIM_PROGRAM_ID,
+        wormholePostMessageShimEa: shimEventAuthority,
       },
     })
-    .signers([wormholeMessage])
     .rpc();
 
   console.log("Tx:", tx);

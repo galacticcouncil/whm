@@ -2,7 +2,7 @@
   "migration": "oracle-relay",
   "environment": "moon",
   "startedAt": "2026-04-07T14:52:40.132Z",
-  "completedAt": "2026-04-10T13:50:47.026Z",
+  "completedAt": "2026-04-11T12:16:49.260Z",
   "steps": [
     {
       "name": "deploy-transactor",
@@ -46,13 +46,13 @@
       "name": "register-emitter",
       "status": "completed",
       "output": {
-        "txHash": "0xc3659063abc0adaf0914c739ce39f7fdd6c78bf1e85b8a8e392f489642b581a2",
-        "emitterBytes32": "0xb92e279a1f46f6204224573cd75a58146956f2c76a9261bf830cb1045f80b7c9",
+        "txHash": "0x1c01bd89a72388065e3ae84d08a29aabaac6c4c91b81f886731295a9e92d04dd",
+        "emitterBytes32": "0x4c0f6655f447821cda959c9fc48ba787909acf1a474ba68ffa6019aa485d4248",
         "sourceChain": "1"
       },
       "error": null,
-      "startedAt": "2026-04-10T13:50:36.352Z",
-      "completedAt": "2026-04-10T13:50:47.025Z"
+      "startedAt": "2026-04-11T12:16:42.396Z",
+      "completedAt": "2026-04-11T12:16:49.259Z"
     },
     {
       "name": "set-handler-price",

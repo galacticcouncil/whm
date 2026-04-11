@@ -9,7 +9,7 @@ crate-type = ["cdylib", "lib"]
 
 [features]
 default = ["mainnet"]
-mainnet = ["wormhole-anchor-sdk/mainnet"]
+mainnet = []
 local-logs = []
 no-entrypoint = []
 no-idl = []
@@ -18,11 +18,11 @@ custom-heap = []
 custom-panic = []
 anchor-debug = []
 cpi = ["no-entrypoint"]
-idl-build = ["anchor-lang/idl-build", "wormhole-anchor-sdk/idl-build"]
+idl-build = ["anchor-lang/idl-build"]
 
 [lints]
 workspace = true
 
 [dependencies]
-anchor-lang = "0.32.1"
-wormhole-anchor-sdk = { git = "https://github.com/wormhole-foundation/wormhole-scaffolding", default-features = false }
+anchor-lang = { version = "0.32.1", features = ["event-cpi"] }
+wormhole-post-message-shim = { package = "wormhole-post-message-shim-interface", git = "https://github.com/wormhole-foundation/wormhole", rev = "8a8067cc730488c6a3ee29e1084fd8e5d3fb7d42", default-features = false, features = ["cpi"] }

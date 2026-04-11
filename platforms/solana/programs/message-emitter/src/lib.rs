@@ -5,13 +5,14 @@ pub mod instructions;
 pub mod oracle;
 pub mod stake_pool;
 pub mod state;
+pub mod wormhole;
 
 pub use instructions::initialize::*;
 pub use instructions::register_price_feed::*;
 pub use instructions::register_pool_feed::*;
 pub use instructions::send::*;
 
-declare_id!("3E7Hqr4TUkAqPyCZtNgdaGeCjTt7rkLH7RjECA3hxbBS");
+declare_id!("8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz");
 
 #[program]
 pub mod message_emitter {

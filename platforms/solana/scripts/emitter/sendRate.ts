@@ -9,9 +9,10 @@ import messageEmitterIdl from "../../target/idl/message_emitter.json";
 import { MessageEmitter } from "../../target/types/message_emitter";
 
 const { requiredEnv, requiredArg } = args;
-const { Keypair, PublicKey, Connection } = anchor.web3;
+const { PublicKey, Connection, Keypair } = anchor.web3;
 
 const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth");
+const SHIM_PROGRAM_ID = new PublicKey("EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX");
 
 function getConfig() {
   const rpcUrl = requiredEnv("RPC_URL");
@@ -35,7 +36,6 @@ async function main(): Promise<void> {
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
 
   const program = new Program<MessageEmitter>(messageEmitterIdl, provider);
-  const wormholeMessage = Keypair.generate();
 
   const assetPubkey = new PublicKey(assetId);
 
@@ -44,13 +44,18 @@ async function main(): Promise<void> {
     program.programId,
   );
 
-  // Resolve stake pool address from on-chain PDA
   const feedData = await program.account.stakePoolFeed.fetch(stakePoolFeed);
 
   const [emitter] = PublicKey.findProgramAddressSync([Buffer.from("emitter")], program.programId);
-  const [wormholeSequence] = PublicKey.findProgramAddressSync(
+  const [message] = PublicKey.findProgramAddressSync([emitter.toBytes()], SHIM_PROGRAM_ID);
+  const [sequence] = PublicKey.findProgramAddressSync(
     [Buffer.from("Sequence"), emitter.toBytes()],
     WORMHOLE_PROGRAM_ID,
+  );
+
+  const [shimEventAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("__event_authority")],
+    SHIM_PROGRAM_ID,
   );
 
   console.log("Program ID:", program.programId.toBase58());
@@ -66,11 +71,12 @@ async function main(): Promise<void> {
       stakePool: feedData.stakePool,
       wormhole: {
         payer: wallet.publicKey,
-        wormholeMessage: wormholeMessage.publicKey,
-        wormholeSequence,
+        message,
+        sequence,
+        wormholePostMessageShim: SHIM_PROGRAM_ID,
+        wormholePostMessageShimEa: shimEventAuthority,
       },
     })
-    .signers([wormholeMessage])
     .rpc();
 
   console.log("Tx:", tx);
