@@ -1,20 +1,63 @@
 version: '3.3'
 services:
   app:
-    image: lumir/mrelayer:latest
+    image: galacticcouncil/mrelayer:latest
     environment:
-      ETH_FROM_SEQ: '269891'
-      PRIVKEY: YOUR_PRIVATE_KEY
+      ACALA_FROM_SEQ: '3408'
+      BASE_FROM_SEQ: '249354'
+      ETH_FROM_SEQ: '625934'
+      MOONBEAM_RPC: https://rpc.api.moonbeam.network
+      PRIVKEY: FILL THIS KEY ALWAYS
       REDIS_HOST: redis
+      SOLANA_FROM_SEQ: '1379804'
       SPY_ENDPOINT: spy:7073
+      SUI_FROM_SEQ: '222468'
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
     networks:
       - default
     logging:
       driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
+  base:
+    image: galacticcouncil/mrelayer:latest
+    command:
+      - start:base
+    environment:
+      MOONBEAM_FROM_SEQ: '95331'
+      PRIVKEY: FILL THIS KEY ALWAYS
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
+  eth:
+    image: galacticcouncil/mrelayer:latest
+    command:
+      - start:eth
+    environment:
+      MOONBEAM_FROM_SEQ: '95532'
+      PRIVKEY: FILL THIS KEY ALWAYS
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
   redis:
     image: redis:latest
     volumes:
-      - db:/data
+      - db22:/data
     networks:
       - default
     logging:
@@ -35,9 +78,11 @@ services:
       - default
     logging:
       driver: json-file
+      options:
+        max-size: 1000m
 networks:
   default:
     driver: overlay
 volumes:
-  db:
+  db22:
     driver: local
