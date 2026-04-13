@@ -3,6 +3,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "install": "cd contracts && forge soldeer install",
     "build": "cd contracts && forge build",
     "test": "cd contracts && forge test",
     "migration:run": "npx tsx migrations/run.ts",

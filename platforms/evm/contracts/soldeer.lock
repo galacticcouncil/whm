@@ -1,0 +1,23 @@
+[[dependencies]]
+name = "forge-std"
+version = "1.14.0"
+git = "https://github.com/foundry-rs/forge-std.git"
+rev = "1801b0541f4fda118a10798fd3486bb7051c5dd6"
+
+[[dependencies]]
+name = "openzeppelin-contracts"
+version = "5.5.0"
+git = "https://github.com/OpenZeppelin/openzeppelin-contracts.git"
+rev = "fcbae5394ae8ad52d8e580a3477db99814b9d565"
+
+[[dependencies]]
+name = "openzeppelin-contracts-upgradeable"
+version = "5.5.0"
+git = "https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable.git"
+rev = "aa677e9d28ed78fc427ec47ba2baef2030c58e7c"
+
+[[dependencies]]
+name = "wormhole-solidity-sdk"
+version = "0.1.0"
+git = "https://github.com/wormhole-foundation/wormhole-solidity-sdk.git"
+rev = "b9e129e65d34827d92fceeed8c87d3ecdfc801d0"

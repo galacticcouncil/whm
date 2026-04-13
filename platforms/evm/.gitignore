@@ -8,5 +8,8 @@ out/
 # Docs
 docs/
 
+# Sol dependecies
+contracts/dependencies/
+
 # Fork deployment
 deployments/fork/

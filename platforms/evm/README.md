@@ -13,6 +13,13 @@ curl -L https://foundry.paradigm.xyz | bash
 foundryup
 ```
 
+## Install
+
+```bash
+cd platforms/evm
+pnpm run install
+```
+
 ## Build
 
 ```bash

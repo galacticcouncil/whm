@@ -1,3 +1,4 @@
-wormhole-solidity-sdk/=lib/wormhole-solidity-sdk/src/
-@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/
-@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/
+forge-std/=dependencies/forge-std-1.14.0/src/
+wormhole-solidity-sdk/=dependencies/wormhole-solidity-sdk-0.1.0/src/
+@openzeppelin/contracts-upgradeable/=dependencies/openzeppelin-contracts-upgradeable-5.5.0/contracts/
+@openzeppelin/contracts/=dependencies/openzeppelin-contracts-5.5.0/contracts/
