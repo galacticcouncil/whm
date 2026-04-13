@@ -1,11 +1,11 @@
+# Anchor
 .anchor
 
 # Node
 node_modules/
 
 # Compiler
-target
-**/*.rs.bk
+target/
 
 # Fork deployment
 deployments/fork/

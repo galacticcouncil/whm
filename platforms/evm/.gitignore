@@ -1,15 +1,12 @@
 # Node
 node_modules/
 
+# Sol dependecies
+dependencies/
+
 # Compiler
 cache/
 out/
-
-# Docs
-docs/
-
-# Sol dependecies
-contracts/dependencies/
 
 # Fork deployment
 deployments/fork/
