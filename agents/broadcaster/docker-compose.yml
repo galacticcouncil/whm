@@ -6,6 +6,7 @@ services:
       - RPC_URL=
       - PRIVATE_KEY=
       - REFRESH_INTERVAL=
+      - CHANGE_THRESHOLD=
     volumes:
       - db:/app/.db
     networks:
