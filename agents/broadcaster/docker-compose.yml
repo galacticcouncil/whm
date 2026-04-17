@@ -9,6 +9,9 @@ services:
       - CHANGE_THRESHOLD=
     volumes:
       - db:/app/.db
+    configs:
+      - source: thresholds
+        target: /app/thresholds.json
     networks:
       - default
     logging:
@@ -22,3 +25,7 @@ networks:
 volumes:
   db:
     driver: local
+configs:
+  thresholds:
+    external: true
+    name: whm_broadcaster_thresholds

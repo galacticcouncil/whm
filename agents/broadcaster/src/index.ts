@@ -10,7 +10,13 @@ import { hasChangedBeyondThreshold } from "./big.js";
 import { loadAllFeeds, assetIdStr, type FeedEntry } from "./feeds.js";
 import { readCurrentValue } from "./reader.js";
 import { sendUpdate } from "./sender.js";
-import { loadState, saveState, type BroadcasterState } from "./state.js";
+import {
+  loadState,
+  loadThresholds,
+  saveState,
+  type BroadcasterState,
+  type ThresholdMap,
+} from "./state.js";
 import { loadKeypair, requiredEnv } from "./utils";
 
 import log from "./logger.js";
@@ -25,6 +31,7 @@ const config = {
   changeThreshold: (Number(process.env.CHANGE_THRESHOLD) || 0.1) / 100,
   fullRefreshMs: (Number(process.env.REFRESH_INTERVAL) || 24) * 60 * 60 * 1_000,
   stateFile: ".db/state.json",
+  thresholdsFile: "thresholds.json",
 };
 
 function buildProgram(): Program<MessageEmitter> {
@@ -68,16 +75,16 @@ async function checkAndBroadcast(
   program: Program<MessageEmitter>,
   feeds: FeedEntry[],
   state: BroadcasterState,
+  thresholds: ThresholdMap,
 ): Promise<void> {
-  const { changeThreshold } = config;
-
   for (const feed of feeds) {
     const key = assetIdStr(feed.assetId);
+    const threshold = thresholds[key] ?? config.changeThreshold;
     try {
       const current = await readCurrentValue(config.rpcUrl, feed);
       const last = BigInt(state[key]?.value ?? "0");
 
-      if (!hasChangedBeyondThreshold(current, last, changeThreshold)) {
+      if (!hasChangedBeyondThreshold(current, last, threshold)) {
         continue;
       }
 
@@ -109,6 +116,10 @@ async function main(): Promise<void> {
   }
 
   const state = loadState(config.stateFile);
+  const thresholds = loadThresholds(config.thresholdsFile);
+  for (const [assetId, threshold] of Object.entries(thresholds)) {
+    log.info(`  Threshold override: ${assetId} = ${threshold * 100}%`);
+  }
 
   // Initial full refresh on startup
   await broadcastAll(program, feeds, state);
@@ -122,7 +133,7 @@ async function main(): Promise<void> {
       await broadcastAll(program, feeds, state);
       lastFullRefresh = now;
     } else {
-      await checkAndBroadcast(program, feeds, state);
+      await checkAndBroadcast(program, feeds, state, thresholds);
     }
   };
 
