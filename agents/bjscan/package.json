@@ -7,16 +7,14 @@
     "build": "node ./esbuild.dist.mjs",
     "clean": "rm -rf dist/",
     "dev": "node ./esbuild.dev.mjs",
-    "db:up": "docker compose -f docker-compose.dev.yml up -d",
-    "db:down": "docker compose -f docker-compose.dev.yml down",
-    "db:logs": "docker compose -f docker-compose.dev.yml logs -f postgres",
-    "db:psql": "docker exec -it bjscan-pg psql -U bjscan",
+    "dev:db": "docker compose -f docker-compose.dev.yml up -d",
     "docker:build": "docker build -t galacticcouncil/bjscan:latest .",
     "docker:deploy": "docker buildx build --platform linux/amd64,linux/arm64 -t galacticcouncil/bjscan:latest --push .",
     "docker:up": "docker stack deploy -c docker-compose.yml whm"
   },
   "dependencies": {
     "@galacticcouncil/descriptors": "^1.16.0",
+    "@galacticcouncil/common": "^0.7.0",
     "fastify": "^5.2.0",
     "pg": "^8.13.1",
     "polkadot-api": "^1.23.3",

@@ -1,13 +1,8 @@
 import type { EvmWatcher } from "../watchers/evm.js";
 import type { SubstrateWatcher } from "../watchers/substrate.js";
 import { app } from "../endpoints.js";
-import {
-  getTransfer,
-  listTransfers,
-  loadCursor,
-  stateCounts,
-  type TransferState,
-} from "../db.js";
+import { getTransfer, listTransfers, loadCursor, stateCounts, type TransferState } from "../db.js";
+import { addressCandidates } from "../filters.js";
 import { subscribe } from "../subscribers.js";
 import { source, destination } from "../config.js";
 
@@ -46,7 +41,7 @@ export default function apiHandler(base: EvmWatcher, hydration: SubstrateWatcher
   app.get<{
     Querystring: {
       state?: TransferState;
-      recipient?: string;
+      address?: string;
       asset?: string;
       limit?: string;
       offset?: string;
@@ -55,7 +50,7 @@ export default function apiHandler(base: EvmWatcher, hydration: SubstrateWatcher
     const q = req.query;
     return listTransfers({
       state: q.state,
-      recipient: q.recipient,
+      address: q.address ? addressCandidates(q.address) : undefined,
       asset: q.asset,
       limit: Math.min(Number(q.limit ?? 100), 1000),
       offset: Number(q.offset ?? 0),

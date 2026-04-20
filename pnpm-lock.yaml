@@ -32,6 +32,9 @@ importers:
 
   agents/bjscan:
     dependencies:
+      '@galacticcouncil/common':
+        specifier: ^0.7.0
+        version: 0.7.0(polkadot-api@1.23.3(bufferutil@4.1.0)(rxjs@7.8.2)(tsx@4.21.0)(utf-8-validate@5.0.10))
       '@galacticcouncil/descriptors':
         specifier: ^1.16.0
         version: 1.16.0
@@ -657,6 +660,11 @@ packages:
 
   '@galacticcouncil/common@0.6.0':
     resolution: {integrity: sha512-fsCcRNHrqDcPbH9sClgyN2O3M4T7KMy+7ey1OwijJhWeg0OqEuLowdFrJlnS4GvgkqIT2GkSYNu/8sryl+uHxA==}
+    peerDependencies:
+      polkadot-api: ^1.23.3
+
+  '@galacticcouncil/common@0.7.0':
+    resolution: {integrity: sha512-5lI2Gh8aNWyRcGabxa+A/W7FUbNyvMKNQBo2bOhzSb7A68sC0H/IJFWO7eXfGKsTiMtAja/oZkch6VKoRrtK0w==}
     peerDependencies:
       polkadot-api: ^1.23.3
 
@@ -3308,6 +3316,12 @@ snapshots:
       ipaddr.js: 2.3.0
 
   '@galacticcouncil/common@0.6.0(polkadot-api@1.23.3(bufferutil@4.1.0)(rxjs@7.8.2)(tsx@4.21.0)(utf-8-validate@5.0.10))':
+    dependencies:
+      big.js: 6.2.2
+      lru-cache: 11.2.6
+      polkadot-api: 1.23.3(bufferutil@4.1.0)(rxjs@7.8.2)(tsx@4.21.0)(utf-8-validate@5.0.10)
+
+  '@galacticcouncil/common@0.7.0(polkadot-api@1.23.3(bufferutil@4.1.0)(rxjs@7.8.2)(tsx@4.21.0)(utf-8-validate@5.0.10))':
     dependencies:
       big.js: 6.2.2
       lru-cache: 11.2.6

@@ -1,7 +1,9 @@
 import pg from "pg";
 
-import { databaseUrl } from "./config.js";
 import log from "./logger.js";
+
+import { databaseUrl } from "./config.js";
+import { AddressCandidates } from "./filters.js";
 
 export const pool = new pg.Pool({ connectionString: databaseUrl });
 
@@ -290,7 +292,7 @@ export async function saveCursor(chain: string, block: bigint): Promise<void> {
 
 export async function listTransfers(filter: {
   state?: TransferState;
-  recipient?: string;
+  address?: AddressCandidates;
   asset?: string;
   limit: number;
   offset: number;
@@ -303,9 +305,19 @@ export async function listTransfers(filter: {
     conds.push(`state = $${params.length}`);
   }
 
-  if (filter.recipient) {
-    params.push(filter.recipient.toLowerCase());
-    conds.push(`lower(recipient) = $${params.length}`);
+  if (filter.address) {
+    const or: string[] = [];
+
+    if (filter.address.sender) {
+      params.push(filter.address.sender);
+      or.push(`lower(sender) = $${params.length}`);
+    }
+
+    if (filter.address.recipient.length) {
+      params.push(filter.address.recipient);
+      or.push(`lower(recipient) = ANY($${params.length})`);
+    }
+    conds.push(or.length ? `(${or.join(" OR ")})` : "FALSE");
   }
 
   if (filter.asset) {
