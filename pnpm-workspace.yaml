@@ -3,6 +3,7 @@ packages:
   - platforms/evm
   - platforms/solana
   - agents/broadcaster
+  - agents/bjscan
 
 onlyBuiltDependencies:
   - esbuild

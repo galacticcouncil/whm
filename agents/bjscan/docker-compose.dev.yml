@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bjscan-pg
+    environment:
+      POSTGRES_USER: bjscan
+      POSTGRES_PASSWORD: bjscan
+      POSTGRES_DB: bjscan
+    ports:
+      - "5432:5432"
+    volumes:
+      - bjscan-pgdata:/var/lib/postgresql/data
+
+volumes:
+  bjscan-pgdata:

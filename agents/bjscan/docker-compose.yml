@@ -1,0 +1,37 @@
+version: "3.3"
+services:
+  bjscan:
+    image: galacticcouncil/bjscan:latest
+    environment:
+      - BASE_RPC_URL=
+      - BASE_START_BLOCK=44386800
+      - HYDRATION_WSS_URL=
+      - HYDRATION_START_BLOCK=12011000
+      - DATABASE_URL=postgres://bjscan:bjscan@postgres:5432/bjscan
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=bjscan
+      - POSTGRES_PASSWORD=bjscan
+      - POSTGRES_DB=bjscan
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - default
+networks:
+  default:
+    driver: overlay
+volumes:
+  pgdata:
+    driver: local
