@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <title>bjscan</title>
     <style>
@@ -148,7 +149,7 @@
         font-size: 12px;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: var(--muted);
+        color: var(--fg);
         margin: 2.5rem 0 1rem;
         font-weight: normal;
       }
@@ -166,11 +167,36 @@
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
         gap: 0.75rem;
       }
+      @media (max-width: 900px) {
+        .legs {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (max-width: 640px) {
+        dl.details {
+          display: block;
+        }
+        dl.details dt {
+          text-align: left;
+          margin-top: 1rem;
+        }
+        dl.details dt:first-child {
+          margin-top: 0;
+        }
+        dl.details dd {
+          margin: 0.2rem 0 0;
+        }
+        .card {
+          padding: 1.25rem 1.25rem;
+        }
+      }
       .leg {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 1rem 1.25rem;
+        min-width: 0;
+        overflow-wrap: anywhere;
       }
       .leg.pending {
         opacity: 0.5;
