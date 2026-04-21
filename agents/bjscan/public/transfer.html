@@ -621,12 +621,16 @@
         `;
       }
 
+      let loaded = false;
       function apply(t) {
         root.innerHTML = render(t);
         document.title = t.id + " · " + t.state;
-        root.classList.remove("flash");
-        void root.offsetWidth;
-        root.classList.add("flash");
+        if (loaded) {
+          root.classList.remove("flash");
+          void root.offsetWidth;
+          root.classList.add("flash");
+        }
+        loaded = true;
       }
 
       function notFound() {
