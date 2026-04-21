@@ -1,7 +1,7 @@
 import type { PublicClient } from "viem";
+import type { HandlerMap } from "../processor";
 
 import { LogEvent, upsertTransfer } from "../../db";
-import { HandlerMap } from "../../processor";
 import { broadcast } from "../../subscribers";
 import { normalizeRecipient } from "../../utils";
 

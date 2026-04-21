@@ -1,17 +1,16 @@
 import api from "./api";
 import log from "./logger";
 import * as db from "./db";
+import ui from "./ui";
 
 import { start as startEndpoints } from "./endpoints";
 import { subscribe } from "./subscribers";
 
-import { Processor } from "./processor";
-import { EvmWatcher, SubstrateWatcher } from "./watchers";
-
 import { source, destination, pollIntervalMs } from "./config";
 import { sourceClient, destinationClient } from "./clients";
+import { EvmWatcher, SubstrateWatcher } from "./watchers";
 
-import { basejump, landing } from "./handlers";
+import { Processor, basejump, landing } from "./handlers";
 
 const BANNER = String.raw`
  ██████╗      ██╗███████╗ ██████╗ █████╗ ███╗   ██╗
@@ -36,6 +35,7 @@ async function main(): Promise<void> {
   const processor = new Processor({ ...basejump(sourceClient), ...landing(destinationClient) });
 
   api(srcWatch, dstWatch);
+  ui();
 
   subscribe((u) => {
     const t = u.transfer;

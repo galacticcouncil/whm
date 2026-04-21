@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>bjscan</title>
+    <style>
+      :root {
+        --bg: #0a0a0b;
+        --surface: #131316;
+        --surface-2: #1a1a1f;
+        --border: #27272a;
+        --fg: #e4e4e7;
+        --muted: #71717a;
+        --dim: #52525b;
+        --ok: #22c55e;
+        --warn: #eab308;
+        --info: #3b82f6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: var(--bg);
+        color: var(--fg);
+        margin: 0;
+        padding: 2rem 1rem;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+        color: var(--muted);
+      }
+      header .title {
+        font-size: 1.1rem;
+        letter-spacing: 0.01em;
+      }
+      a {
+        color: var(--info);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      code {
+        font-family: inherit;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem 2rem;
+      }
+      dl.details {
+        margin: 0;
+        display: grid;
+        grid-template-columns: 7rem 1fr;
+        gap: 0.6rem 2rem;
+        align-items: start;
+      }
+      dl.details dt {
+        color: var(--muted);
+        font-weight: normal;
+        text-align: right;
+      }
+      dl.details dd {
+        margin: 0;
+        word-break: break-all;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.1rem 0.55rem;
+        border-radius: 999px;
+        font-size: 12px;
+      }
+      .pill-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .pill.state-initiated {
+        background: rgba(59, 130, 246, 0.1);
+        color: var(--info);
+      }
+      .pill.state-queued {
+        background: rgba(234, 179, 8, 0.12);
+        color: var(--warn);
+      }
+      .pill.state-completed {
+        background: rgba(34, 197, 94, 0.12);
+        color: var(--ok);
+      }
+      .pill.state-fulfilled {
+        background: rgba(34, 197, 94, 0.18);
+        color: var(--ok);
+      }
+      .chain-line {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+      }
+      .party {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+      }
+      .party-head {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .chain-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--border);
+        font-size: 10px;
+        color: var(--muted);
+        text-transform: uppercase;
+      }
+      .delta {
+        color: var(--muted);
+      }
+      h2 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin: 2.5rem 0 1rem;
+        font-weight: normal;
+      }
+      .flow {
+        color: var(--muted);
+        margin-bottom: 1rem;
+        font-size: 13px;
+      }
+      .flow .arrow {
+        margin: 0 0.4rem;
+        color: var(--dim);
+      }
+      .legs {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 0.75rem;
+      }
+      .leg {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+      }
+      .leg.pending {
+        opacity: 0.5;
+      }
+      .leg-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.75rem;
+      }
+      .leg-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .leg-kind {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .leg-body {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .leg-body .hash {
+        color: var(--fg);
+      }
+      .check {
+        color: var(--ok);
+      }
+      .waiting {
+        color: var(--dim);
+      }
+      .meta {
+        color: var(--dim);
+        font-size: 12px;
+        margin-top: 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .meta .heart {
+        color: #ef4444;
+      }
+      .dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--dim);
+        margin-right: 0.4rem;
+        vertical-align: middle;
+      }
+      .dot.live {
+        background: var(--ok);
+      }
+      .flash {
+        animation: flash 1s ease-out;
+      }
+      @keyframes flash {
+        from {
+          background: rgba(234, 179, 8, 0.08);
+        }
+        to {
+          background: var(--surface);
+        }
+      }
+      .spin {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .leg-kind.pending {
+        color: var(--warn);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="48"
+          height="48"
+          viewBox="0 0 28 28"
+          fill="none"
+        >
+          <path
+            stroke="currentColor"
+            d="M10.6 4.86a1.266 1.266 0 1 0-.001 2.532 1.266 1.266 0 0 0 0-2.533Z"
+          ></path>
+          <path
+            stroke="currentColor"
+            stroke-width="1.5"
+            d="m6.943 12.908 1.606.645-.854-2.264z"
+          ></path>
+          <path
+            stroke="currentColor"
+            stroke-width="1.3"
+            d="M15.86 15.111q-.057.007-.097.015l.035.634c.028.5.112 1.07.192 1.524a20 20 0 0 0 .14.71l.009.041.002.01v.002l.073.321-.215.248-.492-.425.491.426v.001l-.005.005-.007.008a1 1 0 0 1-.061.062 2 2 0 0 1-.145.122 3.6 3.6 0 0 1-.543.34c-.408.21-1.011.448-1.885.657q-.007.066-.02.131a2 2 0 0 1-.093.296l11.63-2.432c-.303-.214-.67-.455-1.101-.7a15.3 15.3 0 0 0-6.193-1.92l-.008-.002c-.863-.089-1.392-.104-1.708-.074Zm-5.786-5.418a.455.455 0 0 0-.611-.27l-.027.01a.457.457 0 0 0-.271.613l.005.012 1.459 3.867c.082.182.167.26.232.289l.013.006.012.006 3.023 1.496.025.011.022.014a.514.514 0 0 0 .62-.259l.12-.223-.111-.195c-.08-.14-.147-.204-.235-.249l-2.63-1.285-.23-.112-.092-.241L10.08 9.71l-.003-.009z"
+          ></path>
+          <path
+            stroke="currentColor"
+            d="M5.625 19.499c-1.023-.027-1.708.058-2.158.185-.452.127-.637.287-.712.384a.34.34 0 0 0-.075.242c.002.035.01.065.015.085l.006.016.004.007.007.02.776 2.026 4.087-.854.769-1.427-.233-.029h.001a4 4 0 0 1-.554-.125c-.23-.062-.509-.141-.78-.22-.275-.078-.544-.156-.764-.215a9 9 0 0 0-.37-.091z"
+          ></path>
+          <path
+            fill="currentColor"
+            d="M10.598 16.962 8.413 18.49l-2.365-2.514-.12-.12-.03-.03a.9.9 0 0 1-.15-.209 1.81 1.81 0 0 1-.089-1.706l.12-.27 3.354 1.348z"
+          ></path>
+          <path
+            stroke="currentColor"
+            stroke-width="1.3"
+            d="m9.67 18.865.384.41.319.34-.222.411-1.496 2.785-.141.263-.293.064-2.55.554c.84-.055 1.92-.25 3.127-.48l.004-.001.96-.175c.965-.17 1.917-.315 2.601-.315.966 0 2.496.252 3.881.488l.004.001c.534.094 1.053.18 1.541.256l1.157-.535c2.016-.932 4.024-2.074 5.483-3.329L11.334 22.45l-1.388.301.679-1.247.928-1.706c.095-.183.074-.435-.105-.647l-.011-.013-.011-.015-.73-.969z"
+          ></path>
+        </svg>
+        <span class="title">BaseJump</span>
+      </header>
+      <div id="root">loading…</div>
+      <div class="meta">
+        <span><span class="dot" id="dot"></span><span id="conn">connecting…</span></span>
+        <span>Built with <span class="heart">♥</span> by hydration</span>
+      </div>
+    </main>
+
+    <script>
+      const ID = decodeURIComponent(location.pathname.slice(1));
+      const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+      const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"']/g, (c) => ESCAPES[c]));
+
+      const root = document.getElementById("root");
+      const connEl = document.getElementById("conn");
+      const dotEl = document.getElementById("dot");
+
+      const EXPLORER = {
+        base: (e) => ({
+          label: e.txHash,
+          url: "https://basescan.org/tx/" + e.txHash,
+        }),
+        hydration: (e) => ({
+          label: e.blockNumber + "-" + e.logIndex,
+          url: "https://hydration.subscan.io/event/" + e.blockNumber + "-" + e.logIndex,
+        }),
+      };
+
+      const ADDR_EXPLORER = {
+        base: (a) => "https://basescan.org/address/" + a,
+        hydration: (a) => "https://hydration.subscan.io/address/" + a,
+      };
+
+      const ASSETS = {
+        "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42": { symbol: "EURC", decimals: 6 },
+      };
+
+      function fmtAmount(raw, decimals) {
+        try {
+          const n = BigInt(raw);
+          const base = BigInt(10) ** BigInt(decimals);
+          const whole = n / base;
+          const frac = n % base;
+          if (frac === 0n) return whole.toLocaleString("en-US");
+          const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
+          return whole.toLocaleString("en-US") + "." + fracStr;
+        } catch {
+          return String(raw);
+        }
+      }
+
+      function truncMiddle(s, head = 8, tail = 6) {
+        return s.length > head + tail + 1 ? s.slice(0, head) + "…" + s.slice(-tail) : s;
+      }
+
+      function fmtAbs(ms) {
+        const d = new Date(ms);
+        const pad = (n) => String(n).padStart(2, "0");
+        const tz = -d.getTimezoneOffset() / 60;
+        const tzStr = "GMT" + (tz >= 0 ? "+" : "") + tz;
+        return (
+          d.getFullYear() +
+          "-" +
+          pad(d.getMonth() + 1) +
+          "-" +
+          pad(d.getDate()) +
+          " " +
+          pad(d.getHours()) +
+          ":" +
+          pad(d.getMinutes()) +
+          ":" +
+          pad(d.getSeconds()) +
+          " " +
+          tzStr
+        );
+      }
+
+      function fmtDelta(ms) {
+        const s = Math.round(ms / 1000);
+        if (s < 60) return s + "s";
+        const m = Math.floor(s / 60);
+        const rs = s % 60;
+        if (m < 60) return m + "m" + (rs ? " " + rs + "s" : "");
+        const h = Math.floor(m / 60);
+        const rm = m % 60;
+        if (h < 24) return h + "h" + (rm ? " " + rm + "m" : "");
+        const d = Math.floor(h / 24);
+        const rh = h % 24;
+        return d + "d" + (rh ? " " + rh + "h" : "");
+      }
+
+      class XAddr extends HTMLElement {
+        connectedCallback() {
+          const v = this.getAttribute("value") || "";
+          const chain = this.getAttribute("chain") || "";
+          if (!v) {
+            this.textContent = "—";
+            return;
+          }
+          const short = esc(truncMiddle(v, 8, 6));
+          const url = ADDR_EXPLORER[chain]?.(v);
+          this.innerHTML = url
+            ? `<a href="${esc(url)}" target="_blank" rel="noopener"><code title="${esc(v)}">${short}</code></a>`
+            : `<code title="${esc(v)} (click to copy)" style="cursor:pointer">${short}</code>`;
+          if (!url) this.onclick = () => navigator.clipboard?.writeText(v);
+        }
+      }
+      customElements.define("x-addr", XAddr);
+
+      class XHash extends HTMLElement {
+        connectedCallback() {
+          const chain = this.getAttribute("chain") || "";
+          const e = {
+            txHash: this.getAttribute("value") || "",
+            blockNumber: this.getAttribute("block") || "",
+            logIndex: this.getAttribute("log-index") || "",
+          };
+          const info = EXPLORER[chain]?.(e) ?? { label: e.txHash, url: null };
+          if (!info.label) {
+            this.textContent = "—";
+            return;
+          }
+          const short = esc(truncMiddle(info.label, 8, 6));
+          this.innerHTML = info.url
+            ? `<a href="${esc(info.url)}" target="_blank" rel="noopener"><code title="${esc(info.label)}">${short}</code></a>`
+            : `<code title="${esc(info.label)}">${short}</code>`;
+        }
+      }
+      customElements.define("x-hash", XHash);
+
+      class XTime extends HTMLElement {
+        connectedCallback() {
+          const ms = Number(this.getAttribute("value"));
+          if (!Number.isFinite(ms)) {
+            this.textContent = "—";
+            return;
+          }
+          this.textContent = fmtAbs(ms);
+        }
+      }
+      customElements.define("x-time", XTime);
+
+      class XDelta extends HTMLElement {
+        connectedCallback() {
+          const from = Number(this.getAttribute("from"));
+          const to = Number(this.getAttribute("to"));
+          if (!Number.isFinite(from) || !Number.isFinite(to)) {
+            this.textContent = "";
+            return;
+          }
+          const diff = to - from;
+          const sign = diff >= 0 ? "+" : "-";
+          this.textContent = "(" + sign + fmtDelta(Math.abs(diff)) + ")";
+        }
+      }
+      customElements.define("x-delta", XDelta);
+
+      class XNum extends HTMLElement {
+        connectedCallback() {
+          const v = this.getAttribute("value");
+          if (v == null || v === "") {
+            this.textContent = "—";
+            return;
+          }
+          try {
+            this.textContent = BigInt(v).toLocaleString("en-US");
+          } catch {
+            this.textContent = v;
+          }
+        }
+      }
+      customElements.define("x-num", XNum);
+
+      const LEG_ORDER = ["initiated", "queued", "completed", "fulfilled"];
+
+      function chainBadge(chain) {
+        if (!chain) return "";
+        return `<span class="chain-badge">${esc(chain.slice(0, 1))}</span>`;
+      }
+
+      function receivedTs(t) {
+        return t.fulfilled || t.completed || t.queued || null;
+      }
+
+      function detailsRows(t) {
+        const sent = t.initiated;
+        const recv = receivedTs(t);
+        const rows = [];
+        rows.push(["ID", `<code>${esc(t.id)}</code>`]);
+        rows.push([
+          "Status",
+          `<span class="pill state-${esc(t.state)}"><span class="pill-dot"></span>${esc(t.state)}</span>`,
+        ]);
+        rows.push(["Action", "transfer"]);
+        if (sent) {
+          rows.push(["Sent", `<x-time value="${esc(sent.blockTimestamp)}"></x-time>`]);
+        }
+        if (recv) {
+          const delta = sent
+            ? ` <span class="delta"><x-delta from="${esc(sent.blockTimestamp)}" to="${esc(recv.blockTimestamp)}"></x-delta></span>`
+            : "";
+          rows.push(["Received", `<x-time value="${esc(recv.blockTimestamp)}"></x-time>${delta}`]);
+        }
+        rows.push([
+          "From",
+          `<div class="party"><span class="party-head">${chainBadge(t.source_chain)}${esc(t.source_chain)}</span>${t.sender ? '<x-addr value="' + esc(t.sender) + '" chain="' + esc(t.source_chain) + '"></x-addr>' : ""}</div>`,
+        ]);
+        rows.push([
+          "To",
+          (() => {
+            const dc = t.dest_chain ?? "hydration";
+            return `<div class="party"><span class="party-head">${chainBadge(dc)}${esc(dc)}</span><x-addr value="${esc(t.recipient)}" chain="${esc(dc)}"></x-addr></div>`;
+          })(),
+        ]);
+        const asset = t.source_asset || t.dest_asset;
+        const meta = asset ? ASSETS[asset.toLowerCase()] : null;
+        const amount = meta
+          ? esc(fmtAmount(t.net_amount, meta.decimals)) + " " + esc(meta.symbol)
+          : `<x-num value="${esc(t.net_amount)}"></x-num>`;
+        rows.push(["Assets", amount]);
+        return rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
+      }
+
+      function flowLine(t) {
+        if (!t.initiated || !t.completed) return "";
+        const chains = [t.initiated.chain];
+        if (t.completed.chain !== t.initiated.chain) chains.push(t.completed.chain);
+        const delta = ` <x-delta from="${esc(t.initiated.blockTimestamp)}" to="${esc(t.completed.blockTimestamp)}"></x-delta>`;
+        return chains.map(esc).join('<span class="arrow">→</span>') + delta;
+      }
+
+      const LEG_CHAIN = {
+        initiated: "base",
+        queued: "hydration",
+        completed: "hydration",
+        fulfilled: "hydration",
+      };
+
+      function legCard(kind, e) {
+        if (!e) {
+          const chain = LEG_CHAIN[kind] ?? "";
+          return `
+            <div class="leg pending">
+              <div class="leg-head">
+                <div class="leg-title">${chain ? chainBadge(chain) + "<span>" + esc(chain) + "</span>" : ""}<span class="leg-kind pending">· PENDING</span></div>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" width="20" height="20" class="spin">
+                  <circle cx="10" cy="10" r="8" stroke="#F59E0B" stroke-opacity="0.3" stroke-width="2"/>
+                  <path d="M10 2a8 8 0 018 8" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </div>
+            </div>`;
+        }
+        return `
+          <div class="leg">
+            <div class="leg-head">
+              <div class="leg-title">${chainBadge(e.chain)}<span>${esc(e.chain)}</span><span class="leg-kind">· ${esc(kind)}</span></div>
+              <span class="check">✓</span>
+            </div>
+            <div class="leg-body">
+              <div><span class="hash"><x-hash value="${esc(e.txHash)}" block="${esc(e.blockNumber)}" log-index="${esc(e.logIndex)}" chain="${esc(e.chain)}"></x-hash></span> · block ${esc(e.blockNumber)}</div>
+              <div><x-time value="${esc(e.blockTimestamp)}"></x-time></div>
+            </div>
+          </div>`;
+      }
+
+      function render(t) {
+        const legs = LEG_ORDER.filter((k) => t[k] || k === "completed")
+          .map((k) => legCard(k, t[k]))
+          .join("");
+        return `
+          <section class="card">
+            <dl class="details">${detailsRows(t)}</dl>
+          </section>
+          <h2>Legs</h2>
+          <div class="flow">${flowLine(t)}</div>
+          <div class="legs">${legs}</div>
+        `;
+      }
+
+      function apply(t) {
+        root.innerHTML = render(t);
+        document.title = t.id + " · " + t.state;
+        root.classList.remove("flash");
+        void root.offsetWidth;
+        root.classList.add("flash");
+      }
+
+      function notFound() {
+        root.innerHTML = `
+          <section class="card">
+            <h1 style="margin:0 0 0.5rem;font-size:1.2rem">404</h1>
+            <p style="margin:0;color:var(--muted)">Transfer <code>${esc(ID)}</code> not found. Will appear here once indexed.</p>
+          </section>`;
+        document.title = ID + " · bjscan";
+      }
+
+      async function load() {
+        try {
+          const r = await fetch("/api/transfers/" + encodeURIComponent(ID));
+          if (r.status === 404) {
+            notFound();
+            return;
+          }
+          if (!r.ok) throw new Error("http " + r.status);
+          apply(await r.json());
+        } catch (err) {
+          root.innerHTML = `<section class="card"><h1 style="margin:0">error</h1><p style="color:var(--muted)">${esc(err.message || String(err))}</p></section>`;
+        }
+      }
+
+      load();
+
+      const es = new EventSource("/api/events");
+      es.onopen = () => {
+        connEl.textContent = "live";
+        dotEl.classList.add("live");
+      };
+      es.onerror = () => {
+        connEl.textContent = "reconnecting…";
+        dotEl.classList.remove("live");
+      };
+      const onUpdate = (e) => {
+        try {
+          const u = JSON.parse(e.data);
+          if (u.transfer && u.transfer.id === ID) apply(u.transfer);
+        } catch {}
+      };
+      es.addEventListener("created", onUpdate);
+      es.addEventListener("updated", onUpdate);
+    </script>
+  </body>
+</html>

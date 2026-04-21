@@ -1,4 +1,5 @@
 import type { PolkadotClient } from "polkadot-api";
+import type { HandlerMap } from "../processor";
 
 import { destination } from "../../config";
 import {
@@ -8,7 +9,6 @@ import {
   type TransferState,
   type LogEvent,
 } from "../../db";
-import type { HandlerMap } from "../../processor";
 import { broadcast } from "../../subscribers";
 import { normalizeRecipient } from "../../utils";
 

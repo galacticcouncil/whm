@@ -1,7 +1,7 @@
 import { decodeEventLog, type AbiEvent } from "viem";
 
-import log from "./logger";
-import { markProcessed, takePendingEvents, type EventRow, type LogEvent } from "./db";
+import log from "../logger";
+import { markProcessed, takePendingEvents, type EventRow, type LogEvent } from "../db";
 
 export interface EventHandler {
   abi: AbiEvent;
