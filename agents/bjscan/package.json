@@ -15,6 +15,7 @@
   "dependencies": {
     "@galacticcouncil/descriptors": "^1.16.0",
     "@galacticcouncil/common": "^0.7.0",
+    "@fastify/cors": "^10.0.2",
     "fastify": "^5.2.0",
     "pg": "^8.13.1",
     "polkadot-api": "^1.23.3",
