@@ -1,9 +1,9 @@
 import pg from "pg";
 
-import log from "./logger.js";
+import log from "./logger";
 
-import { databaseUrl } from "./config.js";
-import { AddressCandidates } from "./filters.js";
+import { databaseUrl } from "./config";
+import { AddressCandidates } from "./filters";
 
 export const pool = new pg.Pool({ connectionString: databaseUrl });
 
@@ -79,16 +79,20 @@ export async function init(): Promise<void> {
 
 export type TransferState = "initiated" | "completed" | "queued" | "fulfilled";
 
-export interface EventRef {
+export interface LogRef {
   chain: string;
   blockNumber: string;
   txHash: `0x${string}`;
   logIndex: number;
 }
 
+export interface EventRef extends LogRef {
+  blockTimestamp: number;
+}
+
 export interface LogEvent {
   chain: string;
-  ref: EventRef;
+  ref: LogRef;
   eventName: string;
   args: Record<string, unknown>;
 }

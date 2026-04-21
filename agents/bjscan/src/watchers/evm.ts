@@ -1,8 +1,8 @@
 import { type PublicClient, type Log, type Chain } from "viem";
 
-import log from "../logger.js";
-import { insertEvent, loadCursor, saveCursor } from "../db.js";
-import { BoundedQueue } from "../queue.js";
+import log from "../logger";
+import { insertEvent, loadCursor, saveCursor } from "../db";
+import { BoundedQueue } from "../utils";
 
 export interface EvmChainCfg {
   name: string;

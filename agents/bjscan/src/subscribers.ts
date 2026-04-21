@@ -1,4 +1,4 @@
-import type { TransferRow, TransferState } from "./db.js";
+import type { TransferRow, TransferState } from "./db";
 
 export type TransferUpdate =
   | { kind: "created"; transfer: TransferRow }

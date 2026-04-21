@@ -1,9 +1,9 @@
 import { HydrationEvents } from "@galacticcouncil/descriptors";
 import { PolkadotClient } from "polkadot-api";
 
-import log from "../logger.js";
-import { insertEvent, loadCursor, saveCursor } from "../db.js";
-import { BoundedQueue } from "../queue.js";
+import log from "../logger";
+import { insertEvent, loadCursor, saveCursor } from "../db";
+import { BoundedQueue } from "../utils";
 
 export interface SubstrateChainCfg {
   name: string;

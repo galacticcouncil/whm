@@ -1,10 +1,9 @@
-import type { EvmWatcher } from "../watchers/evm.js";
-import type { SubstrateWatcher } from "../watchers/substrate.js";
-import { app } from "../endpoints.js";
-import { getTransfer, listTransfers, loadCursor, stateCounts, type TransferState } from "../db.js";
-import { addressCandidates } from "../filters.js";
-import { subscribe } from "../subscribers.js";
-import { source, destination } from "../config.js";
+import { source, destination } from "./config";
+import { getTransfer, listTransfers, loadCursor, stateCounts, type TransferState } from "./db";
+import { app } from "./endpoints";
+import { addressFilter } from "./filters";
+import { subscribe } from "./subscribers";
+import { EvmWatcher, SubstrateWatcher } from "./watchers";
 
 export default function apiHandler(base: EvmWatcher, hydration: SubstrateWatcher): void {
   app.get("/api/health", async () => ({ ok: true }));
@@ -50,7 +49,7 @@ export default function apiHandler(base: EvmWatcher, hydration: SubstrateWatcher
     const q = req.query;
     return listTransfers({
       state: q.state,
-      address: q.address ? addressCandidates(q.address) : undefined,
+      address: q.address ? addressFilter(q.address) : undefined,
       asset: q.asset,
       limit: Math.min(Number(q.limit ?? 100), 1000),
       offset: Number(q.offset ?? 0),

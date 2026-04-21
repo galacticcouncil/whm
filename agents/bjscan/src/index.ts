@@ -1,18 +1,17 @@
-import log from "./logger.js";
-import * as db from "./db.js";
-import { source, destination, pollIntervalMs } from "./config.js";
-import { start as startEndpoints } from "./endpoints.js";
-import { subscribe } from "./subscribers.js";
+import api from "./api";
+import log from "./logger";
+import * as db from "./db";
 
-import { EvmWatcher } from "./watchers/evm.js";
-import { SubstrateWatcher } from "./watchers/substrate.js";
-import { Processor } from "./processor.js";
+import { start as startEndpoints } from "./endpoints";
+import { subscribe } from "./subscribers";
 
-import { base as baseClient, hydration as hydrationClient } from "./clients.js";
+import { Processor } from "./processor";
+import { EvmWatcher, SubstrateWatcher } from "./watchers";
 
-import basejump from "./handlers/basejump.js";
-import landing from "./handlers/landing.js";
-import api from "./handlers/api.js";
+import { source, destination, pollIntervalMs } from "./config";
+import { sourceClient, destinationClient } from "./clients";
+
+import { basejump, landing } from "./handlers";
 
 const BANNER = String.raw`
  ██████╗      ██╗███████╗ ██████╗ █████╗ ███╗   ██╗
@@ -32,11 +31,11 @@ async function main(): Promise<void> {
 
   await db.init();
 
-  const base = new EvmWatcher(source, baseClient);
-  const hydration = new SubstrateWatcher(destination, hydrationClient);
-  const processor = new Processor({ ...basejump, ...landing });
+  const srcWatch = new EvmWatcher(source, sourceClient);
+  const dstWatch = new SubstrateWatcher(destination, destinationClient);
+  const processor = new Processor({ ...basejump(sourceClient), ...landing(destinationClient) });
 
-  api(base, hydration);
+  api(srcWatch, dstWatch);
 
   subscribe((u) => {
     const t = u.transfer;
@@ -46,8 +45,8 @@ async function main(): Promise<void> {
 
   await startEndpoints();
   await Promise.all([
-    base.start(pollIntervalMs),
-    hydration.start(pollIntervalMs),
+    srcWatch.start(pollIntervalMs),
+    dstWatch.start(pollIntervalMs),
     processor.start(pollIntervalMs),
   ]);
 
