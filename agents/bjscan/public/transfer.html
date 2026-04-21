@@ -121,14 +121,17 @@
         align-items: center;
         gap: 0.5rem;
       }
+      img.chain-badge {
+        width: 18px;
+        height: 18px;
+        object-fit: contain;
+      }
       .chain-badge {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         width: 18px;
         height: 18px;
-        border-radius: 50%;
-        background: var(--border);
         font-size: 10px;
         color: var(--muted);
         text-transform: uppercase;
@@ -187,6 +190,9 @@
       .leg-body {
         color: var(--muted);
         font-size: 13px;
+      }
+      .leg-body > div:first-child {
+        margin-bottom: 0.5rem;
       }
       .leg-body .hash {
         color: var(--fg);
@@ -282,7 +288,7 @@
             d="m9.67 18.865.384.41.319.34-.222.411-1.496 2.785-.141.263-.293.064-2.55.554c.84-.055 1.92-.25 3.127-.48l.004-.001.96-.175c.965-.17 1.917-.315 2.601-.315.966 0 2.496.252 3.881.488l.004.001c.534.094 1.053.18 1.541.256l1.157-.535c2.016-.932 4.024-2.074 5.483-3.329L11.334 22.45l-1.388.301.679-1.247.928-1.706c.095-.183.074-.435-.105-.647l-.011-.013-.011-.015-.73-.969z"
           ></path>
         </svg>
-        <span class="title">BaseJump</span>
+        <span class="title">Basejump</span>
       </header>
       <div id="root">loading…</div>
       <div class="meta">
@@ -315,6 +321,24 @@
         base: (a) => "https://basescan.org/address/" + a,
         hydration: (a) => "https://hydration.subscan.io/address/" + a,
       };
+
+      const WORMHOLE_CHAIN_ID = {
+        base: 30,
+      };
+
+      const BRIDGE_CONTRACT = {
+        base: "0xf5b9334e44f800382cb47fc19669401d694e529b",
+      };
+
+      function wormholeRef(t) {
+        const chain = t.initiated?.chain;
+        const wormholeId = WORMHOLE_CHAIN_ID[chain];
+        const contract = BRIDGE_CONTRACT[chain]?.replace(/^0x/, "").toLowerCase();
+        const seq = t.message_sequence;
+        if (!wormholeId || !contract || !seq) return null;
+        const id = `${wormholeId}/${contract.padStart(64, "0")}/${seq}`;
+        return { id, url: `https://wormholescan.io/#/tx/${id}` };
+      }
 
       const ASSETS = {
         "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42": { symbol: "EURC", decimals: 6 },
@@ -458,8 +482,18 @@
 
       const LEG_ORDER = ["initiated", "queued", "completed", "fulfilled"];
 
+      const CHAIN_ICON = {
+        wormhole:
+          "https://cdn.jsdelivr.net/gh/sodazone/intergalactic-asset-metadata/v2/wormhole/1/icon.svg",
+        hydration:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/polkadot/2034/icon.svg",
+        base: "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/ethereum/8453/icon.png",
+      };
+
       function chainBadge(chain) {
         if (!chain) return "";
+        const icon = CHAIN_ICON[chain];
+        if (icon) return `<img class="chain-badge" src="${esc(icon)}" alt="${esc(chain)}"/>`;
         return `<span class="chain-badge">${esc(chain.slice(0, 1))}</span>`;
       }
 
@@ -521,6 +555,11 @@
         fulfilled: "hydration",
       };
 
+      const CHAIN_REF_LABEL = {
+        base: "Tx",
+        hydration: "Event",
+      };
+
       function legCard(kind, e) {
         if (!e) {
           const chain = LEG_CHAIN[kind] ?? "";
@@ -542,16 +581,35 @@
               <span class="check">✓</span>
             </div>
             <div class="leg-body">
-              <div><span class="hash"><x-hash value="${esc(e.txHash)}" block="${esc(e.blockNumber)}" log-index="${esc(e.logIndex)}" chain="${esc(e.chain)}"></x-hash></span> · block ${esc(e.blockNumber)}</div>
+              <div>${esc(CHAIN_REF_LABEL[e.chain] ?? "Tx")}: <span class="hash"><x-hash value="${esc(e.txHash)}" block="${esc(e.blockNumber)}" log-index="${esc(e.logIndex)}" chain="${esc(e.chain)}"></x-hash></span></div>
+              <div>Block: ${esc(e.blockNumber)}</div>
               <div><x-time value="${esc(e.blockTimestamp)}"></x-time></div>
             </div>
           </div>`;
       }
 
+      function wormholeCard(t) {
+        const ref = wormholeRef(t);
+        const link = ref
+          ? `<div>Tx: <span class="hash"><a href="${esc(ref.url)}" target="_blank" rel="noopener" title="${esc(ref.id)}"><code>${esc(truncMiddle(ref.id, 10, 8))}</code></a></span></div>`
+          : "";
+        return `
+          <div class="leg">
+            <div class="leg-head">
+              <div class="leg-title">${chainBadge("wormhole")}<span>wormhole</span><span class="leg-kind">· relayed</span></div>
+              <span class="check">✓</span>
+            </div>
+            <div class="leg-body">${link}</div>
+          </div>`;
+      }
+
       function render(t) {
-        const legs = LEG_ORDER.filter((k) => t[k] || k === "completed")
-          .map((k) => legCard(k, t[k]))
-          .join("");
+        const cards = [];
+        for (const k of LEG_ORDER) {
+          if (t[k] || k === "completed") cards.push(legCard(k, t[k]));
+          if (k === "initiated" && t.initiated) cards.push(wormholeCard(t));
+        }
+        const legs = cards.join("");
         return `
           <section class="card">
             <dl class="details">${detailsRows(t)}</dl>
