@@ -15,25 +15,46 @@ const BATCH_SIZE = 200;
 export class Processor {
   private abis: AbiEvent[];
   private timer?: NodeJS.Timeout;
+  private draining = false;
+  private pending = false;
 
   constructor(private handlers: HandlerMap) {
     this.abis = Object.values(handlers).map((h) => h.abi);
   }
 
   async start(pollIntervalMs: number): Promise<void> {
-    const tick = async () => {
-      try {
-        await this.drain();
-      } catch (e) {
-        log.error(`[processor] tick: ${(e as Error).stack ?? String(e)}`);
-      }
-    };
-    await tick();
-    this.timer = setInterval(tick, pollIntervalMs);
+    await this.drainLoop();
+    this.timer = setInterval(() => this.trigger(), pollIntervalMs);
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
+  }
+
+  // Coalesce nudges from watchers: if a drain is already running, remember
+  // that more work arrived and re-drain once it finishes.
+  trigger(): void {
+    if (this.draining) {
+      this.pending = true;
+      return;
+    }
+    void this.drainLoop();
+  }
+
+  private async drainLoop(): Promise<void> {
+    this.draining = true;
+    try {
+      do {
+        this.pending = false;
+        try {
+          await this.drain();
+        } catch (e) {
+          log.error(`[processor] tick: ${(e as Error).stack ?? String(e)}`);
+        }
+      } while (this.pending);
+    } finally {
+      this.draining = false;
+    }
   }
 
   private async drain(): Promise<void> {

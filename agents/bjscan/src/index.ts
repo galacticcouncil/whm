@@ -30,9 +30,10 @@ async function main(): Promise<void> {
 
   await db.init();
 
-  const srcWatch = new EvmWatcher(source, sourceClient);
-  const dstWatch = new SubstrateWatcher(destination, destinationClient);
   const processor = new Processor({ ...basejump(sourceClient), ...landing(destinationClient) });
+  const nudge = () => processor.trigger();
+  const srcWatch = new EvmWatcher(source, sourceClient, nudge);
+  const dstWatch = new SubstrateWatcher(destination, destinationClient, nudge);
 
   api(srcWatch, dstWatch);
   ui();

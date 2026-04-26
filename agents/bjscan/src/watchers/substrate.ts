@@ -30,6 +30,7 @@ export class SubstrateWatcher {
   constructor(
     public readonly cfg: SubstrateChainCfg,
     private readonly client: PolkadotClient,
+    private readonly onIngest?: () => void,
   ) {}
 
   async latestSafe(): Promise<bigint> {
@@ -91,6 +92,7 @@ export class SubstrateWatcher {
       let lastCheckpoint = cursor;
       const start = Date.now();
       for (let block = await queue.take(); block; block = await queue.take()) {
+        let blockIngested = 0;
         for (const l of block.logs) {
           const txHash = `${block.hash}-${l.index}`;
           const ok = await insertEvent(
@@ -101,8 +103,12 @@ export class SubstrateWatcher {
             l.topics,
             l.data,
           );
-          if (ok) ingested++;
+          if (ok) {
+            ingested++;
+            blockIngested++;
+          }
         }
+        if (blockIngested > 0) this.onIngest?.();
         processed++;
         if (block.number - lastCheckpoint >= BigInt(this.cfg.checkpointEvery)) {
           await saveCursor(this.cfg.name, block.number);

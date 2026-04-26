@@ -23,6 +23,7 @@ export class EvmWatcher {
   constructor(
     public readonly cfg: EvmChainCfg,
     private readonly client: PublicClient,
+    private readonly onIngest?: () => void,
   ) {}
 
   async latestSafe(): Promise<bigint> {
@@ -89,6 +90,7 @@ export class EvmWatcher {
       const start = Date.now();
       const total = safe - cursor;
       for (let chunk = await queue.take(); chunk; chunk = await queue.take()) {
+        let chunkIngested = 0;
         for (const l of chunk.logs) {
           const ok = await insertEvent(
             this.cfg.name,
@@ -98,9 +100,13 @@ export class EvmWatcher {
             l.topics,
             l.data,
           );
-          if (ok) ingested++;
+          if (ok) {
+            ingested++;
+            chunkIngested++;
+          }
         }
         await saveCursor(this.cfg.name, chunk.endBlock);
+        if (chunkIngested > 0) this.onIngest?.();
         processedBlocks = Number(chunk.endBlock - cursor);
         if (processedBlocks < Number(total)) {
           const bps = Math.round(processedBlocks / ((Date.now() - start) / 1000));

@@ -23,7 +23,7 @@ export const destination = {
   wssUrl: required("HYDRATION_WSS_URL"),
   contract: "0x70e9b12c3b19cb5f0e59984a5866278ab69df976" as `0x${string}`,
   startBlock: BigInt(process.env.HYDRATION_START_BLOCK ?? "0"),
-  confirmations: BigInt(process.env.HYDRATION_CONFIRMATIONS ?? 3),
+  confirmations: BigInt(process.env.HYDRATION_CONFIRMATIONS ?? 0),
   concurrency: Number(process.env.HYDRATION_CONCURRENCY ?? 100),
   checkpointEvery: Number(process.env.HYDRATION_CHECKPOINT_EVERY ?? 500),
 };
