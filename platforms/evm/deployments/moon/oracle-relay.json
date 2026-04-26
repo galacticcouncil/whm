@@ -2,7 +2,7 @@
   "migration": "oracle-relay",
   "environment": "moon",
   "startedAt": "2026-04-07T14:52:40.132Z",
-  "completedAt": "2026-04-11T12:16:49.260Z",
+  "completedAt": "2026-04-26T21:30:31.762Z",
   "steps": [
     {
       "name": "deploy-transactor",
@@ -113,6 +113,30 @@
       "error": null,
       "startedAt": "2026-04-07T17:28:21.366Z",
       "completedAt": "2026-04-07T17:28:26.686Z"
+    },
+    {
+      "name": "revoke-transactor-owner",
+      "status": "completed",
+      "output": {
+        "txHash": "0x477f113ce7ec4f8d9061ab20d35c47788353e2831a458178aad00a19ad038814",
+        "contract": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-04-26T21:30:17.655Z",
+      "completedAt": "2026-04-26T21:30:26.952Z"
+    },
+    {
+      "name": "revoke-dispatcher-owner",
+      "status": "completed",
+      "output": {
+        "txHash": "0x0515c4114fddbb97e9533250a1419313c72d7b38113c12a1fec2592afac4d25a",
+        "contract": "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-04-26T21:30:26.955Z",
+      "completedAt": "2026-04-26T21:30:31.761Z"
     }
   ]
 }
