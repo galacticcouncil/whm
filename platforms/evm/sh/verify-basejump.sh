@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: verify-contracts.sh
+# Usage: verify-basejump.sh
 #
 # Verifies all deployed contracts on Base, Moonbeam, and Hydration.
 #
