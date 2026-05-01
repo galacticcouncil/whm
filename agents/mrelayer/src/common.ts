@@ -113,12 +113,22 @@ export function createTransferQueue(
   let isStarted = false;
   let chainLabel: string | undefined;
 
+  const CHAIN_NAMES: Record<number, string> = {
+    1: 'ethereum',
+    8453: 'base',
+    1284: 'moonbeam',
+    1285: 'moonriver',
+    11155111: 'sepolia',
+    84532: 'base-sepolia',
+    1287: 'moonbase-alpha',
+  };
+
   async function getChainLabel() {
     if (chainLabel) return chainLabel;
     const network = await provider.getNetwork();
-    chainLabel = network.name && network.name !== 'unknown'
-      ? `${network.name} (${network.chainId})`
-      : `chainId ${network.chainId}`;
+    const name = CHAIN_NAMES[network.chainId]
+      ?? (network.name && network.name !== 'unknown' ? network.name : null);
+    chainLabel = name ? `${name} (${network.chainId})` : `chain ${network.chainId}`;
     return chainLabel;
   }
 
@@ -148,7 +158,7 @@ export function createTransferQueue(
 
     const warnMulN = warnMultiplier.toNumber();
     const multiplier = minBalance.gt(0)
-      ? balance.mul(10000).div(minBalance).toNumber() / 100
+      ? balance.mul(100).div(minBalance).toNumber() / 100
       : 0;
     const pct = Math.min(100, Math.round((multiplier / warnMulN) * 100));
     const blocks = 20;
