@@ -106,7 +106,61 @@ export function createTransferQueue(
   const transferQueue: TransferTask[] = [];
   let isProcessing = false;
 
+  const minGas = ethers.BigNumber.from(1_000_000);
+  const warnMultiplier = ethers.BigNumber.from(process.env.GAS_WARN_MULTIPLIER || 100);
+  const discordWebhook = process.env.DISCORD_WEBHOOK_URL;
+  let lowBalanceWarned = false;
+  let isStarted = false;
+
+  async function notifyDiscord(message: string) {
+    if (!discordWebhook) return;
+    try {
+      await fetch(discordWebhook, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({content: message}),
+      });
+    } catch (e: any) {
+      logger.error(`Failed to send Discord notification: ${e.message || e}`);
+    }
+  }
+
+  async function checkBalance() {
+    const [balance, gasPrice] = await Promise.all([
+      provider.getBalance(signer.address),
+      provider.getGasPrice(),
+    ]);
+    const minBalance = gasPrice.mul(minGas);
+    const warnBalance = minBalance.mul(warnMultiplier);
+    const balanceStr = ethers.utils.formatEther(balance);
+    const minStr = ethers.utils.formatEther(minBalance);
+    const warnStr = ethers.utils.formatEther(warnBalance);
+    const gweiStr = ethers.utils.formatUnits(gasPrice, 'gwei');
+
+    if (balance.lt(minBalance)) {
+      const msg = `Insufficient gas balance, killing service\nWallet: \`${signer.address}\`\nBalance: ${balanceStr}\nRequired: ${minStr} (${minGas.toString()} gas @ ${gweiStr} gwei)`;
+      logger.error(msg);
+      if (isStarted) await notifyDiscord(msg);
+      process.exit(1);
+    }
+
+    if (balance.lt(warnBalance)) {
+      if (!lowBalanceWarned) {
+        const msg = `Low gas balance\nWallet: \`${signer.address}\`\nBalance: ${balanceStr}\nThreshold: ${warnStr} (${warnMultiplier.toString()}x min @ ${gweiStr} gwei)`;
+        logger.warn(msg);
+        await notifyDiscord(msg);
+        lowBalanceWarned = true;
+      }
+    } else {
+      lowBalanceWarned = false;
+    }
+
+    logger.info(`Gas balance: ${balanceStr} (min ${minStr} @ ${gweiStr} gwei)`);
+  }
+
   async function initNonce() {
+    await checkBalance();
+    isStarted = true;
     currentNonce = await provider.getTransactionCount(signer.address);
     return currentNonce;
   }
@@ -140,6 +194,7 @@ export function createTransferQueue(
       }
     } finally {
       isProcessing = false;
+      await checkBalance();
       processQueue();
     }
   }
