@@ -107,10 +107,20 @@ export function createTransferQueue(
   let isProcessing = false;
 
   const minGas = ethers.BigNumber.from(1_000_000);
-  const warnMultiplier = ethers.BigNumber.from(process.env.GAS_WARN_MULTIPLIER || 100);
+  const warnMultiplier = ethers.BigNumber.from(process.env.GAS_WARN_MULTIPLIER || 50);
   const discordWebhook = process.env.DISCORD_WEBHOOK_URL;
   let lowBalanceWarned = false;
   let isStarted = false;
+  let chainLabel: string | undefined;
+
+  async function getChainLabel() {
+    if (chainLabel) return chainLabel;
+    const network = await provider.getNetwork();
+    chainLabel = network.name && network.name !== 'unknown'
+      ? `${network.name} (${network.chainId})`
+      : `chainId ${network.chainId}`;
+    return chainLabel;
+  }
 
   async function notifyDiscord(message: string) {
     if (!discordWebhook) return;
@@ -126,19 +136,29 @@ export function createTransferQueue(
   }
 
   async function checkBalance() {
-    const [balance, gasPrice] = await Promise.all([
+    const [balance, gasPrice, chain] = await Promise.all([
       provider.getBalance(signer.address),
       provider.getGasPrice(),
+      getChainLabel(),
     ]);
     const minBalance = gasPrice.mul(minGas);
     const warnBalance = minBalance.mul(warnMultiplier);
-    const balanceStr = ethers.utils.formatEther(balance);
-    const minStr = ethers.utils.formatEther(minBalance);
-    const warnStr = ethers.utils.formatEther(warnBalance);
-    const gweiStr = ethers.utils.formatUnits(gasPrice, 'gwei');
+    const balanceStr = (+ethers.utils.formatEther(balance)).toFixed(4);
+    const gweiStr = (+ethers.utils.formatUnits(gasPrice, 'gwei')).toFixed(2);
+
+    const warnMulN = warnMultiplier.toNumber();
+    const multiplier = minBalance.gt(0)
+      ? balance.mul(10000).div(minBalance).toNumber() / 100
+      : 0;
+    const pct = Math.min(100, Math.round((multiplier / warnMulN) * 100));
+    const blocks = 20;
+    const filled = Math.round((pct / 100) * blocks);
+    const bar = '█'.repeat(filled) + '░'.repeat(blocks - filled);
+
+    const summary = `${chain} | \`${signer.address}\` | ${multiplier.toFixed(1)}x/${warnMulN}x [${bar}] ${pct}% | ${balanceStr} ETH @ ${gweiStr} gwei`;
 
     if (balance.lt(minBalance)) {
-      const msg = `Insufficient gas balance, killing service\nWallet: \`${signer.address}\`\nBalance: ${balanceStr}\nRequired: ${minStr} (${minGas.toString()} gas @ ${gweiStr} gwei)`;
+      const msg = `KILL out of gas | ${summary}`;
       logger.error(msg);
       if (isStarted) await notifyDiscord(msg);
       process.exit(1);
@@ -146,7 +166,7 @@ export function createTransferQueue(
 
     if (balance.lt(warnBalance)) {
       if (!lowBalanceWarned) {
-        const msg = `Low gas balance\nWallet: \`${signer.address}\`\nBalance: ${balanceStr}\nThreshold: ${warnStr} (${warnMultiplier.toString()}x min @ ${gweiStr} gwei)`;
+        const msg = `WARN low gas | ${summary}`;
         logger.warn(msg);
         await notifyDiscord(msg);
         lowBalanceWarned = true;
@@ -155,7 +175,7 @@ export function createTransferQueue(
       lowBalanceWarned = false;
     }
 
-    logger.info(`Gas balance: ${balanceStr} (min ${minStr} @ ${gweiStr} gwei)`);
+    logger.info(`Gas: ${summary}`);
   }
 
   async function initNonce() {
