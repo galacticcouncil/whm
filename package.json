@@ -1,5 +1,5 @@
 {
-  "name": "@nohaapav/whm",
+  "name": "@whm/root",
   "private": true,
   "scripts": {},
   "devDependencies": {
