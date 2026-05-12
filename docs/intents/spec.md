@@ -18,7 +18,7 @@ The bridge composes two existing systems: **Basejump** (Hydration ↔ EVM, fast-
 - Completion model: `OneClickService.submitDepositTx({ depositAddress, txHash })`
 - Requires Basejump payload extension: VAA carries opaque `bytes data`, forwarded by `BasejumpLanding` to receiver contracts as a callback
 - EVM forward step is **atomic** with Basejump delivery — no keeper involvement, reverts together
-- Single `nintent` orchestrator for V1 quote acquisition, deposit submission, monitoring, and manual unwind. Trust is limited to liveness and operations.
+- Single `nintent` orchestrator for V1 deposit submission, monitoring, and manual unwind. Quote acquisition is UI ↔ OneClick direct — nintent is not in the quote path. Trust is limited to liveness and operations.
 - Supported destinations: any NEAR Intents-listed asset/chain pair supported by the quote API (ZEC/Zcash, BTC/Bitcoin, NEAR/NEAR, SPL/Solana, …)
 - No on-chain failure handling — happy path only; expired or rejected quotes are unwound off-chain
 - No shared NEAR recipient account in the NIR path — the quote's origin-chain `depositAddress` is used directly
@@ -39,7 +39,7 @@ This extension is what makes the EVM-side forward atomic; everything else in Bas
 
 ### Hydration → Ethereum — Basejump
 
-The Hydration-side leg is plain Basejump. First, `nintent` obtains a OneClick quote for `srcAsset = USDC.eth` and receives a quote-specific `depositAddress` on Ethereum. It stores that quote off-chain and computes a local `intentId` for correlation. The user then XCM-transfers USDC to Moonbeam's `BasejumpProxy` and calls:
+The Hydration-side leg is plain Basejump. First, the **UI calls the Defuse / OneClick quote API directly** for `originAsset = USDC.eth` and receives a quote-specific `depositAddress` on Ethereum (plus optional memo and deadline). The UI computes a local `intentId` from the accepted quote parameters. The user then XCM-transfers USDC to Moonbeam's `BasejumpProxy` and calls:
 
 `bridgeViaWormhole(USDC, amount, ETHEREUM_WORMHOLE_ID, recipient = NearIntentsRouter, data = abi.encode(intentId, depositAddress))`
 
@@ -76,23 +76,23 @@ Long-running TypeScript service, structured like the existing `agents/bjscan` an
 
 **Responsibilities:**
 
-1. **Quote API wrapper** — requests a live Defuse / OneClick quote for `(originAsset = USDC.eth, amount, destinationAsset, recipient, deadline, ...)`. Returns quote details, expiry, and `quote.quote.depositAddress` (plus optional `depositMemo` when present).
-2. **Intent registry** — stores accepted quotes keyed by local `intentId`. Each record includes `quoteId`, `depositAddress`, optional `depositMemo`, quoted output, deadline, and destination details.
-3. **Forward watcher** — subscribes to `IntentForwarded` events on `NearIntentsRouter`. This is the signal that the EVM-side forward has completed atomically with Basejump delivery; the watcher also captures the Ethereum tx hash from the event.
-4. **Deposit submitter** — calls `OneClickService.submitDepositTx({ depositAddress, txHash })` using the quote's `depositAddress` and the Ethereum tx hash from step 3. This lets the service detect the deposit faster and start processing sooner.
-5. **Settlement monitor** — watches quote / swap status through the quote API until fulfillment or failure, then reports completion to the user.
-6. **Failure path (manual for V1)** — if the quote expires before the deposit can be processed, or the quoted deposit is rejected, the operator reverses the position: bridges USDC back from Ethereum to Hydration via Basejump and returns it to the user.
+1. **Forward watcher** — subscribes to `IntentForwarded` events on `NearIntentsRouter`. This is the signal that the EVM-side forward has completed atomically with Basejump delivery; the watcher also captures the Ethereum tx hash from the event. `depositAddress` is read out of the event itself — no prior registration is required.
+2. **Deposit submitter** — calls `OneClickService.submitDepositTx({ depositAddress, txHash })` using the `depositAddress` from the event and the Ethereum tx hash. This lets the service detect the deposit faster and start processing sooner.
+3. **Settlement monitor** — watches quote / swap status through the quote API until fulfillment or failure, then reports completion (UI may poll nintent for status).
+4. **Failure path (manual for V1)** — if the quote expires before the deposit can be processed, or the quoted deposit is rejected, the operator reverses the position: bridges USDC back from Ethereum to Hydration via Basejump and returns it to the user.
+5. **Optional intent registry** — UX nicety, not protocol-required. If the UI posts the accepted quote to nintent at acceptance time (`POST /intent`), nintent stores `(intentId → quote details)` and can serve richer status responses via `GET /intent/:id`. nintent functions correctly without it, since `depositAddress` arrives via the on-chain event.
 
-Note: the orchestrator has no role in the EVM-side forward — that step is atomic with Basejump delivery. Its responsibilities are quote acquisition, registration, `submitDepositTx`, monitoring, and the off-chain failure path.
+Note: the orchestrator has no role in quote acquisition (UI → OneClick direct) and no role in the EVM-side forward (atomic with Basejump delivery). Its required responsibilities are event watching, `submitDepositTx`, settlement monitoring, and operator-driven failure unwind.
 
-**Intent ID** = local correlation hash generated by `nintent`, for example:
+**Intent ID** = local correlation hash computed by the UI from the accepted quote, for example:
 
 `keccak256(abi.encode(quoteId, depositAddress, srcAmount, destAsset, destRecipient, deadline, nonce))`
 
 The same hash is used as:
 
 - the first field in Basejump `data`, carried end-to-end into `NearIntentsRouter.onBasejumpReceive`
-- the lookup key in `nintent`'s registry
+- the first field of the `IntentForwarded` event, observable on-chain
+- the optional lookup key in `nintent`'s status-tracking registry (if the UI registers the quote)
 - the memo / correlation field for logs and status checks on our side
 
 ### NEAR side — third-party
@@ -111,11 +111,11 @@ See [schema.md](schema.md) for full chain-hop diagrams.
 
 End-to-end happy path:
 
-1. **Quote** — `nintent` requests a live quote for `USDC.hydration → destination asset`. The quote API returns quoted output, expiry, and `quote.quote.depositAddress` on Ethereum.
-2. **Accept** — user accepts the live quote off-chain. `nintent` stores the quote, validates that `depositAddress` is an Ethereum address, and computes a local `intentId`.
+1. **Quote** — the UI calls the Defuse / OneClick API directly for `USDC.eth → destination asset`. The API returns quoted output, expiry, and `quote.depositAddress` on Ethereum (plus optional memo).
+2. **Accept** — user reviews and accepts the live quote in the UI. The UI computes the local `intentId` from the accepted parameters. Optionally, the UI posts the quote to `nintent` for status tracking; this is not required for the protocol to work.
 3. **Bridge** — user initiates Basejump on Hydration with `recipient = NearIntentsRouter` and `data = abi.encode(intentId, depositAddress)`.
 4. **Fast-path delivery + forward (atomic)** — Wormhole fast VAA → `Basejump.completeTransfer` on Ethereum → `BasejumpLanding.transfer(USDC, netAmount, NearIntentsRouter, data)` → `NearIntentsRouter.onBasejumpReceive` → USDC transfer to `depositAddress`, all in one transaction (~2 min). Emits `IntentForwarded(intentId, depositAddress, amount)`.
-5. **Submit deposit tx** — `nintent` calls `OneClickService.submitDepositTx({ depositAddress, txHash })`, using the router tx hash from step 4.
+5. **Submit deposit tx** — `nintent` observes `IntentForwarded(intentId, depositAddress, amount)`, reads `depositAddress` from the event, and calls `OneClickService.submitDepositTx({ depositAddress, txHash })` with the router tx hash from step 4.
 6. **Quote processing** — the quote service detects the deposit and starts the quoted NEAR Intents flow.
 7. **Solver fulfills** — solver delivers the destination asset to the user's destination-chain address.
 8. **Basejump slow settles** — ~13 min after step 3, TokenBridge transfer finalizes and replenishes `BasejumpLanding`'s pool on Ethereum. Independent of steps 4–7.
@@ -123,8 +123,8 @@ End-to-end happy path:
 ## Interface
 
 - `IBasejumpReceiver.sol` (shared) — `onBasejumpReceive(address asset, uint256 amount, bytes calldata data)`. Implemented by any contract that wants atomic post-delivery hooks from Basejump.
-- `INearIntentsRouter.sol` — extends `IBasejumpReceiver` with `sweep(address asset, address to, uint256 amount)`, event `IntentForwarded`. `data` MUST decode to `(bytes32 intentId, address depositAddress)`.
-- `nintent` HTTP API — `POST /quote`, `POST /intent`, `GET /intent/:id` (status). To be documented inside the `agents/nintent/` package alongside `broadcaster` and `bjscan`.
+- `INearIntentsRouter.sol` — extends `IBasejumpReceiver` with `sweep(address asset, address to, uint256 amount)`, event `IntentForwarded(bytes32 intentId, address depositAddress, uint256 amount)`. `data` MUST decode to `(bytes32 intentId, address depositAddress)`.
+- `nintent` exposes no public HTTP API. It is a headless event-driven keeper: chain subscription in, `submitDepositTx` out. Operator-facing logs and metrics only. The UI talks to OneClick directly for both quote acquisition and status polling.
 
 ## Key Design Decisions
 
@@ -132,7 +132,7 @@ End-to-end happy path:
 2. **Atomic delivery + forward.** `BasejumpLanding.transfer` and `NearIntentsRouter.onBasejumpReceive` execute in the same transaction. If the deposit transfer to `depositAddress` reverts, the entire fast-path completion reverts; the slow TokenBridge path still settles into `BasejumpLanding`, so user funds are never stranded at the router.
 3. **Quote-scoped origin-chain deposit.** The router does not deposit into a shared NEAR account. It forwards USDC to the quote's origin-chain `depositAddress` on Ethereum, exactly as the OneClick flow expects.
 4. **`submitDepositTx` as the NEAR-side continuation.** `nintent` does not manually reconstruct a NEAR settlement step. It hands Defuse / OneClick the quoted `depositAddress` and the actual Ethereum tx hash, which is the canonical signal to continue processing the quote.
-5. **Intent ID as local correlation primitive.** `intentId` is our join key across quote registration, Basejump `data`, router events, and status monitoring. The actual deposit recipient is `depositAddress`, not `intentId`.
+5. **Intent ID as local correlation primitive.** `intentId` is computed by the UI and threaded through Basejump `data`, the `IntentForwarded` event, and (optionally) `nintent`'s status registry. The actual deposit recipient is `depositAddress`, not `intentId`.
 6. **Auth boundary is `basejumpLanding`, not an orchestrator.** `onBasejumpReceive` is callable only by the authorized `BasejumpLanding`. There is no externally callable `forward` and no keeper discretion over the destination deposit address once the VAA is created.
 7. **No on-chain failure handling in V1.** Expired or rejected quotes are handled operationally. On-chain refund logic is deferred to V2.
 8. **`sweep` as escape hatch.** Slow-settlement USDC arrives at `BasejumpLanding`, not at the router — but operator error or unexpected token deposits should still be recoverable. `sweep` is owner-only.
@@ -147,4 +147,4 @@ End-to-end happy path:
 | `NearIntentsRouter`  | New — `IBasejumpReceiver` that forwards arriving USDC to the OneClick quote's Ethereum `depositAddress`                                             |
 | Defuse / OneClick API | Third-party — returns quote data, quote-specific `depositAddress`, and accepts `submitDepositTx`                                                   |
 | `intents.near`       | Third-party — NEAR Intents settlement layer behind the quote flow                                                                                   |
-| `nintent` agent      | New off-chain — quote API wrapper, registry, deposit submitter, settlement watch                                                                    |
+| `nintent` agent      | New off-chain — event-driven keeper. Watches `IntentForwarded`, calls `submitDepositTx`, monitors settlement, drives manual unwind. Not in the quote path |
