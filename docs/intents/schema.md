@@ -113,11 +113,11 @@ A: Hydration            B: Moonbeam (proxy)       M: off-chain agents     C: Eth
                                                               │ emit IntentForwarded                                         │ funds present here
                                                               ▼                                                              │ once Router tx mined
                                                    ┌────────────────────┐    submitDepositTx          ┌──────────────────────▼─────┐
-                                                   │ nintent agent      │ ─────────────────────────► │ Defuse / OneClick API      │
-                                                   │ (off-chain)        │  ({ depositAddress,        │                            │
-                                                   │                    │     txHash })              └─────────────┬──────────────┘
-                                                   └────────────────────┘                                          │ quoted processing
-                                                                                                                   ▼
+                                                   │ nintent agent      │ ─────────────────────────►  │ Defuse / OneClick API      │
+                                                   │ (off-chain)        │  ({ depositAddress,         │                            │
+                                                   │                    │     txHash })               └─────────────┬──────────────┘
+                                                   └────────────────────┘                                           │ quoted processing
+                                                                                                                    ▼
                                                                                                        ┌────────────────────────────┐
                                                                                                        │ NEAR Intents + solvers     │
                                                                                                        └─────────────┬──────────────┘
