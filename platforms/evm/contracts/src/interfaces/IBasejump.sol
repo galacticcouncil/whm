@@ -9,6 +9,7 @@ interface IBasejump is IBasejumpBase {
     function bridgeViaWormhole(
         address asset,
         uint256 amount,
-        bytes32 recipient
+        bytes32 recipient,
+        bytes memory data
     ) external payable returns (uint64 transferSequence, uint64 messageSequence);
 }

@@ -9,6 +9,7 @@ interface IBasejumpBase {
         uint256 amount;
         bytes32 recipient;
         uint64 transferSequence;
+        bytes data;
     }
 
     // ─── Events ──────────────────────────────────────────────────

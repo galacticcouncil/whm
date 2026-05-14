@@ -10,6 +10,7 @@ interface IBasejumpProxy is IBasejumpBase {
         address asset,
         uint256 amount,
         uint16 destChain,
-        bytes32 recipient
+        bytes32 recipient,
+        bytes memory data
     ) external payable returns (uint64 transferSequence, uint64 messageSequence);
 }
