@@ -48,6 +48,8 @@ contract MessageDispatcher is MessageReceiver {
         }
     }
 
+    /// @dev VULNERABLE: Uses vm.timestamp (guardian observation time) for staleness,
+    ///      discards the payload-embedded price timestamp. See fix_handleOracleUpdate.
     function _handleOracleUpdate(uint8 action, IWormhole.VM memory vm) internal virtual {
         (, bytes32 assetId, uint256 price,) = abi.decode(vm.payload, (uint8, bytes32, uint256, uint64));
         uint64 vaaTimestamp = uint64(vm.timestamp);
@@ -63,6 +65,33 @@ contract MessageDispatcher is MessageReceiver {
 
         latestPrices[assetId] = PriceData({price: price, timestamp: vaaTimestamp, receivedAt: uint64(block.timestamp)});
         emit PriceReceived(assetId, price, vaaTimestamp);
+
+        uint256 scaledPrice = price / PRICE_SCALE_DIVISOR;
+        require(scaledPrice > 0, "Price too low to scale");
+        bytes memory input = abi.encodeWithSignature("setPrice(int256)", int256(scaledPrice));
+        XcmTransactor(handler).transact(oracle, input);
+    }
+
+    /// @notice Fixed oracle update handler that uses the payload-embedded price
+    ///         timestamp for staleness checks instead of the Wormhole guardian
+    ///         observation timestamp (vm.timestamp).
+    function fix_handleOracleUpdate(uint8 action, IWormhole.VM memory vm) internal virtual {
+        (, bytes32 assetId, uint256 price, uint64 priceTimestamp) =
+            abi.decode(vm.payload, (uint8, bytes32, uint256, uint64));
+
+        // Use the PAYLOAD timestamp (actual price observation time), not vm.timestamp
+        uint64 latestTimestamp = latestPrices[assetId].timestamp;
+        if (priceTimestamp <= latestTimestamp) revert StalePriceUpdate(assetId, priceTimestamp, latestTimestamp);
+        require(block.timestamp - priceTimestamp <= maxPriceAge, "Price too stale");
+
+        address handler = handlers[action];
+        address oracle = oracles[assetId];
+
+        if (handler == address(0)) revert HandlerNotSet(action);
+        if (oracle == address(0)) revert OracleNotSet(assetId);
+
+        latestPrices[assetId] = PriceData({price: price, timestamp: priceTimestamp, receivedAt: uint64(block.timestamp)});
+        emit PriceReceived(assetId, price, priceTimestamp);
 
         uint256 scaledPrice = price / PRICE_SCALE_DIVISOR;
         require(scaledPrice > 0, "Price too low to scale");

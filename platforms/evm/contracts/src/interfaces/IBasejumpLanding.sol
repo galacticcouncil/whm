@@ -7,6 +7,7 @@ interface IBasejumpLanding {
     event TransferExecuted(address indexed sourceAsset, address indexed destAsset, bytes32 indexed recipient, uint256 amount);
     event TransferQueued(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
     event PendingTransferFulfilled(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
+    event PendingTransferSkipped(uint256 indexed id, address indexed sourceAsset, bytes32 indexed recipient);
     event Withdrawn(address indexed asset, uint256 amount, address indexed to);
     event DestAssetUpdated(address indexed sourceAsset, address indexed destAsset);
 
