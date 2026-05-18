@@ -6,15 +6,7 @@ import {IBasejumpBase} from "../../src/interfaces/IBasejumpBase.sol";
 /// @notice Test helper library for Basejump integration tests
 /// @dev Provides utilities for VAA generation and common test operations
 library BasejumpTestHelpers {
-    /// @notice Build a fast-path VAA for Basejump transfers
-    /// @dev VAA format: abi.encode(emitterChainId, emitterAddress, payload)
-    /// @param sourceChain Wormhole chain ID of the source chain
-    /// @param sourceBasejump Address of the Basejump contract that emitted the message
-    /// @param sourceAsset Address of the source asset being transferred
-    /// @param netAmount Amount after fees deducted
-    /// @param recipient bytes32-encoded recipient address
-    /// @param transferSequence TokenBridge transfer sequence number
-    /// @return Encoded VAA bytes
+    /// @notice Build a fast-path VAA for Basejump transfers (empty data)
     function buildFastPathVAA(
         uint16 sourceChain,
         address sourceBasejump,
@@ -23,11 +15,26 @@ library BasejumpTestHelpers {
         bytes32 recipient,
         uint64 transferSequence
     ) internal pure returns (bytes memory) {
+        return buildFastPathVAA(sourceChain, sourceBasejump, sourceAsset, netAmount, recipient, transferSequence, "");
+    }
+
+    /// @notice Build a fast-path VAA for Basejump transfers carrying opaque receiver data
+    /// @dev VAA format: abi.encode(emitterChainId, emitterAddress, payload)
+    function buildFastPathVAA(
+        uint16 sourceChain,
+        address sourceBasejump,
+        address sourceAsset,
+        uint256 netAmount,
+        bytes32 recipient,
+        uint64 transferSequence,
+        bytes memory data
+    ) internal pure returns (bytes memory) {
         IBasejumpBase.TransferPayload memory transfer = IBasejumpBase.TransferPayload({
             sourceAsset: sourceAsset,
             amount: netAmount,
             recipient: recipient,
-            transferSequence: transferSequence
+            transferSequence: transferSequence,
+            data: data
         });
 
         bytes memory payload = abi.encode(transfer);

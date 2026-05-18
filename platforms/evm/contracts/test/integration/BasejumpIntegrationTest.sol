@@ -274,7 +274,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         (uint64 transferSeq,) = basejumpBase.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             amount,
-            hydrationRecipient
+            hydrationRecipient,
+            ""
         );
         vm.stopPrank();
 
@@ -326,7 +327,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
 
         // BasejumpProxy calls BasejumpLanding.transfer via XCM
         vm.prank(address(basejumpMoonbeam));
-        basejumpHydration.transfer(address(usdcBase), expectedNetAmount, hydrationRecipient);
+        basejumpHydration.transfer(address(usdcBase), expectedNetAmount, hydrationRecipient, "");
 
         // ─── Step 7: Verify dispatch precompile was called ─────────
         // This is verified by the vm.mockCall in setUp not reverting
@@ -343,7 +344,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         (uint64 transferSeq,) = basejumpBase.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             amount,
-            hydrationRecipient
+            hydrationRecipient,
+            ""
         );
         vm.stopPrank();
 
@@ -365,7 +367,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
 
         // On Landing, verify net amount is transferred
         vm.prank(address(basejumpMoonbeam));
-        basejumpHydration.transfer(address(usdcBase), expectedNet, hydrationRecipient);
+        basejumpHydration.transfer(address(usdcBase), expectedNet, hydrationRecipient, "");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -400,7 +402,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         );
 
         vm.prank(address(basejumpMoonbeam));
-        basejumpHydration.transfer(address(usdcBase), largeAmount, hydrationRecipient);
+        basejumpHydration.transfer(address(usdcBase), largeAmount, hydrationRecipient, "");
 
         // Verify queued
         assertEq(basejumpHydration.pendingTail(), 1, "Transfer not queued");
@@ -429,7 +431,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         basejumpMoonbeam.completeTransfer(vaa);
 
         vm.prank(address(basejumpMoonbeam));
-        basejumpHydration.transfer(address(usdcBase), largeAmount, hydrationRecipient);
+        basejumpHydration.transfer(address(usdcBase), largeAmount, hydrationRecipient, "");
 
         // Restore liquidity (simulate slow path arrival)
         usdcHydration.mint(address(basejumpHydration), 2000e6);
@@ -504,7 +506,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         vm.expectRevert(
             abi.encodeWithSelector(IBasejumpLanding.AssetNotConfigured.selector, unknownAsset)
         );
-        basejumpHydration.transfer(unknownAsset, TRANSFER_AMOUNT, hydrationRecipient);
+        basejumpHydration.transfer(unknownAsset, TRANSFER_AMOUNT, hydrationRecipient, "");
     }
 
     function testDispatchPrecompileFailure() public {
@@ -525,7 +527,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         // When Landing.transfer is called, it should revert
         vm.prank(address(basejumpMoonbeam));
         vm.expectRevert(IBasejumpLanding.DispatchFailed.selector);
-        basejumpHydration.transfer(address(usdcBase), TRANSFER_AMOUNT, hydrationRecipient);
+        basejumpHydration.transfer(address(usdcBase), TRANSFER_AMOUNT, hydrationRecipient, "");
     }
 
     function testZeroAmountReverts() public {
@@ -536,7 +538,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         basejumpBase.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             0,
-            hydrationRecipient
+            hydrationRecipient,
+            ""
         );
         vm.stopPrank();
     }
@@ -559,7 +562,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         basejump.bridgeViaWormhole{value: 1 ether}(
             address(usdcBase),
             TRANSFER_AMOUNT,
-            hydrationRecipient
+            hydrationRecipient,
+            ""
         );
         vm.stopPrank();
     }
@@ -570,7 +574,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             address(usdcBase),
             TRANSFER_AMOUNT,
             BASE_CHAIN_ID,
-            hydrationRecipient
+            hydrationRecipient,
+            ""
         );
     }
 

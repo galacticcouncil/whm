@@ -25,14 +25,18 @@ abstract contract BasejumpBase is MessageReceiver, IBasejumpBase {
         tokenBridge = ITokenBridge(_tokenBridge);
     }
 
-    function _executeTransfer(uint16 sourceChain, address sourceAsset, uint256 amount, bytes32 recipient)
-        internal
-        virtual;
+    function _executeTransfer(
+        uint16 sourceChain,
+        address sourceAsset,
+        uint256 amount,
+        bytes32 recipient,
+        bytes memory data
+    ) internal virtual;
 
     function _processMessage(IWormhole.VM memory vm) internal virtual override {
         IBasejumpBase.TransferPayload memory transfer = abi.decode(vm.payload, (IBasejumpBase.TransferPayload));
 
-        _executeTransfer(vm.emitterChainId, transfer.sourceAsset, transfer.amount, transfer.recipient);
+        _executeTransfer(vm.emitterChainId, transfer.sourceAsset, transfer.amount, transfer.recipient, transfer.data);
 
         emit TransferProcessed(transfer.sourceAsset, transfer.amount, transfer.recipient);
     }
@@ -42,7 +46,8 @@ abstract contract BasejumpBase is MessageReceiver, IBasejumpBase {
         uint256 amount,
         uint16 destChain,
         bytes32 recipient,
-        uint64 transferSequence
+        uint64 transferSequence,
+        bytes memory data
     ) internal returns (uint64 messageSequence) {
         // Net amount after fee (fee stays in BasejumpLanding on destination)
         uint256 fee = quoteFee(sourceAsset);
@@ -50,7 +55,11 @@ abstract contract BasejumpBase is MessageReceiver, IBasejumpBase {
         uint256 netAmount = amount - fee;
 
         IBasejumpBase.TransferPayload memory transfer = IBasejumpBase.TransferPayload({
-            sourceAsset: sourceAsset, amount: netAmount, recipient: recipient, transferSequence: transferSequence
+            sourceAsset: sourceAsset,
+            amount: netAmount,
+            recipient: recipient,
+            transferSequence: transferSequence,
+            data: data
         });
 
         bytes memory payload = abi.encode(transfer);

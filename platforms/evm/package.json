@@ -17,6 +17,7 @@
     "migrate:basejump:fork": "bash sh/migrate-basejump.sh fork"
   },
   "dependencies": {
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.17",
     "@galacticcouncil/common": "^0.6.0",
     "@galacticcouncil/descriptors": "^1.15.0",
     "@whm/common": "workspace:*",

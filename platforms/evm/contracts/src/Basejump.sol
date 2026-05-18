@@ -42,7 +42,8 @@ contract Basejump is BasejumpBase, IBasejump {
     function bridgeViaWormhole(
         address asset,
         uint256 amount,
-        bytes32 recipient
+        bytes32 recipient,
+        bytes memory data
     ) external payable returns (uint64 transferSequence, uint64 messageSequence) {
         if (amount == 0) revert ZeroAmount();
         if (landingDest == bytes32(0)) revert BasejumpLandingNotSet(MOONBEAM_WORMHOLE_ID);
@@ -71,14 +72,19 @@ contract Basejump is BasejumpBase, IBasejump {
         );
 
         // 2. Fast path: instant-finality message with net amount (after fee)
-        //    BasejumpLanding sends netAmount to recipient, keeps fee
-        messageSequence = _fastTrack(asset, actualAmount, MOONBEAM_WORMHOLE_ID, recipient, transferSequence);
+        //    BasejumpLanding sends netAmount to recipient, keeps fee.
+        //    `data` is opaque bytes forwarded end-to-end into the destination
+        //    receiver's onBasejumpReceive callback (TokenBridge payload-3 style).
+        messageSequence = _fastTrack(asset, actualAmount, MOONBEAM_WORMHOLE_ID, recipient, transferSequence, data);
     }
 
-    function _executeTransfer(uint16, address sourceAsset, uint256 amount, bytes32 recipient) internal override {
+    function _executeTransfer(uint16, address sourceAsset, uint256 amount, bytes32 recipient, bytes memory data)
+        internal
+        override
+    {
         if (landing == bytes32(0)) revert BasejumpLandingNotSet(wormhole.chainId());
 
-        IBasejumpLanding(_bytes32ToAddress(landing)).transfer(sourceAsset, amount, recipient);
+        IBasejumpLanding(_bytes32ToAddress(landing)).transfer(sourceAsset, amount, recipient, data);
     }
 
     // ─── Admin ──────────────────────────────────────────────────

@@ -95,7 +95,7 @@ contract SecurityFixesTest is Test {
 
         vm.prank(bridge);
         vm.expectRevert("Amount exceeds uint128");
-        landing.transfer(address(token), hugeAmount, recipient);
+        landing.transfer(address(token), hugeAmount, recipient, "");
     }
 
     /// @notice Test Fix #6: uint128.max should work
@@ -110,7 +110,7 @@ contract SecurityFixesTest is Test {
 
         // Should not revert for uint128.max
         vm.prank(bridge);
-        landing.transfer(address(token), maxAmount, recipient);
+        landing.transfer(address(token), maxAmount, recipient, "");
     }
 
     /// @notice Test Fix #1: int256 overflow protection
@@ -159,7 +159,7 @@ contract SecurityFixesTest is Test {
             deal(address(destToken), address(landing), amounts[i]);
 
             vm.prank(bridge);
-            landing.transfer(address(token), amounts[i], recipient);
+            landing.transfer(address(token), amounts[i], recipient, "");
         }
     }
 }

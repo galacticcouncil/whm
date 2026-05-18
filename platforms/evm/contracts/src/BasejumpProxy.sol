@@ -38,7 +38,8 @@ contract BasejumpProxy is BasejumpBase, IBasejumpProxy {
         address asset,
         uint256 amount,
         uint16 destChain,
-        bytes32 recipient
+        bytes32 recipient,
+        bytes memory data
     ) external payable returns (uint64 transferSequence, uint64 messageSequence) {
         if (amount == 0) revert ZeroAmount();
 
@@ -65,11 +66,19 @@ contract BasejumpProxy is BasejumpBase, IBasejumpProxy {
         );
 
         // 2. Fast path: instant-finality message with net amount (after fee)
-        //    BasejumpLanding sends netAmount to recipient, keeps fee
-        messageSequence = _fastTrack(asset, actualAmount, destChain, recipient, transferSequence);
+        //    BasejumpLanding sends netAmount to recipient, keeps fee.
+        //    `data` is opaque bytes forwarded end-to-end into the destination
+        //    receiver's onBasejumpReceive callback (TokenBridge payload-3 style).
+        messageSequence = _fastTrack(asset, actualAmount, destChain, recipient, transferSequence, data);
     }
 
-    function _executeTransfer(uint16 sourceChain, address sourceAsset, uint256 amount, bytes32 recipient) internal override {
+    function _executeTransfer(
+        uint16 sourceChain,
+        address sourceAsset,
+        uint256 amount,
+        bytes32 recipient,
+        bytes memory data
+    ) internal override {
         if (xcmTransactor == address(0)) revert XcmTransactorNotSet();
 
         bytes32 sourceLanding = landings[sourceChain];
@@ -77,7 +86,9 @@ contract BasejumpProxy is BasejumpBase, IBasejumpProxy {
 
         address basejumpLanding = _bytes32ToAddress(sourceLanding);
 
-        bytes memory input = abi.encodeWithSelector(IBasejumpLanding.transfer.selector, sourceAsset, amount, recipient);
+        bytes memory input = abi.encodeWithSelector(
+            IBasejumpLanding.transfer.selector, sourceAsset, amount, recipient, data
+        );
 
         XcmTransactor(xcmTransactor).transact(basejumpLanding, input);
     }
