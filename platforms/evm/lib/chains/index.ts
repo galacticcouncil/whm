@@ -1,10 +1,11 @@
 import { Chain } from "viem";
-import { base } from "viem/chains";
+import { base, mainnet } from "viem/chains";
 
 import { hydration } from "./hydration";
 import { moonbeam } from "./moonbeam";
 
 const chains: Record<number, Chain> = {
+  1: mainnet,
   222222: hydration,
   1284: moonbeam,
   8453: base,
