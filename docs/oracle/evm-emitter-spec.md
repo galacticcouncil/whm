@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Hydration's on-chain oracle pipeline needs **rate** data from Ethereum-mainnet assets (wstETH, apyUSD, and any future ERC-4626 / view-readable feed that exposes an 18-decimal `uint256`). The EVM Oracle Emitter is the Ethereum-side counterpart of the Solana `message-emitter` program: it reads source contracts directly on-chain, ABI-encodes the value into the WHM oracle payload, and publishes it through Wormhole. The existing Moonbeam dispatcher and Hydration XCM path then carry it to Hydration's oracle store unchanged.
+Hydration's on-chain oracle pipeline needs **rate** data from Ethereum-mainnet assets (wstETH, apyUSD, and any future ERC-4626 / view-readable feed that exposes an 18-decimal `uint256`). The EVM Oracle Emitter is the Ethereum-side counterpart of the Solana `message-emitter` program: it reads source contracts directly on-chain, ABI-encodes the value into the WHM oracle payload, and publishes it through Wormhole. A dedicated `MessageDispatcher` proxy on Moonbeam then routes the VAA to Hydration's oracle store via XCM.
 
 ## Overview
 
@@ -35,13 +35,17 @@ Reads exchange rates directly from source contracts on Ethereum mainnet and publ
 
 - Deletes the binding.
 
-### Wormhole, Moonbeam, Hydration — unchanged
+### Moonbeam — parallel relay stack
 
-The VAA emitted by `OracleEmitter` is consumed by the same `MessageReceiver` / `MessageDispatcher` / `XcmTransactor` stack on Moonbeam that already handles Solana-sourced VAAs ([spec.md](spec.md)). Adding Ethereum as a source requires one admin call on Moonbeam:
+The existing `oracle-relay` Moonbeam stack (Solana → Moonbeam → Hydration) has been renounced to a zero owner — `MessageDispatcher.setAuthorizedEmitter`, `setOracle`, UUPS upgrades, and even `XcmTransactor.setAuthorized` are all uncallable. Configuring it to accept Ethereum-sourced VAAs is therefore not possible.
 
-- `MessageDispatcher.setAuthorizedEmitter(2, bytes32(uint256(uint160(oracleEmitterProxy))))` — Wormhole chainId 2 = Ethereum mainnet.
+Adding Ethereum as a source instead requires a **fresh parallel stack** on Moonbeam: a new `XcmTransactor` proxy + new `MessageDispatcher` proxy using the existing Solidity contracts unchanged. The contracts are not chain-coupled — only the per-deployment `authorizedEmitters`, `handlers`, and `oracles` mappings need to differ. Its decode, stale-check, 1e10 scaling, and XCM dispatch logic apply identically to the Solana side.
 
-`MessageDispatcher` does not care which chain the payload came from. Its decode, stale-check, 1e10 scaling, and XCM dispatch logic apply identically.
+This is the [`oracle-relay-eth` migration](#deployment).
+
+### Hydration — new MDA authorisation required
+
+Each Moonbeam `XcmTransactor` proxy executes on Hydration as a distinct multilocation-derived account (MDA), and per [spec.md design decision #4](spec.md#key-design-decisions) each Hydration oracle contract whitelists a single MDA as the authorised `setPrice` caller. The new `XcmTransactor` proxy therefore has a different MDA than the existing one, so each target oracle on Hydration must additionally authorise this new MDA. This is a Hydration-parachain task, tracked as a follow-up — not in this repo.
 
 ### Off-chain — broadcaster
 
@@ -52,7 +56,7 @@ The existing `agents/broadcaster` service is Solana-aware today. The plan is to 
 | Asset    | source                                       | call                                 | Published value           |
 | -------- | -------------------------------------------- | ------------------------------------ | ------------------------- |
 | `wstETH` | `0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0` | `stEthPerToken()`                    | stETH per 1 wstETH        |
-| `apyUSD` | `0x38eeb52f0771140d10c4e9a9a72349a329fe8a6a` | `convertToAssets(uint256)` with 1e18 | apxUSD per 1 apyUSD share |
+| `apyUSD` | `0x38EEb52F0771140d10c4E9A9a72349A329Fe8a6A` | `convertToAssets(uint256)` with 1e18 | apxUSD per 1 apyUSD share |
 
 Both sources return a `uint256` at 18 decimals natively; the emitter publishes the return value verbatim.
 
@@ -95,10 +99,10 @@ The `timestamp` field is informational. The dispatcher's stale-check uses `vm.ti
 
 | Contract | Role |
 | --- | --- |
-| `OracleEmitter` (this contract) | Feed registry, direct on-chain reads, ABI-encode payload, publish Wormhole VAA |
-| `MessageReceiver` (Moonbeam) | VAA verification, replay protection, authorised-emitter whitelist (one entry per source chain) |
-| `MessageDispatcher` (Moonbeam) | Decode payload, action-route, stale-check, 1e10 scaling, dispatch to `XcmTransactor` |
-| `XcmTransactor` (Moonbeam) | SCALE-encode `evm.call`, send via XCM precompile to Hydration |
+| `OracleEmitter` (Ethereum) | Feed registry, direct on-chain reads, ABI-encode payload, publish Wormhole VAA |
+| `MessageReceiver` / `MessageDispatcher` (Moonbeam, **new proxy**) | VAA verification, replay protection, authorised-emitter whitelist, action routing — same Solidity as `oracle-relay`, fresh proxy instance scoped to the Ethereum source |
+| `XcmTransactor` (Moonbeam, **new proxy**) | SCALE-encode `evm.call`, send via XCM precompile to Hydration — fresh proxy → distinct MDA on Hydration |
+| Hydration oracle contracts | Must additionally whitelist the new MDA as authorised `setPrice` caller (follow-up; out of this repo) |
 
 ## Deployment
 
@@ -118,17 +122,21 @@ Rollout is split across two migrations — the Ethereum-side deploy + feed regis
 
 **2. `oracle-relay-eth` (Moonbeam)** — `platforms/evm/migrations/definitions/oracle-relay-eth/`
 
-Runs after `oracle-relay` (which deploys `MessageDispatcher`) and after `oracle-emitter` above. Reads the dispatcher address from the `oracle-relay` deployment state and the emitter proxy address from the `oracle-emitter` deployment state (cross-env via `EMITTER_ENV`).
+Runs after `oracle-emitter` above. Reads the Ethereum emitter proxy from the `oracle-emitter` deployment state via `ctx.ref` — cross-env override with `EMITTER_ENV` (e.g. `EMITTER_ENV=eth` when running against the moon env).
 
-1. `001-register-emitter` — `setAuthorizedEmitter(2, bytes32(oracleEmitterProxy))` on `MessageDispatcher`
-2. `002-set-oracle-wsteth` — `setOracle(keccak256("WSTETH"), wstethOracleAddress)` on `MessageDispatcher`
-3. `003-set-oracle-apyusd` — `setOracle(keccak256("APYUSD"), apyusdOracleAddress)` on `MessageDispatcher`
+1. `001-deploy-transactor` — deploy fresh `XcmTransactor` impl + proxy
+2. `002-deploy-dispatcher` — deploy fresh `MessageDispatcher` impl + proxy
+3. `003-authorize-dispatcher` — `setAuthorized(newDispatcher, true)` on the new transactor
+4. `004-register-emitter` — `setAuthorizedEmitter(2, ethEmitterProxy)` — Wormhole chainId 2 = Ethereum mainnet
+5. `005-set-handler-rate` — `setHandler(ACTION_RATE_UPDATE, newTransactor)` on the new dispatcher
+6. `006-set-oracle-wsteth` — `setOracle(keccak256("WSTETH"), wstethOracleAddress)`
+7. `007-set-oracle-apyusd` — `setOracle(keccak256("APYUSD"), apyusdOracleAddress)`
 
-`handlers[ACTION_RATE_UPDATE]` is assumed already wired from the original `oracle-relay` migration; if not, add it there rather than in this migration.
+Ownership is intentionally **retained** on the new stack — mirror `oracle-relay`'s `010-revoke-transactor-owner` / `011-revoke-dispatcher-owner` steps once Hydration-side MDA authorisation is wired and end-to-end is verified.
 
 **Env files** (one per chain/env): `migrations/envs/{env}/oracle-emitter.env` and `migrations/envs/{env}/oracle-relay-eth.env` — e.g. `envs/eth/oracle-emitter.env`, `envs/fork/oracle-emitter.env`, `envs/moon/oracle-relay-eth.env`, `envs/fork/oracle-relay-eth.env`.
 
-**One-shot driver:** `pnpm run migrate:oracle-emitter` (or `migrate:oracle-emitter:fork`) — see [sh/migrate-oracle-emitter.sh](../../platforms/evm/sh/migrate-oracle-emitter.sh).
+**Running the migrations:** both run through the shared runner via `pnpm run migration:run` — e.g. `pnpm run migration:run --migration oracle-emitter --env fork --pk 0x…`, then `pnpm run migration:run --migration oracle-relay-eth --env fork --pk 0x…`. For a forked Ethereum mainnet, start the fork first with `pnpm run fork:eth` (anvil on `:8550`).
 
 ## Flow
 

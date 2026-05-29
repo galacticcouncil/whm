@@ -161,7 +161,7 @@
   apyUSD (rate)
   ─────────────
     assetId = keccak256("APYUSD")
-    source  = 0x38eeb52f0771140d10c4e9a9a72349a329fe8a6a
+    source  = 0x38EEb52F0771140d10c4E9A9a72349A329Fe8a6A
     call    = abi.encodeCall(IERC4626.convertToAssets, (1e18))
 
 
