@@ -2,11 +2,18 @@
 
 ## Abstract
 
-On-chain oracles on Hydration need external price feeds but have no direct access to Solana price sources. Oracle Relay bridges Kamino Scope prices from Solana to Hydration's on-chain oracle via Wormhole and Moonbeam XCM.
+On-chain oracles on Hydration need external price feeds but have no direct access to Solana or Ethereum price sources. Oracle Relay bridges Kamino Scope prices from Solana and ERC-4626 / view-readable rates from Ethereum to Hydration's on-chain oracle via Wormhole and Moonbeam XCM.
 
 ## Overview
 
-A Solana program reads oracle prices, ABI-encodes them, and publishes through Wormhole as VAAs. On Moonbeam, a dispatcher contract validates the VAA, routes by action type, and forwards the price to Hydration's oracle contract via XCM. Off-chain agents (broadcaster + relayer) drive the pipeline.
+A source-chain emitter reads oracle prices or rates, ABI-encodes them, and publishes through Wormhole as VAAs. On Moonbeam, a dispatcher contract validates the VAA, routes by action type, and forwards the price to Hydration's oracle contract via XCM. Off-chain agents (broadcaster + relayer) drive the pipeline.
+
+Two source chains are supported:
+
+- **Solana** — `message-emitter` Anchor program, reading Kamino Scope prices and SPL Stake Pool rates. Described below.
+- **Ethereum** — `OracleEmitter` Solidity contract, reading rates directly from token / vault contracts (wstETH, apyUSD, …). See [evm-emitter-spec.md](evm-emitter-spec.md) and [evm-emitter-schema.md](evm-emitter-schema.md).
+
+The Moonbeam dispatcher stack and Hydration XCM path are chain-agnostic — adding a new source chain is purely a matter of authorising a new emitter address on `MessageReceiver`.
 
 ## Architecture
 
