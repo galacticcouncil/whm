@@ -3,7 +3,7 @@ import "dotenv/config";
 import { isAddress, isHex } from "viem";
 
 import { args } from "@whm/common";
-import { ifs, wallet } from "../../lib";
+import { ifs, wallet } from "@whm/common";
 
 import xcmTransactorJson from "../../out/XcmTransactor.sol/XcmTransactor.json";
 

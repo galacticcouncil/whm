@@ -111,7 +111,7 @@ echo "=== BASE ==="
 
 verify_etherscan "Basejump impl" \
   8453 base 0xedece54767182abc1b04fe699a96cf7e97a3ccf2 \
-  src/Basejump.sol:Basejump \
+  src/basejump/Basejump.sol:Basejump \
   "$BASE_RPC"
 
 BASEJUMP_BASE_PROXY_ARGS=$(proxy_args \
@@ -132,7 +132,7 @@ echo "=== MOONBEAM ==="
 
 verify_etherscan "BasejumpProxy impl" \
   1284 moonbeam 0xedece54767182abc1b04fe699a96cf7e97a3ccf2 \
-  src/BasejumpProxy.sol:BasejumpProxy \
+  src/basejump/BasejumpProxy.sol:BasejumpProxy \
   "$MOON_RPC"
 
 BASEJUMP_MOON_PROXY_ARGS=$(proxy_args \
@@ -173,7 +173,7 @@ echo "=== HYDRATION ==="
 
 verify_subscan "BasejumpLanding impl" \
   0x4ea0d58ab1551b5794bca0d2327dbedc85bae31f \
-  src/BasejumpLanding.sol:BasejumpLanding
+  src/basejump/BasejumpLanding.sol:BasejumpLanding
 
 LANDING_PROXY_ARGS=$(proxy_args \
   0x4ea0d58ab1551b5794bca0d2327dbedc85bae31f \

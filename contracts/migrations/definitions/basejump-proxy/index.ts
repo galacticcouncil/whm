@@ -1,5 +1,5 @@
 import type { MigrationConfig } from "../../types";
-import { wallet } from "../../../lib";
+import { wallet } from "@whm/common";
 
 /**
  * Full Moonbeam stack:

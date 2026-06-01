@@ -3,7 +3,7 @@ import "dotenv/config";
 import { isAddress } from "viem";
 
 import { args } from "@whm/common";
-import { ifs, wallet } from "../../lib";
+import { ifs, wallet } from "@whm/common";
 
 import messageReceiverJson from "../../out/MessageReceiver.sol/MessageReceiver.json";
 

@@ -1,5 +1,5 @@
 import type { MigrationStep } from "../../types";
-import { setDestAsset } from "../../actions/basejumpLanding/setDestAsset";
+import { setDestAsset } from "../../actions/basejump-landing/setDestAsset";
 
 const step: MigrationStep = {
   name: "set-dest-asset_EURC",

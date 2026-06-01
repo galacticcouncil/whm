@@ -5,14 +5,14 @@ import type {
   Migration as BaseMigration,
 } from "@whm/common/migration";
 import type * as anchor from "@coral-xyz/anchor";
-import type { MessageEmitter } from "../target/types/message_emitter";
+import type { OracleEmitter } from "../target/types/oracle_emitter";
 
 export interface SolanaContext {
   connection: anchor.web3.Connection;
   keypair: anchor.web3.Keypair;
   wallet: anchor.Wallet;
   provider: anchor.AnchorProvider;
-  program: anchor.Program<MessageEmitter>;
+  program: anchor.Program<OracleEmitter>;
 }
 
 // Narrow generic types to Solana context

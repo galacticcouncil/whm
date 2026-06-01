@@ -1,4 +1,4 @@
-import type { ifs } from "../../../lib";
+import type { ifs } from "@whm/common";
 import type { MigrationStep } from "../../types";
 import { setOwner } from "../../actions/setOwner";
 

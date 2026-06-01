@@ -1,5 +1,5 @@
 import type { MigrationStep } from "../../types";
-import { deploy } from "../../actions/basejumpLanding/deploy";
+import { deploy } from "../../actions/basejump-landing/deploy";
 
 const step: MigrationStep = {
   name: "deploy",

@@ -4,7 +4,7 @@ pragma solidity ^0.8.22;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {BasejumpBase} from "./BasejumpBase.sol";
+import {BasejumpCore} from "./BasejumpCore.sol";
 import {XcmTransactor} from "../XcmTransactor.sol";
 
 import {IBasejumpProxy} from "./interfaces/IBasejumpProxy.sol";
@@ -14,7 +14,7 @@ import {IBasejumpLanding} from "./interfaces/IBasejumpLanding.sol";
 /// @notice Bridges funds OUT from Hydration to external wormhole chains.
 ///         - bridgeViaWormhole: called via XCM from Hydration, sends tokens out
 ///         - completeTransfer: receives fast-path VAA, forwards to Hydration Landing via XCM
-contract BasejumpProxy is BasejumpBase, IBasejumpProxy {
+contract BasejumpProxy is BasejumpCore, IBasejumpProxy {
     using SafeERC20 for IERC20;
 
     address public xcmTransactor;

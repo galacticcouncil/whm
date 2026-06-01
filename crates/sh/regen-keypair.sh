@@ -7,9 +7,9 @@
 # Usage: ./sh/regen-keypair.sh
 set -euo pipefail
 
-PROGRAM_NAME="message_emitter"
+PROGRAM_NAME="oracle_emitter"
 KEYPAIR_PATH="target/deploy/${PROGRAM_NAME}-keypair.json"
-LIB_RS="programs/message-emitter/src/lib.rs"
+LIB_RS="programs/oracle-emitter/src/lib.rs"
 ANCHOR_TOML="Anchor.toml"
 
 # cd to repo root (where Anchor.toml lives)
@@ -29,7 +29,7 @@ sed -i '' "s/declare_id!(\"[^\"]*\")/declare_id!(\"${NEW_ID}\")/" "$LIB_RS"
 echo "Updated $LIB_RS"
 
 # Update program ID in Anchor.toml [programs.localnet]
-sed -i '' "s/^message-emitter = \"[^\"]*\"/message-emitter = \"${NEW_ID}\"/" "$ANCHOR_TOML"
+sed -i '' "s/^oracle-emitter = \"[^\"]*\"/oracle-emitter = \"${NEW_ID}\"/" "$ANCHOR_TOML"
 echo "Updated $ANCHOR_TOML"
 
 echo "Done. Run 'anchor build -p $PROGRAM_NAME' to rebuild."

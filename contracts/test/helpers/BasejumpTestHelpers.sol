@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import {IBasejumpBase} from "../../src/basejump/interfaces/IBasejumpBase.sol";
+import {IBasejumpCore} from "../../src/basejump/interfaces/IBasejumpCore.sol";
 
 /// @notice Test helper library for Basejump integration tests
 /// @dev Provides utilities for VAA generation and common test operations
@@ -29,7 +29,7 @@ library BasejumpTestHelpers {
         uint64 transferSequence,
         bytes memory data
     ) internal pure returns (bytes memory) {
-        IBasejumpBase.TransferPayload memory transfer = IBasejumpBase.TransferPayload({
+        IBasejumpCore.TransferPayload memory transfer = IBasejumpCore.TransferPayload({
             sourceAsset: sourceAsset,
             amount: netAmount,
             recipient: recipient,

@@ -1,6 +1,6 @@
 import { encodeFunctionData } from "viem";
 
-import type { ifs } from "../../../lib";
+import type { ifs } from "@whm/common";
 import type { WalletContext } from "../../types";
 
 import basejumpJson from "../../../out/Basejump.sol/Basejump.json";

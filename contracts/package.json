@@ -13,7 +13,7 @@
     "fork:hydration": "bash sh/fork-hydration.sh",
     "fork:eth": "bash sh/fork-eth.sh",
     "fork:all": "run-p fork:base fork:moonbeam fork:hydration fork:eth",
-    "migrate:oracle-relay": "bash sh/migrate-oracle-relay.sh",
+    "migrate:oracle-relay-solana": "bash sh/migrate-oracle-relay-solana.sh",
     "migrate:basejump": "bash sh/migrate-basejump.sh",
     "migrate:basejump:fork": "bash sh/migrate-basejump.sh fork"
   },

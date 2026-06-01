@@ -10,7 +10,7 @@ const step: MigrationStep = {
       return {};
     }
 
-    const { deploy } = await import(`../../actions/basejumpLanding/${action}`);
+    const { deploy } = await import(`../../actions/basejump-landing/${action}`);
 
     return await deploy({
       ...ctx.wallet,

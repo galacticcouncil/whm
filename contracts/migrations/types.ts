@@ -4,7 +4,7 @@ import type {
   MigrationConfig as BaseMigrationConfig,
   Migration as BaseMigration,
 } from "@whm/common/migration";
-import type { wallet } from "../lib";
+import type { wallet } from "@whm/common";
 
 export type WalletContext = ReturnType<typeof wallet.getWallet>;
 

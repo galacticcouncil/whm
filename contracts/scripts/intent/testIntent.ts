@@ -3,7 +3,7 @@ import "dotenv/config";
 import { OneClickService, QuoteRequest } from "@defuse-protocol/one-click-sdk-typescript";
 
 import { args } from "@whm/common";
-import { wallet } from "../../lib";
+import { wallet } from "@whm/common";
 
 const { requiredArg, requiredEnv } = args;
 const { getWallet } = wallet;

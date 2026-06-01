@@ -1,0 +1,28 @@
+[package]
+name = "oracle-emitter"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "oracle_emitter"
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["mainnet"]
+mainnet = []
+local-logs = []
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+custom-heap = []
+custom-panic = []
+anchor-debug = []
+cpi = ["no-entrypoint"]
+idl-build = ["anchor-lang/idl-build"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anchor-lang = { version = "0.32.1", features = ["event-cpi"] }
+wormhole-post-message-shim = { package = "wormhole-post-message-shim-interface", git = "https://github.com/wormhole-foundation/wormhole", rev = "8a8067cc730488c6a3ee29e1084fd8e5d3fb7d42", default-features = false, features = ["cpi"] }

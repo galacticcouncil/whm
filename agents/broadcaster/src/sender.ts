@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import type { Program } from "@coral-xyz/anchor";
 
-import type { MessageEmitter } from "./emitter/types.js";
+import type { OracleEmitter } from "./emitter/types.js";
 import type { PriceFeedEntry, RateFeedEntry, FeedEntry } from "./feeds.js";
 import { assetIdStr } from "./feeds.js";
 
@@ -13,7 +13,7 @@ const WORMHOLE_PROGRAM_ID = new PublicKey("worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2Mg
 const SHIM_PROGRAM_ID = new PublicKey("EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX");
 
 export async function sendUpdate(
-  program: Program<MessageEmitter>,
+  program: Program<OracleEmitter>,
   feed: FeedEntry,
 ): Promise<string> {
   switch (feed.kind) {
@@ -29,7 +29,7 @@ export async function sendUpdate(
 }
 
 async function sendPriceUpdate(
-  program: Program<MessageEmitter>,
+  program: Program<OracleEmitter>,
   feed: PriceFeedEntry,
 ): Promise<string> {
   const payer = (program.provider as anchor.AnchorProvider).wallet.publicKey;
@@ -66,7 +66,7 @@ async function sendPriceUpdate(
 }
 
 async function sendRateUpdate(
-  program: Program<MessageEmitter>,
+  program: Program<OracleEmitter>,
   feed: RateFeedEntry,
 ): Promise<string> {
   const payer = (program.provider as anchor.AnchorProvider).wallet.publicKey;

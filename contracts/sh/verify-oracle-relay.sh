@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Usage: verify-oracle-relay.sh
 #
-# Verifies oracle-relay contracts on Moonbeam (XcmTransactor + MessageDispatcher).
+# Verifies oracle-relay contracts on Moonbeam (XcmTransactor + OracleDispatcher).
 #
 # Required environment variables:
 #   ETHERSCAN_KEY  — API key from https://etherscan.io/myapikey (V2 unified key)
@@ -84,17 +84,17 @@ verify_etherscan "XcmTransactor proxy" \
   "$MOON_RPC" \
   --constructor-args "$XCM_TRANSACTOR_PROXY_ARGS"
 
-# MessageDispatcher impl + proxy
-verify_etherscan "MessageDispatcher impl" \
+# OracleDispatcher impl + proxy
+verify_etherscan "OracleDispatcher impl" \
   1284 moonbeam 0x9e3bcae89844c3555e61eb4884d7668d9bfd4f2a \
-  src/MessageDispatcher.sol:MessageDispatcher \
+  src/oracles/OracleDispatcher.sol:OracleDispatcher \
   "$MOON_RPC"
 
 DISPATCHER_PROXY_ARGS=$(proxy_args \
   0x9e3bcae89844c3555e61eb4884d7668d9bfd4f2a \
   "$(cast calldata 'initialize(address)' "$WORMHOLE_CORE_MOON")")
 
-verify_etherscan "MessageDispatcher proxy" \
+verify_etherscan "OracleDispatcher proxy" \
   1284 moonbeam 0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c \
   "$PROXY_SOL" \
   "$MOON_RPC" \

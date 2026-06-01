@@ -1,5 +1,5 @@
 import type { MigrationStep } from "../../types";
-import { setAuthorizedBridge } from "../../actions/basejumpLanding/setAuthorizedBridge";
+import { setAuthorizedBridge } from "../../actions/basejump-landing/setAuthorizedBridge";
 
 const step: MigrationStep = {
   name: "authorize-proxy",

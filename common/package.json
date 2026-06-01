@@ -5,5 +5,8 @@
   "exports": {
     ".": "./index.ts",
     "./migration": "./migration/index.ts"
+  },
+  "dependencies": {
+    "viem": "^2.38.3"
   }
 }

@@ -39,7 +39,7 @@ if [ "$ENV" = "fork" ]; then
   PK_PROXY=$PK
   PK_LANDING=$PK
 else
-  PROXY_ENV="moon"
+  PROXY_ENV="moonbeam"
 fi
 
 PK_PROXY=${PK_PROXY:?Missing PK_PROXY}

@@ -1,6 +1,6 @@
 import { args } from "@whm/common";
 
-import { utils } from "../lib";
+import { utils } from "@whm/common";
 
 const { requiredArg } = args;
 const { mnemonicToAccountByAddress } = utils;

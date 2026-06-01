@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import {IBasejumpBase} from "./IBasejumpBase.sol";
+import {IBasejumpCore} from "./IBasejumpCore.sol";
 
-interface IBasejumpProxy is IBasejumpBase {
+interface IBasejumpProxy is IBasejumpCore {
     // ─── Functions ───────────────────────────────────────────────
 
     function bridgeViaWormhole(

@@ -1,7 +1,7 @@
 {
   "address": "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz",
   "metadata": {
-    "name": "message_emitter",
+    "name": "oracle_emitter",
     "version": "0.1.0",
     "spec": "0.1.0"
   },
