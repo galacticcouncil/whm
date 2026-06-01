@@ -11,7 +11,8 @@
     "fork:base": "bash sh/fork-base.sh",
     "fork:moonbeam": "bash sh/fork-moonbeam.sh",
     "fork:hydration": "bash sh/fork-hydration.sh",
-    "fork:all": "run-p fork:base fork:moonbeam fork:hydration",
+    "fork:eth": "bash sh/fork-eth.sh",
+    "fork:all": "run-p fork:base fork:moonbeam fork:hydration fork:eth",
     "migrate:oracle-relay": "bash sh/migrate-oracle-relay.sh",
     "migrate:basejump": "bash sh/migrate-basejump.sh",
     "migrate:basejump:fork": "bash sh/migrate-basejump.sh fork"
