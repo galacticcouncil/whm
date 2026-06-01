@@ -18,13 +18,13 @@ The core design goal is simple:
 
 ## Key Assumption
 
-In the current NIR design, the 1Click origin chain is **Ethereum**.
+In the current NIR design, the 1Click origin chain is **Ethereum** and the origin asset is **native ETH**. The user pays in WETH on Hydration; Snowbridge converts WETH→ETH at the bridge boundary so native ETH arrives at `BasejumpLanding` and is forwarded by `NearIntentsRouter` to the quote's `depositAddress`.
 
 That means:
 
-- `NearIntentsRouter` forwards USDC on Ethereum to the quote's `depositAddress`
-- `refundType = ORIGIN_CHAIN` means the refund comes back on **Ethereum**
-- `refundTo` should therefore be an **Ethereum** address
+- `NearIntentsRouter` forwards native ETH on Ethereum to the quote's `depositAddress`
+- `refundType = ORIGIN_CHAIN` means the refund comes back on **Ethereum** as native ETH (1Click's standard origin-asset refund behavior)
+- `refundTo` should therefore be an **Ethereum** address capable of receiving native ETH
 
 If the user starts from a Hydration-side `H160` identity, the clean default is:
 
@@ -113,7 +113,7 @@ Recommended handling:
 2. Quote is requested with:
    - `refundType = ORIGIN_CHAIN`
    - `refundTo = userH160`
-3. Basejump completes and `NearIntentsRouter` forwards USDC to the quote's `depositAddress`.
+3. `BasejumpHub.bridgeAndForward` fires the dual transport on Hydration; the fast-path completes and `NearIntentsRouter` forwards native ETH to the quote's `depositAddress`.
 4. 1Click processes the deposit.
 5. If the swap cannot complete, 1Click returns funds to `userH160` on Ethereum.
 6. Operator or automation checks status using `depositAddress` and `depositMemo`.

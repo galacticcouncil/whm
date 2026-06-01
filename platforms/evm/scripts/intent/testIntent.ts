@@ -8,10 +8,10 @@ import { wallet } from "../../lib";
 const { requiredArg, requiredEnv } = args;
 const { getWallet } = wallet;
 
-const BASE_CHAIN_ID = 8453;
-const USDC_ON_BASE = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" as const;
-const AMOUNT = 350_000n; // 0.35 USDC (6 decimals)
-const WALLET = "0x" as const;
+const ETHEREUM_CHAIN_ID = 1;
+const USDC_ON_ETHEREUM = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as const;
+const AMOUNT = 500_000n; // 0.5 USDC (6 decimals)
+const WALLET = "INSERT_ADDRESS" as const;
 
 const ERC20_ABI = [
   {
@@ -34,13 +34,13 @@ async function main(): Promise<void> {
     dry: false,
     swapType: QuoteRequest.swapType.EXACT_INPUT,
     slippageTolerance: 100,
-    originAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+    originAsset: "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
     depositType: QuoteRequest.depositType.ORIGIN_CHAIN,
-    destinationAsset: "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+    destinationAsset: "nep141:wrap.near",
     amount: AMOUNT.toString(),
     refundTo: WALLET,
     refundType: QuoteRequest.refundType.ORIGIN_CHAIN,
-    recipient: WALLET,
+    recipient: "INSERT",
     recipientType: QuoteRequest.recipientType.DESTINATION_CHAIN,
     deadline: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
   };
@@ -52,22 +52,22 @@ async function main(): Promise<void> {
   const depositAddress = quote.quote.depositAddress;
   if (!depositAddress) throw new Error("No depositAddress in quote response.");
 
-  const { publicClient, walletClient } = getWallet(rpcUrl, BASE_CHAIN_ID, pk);
+  const { publicClient, walletClient } = getWallet(rpcUrl, ETHEREUM_CHAIN_ID, pk);
 
+  console.log("\nSending USDC to depositAddress…");
   const txHash = await walletClient.writeContract({
-    address: USDC_ON_BASE,
+    address: USDC_ON_ETHEREUM,
     abi: ERC20_ABI,
     functionName: "transfer",
     args: [depositAddress as `0x${string}`, AMOUNT],
   });
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
-  console.log("\nDeposit tx:", txHash);
+  console.log("Deposit tx submitted:", txHash);
+  console.log("Waiting for confirmation…");
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  console.log("Confirmed in block:", receipt.blockNumber, "status:", receipt.status);
 
   console.log("\nSubmit:");
-  const submit = await OneClickService.submitDepositTx({
-    depositAddress,
-    txHash,
-  });
+  const submit = await OneClickService.submitDepositTx({ depositAddress, txHash });
   console.log(JSON.stringify(submit, null, 2));
 
   console.log("\nStatus:");
