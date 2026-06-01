@@ -75,7 +75,7 @@ importers:
 
   common: {}
 
-  platforms/evm:
+  contracts:
     dependencies:
       '@defuse-protocol/one-click-sdk-typescript':
         specifier: ^0.1.17
@@ -85,10 +85,10 @@ importers:
         version: 0.6.0(polkadot-api@1.23.3(bufferutil@4.1.0)(rxjs@7.8.2)(tsx@4.21.0)(utf-8-validate@5.0.10))
       '@galacticcouncil/descriptors':
         specifier: ^1.15.0
-        version: 1.15.0
+        version: 1.16.0
       '@whm/common':
         specifier: workspace:*
-        version: link:../../common
+        version: link:../common
       polkadot-api:
         specifier: ^1.23.3
         version: 1.23.3(bufferutil@4.1.0)(rxjs@7.8.2)(tsx@4.21.0)(utf-8-validate@5.0.10)
@@ -100,14 +100,14 @@ importers:
         specifier: ^4.1.5
         version: 4.1.5
 
-  platforms/solana:
+  crates:
     dependencies:
       '@coral-xyz/anchor':
         specifier: ^0.32.1
         version: 0.32.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@whm/common':
         specifier: workspace:*
-        version: link:../../common
+        version: link:../common
       bip39:
         specifier: ^3.1.0
         version: 3.1.0
@@ -680,9 +680,6 @@ packages:
     resolution: {integrity: sha512-5lI2Gh8aNWyRcGabxa+A/W7FUbNyvMKNQBo2bOhzSb7A68sC0H/IJFWO7eXfGKsTiMtAja/oZkch6VKoRrtK0w==}
     peerDependencies:
       polkadot-api: ^1.23.3
-
-  '@galacticcouncil/descriptors@1.15.0':
-    resolution: {integrity: sha512-oDY/DhYBj0USXP6qheqebumymjOOnxmvMgYRIOjyBvEZWZY6bcO+vGmtkePzFVpINLhXl86/45Q5bi5M5plPhg==}
 
   '@galacticcouncil/descriptors@1.16.0':
     resolution: {integrity: sha512-e7/WBs7vYWAF6rr8Frv3yQ54N8teLVuvgHj2eHA/O8OIjEKQu43agpSByxNxMXSue0ccDIZccyApkfIHKJo08w==}
@@ -3408,8 +3405,6 @@ snapshots:
       big.js: 6.2.2
       lru-cache: 11.2.6
       polkadot-api: 1.23.3(bufferutil@4.1.0)(rxjs@7.8.2)(tsx@4.21.0)(utf-8-validate@5.0.10)
-
-  '@galacticcouncil/descriptors@1.15.0': {}
 
   '@galacticcouncil/descriptors@1.16.0': {}
 

@@ -1,0 +1,31 @@
+{
+  "name": "@whm/contracts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "install": "forge soldeer install",
+    "build": "forge build",
+    "test": "forge test",
+    "migration:run": "npx tsx migrations/run.ts",
+    "check:oracles": "bash sh/check-oracles.sh",
+    "fork:base": "bash sh/fork-base.sh",
+    "fork:moonbeam": "bash sh/fork-moonbeam.sh",
+    "fork:hydration": "bash sh/fork-hydration.sh",
+    "fork:eth": "bash sh/fork-eth.sh",
+    "fork:all": "run-p fork:base fork:moonbeam fork:hydration fork:eth",
+    "migrate:oracle-relay": "bash sh/migrate-oracle-relay.sh",
+    "migrate:basejump": "bash sh/migrate-basejump.sh",
+    "migrate:basejump:fork": "bash sh/migrate-basejump.sh fork"
+  },
+  "dependencies": {
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.17",
+    "@galacticcouncil/common": "^0.6.0",
+    "@galacticcouncil/descriptors": "^1.15.0",
+    "@whm/common": "workspace:*",
+    "polkadot-api": "^1.23.3",
+    "viem": "^2.38.3"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}
