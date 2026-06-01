@@ -3,3 +3,7 @@
 
 node_modules/
 package-lock.json
+
+# Fork deployments
+deployments/fork/
+deployments/solana-fork/

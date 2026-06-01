@@ -1,7 +1,5 @@
 packages:
   - common
-  - contracts
-  - crates
   - agents/broadcaster
   - agents/bjscan
 

@@ -1,11 +1,5 @@
 # Anchor
 .anchor
 
-# Node
-node_modules/
-
 # Compiler
 target/
-
-# Fork deployment
-deployments/fork/

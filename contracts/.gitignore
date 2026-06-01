@@ -1,12 +1,6 @@
-# Node
-node_modules/
-
 # Sol dependecies
 dependencies/
 
 # Compiler
 cache/
 out/
-
-# Fork deployment
-deployments/fork/
