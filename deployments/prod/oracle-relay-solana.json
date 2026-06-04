@@ -1,0 +1,199 @@
+{
+  "migration": "oracle-relay-solana",
+  "environment": "prod",
+  "startedAt": "2026-04-11T12:12:31.311Z",
+  "completedAt": "2026-04-26T21:30:31.762Z",
+  "steps": [
+    {
+      "name": "001-deploy-emitter",
+      "status": "completed",
+      "output": {
+        "programId": "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz",
+        "emitterPda": "67uc52guejA343y3D9bzwAcyY36AcoL8ZTuCdKDo6pJj",
+        "emitterBytes32": "0x4c0f6655f447821cda959c9fc48ba787909acf1a474ba68ffa6019aa485d4248",
+        "configPda": "FsfWPPq9xNEgmHcQgE4hZ4wwRLBpqmE29ePWJZZJ7zJY",
+        "ownerAddress": "6db8TCH51fK4Pq2LkBdMaMFPfXD17GjfLD8TaMPWNuiq",
+        "initializeTx": "2tSP7YpZ74dyDPKbEpZtJE9MqHD7iNYjS85JiYYLs9LCte3r7BELxgxsyPM4zbQhBJT3scq8yHrZWVruGkC1HhSY"
+      },
+      "error": null,
+      "startedAt": "2026-04-11T12:12:31.313Z",
+      "completedAt": "2026-04-11T12:14:36.538Z"
+    },
+    {
+      "name": "002-deploy-dispatcher",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x9e3bcae89844c3555e61eb4884d7668d9bfd4f2a",
+        "proxyAddress": "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:52:52.147Z",
+      "completedAt": "2026-04-07T14:53:02.880Z"
+    },
+    {
+      "name": "003-deploy-transactor",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x97cd0d08c376005d09afcc47fa9ce0c384fba406",
+        "proxyAddress": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2",
+        "mda": "5EYBt64mQETWJMf46H7T5VZfrAGrjctf9kbyFtSZGDg6bGpo",
+        "mdaH160": "0x6d6e6e7dc8aba5b44845dda12e7d41846d91c653"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:52:40.134Z",
+      "completedAt": "2026-04-07T14:52:52.145Z"
+    },
+    {
+      "name": "004-authorize-dispatcher@transactor",
+      "status": "completed",
+      "output": {
+        "txHash": "0xa36a0908fb37428d9dddf952eb10e0f24f9fac5b1f7d388410155a2fa89774dd",
+        "operator": "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:02.880Z",
+      "completedAt": "2026-04-07T14:53:08.179Z"
+    },
+    {
+      "name": "005-authorize-emitter@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x1c01bd89a72388065e3ae84d08a29aabaac6c4c91b81f886731295a9e92d04dd",
+        "emitterBytes32": "0x4c0f6655f447821cda959c9fc48ba787909acf1a474ba68ffa6019aa485d4248",
+        "sourceChain": "1"
+      },
+      "error": null,
+      "startedAt": "2026-04-11T12:16:42.396Z",
+      "completedAt": "2026-04-11T12:16:49.259Z"
+    },
+    {
+      "name": "006-register-prime@emitter",
+      "status": "completed",
+      "output": {
+        "priceFeedPda": "F91oB5TobNzjjcEYj3pVRiz33EzH2H9ibHyVcwa1B8Sc",
+        "assetId": "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7",
+        "assetIdBytes32": "0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da",
+        "priceIndex": "190",
+        "tx": "44VBQgcdmE3zg5s9sEPMku6WNmVSWjuKm6LVPW1mmqgyV1eevuo8yqi6BegJCNZiFz5PGi4M3hxYyScykXYqw8w4"
+      },
+      "error": null,
+      "startedAt": "2026-04-11T12:14:36.538Z",
+      "completedAt": "2026-04-11T12:14:38.424Z"
+    },
+    {
+      "name": "007-register-sol@emitter",
+      "status": "completed",
+      "output": {
+        "priceFeedPda": "38WQctAcvbivTAxGqCKBGZKrdNAVtoSK1BpyQy8YYBMt",
+        "assetId": "So11111111111111111111111111111111111111112",
+        "assetIdBytes32": "0x069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001",
+        "priceIndex": "1",
+        "tx": "3b88ZQFoatfkzXZJBwagsgSVAUsVd7vMaLZgGbUfQcdB5LxXTcLmN3JQiPZuGeeLv6bATdAmbezr9qDDQgiFPFNU"
+      },
+      "error": null,
+      "startedAt": "2026-04-11T12:14:38.425Z",
+      "completedAt": "2026-04-11T12:14:39.200Z"
+    },
+    {
+      "name": "008-register-jitosol@emitter",
+      "status": "completed",
+      "output": {
+        "poolFeedPda": "AwpwmmFgkthkPogke5yqU9XtDk42JcN15Ejmo6qymVRG",
+        "assetId": "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn",
+        "assetIdBytes32": "0xfcd141e9832caf10ad917495ca0f271b5b293cd47027ea737007ed40eb39a0bd",
+        "stakePool": "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb",
+        "tx": "4xaiVSACjW2K8o45JX37Vve9SoGUVJwmFKFUaN5tRAaKe3AA5ds5hraNhUsQS9QsKVDPtTTcFgSVMGXXJ6x6jJ89"
+      },
+      "error": null,
+      "startedAt": "2026-04-11T12:14:39.200Z",
+      "completedAt": "2026-04-11T12:14:40.838Z"
+    },
+    {
+      "name": "009-set-handler-price@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0xa9603e3cad3a764b031fb9c6dab84d16298c55a3b33b5d9cf86e8f418bab66b8",
+        "actionId": "1",
+        "handler": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:13.475Z",
+      "completedAt": "2026-04-07T14:53:23.307Z"
+    },
+    {
+      "name": "010-set-handler-rate@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x73b5f8d4a4da53617e75a629a88839a460febe618723db8aa03e4d252824cd7a",
+        "actionId": "2",
+        "handler": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:23.308Z",
+      "completedAt": "2026-04-07T14:53:28.605Z"
+    },
+    {
+      "name": "011-set-prime@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x773000c924d3bd4aaf551b00b6f1de9161eeb70080591150b75e47b65fb44d80",
+        "assetId": "0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da",
+        "oracle": "0x82022F77ae239Ad99bB1F2aC0d8DaFF6Cc976a07"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T14:53:28.606Z",
+      "completedAt": "2026-04-07T14:53:34.004Z"
+    },
+    {
+      "name": "012-set-sol@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x337ef9d6e1233a53cacd2823877ae6d425d346133c2b9ba58753286d7ccbcbe0",
+        "assetId": "0x069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001",
+        "oracle": "0x3928A0C729819B3999006D9fd0eB8e2562006384"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T17:28:06.785Z",
+      "completedAt": "2026-04-07T17:28:21.365Z"
+    },
+    {
+      "name": "013-set-jitosol@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x05b65ba5591f3b0fbb9da424a557cd687298f3cb35e6726d8e4862e42d0e8891",
+        "assetId": "0xfcd141e9832caf10ad917495ca0f271b5b293cd47027ea737007ed40eb39a0bd",
+        "oracle": "0x58469121FeD2F06183e7cF741a1219b6A20923eE"
+      },
+      "error": null,
+      "startedAt": "2026-04-07T17:28:21.366Z",
+      "completedAt": "2026-04-07T17:28:26.686Z"
+    },
+    {
+      "name": "014-renounce@transactor",
+      "status": "completed",
+      "output": {
+        "txHash": "0x477f113ce7ec4f8d9061ab20d35c47788353e2831a458178aad00a19ad038814",
+        "contract": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-04-26T21:30:17.655Z",
+      "completedAt": "2026-04-26T21:30:26.952Z"
+    },
+    {
+      "name": "015-renounce@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x0515c4114fddbb97e9533250a1419313c72d7b38113c12a1fec2592afac4d25a",
+        "contract": "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-04-26T21:30:26.955Z",
+      "completedAt": "2026-04-26T21:30:31.761Z"
+    }
+  ]
+}

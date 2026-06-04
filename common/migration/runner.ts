@@ -14,8 +14,8 @@ import type {
 // Env file loading
 // ---------------------------------------------------------------------------
 
-function loadEnvFile(envsDir: string, migration: string, env: string): void {
-  const filePath = path.join(envsDir, env, `${migration}.env`);
+function loadEnvFile(envsDir: string, environment: string, migration: string): void {
+  const filePath = path.join(envsDir, environment, `${migration}.env`);
   if (!fs.existsSync(filePath)) {
     throw new Error(`Env file not found: ${filePath}`);
   }
@@ -80,27 +80,31 @@ async function loadMigration(definitionsDir: string, name: string): Promise<Migr
 // State persistence
 // ---------------------------------------------------------------------------
 
-function stateFilePath(deploymentsDir: string, migration: string, env: string): string {
-  const dir = path.join(deploymentsDir, env);
+function stateFilePath(deploymentsDir: string, environment: string, migration: string): string {
+  const dir = path.join(deploymentsDir, environment);
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, `${migration}.json`);
 }
 
-function loadState(deploymentsDir: string, migration: string, env: string): MigrationState | null {
-  const filePath = stateFilePath(deploymentsDir, migration, env);
+function loadState(
+  deploymentsDir: string,
+  environment: string,
+  migration: string,
+): MigrationState | null {
+  const filePath = stateFilePath(deploymentsDir, environment, migration);
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf-8"));
 }
 
 function saveState(deploymentsDir: string, state: MigrationState): void {
-  const filePath = stateFilePath(deploymentsDir, state.migration, state.environment);
+  const filePath = stateFilePath(deploymentsDir, state.environment, state.migration);
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2) + "\n");
 }
 
-function createState(migration: Migration, env: string): MigrationState {
+function createState(migration: Migration, environment: string): MigrationState {
   return {
     migration: migration.name,
-    environment: env,
+    environment,
     startedAt: new Date().toISOString(),
     completedAt: null,
     steps: migration.steps.map((step) => ({
@@ -114,38 +118,7 @@ function createState(migration: Migration, env: string): MigrationState {
   };
 }
 
-function buildRef(deploymentsDir: string, environment: string) {
-  return (migration: string, step: string, env?: string): StepOutput => {
-    const targetEnv = env ?? environment;
-    const filePath = path.join(deploymentsDir, targetEnv, `${migration}.json`);
-    if (!fs.existsSync(filePath)) {
-      throw new Error(
-        `Referenced migration "${migration}" has no state for environment "${targetEnv}".\n` +
-          `  Expected: ${filePath}`,
-      );
-    }
-    const refState: MigrationState = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    const stepState = refState.steps.find((s) => s.name === step);
-    if (!stepState) {
-      throw new Error(
-        `Step "${step}" not found in migration "${migration}".\n` +
-          `  Available: ${refState.steps.map((s) => s.name).join(", ")}`,
-      );
-    }
-    if (stepState.status !== "completed" || !stepState.output) {
-      throw new Error(
-        `Step "${step}" in migration "${migration}" is not completed (status: ${stepState.status}).`,
-      );
-    }
-    return stepState.output;
-  };
-}
-
-function buildStepContext(
-  state: MigrationState,
-  walletCtx: unknown,
-  deploymentsDir: string,
-): StepContext {
+function buildStepContext(state: MigrationState, walletCtx: unknown): StepContext {
   const outputs: Record<string, StepOutput> = {};
   for (const step of state.steps) {
     if (step.status === "completed" && step.output) {
@@ -156,7 +129,6 @@ function buildStepContext(
     outputs,
     wallet: walletCtx,
     env: process.env,
-    ref: buildRef(deploymentsDir, state.environment),
   };
 }
 
@@ -167,7 +139,6 @@ function buildStepContext(
 export interface RunOptions {
   migrationName: string;
   environment: string;
-  privateKey: string;
   /** Reset this step and all subsequent steps, then run */
   from?: string;
   /** Pause after completing this step (inclusive) */
@@ -179,23 +150,32 @@ export interface RunOptions {
 }
 
 export async function runMigration(options: RunOptions): Promise<void> {
-  const { migrationName, environment, privateKey, from, pauseAt, migrationsDir, deploymentsDir } =
-    options;
+  const { migrationName, environment, from, pauseAt, migrationsDir, deploymentsDir } = options;
 
   const definitionsDir = path.join(migrationsDir, "definitions");
   const envsDir = path.join(migrationsDir, "envs");
 
-  // Load env file: {migrationsDir}/envs/{migration}.{env}.env
-  loadEnvFile(envsDir, migrationName, environment);
+  // Load env file: {migrationsDir}/envs/{environment}/{migration}.env
+  loadEnvFile(envsDir, environment, migrationName);
 
   // Auto-discover and assemble migration from folder
   const migration = await loadMigration(definitionsDir, migrationName);
 
-  // Let the migration create its wallet from the loaded env vars
-  const walletCtx = migration.setup(process.env, privateKey);
+  // Validate PK env vars are present
+  for (const pkVar of migration.pks) {
+    if (!process.env[pkVar]) {
+      throw new Error(
+        `Migration "${migration.name}" requires env var "${pkVar}" (declared in pks). ` +
+          `Set it in your shell or root .env file.`,
+      );
+    }
+  }
+
+  // Let the migration build its wallet context from loaded env vars
+  const walletCtx = migration.setup(process.env);
 
   // Load existing state (resume) or create fresh state
-  let state = loadState(deploymentsDir, migration.name, environment);
+  let state = loadState(deploymentsDir, environment, migration.name);
 
   if (state) {
     console.log(`\nResuming migration: ${migration.name} [${environment}]`);
@@ -209,7 +189,7 @@ export async function runMigration(options: RunOptions): Promise<void> {
       throw new Error(
         "Migration steps changed since last run. " +
           "Delete the state file to start fresh, or restore the original definition.\n" +
-          `  State file: ${stateFilePath(deploymentsDir, migration.name, environment)}`,
+          `  State file: ${stateFilePath(deploymentsDir, environment, migration.name)}`,
       );
     }
 
@@ -286,7 +266,7 @@ export async function runMigration(options: RunOptions): Promise<void> {
     stepState.status = "pending";
 
     try {
-      const ctx = buildStepContext(state, walletCtx, deploymentsDir);
+      const ctx = buildStepContext(state, walletCtx);
       const output = await step.action(ctx);
 
       stepState.status = "completed";
@@ -326,7 +306,7 @@ export async function runMigration(options: RunOptions): Promise<void> {
   state.completedAt = new Date().toISOString();
   saveState(deploymentsDir, state);
 
-  const filePath = stateFilePath(deploymentsDir, state.migration, state.environment);
+  const filePath = stateFilePath(deploymentsDir, state.environment, state.migration);
   console.log(`\n✓ Migration complete: ${migration.name}`);
   console.log(`  State: ${path.relative(process.cwd(), filePath)}\n`);
 }

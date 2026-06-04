@@ -1,0 +1,11 @@
+{
+  "name": "@whm/crates-solana",
+  "private": true,
+  "scripts": {
+    "build": "anchor build -p oracle-emitter",
+    "build:local": "anchor build -p oracle-emitter -- --features local-logs",
+    "test": "cargo test -p oracle-emitter",
+    "logs:local": "solana logs -u http://127.0.0.1:8898",
+    "validator:cleanup": "rm -rf .anchor/test-ledger"
+  }
+}

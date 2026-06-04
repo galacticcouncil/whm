@@ -1,4 +1,4 @@
-import type { WalletContext } from "../evm";
+import type { WalletContext } from "./types";
 
 const SET_OWNER_ABI = [
   {

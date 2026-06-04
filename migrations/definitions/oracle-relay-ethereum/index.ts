@@ -1,23 +1,44 @@
-import type { MigrationConfig } from "../../evm";
 import { wallet } from "@whm/common";
 
-// Parallel Moonbeam oracle relay stack scoped to Ethereum-sourced VAAs.
-// The original `oracle-relay` stack (Solana → Moonbeam) has been renounced
-// to a zero owner, so adding Ethereum as a new source requires a fresh
-// XcmTransactor + OracleDispatcher proxy pair, not a config call.
-//
-// Reads ethEmitter proxy from the `oracle-emitter` migration via ctx.ref —
-// cross-env override via EMITTER_ENV.
+import type { MigrationConfig } from "./types";
+
+/**
+ * Oracle relay with Ethereum as source.
+ *
+ * Ethereum OracleEmitter publishes rate updates (wstETH, apyUSD) via Wormhole.
+ * Moonbeam dispatcher receives VAAs and forwards to Hydration oracle pallets
+ * via XCM transactor.
+ *
+ * Required PK env vars:
+ *   PK_EMITTER — Ethereum deployer
+ *   PK_RELAY   — Moonbeam deployer
+ *
+ * Env file: migrations/envs/<context>/oracle-relay-ethereum.env
+ */
 const config: MigrationConfig = {
   name: "oracle-relay-ethereum",
-  description: "Deploy a Moonbeam oracle relay stack dedicated to the Ethereum source",
+  description: "Deploy Ethereum oracle emitter + Moonbeam relay (dispatcher + transactor)",
+  pks: ["PK_EMITTER", "PK_RELAY"],
 
-  setup: (env, pk) => {
-    const rpcUrl = env.RPC;
-    const chainId = env.CHAIN_ID;
-    if (!rpcUrl) throw new Error("Missing RPC");
-    if (!chainId) throw new Error("Missing CHAIN_ID");
-    return wallet.getWallet(rpcUrl, Number(chainId), pk as `0x${string}`);
+  setup(env) {
+    const required = (k: string) => {
+      const v = env[k];
+      if (!v) throw new Error(`Missing ${k}`);
+      return v;
+    };
+
+    return {
+      ethereum: wallet.getWallet(
+        required("RPC_ETHEREUM"),
+        Number(required("CHAIN_ID_ETHEREUM")),
+        env.PK_EMITTER as `0x${string}`,
+      ),
+      moonbeam: wallet.getWallet(
+        required("RPC_MOONBEAM"),
+        Number(required("CHAIN_ID_MOONBEAM")),
+        env.PK_RELAY as `0x${string}`,
+      ),
+    };
   },
 };
 

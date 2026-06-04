@@ -2,7 +2,7 @@ import { encodeFunctionData } from "viem";
 import { acc } from "@galacticcouncil/common";
 
 import type { ifs } from "@whm/common";
-import type { WalletContext } from "../../evm";
+import type { WalletContext } from "../types";
 
 import xcmTransactorJson from "../../../contracts/out/XcmTransactor.sol/XcmTransactor.json";
 import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";

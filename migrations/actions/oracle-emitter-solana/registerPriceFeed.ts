@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 
-import type { SolanaContext } from "../../solana";
+import type { SolanaContext } from "../types";
 import type { StepOutput } from "@whm/common/migration";
 
 interface RegisterPriceFeedParams extends SolanaContext {

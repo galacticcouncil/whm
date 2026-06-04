@@ -1,7 +1,7 @@
 import { encodeFunctionData } from "viem";
 
 import type { ifs } from "@whm/common";
-import type { WalletContext } from "../../evm";
+import type { WalletContext } from "../types";
 
 import basejumpJson from "../../../contracts/out/Basejump.sol/Basejump.json";
 import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";

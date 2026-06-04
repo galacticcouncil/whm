@@ -3,34 +3,29 @@ set -euo pipefail
 
 # Usage: migrate-oracle-relay-solana.sh <env>
 #
-# Runs the oracle-relay-solana migration:
-#   1. oracle-relay-solana  — deploy and configure Moonbeam oracle relay stack
-#                      (XcmTransactor + OracleDispatcher + wiring)
+# Run the oracle-relay-solana merged migration (Solana emitter program + Moonbeam dispatcher
+# + transactor + wiring + ownership renunciations) in one shot.
 #
 # Arguments:
-#   <env>   Environment name (e.g. fork, moonbeam). Must match an env
-#           file in migrations/envs/oracle-relay.<env>.env
+#   <env>   Environment context: prod | fork
 #
-# Required environment variables:
-#   PK   Private key for the oracle-relay deployer (Moonbeam)
-#
-# Example:
-#   PK=0x... ./migrate-oracle-relay-solana.sh moonbeam
+# Required env vars:
+#   PK_EMITTER  Solana deployer (BS58-encoded secret key)
+#   PK_RELAY    Moonbeam deployer (0x...)
 
-ENV=${1:?Usage: migrate-oracle-relay-solana.sh <env>}
+ENV=${1:?Usage: migrate-oracle-relay-solana.sh <env (prod|fork)>}
 
-PK=${PK:?Missing PK}
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-MIGRATIONS_DIR="$(cd "$(dirname "$0")/.." && pwd)/migrations"
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  source "$ROOT_DIR/.env"
+  set +a
+fi
 
-run() {
-  local migration=$1
-  local pk=$2
-  shift 2
-  npx tsx "$MIGRATIONS_DIR/run.ts" --migration "$migration" --env "$ENV" --pk "$pk" "$@"
-}
+PK_EMITTER=${PK_EMITTER:?Missing PK_EMITTER (BS58-encoded Solana keypair)}
+PK_RELAY=${PK_RELAY:?Missing PK_RELAY (Moonbeam EVM private key)}
 
-echo "=== 1/1: oracle-relay-solana ==="
-run oracle-relay-solana "$PK"
+export PK_EMITTER PK_RELAY
 
-echo "=== Done ==="
+npx tsx "$ROOT_DIR/migrations/run.ts" --migration oracle-relay-solana --env "$ENV"

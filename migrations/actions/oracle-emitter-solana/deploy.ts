@@ -4,7 +4,7 @@ import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-import type { SolanaContext } from "../../solana";
+import type { SolanaContext } from "../types";
 import type { StepOutput } from "@whm/common/migration";
 
 interface DeployParams extends SolanaContext {

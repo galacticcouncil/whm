@@ -1,0 +1,9 @@
+{
+  "name": "@whm/contracts",
+  "private": true,
+  "scripts": {
+    "install": "forge soldeer install",
+    "build": "forge build",
+    "test": "forge test"
+  }
+}

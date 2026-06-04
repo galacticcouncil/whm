@@ -1,15 +1,15 @@
-import type { MigrationStep } from "../../evm";
+import type { MigrationStep } from "./types";
 import { deployDispatcher } from "../../actions/oracle-dispatcher/deploy";
 
 const step: MigrationStep = {
-  name: "deploy-dispatcher",
-  description: "Deploy OracleDispatcher implementation + UUPS proxy (Ethereum stack)",
+  name: "002-deploy-dispatcher",
+  description: "Deploy OracleDispatcher on Moonbeam (Ethereum oracle stack)",
   action: async (ctx) => {
-    const wormholeCore = ctx.env.WORMHOLE_CORE;
-    if (!wormholeCore) throw new Error("Missing WORMHOLE_CORE");
+    const wormholeCore = ctx.env.WORMHOLE_CORE_MOONBEAM;
+    if (!wormholeCore) throw new Error("Missing WORMHOLE_CORE_MOONBEAM");
 
     return await deployDispatcher({
-      ...ctx.wallet,
+      ...ctx.wallet.moonbeam,
       wormholeCore: wormholeCore as `0x${string}`,
     });
   },

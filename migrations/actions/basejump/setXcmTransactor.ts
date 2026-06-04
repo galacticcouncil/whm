@@ -1,5 +1,5 @@
 import type { ifs } from "@whm/common";
-import type { WalletContext } from "../../evm";
+import type { WalletContext } from "../types";
 
 import basejumpProxyJson from "../../../contracts/out/BasejumpProxy.sol/BasejumpProxy.json";
 
