@@ -8,8 +8,8 @@
     "clean": "rm -rf dist/",
     "dev": "node ./esbuild.dev.mjs",
     "sync-idl": "npm run sync-idl-json && npm run sync-idl-types",
-    "sync-idl-json": "cp ../../platforms/solana/target/idl/message_emitter.json src/emitter/idl.json",
-    "sync-idl-types": "cp ../../platforms/solana/target/types/message_emitter.ts src/emitter/types.ts",
+    "sync-idl-json": "cp ../../crates/solana/target/idl/oracle_emitter.json src/emitter/idl.json",
+    "sync-idl-types": "cp ../../crates/solana/target/types/oracle_emitter.ts src/emitter/types.ts",
     "docker:build": "docker build -t galacticcouncil/broadcaster:latest .",
     "docker:deploy": "docker buildx build --platform linux/amd64,linux/arm64 -t galacticcouncil/broadcaster:latest --push .",
     "docker:up": "docker stack deploy -c docker-compose.yml whm"

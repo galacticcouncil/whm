@@ -29,7 +29,7 @@ const BASEJUMP_MOONBEAM = "0xf5b9334e44f800382cb47fc19669401d694e529b";
 // Solana oracle emitter program ID (base58 — SDK derives the emitter PDA internally)
 const SOLANA_ORACLE_EMITTER = "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz";
 
-// MessageDispatcher proxy on Moonbeam (oracle relay)
+// OracleDispatcher proxy on Moonbeam (oracle relay)
 const DISPATCHER_PROXY = "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c";
 
 const moonbeam = new ethers.providers.JsonRpcProvider(process.env.MOONBEAM_RPC || 'https://moonbeam-rpc.n.dwellir.com');

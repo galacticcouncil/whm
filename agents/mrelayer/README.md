@@ -11,7 +11,7 @@ Relays token transfers **to Moonbeam** from ETH, Base, Acala, Solana, and SUI us
 Relays token transfers **from Moonbeam to Base** using standard Wormhole Token Bridge.
 
 ### Solana Relayer
-Relays Solana oracle messages to the MessageDispatcher proxy on Moonbeam. Integrated into the main Moonbeam relayer.
+Relays Solana oracle messages to the OracleDispatcher proxy on Moonbeam. Integrated into the main Moonbeam relayer.
 
 ## Environment Variables
 

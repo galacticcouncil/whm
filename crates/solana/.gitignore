@@ -1,0 +1,8 @@
+# Anchor
+.anchor
+
+# Compiler
+target/
+
+# Local fork keypair (regenerated on demand)
+.fork/

@@ -1,0 +1,205 @@
+{
+  "migration": "basejump-base",
+  "environment": "prod",
+  "startedAt": "2026-03-31T00:48:39.852Z",
+  "completedAt": "2026-04-10T03:10:27.537Z",
+  "steps": [
+    {
+      "name": "001-deploy-basejump",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xedece54767182abc1b04fe699a96cf7e97a3ccf2",
+        "proxyAddress": "0xf5b9334e44f800382cb47fc19669401d694e529b",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0",
+        "wormholeId": "30"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:05:21.041Z",
+      "completedAt": "2026-03-31T01:05:27.071Z"
+    },
+    {
+      "name": "002-deploy-proxy",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xedece54767182abc1b04fe699a96cf7e97a3ccf2",
+        "proxyAddress": "0xf5b9334e44f800382cb47fc19669401d694e529b",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T00:48:39.853Z",
+      "completedAt": "2026-03-31T00:48:49.347Z"
+    },
+    {
+      "name": "003-deploy-transactor",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x96501ea4984d3ecd028146a628af1a6a929b2a17",
+        "proxyAddress": "0xdd11a22a428fd884a9f2feb3028cba541fc4ab87",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0",
+        "mda": "5CSfngCQ9qVcwr9nPNiT85WmzRFFwAEbRQakbhez6XWSu5Yq",
+        "mdaH160": "0x10c06f418a082e636ee932ce8f9c5e791b925b51"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T00:48:49.347Z",
+      "completedAt": "2026-03-31T00:49:11.181Z"
+    },
+    {
+      "name": "004-deploy-landing",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x4ea0d58ab1551b5794bca0d2327dbedc85bae31f",
+        "proxyAddress": "0x70e9b12c3b19cb5f0e59984a5866278ab69df976",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:01:09.907Z",
+      "completedAt": "2026-03-31T01:01:19.369Z"
+    },
+    {
+      "name": "005-authorize-proxy@transactor",
+      "status": "completed",
+      "output": {
+        "txHash": "0x9a7d0a52d0440c5e29cf6160fc083618331b9ca2730175312401c9b51a80f442",
+        "operator": "0xf5b9334e44f800382cb47fc19669401d694e529b",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T00:49:11.182Z",
+      "completedAt": "2026-03-31T00:49:15.726Z"
+    },
+    {
+      "name": "006-authorize-proxy@landing",
+      "status": "completed",
+      "output": {
+        "txHash": "0xb27a34e47c5dc631d624e3a896aaed9ee688622dc9bc3a5d4bf9c8f23ba6e16c",
+        "bridgeAddress": "0x10c06f418a082e636ee932ce8f9c5e791b925b51",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:03:54.729Z",
+      "completedAt": "2026-03-31T01:04:07.691Z"
+    },
+    {
+      "name": "007-set-transactor@proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x9d153545e00f8505135d3712945975c6d78b4ff445d3a61064206e1aa150e875",
+        "xcmTransactor": "0xdd11a22a428fd884a9f2feb3028cba541fc4ab87"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T00:49:15.727Z",
+      "completedAt": "2026-03-31T00:49:20.245Z"
+    },
+    {
+      "name": "008-set-emitter@proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x19fe2f4c2226e25e7651e80d78ac4ab5f5bcad11c67d88458cbfa013431fc58a",
+        "emitterChain": "30",
+        "emitter": "0x000000000000000000000000f5b9334e44f800382cb47fc19669401d694e529b"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:36.572Z",
+      "completedAt": "2026-03-31T01:06:45.441Z"
+    },
+    {
+      "name": "009-set-landing@proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x7910451b80242e2a08d82ed07ec48bca27c937af636692083e01ea81ff71cdb5",
+        "fromWhChain": "30",
+        "landing": "0x00000000000000000000000070e9b12c3b19cb5f0e59984a5866278ab69df976"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:45.442Z",
+      "completedAt": "2026-03-31T01:06:49.948Z"
+    },
+    {
+      "name": "010-set-emitter@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0xceda169f34dc682312c72fb1fe10d211c79c1b9236e536574bcde8ad4986cd3a",
+        "emitterChain": "16",
+        "emitter": "0x000000000000000000000000f5b9334e44f800382cb47fc19669401d694e529b"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:26.566Z",
+      "completedAt": "2026-03-31T01:06:29.187Z"
+    },
+    {
+      "name": "011-set-landing-dest@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x08b3eef28f5554aec7b137d8b033577c7243c48a70ae068a01cec4e97000e582",
+        "landingDest": "0x00000000000000000000000070e9b12c3b19cb5f0e59984a5866278ab69df976"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:29.188Z",
+      "completedAt": "2026-03-31T01:06:32.183Z"
+    },
+    {
+      "name": "012-set-eurc-fee@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x9a0977773dde1cf76f43f91740352e0f36111d45ec49eccd420769ab469ec1fb",
+        "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+        "fee": "100000"
+      },
+      "error": null,
+      "startedAt": "2026-03-31T01:06:32.184Z",
+      "completedAt": "2026-03-31T01:06:34.974Z"
+    },
+    {
+      "name": "013-set-eurc@landing",
+      "status": "completed",
+      "output": {
+        "txHash": "0x10792effa973a1b56e8949b8db85adb0e807e3262b71878a2ef18cd1678d936e",
+        "sourceAsset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+        "destAsset": "0x000000000000000000000000000000010000002c"
+      },
+      "error": null,
+      "startedAt": "2026-04-01T04:17:02.012Z",
+      "completedAt": "2026-04-01T04:17:13.575Z"
+    },
+    {
+      "name": "014-transfer-ownership@landing",
+      "status": "completed",
+      "output": {
+        "txHash": "0xb1f562e1f1392ac8aab4a70493938d15987ec9c68c22afc2635d743b00b9c985",
+        "contract": "0x70e9b12c3b19cb5f0e59984a5866278ab69df976",
+        "newOwner": "0xaa7e0000000000000000000000000000000aa7e1"
+      },
+      "error": null,
+      "startedAt": "2026-04-10T03:10:12.913Z",
+      "completedAt": "2026-04-10T03:10:27.536Z"
+    },
+    {
+      "name": "015-transfer-ownership@proxy",
+      "status": "completed",
+      "output": {
+        "operatorTxHash": "0x1d4af15fe9d1d03cbdfd67b82ec1f72dc0aa3866b4098c3c72bcab3783d80dab",
+        "xcmOperator": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0",
+        "proxyTxHash": "0x6f0fc228fa8794aaaf2d3577d1e9236c5e4ab551f2396ab481e40fa7ae8977b7",
+        "transactorTxHash": "0x7dce4dafa81f3997c5c855bd114a8fa0f983d0a0e90ce79432dbbb360187a79c",
+        "proxyAddress": "0xf5b9334e44f800382cb47fc19669401d694e529b",
+        "transactorAddress": "0xdd11a22a428fd884a9f2feb3028cba541fc4ab87",
+        "newOwner": "0xb041705871c4c5537a1a57edd4d62f66217522a7"
+      },
+      "error": null,
+      "startedAt": "2026-04-10T03:09:20.983Z",
+      "completedAt": "2026-04-10T03:09:47.092Z"
+    },
+    {
+      "name": "016-transfer-ownership@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x40ff4c5f3d492e242636c6e87e3a1bab939129ec1c8544ebe7f9365cbc93208d",
+        "contract": "0xf5b9334e44f800382cb47fc19669401d694e529b",
+        "newOwner": "0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7"
+      },
+      "error": null,
+      "startedAt": "2026-04-10T03:08:56.401Z",
+      "completedAt": "2026-04-10T03:08:59.316Z"
+    }
+  ]
+}

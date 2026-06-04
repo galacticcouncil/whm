@@ -1,7 +1,7 @@
 packages:
   - common
-  - platforms/evm
-  - platforms/solana
+  - contracts
+  - crates/solana
   - agents/broadcaster
   - agents/bjscan
 

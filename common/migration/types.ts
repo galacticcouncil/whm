@@ -5,12 +5,10 @@ export type StepOutput = Record<string, string>;
 export interface StepContext<W = unknown> {
   /** Outputs from all previously completed steps, keyed by step name */
   outputs: Record<string, StepOutput>;
-  /** Configured wallet for the target chain */
+  /** Wallet context — typically a map of chain → wallet for multi-chain migrations */
   wallet: W;
   /** Process environment variables (loaded from env file + shell) */
   env: NodeJS.ProcessEnv;
-  /** Read-only access to a completed step from another migration (defaults to same environment) */
-  ref: (migration: string, step: string, env?: string) => StepOutput;
 }
 
 /** A single migration step — exported as default from each NNN-*.ts file */
@@ -25,16 +23,22 @@ export interface MigrationStep<W = unknown> {
 
 /** Migration config — exported as default from each migration's index.ts */
 export interface MigrationConfig<W = unknown> {
-  /** Unique identifier matching the folder name, e.g. "oracle-relay" */
+  /** Unique identifier matching the folder name, e.g. "basejump-base" */
   name: string;
   /** Human-readable description */
   description: string;
   /**
+   * Env vars holding deployer private keys this migration needs.
+   * The runner validates these are present in process.env before invoking setup().
+   * E.g. ["PK_LANDING", "PK_PROXY", "PK"] for a multi-chain basejump migration.
+   */
+  pks: string[];
+  /**
    * Create wallet context from the loaded env vars.
-   * Each migration knows which env vars hold its RPC/chainId.
+   * PKs are read from process.env using keys declared in `pks`.
    * Called once before step execution.
    */
-  setup: (env: NodeJS.ProcessEnv, privateKey: string) => W;
+  setup: (env: NodeJS.ProcessEnv) => W;
 }
 
 /** Full migration = config + auto-discovered steps (assembled by runner) */

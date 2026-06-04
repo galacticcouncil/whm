@@ -1,0 +1,6 @@
+# Sol dependecies
+dependencies/
+
+# Compiler
+cache/
+out/

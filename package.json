@@ -1,18 +1,49 @@
 {
   "name": "@whm/root",
   "private": true,
-  "scripts": {},
+  "scripts": {
+    "fork:base": "bash sh/fork-base.sh",
+    "fork:moonbeam": "bash sh/fork-moonbeam.sh",
+    "fork:hydration": "bash sh/fork-hydration.sh",
+    "fork:ethereum": "bash sh/fork-ethereum.sh",
+    "fork:solana": "bash sh/fork-solana.sh",
+    "fork:all": "run-p fork:base fork:moonbeam fork:hydration fork:ethereum",
+    "migrate:basejump-base": "bash sh/migrate-basejump-base.sh prod",
+    "migrate:basejump-base:fork": "bash sh/migrate-basejump-base.sh fork",
+    "migrate:oracle-relay-solana": "bash sh/migrate-oracle-relay-solana.sh prod",
+    "migrate:oracle-relay-solana:fork": "bash sh/migrate-oracle-relay-solana.sh fork",
+    "migrate:oracle-relay-ethereum": "bash sh/migrate-oracle-relay-ethereum.sh prod",
+    "migrate:oracle-relay-ethereum:fork": "bash sh/migrate-oracle-relay-ethereum.sh fork",
+    "print:oracles": "bash sh/print-oracles.sh"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.17",
+    "@galacticcouncil/common": "^0.6.0",
+    "@galacticcouncil/descriptors": "^1.15.0",
+    "@whm/common": "workspace:*",
+    "bip39": "^3.1.0",
+    "ed25519-hd-key": "^1.3.0",
+    "polkadot-api": "^1.23.3",
+    "viem": "^2.38.3"
+  },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "esbuild": "^0.28.0",
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^25.0.0",
+    "chai": "^4.3.4",
     "dotenv": "^16.4.7",
+    "esbuild": "^0.28.0",
+    "mocha": "^10.0.0",
+    "npm-run-all": "^4.1.5",
+    "ts-mocha": "^10.0.0",
     "ts-node": "^10.9.1",
     "tsx": "^4.20.6",
     "turbo": "^2.5.8",
     "typescript": "^5.7.2"
   },
   "engines": {
-    "node": "23.x"
+    "node": "25.x"
   },
   "packageManager": "pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48"
 }

@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import type { Program } from "@coral-xyz/anchor";
 
-import type { MessageEmitter } from "./emitter/types.js";
+import type { OracleEmitter } from "./emitter/types.js";
 import log from "./logger.js";
 
 export interface PriceFeedEntry {
@@ -21,7 +21,7 @@ export interface RateFeedEntry {
 
 export type FeedEntry = PriceFeedEntry | RateFeedEntry;
 
-export async function loadAllFeeds(program: Program<MessageEmitter>): Promise<FeedEntry[]> {
+export async function loadAllFeeds(program: Program<OracleEmitter>): Promise<FeedEntry[]> {
   const feeds: FeedEntry[] = [];
 
   const priceFeeds = await program.account.priceFeed.all();

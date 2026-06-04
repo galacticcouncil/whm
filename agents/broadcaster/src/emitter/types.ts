@@ -2,12 +2,12 @@
  * Program IDL in camelCase format in order to be used in JS/TS.
  *
  * Note that this is only a type helper and is not the actual IDL. The original
- * IDL can be found at `target/idl/message_emitter.json`.
+ * IDL can be found at `target/idl/oracle_emitter.json`.
  */
-export type MessageEmitter = {
+export type OracleEmitter = {
   "address": "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz",
   "metadata": {
-    "name": "messageEmitter",
+    "name": "oracleEmitter",
     "version": "0.1.0",
     "spec": "0.1.0"
   },

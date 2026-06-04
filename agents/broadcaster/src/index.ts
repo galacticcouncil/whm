@@ -4,7 +4,7 @@ import { Program } from "@coral-xyz/anchor";
 import { HumanizeDuration, HumanizeDurationLanguage } from "humanize-duration-ts";
 
 import idl from "./emitter/idl.json";
-import type { MessageEmitter } from "./emitter/types.js";
+import type { OracleEmitter } from "./emitter/types.js";
 
 import { hasChangedBeyondThreshold } from "./big.js";
 import { loadAllFeeds, assetIdStr, type FeedEntry } from "./feeds.js";
@@ -34,16 +34,16 @@ const config = {
   thresholdsFile: "thresholds.json",
 };
 
-function buildProgram(): Program<MessageEmitter> {
+function buildProgram(): Program<OracleEmitter> {
   const keypair = loadKeypair(config.privateKey);
   const connection = new anchor.web3.Connection(config.rpcUrl, "confirmed");
   const wallet = new anchor.Wallet(keypair);
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
-  return new Program<MessageEmitter>(idl as MessageEmitter, provider);
+  return new Program<OracleEmitter>(idl as OracleEmitter, provider);
 }
 
 async function broadcastAll(
-  program: Program<MessageEmitter>,
+  program: Program<OracleEmitter>,
   feeds: FeedEntry[],
   state: BroadcasterState,
 ): Promise<void> {
@@ -72,7 +72,7 @@ async function broadcastAll(
 }
 
 async function checkAndBroadcast(
-  program: Program<MessageEmitter>,
+  program: Program<OracleEmitter>,
   feeds: FeedEntry[],
   state: BroadcasterState,
   thresholds: ThresholdMap,
