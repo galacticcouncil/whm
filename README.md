@@ -111,22 +111,8 @@ See [migrations/README.md](migrations/README.md) for the migration model, naming
 
 `agents/mrelayer` ships its own `package-lock.json` and is intentionally NOT a pnpm workspace member.
 
-## Adding a new ecosystem
-
-`crates/` is namespaced by chain — new ecosystems get a sibling subdir:
-
-```
-crates/solana/      # exists
-crates/near/        # future NEAR Rust contracts
-```
-
-Each subdir is a self-contained Cargo workspace with its own toolchain config (`Anchor.toml`, `Cargo.toml`, etc.) and `package.json` so npm scripts work via `pnpm --filter`.
-
-Non-Rust ecosystems get their own top-level dir (e.g. `moves/` for Sui Move modules).
-
 ## Conventions
 
 - **Commit messages**: `scope: description` (lowercase, imperative). Common scopes: `oracle`, `basejump`, `intents`, `bjscan` ...
 - **Migration naming**: deploy-first NNN order, `@<contract>` suffix for setters. See [migrations/README.md](migrations/README.md).
-- **No `ctx.ref` across migrations**: cross-deployment dependencies are explicit env-config copies, not runtime lookups.
 - **Renounced ownership**: every prod-ready migration ends with `transfer-ownership@*` (to a custodian) or `renounce@*` (to `0x0`).
