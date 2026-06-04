@@ -31,28 +31,6 @@ pnpm run build
 pnpm run test
 ```
 
-## Local Forks
-
-Run individual forks:
-
-```bash
-pnpm run fork:base
-pnpm run fork:moonbeam
-pnpm run fork:hydration
-```
-
-Or run all forks together in parallel:
-
-```bash
-pnpm run fork:all
-```
-
-Ports:
-
-- Moonbeam: `http://127.0.0.1:8545`
-- Base: `http://127.0.0.1:8546`
-- Hydration: `http://127.0.0.1:8547`
-
 ## Scripts
 
 Standalone operational scripts. Use **DOTENV_CONFIG_PATH** for targeting .env variables.

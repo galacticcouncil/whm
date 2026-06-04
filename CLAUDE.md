@@ -82,7 +82,7 @@ agents/
   bjscan/                 # @whm/bjscan — Basejump indexer
   mrelayer/               # standalone npm project (NOT a workspace member)
 
-common/                   # @whm/common — shared TS (chains, wallet, args, migration runner)
+common/                   # @whm/common — shared TS (evm, args, migration)
 
 contracts/                # @whm/contracts — Foundry / Solidity
   src/                    # contracts, grouped by feature (basejump/ oracles/ intents/ utils/)
@@ -93,18 +93,18 @@ contracts/                # @whm/contracts — Foundry / Solidity
 crates/                   # Rust umbrella (each subdir = its own Cargo workspace)
   solana/                 # @whm/crates-solana — Anchor workspace
     programs/             # Anchor programs (currently: oracle-emitter)
-    scripts/              # Solana ops helpers (.ts + .sh)
+    scripts/              # Solana ops helpers
 
 migrations/               # Cross-platform deployment runner
   run.ts                  # CLI entry
   README.md               # detailed model + conventions
   definitions/            # one merged migration per deployable feature
   actions/                # shared atomic operations
-  envs/<context>/         # per-context multi-chain env files (prod/, fork/)
+  envs/<context>/         # per-context multi-chain env files (prod/fork)
 
 deployments/              # migration state files (write-once audit records)
 
-docs/                     # protocol docs (basejump/, oracle/, intents/, migration.md)
+docs/                     # protocol docs (basejump, oracle, intents,...)
 
 sh/                       # cross-cutting bash wrappers (fork-*, migrate-*, verify-*)
 ```

@@ -36,19 +36,13 @@ pnpm run build
 
 ## Test
 
-Start a local validator:
-
 ```bash
-pnpm run validator
-```
-
-In another terminal:
-
-```bash
-pnpm run test:validator
+pnpm run test
 ```
 
 ## Scripts
+
+Standalone operational scripts. Use **DOTENV_CONFIG_PATH** for targeting .env variables.
 
 ### Account
 
@@ -96,11 +90,11 @@ npx tsx scripts/oracle-emitter/runValidator.ts
 
 Close the deployed program and reclaim rent lamports to a recipient account.
 
-| Flag          | Description                                                           |
-| ------------- | --------------------------------------------------------------------- |
-| `--pk`        | Upgrade authority private key used to sign close transaction          |
+| Flag          | Description                                                          |
+| ------------- | -------------------------------------------------------------------- |
+| `--pk`        | Upgrade authority private key used to sign close transaction         |
 | `--programId` | Program id to close (defaults to current oracle-emitter id from IDL) |
-| `--recipient` | Recipient account for reclaimed lamports (defaults to authority)      |
+| `--recipient` | Recipient account for reclaimed lamports (defaults to authority)     |
 
 ```bash
 npx tsx scripts/oracle-emitter/close.ts \

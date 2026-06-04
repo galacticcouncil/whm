@@ -1,4 +1,4 @@
-# Wormhole Oracle Emitter Program
+# Oracle Emitter
 
 ## Context
 

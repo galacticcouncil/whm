@@ -8,6 +8,7 @@
     "fork:ethereum": "bash sh/fork-ethereum.sh",
     "fork:solana": "bash sh/fork-solana.sh",
     "fork:all": "run-p fork:base fork:moonbeam fork:hydration fork:ethereum",
+    "migration:run": "npx tsx migrations/run.ts",
     "migrate:basejump-base": "bash sh/migrate-basejump-base.sh prod",
     "migrate:basejump-base:fork": "bash sh/migrate-basejump-base.sh fork",
     "migrate:oracle-relay-solana": "bash sh/migrate-oracle-relay-solana.sh prod",

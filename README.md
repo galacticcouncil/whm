@@ -82,8 +82,8 @@ pnpm fork:base          # anvil :8546
 pnpm fork:moonbeam      # anvil :8545
 pnpm fork:hydration     # anvil :8547
 pnpm fork:ethereum      # anvil :8550
-pnpm fork:solana        # solana-test-validator :8898 (Wormhole + Scope + Jito cloned from mainnet)
-pnpm fork:all           # all four EVM forks in parallel (solana is spawned separately)
+pnpm fork:solana        # solana-test-validator :8898 (Wormhole + Oracle clone)
+pnpm fork:all           # all evm forks in parallel
 
 # Run migrations (against fork or prod)
 pnpm migrate:basejump-base:fork
