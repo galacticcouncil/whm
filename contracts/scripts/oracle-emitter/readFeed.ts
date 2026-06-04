@@ -3,7 +3,7 @@ import "dotenv/config";
 import { createPublicClient, http, isAddress, keccak256, toBytes } from "viem";
 
 import { args } from "@whm/common";
-import { chains, ifs } from "@whm/common";
+import { chains, ifs } from "@whm/common/evm";
 
 import oracleEmitterJson from "../../out/OracleEmitter.sol/OracleEmitter.json";
 

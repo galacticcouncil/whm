@@ -1,4 +1,4 @@
-import type { ifs } from "@whm/common";
+import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
 import basejumpLandingJson from "../../../contracts/out/BasejumpLanding.sol/BasejumpLanding.json";

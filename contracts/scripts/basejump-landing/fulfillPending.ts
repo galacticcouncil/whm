@@ -3,7 +3,7 @@ import "dotenv/config";
 import { isAddress } from "viem";
 
 import { args } from "@whm/common";
-import { ifs, wallet } from "@whm/common";
+import { ifs, wallet } from "@whm/common/evm";
 
 import basejumpLandingJson from "../../out/BasejumpLanding.sol/BasejumpLanding.json";
 

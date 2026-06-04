@@ -1,4 +1,4 @@
-import type { ifs } from "@whm/common";
+import type { ifs } from "@whm/common/evm";
 import xcmTransactorJson from "../../../contracts/out/XcmTransactor.sol/XcmTransactor.json";
 
 import type { MigrationStep } from "./types";

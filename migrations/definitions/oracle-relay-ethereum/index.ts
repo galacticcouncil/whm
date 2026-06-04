@@ -1,4 +1,4 @@
-import { wallet } from "@whm/common";
+import { wallet } from "@whm/common/evm";
 
 import type { MigrationConfig } from "./types";
 

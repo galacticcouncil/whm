@@ -1,4 +1,4 @@
-import type { wallet } from "@whm/common";
+import type { wallet } from "@whm/common/evm";
 import type {
   MigrationStep as BS,
   MigrationConfig as BC,

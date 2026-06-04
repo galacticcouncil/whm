@@ -5,7 +5,7 @@
 ```
 ┌──────────────┐    1. getQuote(originAsset = ETH.eth,                       ┌────────────────────────┐
 │ User (UI)    │                destAsset, recipient, ...)                   │ Defuse / OneClick      │
-│              │ ───────────────────────────────────────────────────────►   │ Quote API              │
+│              │ ───────────────────────────────────────────────────────►    │ Quote API              │
 │              │                                                             │                        │
 │              │ ◄────────── 2. quote + depositAddress (+ memo, deadline) ───│                        │
 │              │                                                             └────────────────────────┘
@@ -18,7 +18,7 @@
 └──────────────┘
 
 The UI talks to OneClick directly — nintent is not in this path. The UI now holds
-(intentId, depositAddress) and is ready to call BasejumpHub.bridgeAndForward
+(intentId, depositAddress) and is ready to call IntentEmitter.bridgeAndForward
 on Hydration. The user pays in WETH on Hydration; native ETH lands at depositAddress
 on Ethereum.
 ```
@@ -27,17 +27,17 @@ on Ethereum.
 
 ```
 A: Hydration                B: Snowbridge       C: Moonbeam (proxy)   M: off-chain    D: Ethereum (1 atomic tx on fast-path VAA)       E: Defuse / OneClick +     F: Destination chain
-   (BasejumpHub)               transport            (BasejumpProxy)      (mrelayer +     (Basejump + BasejumpLanding +                     NEAR Intents + solvers     (Zcash, BTC, NEAR, ...)
-                                                                          nintent)        NearIntentsRouter + depositAddress)
+   (IntentEmitter)               transport            (BasejumpProxy)      (mrelayer +     (Basejump + BasejumpLanding +                     NEAR Intents + solvers     (Zcash, BTC, NEAR, ...)
+                                                                          nintent)        IntentRouter + depositAddress)
 ┌──────────────────────┐    ┌────────────────┐  ┌──────────────────┐  ┌────────────┐  ┌─────────────────────────────────────────────┐   ┌──────────────────────┐   ┌──────────────────┐
 │ User                 │    │ Snowbridge     │  │ BasejumpProxy    │  │ mrelayer / │  │ Basejump +                                  │   │ Quote API +          │   │ User wallet      │
 │                      │    │ (Hydration ⇄   │  │ (whitelist gated │  │ nintent    │  │ BasejumpLanding (native ETH pool) +         │   │ deposit detection +  │   │ (Zcash address)  │
-│                      │    │  Ethereum;     │  │  msg.sender =    │  │            │  │ NearIntentsRouter (forwards native ETH) +   │   │ NEAR Intents +       │   │                  │
-│                      │    │  WETH→ETH      │  │  BasejumpHubMDA) │  │            │  │ quote depositAddress (ETH EOA/contract)     │   │ solvers              │   │                  │
+│                      │    │  Ethereum;     │  │  msg.sender =    │  │            │  │ IntentRouter (forwards native ETH) +   │   │ NEAR Intents +       │   │                  │
+│                      │    │  WETH→ETH      │  │  IntentEmitterMDA) │  │            │  │ quote depositAddress (ETH EOA/contract)     │   │ solvers              │   │                  │
 │                      │    │  unwrap at     │  │                  │  │            │  │                                             │   │                      │   │                  │
 │                      │    │  bridge edge)  │  │                  │  │            │  │                                             │   │                      │   │                  │
 │                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│ 1. BasejumpHub       │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
+│ 1. IntentEmitter       │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
 │    .bridgeAndForward │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
 │    (ethAmount,       │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
 │     intentId,        │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
@@ -50,7 +50,7 @@ A: Hydration                B: Snowbridge       C: Moonbeam (proxy)   M: off-cha
 │                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
 │ 2c. MRL leg ─────────┼────┼────────────────┼─►│ 3. proxy receives│  │            │  │                                             │   │                      │   │                  │
 │     XCM to Moonbeam, │    │                │  │    XCM as        │  │            │  │                                             │   │                      │   │                  │
-│     calls            │    │                │  │    BasejumpHub   │  │            │  │                                             │   │                      │   │                  │
+│     calls            │    │                │  │    IntentEmitter   │  │            │  │                                             │   │                      │   │                  │
 │     BasejumpProxy    │    │                │  │    MDA           │  │            │  │                                             │   │                      │   │                  │
 │     .bridgeVia       │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
 │     Wormhole(ETH,    │    │                │  │ 4. wormhole      │  │            │  │                                             │   │                      │   │                  │
@@ -122,12 +122,12 @@ A: Hydration                B: Snowbridge       C: Moonbeam (proxy)   M: off-cha
 │ WETH + accepted  │                                                     │ on Ethereum                   │
 │ quote            │                                                     └──────────────┬────────────────┘
 └────────┬─────────┘                                                                    │ onBasejumpReceive
-         │ BasejumpHub.bridgeAndForward(ethAmount, intentId, depositAddress)            │ (fast-path VAA)
+         │ IntentEmitter.bridgeAndForward(ethAmount, intentId, depositAddress)            │ (fast-path VAA)
          │                                                                              ▼
          │  ┌──────────────────────┐  MRL/XCM (no token)   ┌─────────────────┐  ┌────────────────────┐  native ETH  ┌────────────────────────────┐
-         └─►│ BasejumpHub          │ ───────────────────►  │ BasejumpProxy   │  │ NearIntentsRouter  │ ───────────► │ quote.depositAddress (ETH) │
+         └─►│ IntentEmitter          │ ───────────────────►  │ BasejumpProxy   │  │ IntentRouter  │ ───────────► │ quote.depositAddress (ETH) │
             │ (Hydration, atomic   │  msg.sender check:    │ (Moonbeam,      │  │ (Ethereum,         │  forward     │ origin-chain deposit addr  │
-            │  dual-transport)     │  BasejumpHub MDA      │  publishMessage │  │  IBasejumpReceiver,│  (no unwrap) └─────────────┬──────────────┘
+            │  dual-transport)     │  IntentEmitter MDA      │  publishMessage │  │  IBasejumpReceiver,│  (no unwrap) └─────────────┬──────────────┘
             │                      │  only                 │  only — no      │  │  forwards native   │                            │ funds present here
             │                      │                       │  TokenBridge    │  │  ETH to deposit    │                            │ once Router tx mined
             └──────────────────────┘                       └────────┬────────┘  └────────┬───────────┘                            ▼
@@ -155,7 +155,7 @@ A: Hydration                B: Snowbridge       C: Moonbeam (proxy)   M: off-cha
 The local `intentId` is the correlation key across quote acquisition, both Hydration transports, the EVM forward, and status monitoring:
 
 ```
-                 accepted quote            BasejumpHub call       Basejump VAA `data`        Router event              submitDepositTx
+                 accepted quote            IntentEmitter call       Basejump VAA `data`        Router event              submitDepositTx
                  (quoteId, depositAddr,    (intentId,             (intentId,                 (IntentForwarded)         lookup parameters
                   amount, dest, deadline)   depositAddress)        depositAddress)                    │                          │
                          │                          │                       │                        │                          │
@@ -171,7 +171,7 @@ The local `intentId` is the correlation key across quote acquisition, both Hydra
              ))
 ```
 
-The quote's `depositAddress` is the actual origin-chain recipient on Ethereum. `intentId` is the local join key used by `nintent` and emitted by both `BasejumpHub` (`BasejumpInitiated`) on Hydration and `NearIntentsRouter` (`IntentForwarded`) on Ethereum.
+The quote's `depositAddress` is the actual origin-chain recipient on Ethereum. `intentId` is the local join key used by `nintent` and emitted by both `IntentEmitter` (`BasejumpInitiated`) on Hydration and `IntentRouter` (`IntentForwarded`) on Ethereum.
 
 ## Atomicity Boundaries
 
@@ -179,7 +179,7 @@ The quote's `depositAddress` is the actual origin-chain recipient on Ethereum. `
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │ Hydration extrinsic (1 transaction)                                                 │
 │                                                                                     │
-│   BasejumpHub.bridgeAndForward(...)                                                 │
+│   IntentEmitter.bridgeAndForward(...)                                               │
 │     ├─ Snowbridge leg dispatched (WETH on Hydration → native ETH at                 │
 │     │  BasejumpLanding on Ethereum, ~30 min finality)                               │
 │     └─ MRL leg dispatched (XCM → Moonbeam BasejumpProxy)                            │
@@ -213,26 +213,26 @@ Why two atomicity boundaries matter:
 
 ## Intent Lifecycle (off-chain state)
 
-| State                  | Trigger                                                                                                  |
-| ---------------------- | -------------------------------------------------------------------------------------------------------- |
-| `quoted`               | Quote returned by OneClick API, including `depositAddress`                                               |
-| `accepted`             | User accepts quote in UI; UI computes `intentId`                                                         |
-| `bridging`             | `BasejumpInitiated` event on Hydration (`BasejumpHub` extrinsic confirmed)                               |
-| `forwarded`            | `IntentForwarded` event on `NearIntentsRouter` — native ETH transferred to `depositAddress` on Ethereum  |
-| `submitted`            | `OneClickService.submitDepositTx({ depositAddress, txHash })` called by `nintent`                        |
-| `processing`           | Quote service acknowledges deposit and starts quoted execution                                           |
-| `fulfilled`            | Solver delivered destination asset; user reported success                                                |
-| `expired`              | Quote deadline passed before deposit processing completed; operator unwinds manually                     |
-| `replenished` (bg)     | Snowbridge slow path finalized; native ETH landed in `BasejumpLanding`'s pool                            |
+| State              | Trigger                                                                                            |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `quoted`           | Quote returned by OneClick API, including `depositAddress`                                         |
+| `accepted`         | User accepts quote in UI; UI computes `intentId`                                                   |
+| `bridging`         | `BasejumpInitiated` event on Hydration (`IntentEmitter` extrinsic confirmed)                       |
+| `forwarded`        | `IntentForwarded` event on `IntentRouter` — native ETH transferred to `depositAddress` on Ethereum |
+| `submitted`        | `OneClickService.submitDepositTx({ depositAddress, txHash })` called by `nintent`                  |
+| `processing`       | Quote service acknowledges deposit and starts quoted execution                                     |
+| `fulfilled`        | Solver delivered destination asset; user reported success                                          |
+| `expired`          | Quote deadline passed before deposit processing completed; operator unwinds manually               |
+| `replenished` (bg) | Snowbridge slow path finalized; native ETH landed in `BasejumpLanding`'s pool                      |
 
 ## Timing
 
-| Step                                                       | Approx. duration   |
-| ---------------------------------------------------------- | ------------------ |
-| Off-chain quote acquisition + user accept                  | seconds            |
-| Hydration extrinsic (`BasejumpHub.bridgeAndForward`)       | one block          |
-| MRL leg → Moonbeam → Wormhole VAA → Ethereum + atomic fwd  | ~2 min             |
-| `submitDepositTx` call after router forward                | seconds            |
-| Quote processing + solver fill                             | seconds to minutes |
-| **Total user-perceived time**                              | **~2–5 min**       |
-| Snowbridge slow settlement (replenishes pool, background)  | ~30 min            |
+| Step                                                      | Approx. duration   |
+| --------------------------------------------------------- | ------------------ |
+| Off-chain quote acquisition + user accept                 | seconds            |
+| Hydration extrinsic (`IntentEmitter.bridgeAndForward`)    | one block          |
+| MRL leg → Moonbeam → Wormhole VAA → Ethereum + atomic fwd | ~2 min             |
+| `submitDepositTx` call after router forward               | seconds            |
+| Quote processing + solver fill                            | seconds to minutes |
+| **Total user-perceived time**                             | **~2–5 min**       |
+| Snowbridge slow settlement (replenishes pool, background) | ~30 min            |

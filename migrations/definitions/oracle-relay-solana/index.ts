@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { wallet } from "@whm/common";
+import { wallet } from "@whm/common/evm";
 
 import oracleEmitterIdl from "../../../crates/solana/target/idl/oracle_emitter.json";
 import type { OracleEmitter } from "../../../crates/solana/target/types/oracle_emitter";

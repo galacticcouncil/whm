@@ -3,7 +3,7 @@ import "dotenv/config";
 import { decodeEventLog, isAddress, keccak256, toBytes } from "viem";
 
 import { args } from "@whm/common";
-import { ifs, wallet } from "@whm/common";
+import { ifs, wallet } from "@whm/common/evm";
 
 import oracleEmitterJson from "../../out/OracleEmitter.sol/OracleEmitter.json";
 

@@ -13,7 +13,7 @@ No private keys or special access required — verification is read-only.
 | Upgrade authority | `6db8TCH51fK4Pq2LkBdMaMFPfXD17GjfLD8TaMPWNuiq` |
 | `Config.owner`    | `6db8TCH51fK4Pq2LkBdMaMFPfXD17GjfLD8TaMPWNuiq` |
 | Repository        | https://github.com/galacticcouncil/whm         |
-| Source path       | `platforms/solana/programs/oracle-emitter`     |
+| Source path       | `crates/solana/programs/oracle-emitter`     |
 
 ### Program-derived addresses
 
@@ -44,7 +44,7 @@ solana-verify get-program-hash 8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz
 
 # 2. Build from source
 git clone https://github.com/galacticcouncil/whm
-cd whm/platforms/solana
+cd whm/crates/solana
 git checkout <commit-hash>      # the commit you want to verify against
 anchor build -p oracle_emitter
 

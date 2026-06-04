@@ -1,7 +1,7 @@
 import { encodeFunctionData } from "viem";
 import { acc } from "@galacticcouncil/common";
 
-import type { ifs } from "@whm/common";
+import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
 import xcmTransactorJson from "../../../contracts/out/XcmTransactor.sol/XcmTransactor.json";

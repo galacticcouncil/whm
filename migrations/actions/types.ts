@@ -1,5 +1,5 @@
 import type * as anchor from "@coral-xyz/anchor";
-import type { wallet } from "@whm/common";
+import type { wallet } from "@whm/common/evm";
 
 import type { OracleEmitter } from "../../crates/solana/target/types/oracle_emitter";
 

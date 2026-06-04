@@ -86,7 +86,7 @@ npx tsx scripts/getBytes32.ts \
 
 #### Local validator (fork environment)
 
-Spawn a local Solana test validator pre-loaded with the message-emitter program and Wormhole accounts.
+Spawn a local Solana test validator pre-loaded with the oracle-emitter program and Wormhole accounts.
 
 ```bash
 npx tsx scripts/oracle-emitter/runValidator.ts
@@ -99,7 +99,7 @@ Close the deployed program and reclaim rent lamports to a recipient account.
 | Flag          | Description                                                           |
 | ------------- | --------------------------------------------------------------------- |
 | `--pk`        | Upgrade authority private key used to sign close transaction          |
-| `--programId` | Program id to close (defaults to current message-emitter id from IDL) |
+| `--programId` | Program id to close (defaults to current oracle-emitter id from IDL) |
 | `--recipient` | Recipient account for reclaimed lamports (defaults to authority)      |
 
 ```bash

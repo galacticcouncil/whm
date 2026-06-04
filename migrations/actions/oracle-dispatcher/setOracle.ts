@@ -1,4 +1,4 @@
-import type { ifs } from "@whm/common";
+import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
 import oracleDispatcherJson from "../../../contracts/out/OracleDispatcher.sol/OracleDispatcher.json";

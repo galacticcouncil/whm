@@ -20,9 +20,9 @@ Two independent contracts — **Basejump** (transport) and **BasejumpLanding** (
 
 ## Architecture
 
-Three contracts, sharing a common base (`BasejumpBase`):
+Three contracts, sharing a common base (`BasejumpCore`):
 
-### `BasejumpBase` — Shared Logic (abstract)
+### `BasejumpCore` — Shared Logic (abstract)
 
 Common storage, VAA verification & fee calculation. Subclasses implement `bridgeViaWormhole` (outbound) and `_executeTransfer` (inbound).
 
@@ -102,10 +102,10 @@ See [schema.md](schema.md) for full architecture diagrams (both EVM → Hydratio
 
 ## Interface
 
-- [IBasejumpBase.sol](../../platforms/evm/contracts/src/interfaces/IBasejumpBase.sol) — shared events, errors, `completeTransfer`, `quoteFee`
-- [IBasejump.sol](../../platforms/evm/contracts/src/interfaces/IBasejump.sol) — extends IBasejumpBase with `bridgeViaWormhole(asset, amount, recipient)`
-- [IBasejumpProxy.sol](../../platforms/evm/contracts/src/interfaces/IBasejumpProxy.sol) — extends IBasejumpBase with `bridgeViaWormhole(asset, amount, destChain, recipient)`
-- [IBasejumpLanding.sol](../../platforms/evm/contracts/src/interfaces/IBasejumpLanding.sol)
+- [IBasejumpCore.sol](../../contracts/src/basejump/interfaces/IBasejumpCore.sol) — shared events, errors, `completeTransfer`, `quoteFee`
+- [IBasejump.sol](../../contracts/src/basejump/interfaces/IBasejump.sol) — extends IBasejumpCore with `bridgeViaWormhole(asset, amount, recipient)`
+- [IBasejumpProxy.sol](../../contracts/src/basejump/interfaces/IBasejumpProxy.sol) — extends IBasejumpCore with `bridgeViaWormhole(asset, amount, destChain, recipient)`
+- [IBasejumpLanding.sol](../../contracts/src/basejump/interfaces/IBasejumpLanding.sol)
 
 ## Key Design Decisions
 

@@ -1,6 +1,6 @@
 import { isAddress, pad } from "viem";
 
-import type { ifs } from "@whm/common";
+import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
 import messageReceiverJson from "../../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
