@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-oracle-emitter = "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz"
+oracle-emitter = "AN6yxTepWFFjQWbo4448bNHHQR1Je48ppTkgBEpZ1SoJ"
 
 [registry]
 url = "https://api.apr.dev"

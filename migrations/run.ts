@@ -1,3 +1,6 @@
 import { migration } from "@whm/common";
 
-await migration.run();
+migration.run().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

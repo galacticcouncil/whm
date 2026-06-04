@@ -12,7 +12,7 @@ pub use instructions::register_price_feed::*;
 pub use instructions::register_pool_feed::*;
 pub use instructions::send::*;
 
-declare_id!("8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz");
+declare_id!("AN6yxTepWFFjQWbo4448bNHHQR1Je48ppTkgBEpZ1SoJ");
 
 #[program]
 pub mod oracle_emitter {

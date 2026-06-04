@@ -2,7 +2,9 @@ import * as anchor from "@coral-xyz/anchor";
 import { execSync } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
+
+const ANCHOR_WORKSPACE = resolve(__dirname, "../../../crates/solana");
 
 import type { SolanaContext } from "../types";
 import type { StepOutput } from "@whm/common/migration";
@@ -41,7 +43,7 @@ export async function deploy(params: DeployParams): Promise<StepOutput> {
     ];
 
     console.log(`> ${deployArgs.join(" ")}\n`);
-    execSync(deployArgs.join(" "), { stdio: "inherit" });
+    execSync(deployArgs.join(" "), { stdio: "inherit", cwd: ANCHOR_WORKSPACE });
   } finally {
     unlinkSync(walletPath);
   }

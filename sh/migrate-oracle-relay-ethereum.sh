@@ -16,6 +16,8 @@ set -euo pipefail
 ENV=${1:?Usage: migrate-oracle-relay-ethereum.sh <env (prod|fork)>}
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TSX="$ROOT_DIR/node_modules/.bin/tsx"
+RUNNER="$ROOT_DIR/migrations/run.ts"
 
 if [ -f "$ROOT_DIR/.env" ]; then
   set -a
@@ -23,9 +25,15 @@ if [ -f "$ROOT_DIR/.env" ]; then
   set +a
 fi
 
+if [ "$ENV" = "fork" ]; then
+  PK=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+  PK_EMITTER=$PK
+  PK_RELAY=$PK
+fi
+
 PK_EMITTER=${PK_EMITTER:?Missing PK_EMITTER (Ethereum EVM private key)}
 PK_RELAY=${PK_RELAY:?Missing PK_RELAY (Moonbeam EVM private key)}
 
 export PK_EMITTER PK_RELAY
 
-npx tsx "$ROOT_DIR/migrations/run.ts" --migration oracle-relay-ethereum --env "$ENV"
+"$TSX" "$RUNNER" --migration oracle-relay-ethereum --env "$ENV"
