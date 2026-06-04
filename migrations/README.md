@@ -73,30 +73,6 @@ Files are `NNN-<verb>-<subject>[@<contract>].ts` where `NNN` is a zero-padded or
 
 ## Env file format
 
-```ini
-# migrations/envs/prod/basejump-base.env
-
-# === Base ===
-RPC_BASE=https://mainnet.base.org
-CHAIN_ID_BASE=8453
-WORMHOLE_ID_BASE=30
-WORMHOLE_CORE_BASE=0x...
-TOKEN_BRIDGE_BASE=0x...
-
-# === Moonbeam ===
-RPC_MOONBEAM=...
-...
-
-# === Asset config ===
-EURC_SOURCE_ASSET=0x...
-EURC_DEST_ASSET=0x...
-
-# === Ownership renunciation targets ===
-LANDING_NEW_OWNER=0x...
-PROXY_NEW_OWNER=0x...
-BASEJUMP_NEW_OWNER=0x...
-```
-
 Conventions:
 
 - Chain-prefixed vars: `RPC_<CHAIN>`, `CHAIN_ID_<CHAIN>`, `WORMHOLE_CORE_<CHAIN>`, `TOKEN_BRIDGE_<CHAIN>`.
@@ -164,7 +140,3 @@ Action types are imported from `migrations/actions/types.ts`:
 
 - `WalletContext` — `{ publicClient, walletClient, account }` for EVM
 - `SolanaContext` — Anchor `{ connection, keypair, wallet, provider, program }` for Solana
-
-## Archived state
-
-`deployments/archive/` holds pre-refactor per-chain state files for historical reference. The merged migration state files at `deployments/prod/<migration>.json` were reconstructed from these. The archive is not consumed by any code — safe to drop once you've verified the merged state files.
