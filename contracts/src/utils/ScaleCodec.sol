@@ -79,6 +79,17 @@ library ScaleCodec {
         return r;
     }
 
+    /// @notice Encode uint128 as 16-byte little-endian (SCALE u128, non-compact)
+    function u128Le(uint128 value) internal pure returns (bytes memory) {
+        bytes memory r = new bytes(16);
+        for (uint256 i; i < 16; i++) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            r[i] = bytes1(uint8(value));
+            value >>= 8;
+        }
+        return r;
+    }
+
     /// @notice Encode uint32 as 4-byte little-endian (SCALE u32)
     function u32Le(uint32 value) internal pure returns (bytes memory) {
         bytes memory r = new bytes(4);

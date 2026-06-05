@@ -140,16 +140,17 @@ contract OracleDispatcherTest is Test, MockWormhole {
         dispatcher.setHandler(1, address(transactor));
         dispatcher.setOracle(assetId, address(0xBEEF));
 
-        uint64 ts = uint64(block.timestamp);
-        bytes memory newerPayload = abi.encode(uint8(1), assetId, uint256(2_000_000_000_000_000_000), ts);
-        bytes memory olderPayload = abi.encode(uint8(1), assetId, uint256(1_000_000_000_000_000_000), ts - 1);
-
+        // The dispatcher orders updates by the Wormhole envelope timestamp (block.timestamp in the mock).
+        vm.warp(1000);
+        bytes memory newerPayload = abi.encode(uint8(1), assetId, uint256(2_000_000_000_000_000_000), uint64(1000));
         dispatcher.receiveMessage(_buildVaa(newerPayload));
 
+        // Rewind the envelope clock: this VAA is now older than the stored update.
+        vm.warp(999);
+        bytes memory olderPayload = abi.encode(uint8(1), assetId, uint256(1_000_000_000_000_000_000), uint64(999));
         vm.expectRevert(
-            abi.encodeWithSelector(OracleDispatcher.StalePriceUpdate.selector, assetId, ts - 1, ts)
+            abi.encodeWithSelector(OracleDispatcher.StalePriceUpdate.selector, assetId, uint64(999), uint64(1000))
         );
-        // forge-lint: disable-next-line(unsafe-typecast)
         dispatcher.receiveMessage(_buildVaaWithHash(olderPayload, bytes32("salt")));
     }
 

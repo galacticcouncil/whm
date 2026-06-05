@@ -6,4 +6,3 @@ package-lock.json
 
 # Fork deployments
 deployments/fork/
-deployments/solana-fork/
