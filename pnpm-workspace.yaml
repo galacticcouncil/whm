@@ -1,5 +1,6 @@
 packages:
   - common
+  - chopsticks
   - contracts
   - crates/solana
   - agents/broadcaster
@@ -7,3 +8,22 @@ packages:
 
 onlyBuiltDependencies:
   - esbuild
+
+packageExtensions:
+  # Fix missing/transitive dependencies that are imported at runtime
+  # but not declared by upstream packages.
+
+  # @galacticcouncil/chopsticks imports
+  # '@acala-network/chopsticks-db' but only declares
+  # '@galacticcouncil/chopsticks-db'. Alias the import to the
+  # Galactic Council package so pnpm can resolve it correctly.
+  "@galacticcouncil/chopsticks@2.0.0":
+    dependencies:
+      "@acala-network/chopsticks-db": "npm:@galacticcouncil/chopsticks-db@2.0.0"
+
+  # @polkadot-api/json-rpc-provider-proxy imports `isResponse`
+  # from '@polkadot-api/json-rpc-provider' without declaring the
+  # dependency. Pin the required papi-2.x version explicitly.
+  "@polkadot-api/json-rpc-provider-proxy@0.4.0":
+    dependencies:
+      "@polkadot-api/json-rpc-provider": "0.2.0"

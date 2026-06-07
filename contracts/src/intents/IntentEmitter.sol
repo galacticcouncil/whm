@@ -109,7 +109,8 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
         // Slippage check
         if (wethOut < minEthOut) revert InsufficientOutput();
 
-        _bridge(wethOut, intentId, intentDepositAddress);
+        // TEMP DEBUG: bridge leg disabled to isolate the swap path. Re-enable before merging.
+        // _bridge(wethOut, intentId, intentDepositAddress);
 
         emit BridgeInitiated(intentId, msg.sender, assetIn, amountIn, wethOut, intentDepositAddress);
     }

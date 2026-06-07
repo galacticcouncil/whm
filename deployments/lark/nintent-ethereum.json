@@ -1,0 +1,45 @@
+{
+  "migration": "nintent-ethereum",
+  "environment": "lark",
+  "startedAt": "2026-06-04T16:58:16.394Z",
+  "completedAt": "2026-06-04T17:50:15.787Z",
+  "steps": [
+    {
+      "name": "001-deploy-emitter",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x8ebe3030bb38c86de1c53a8b60538dc69ba96854",
+        "proxyAddress": "0x1e755ba323dbfe80caa1bdae37255d6f18f38ce6",
+        "ownerAddress": "0x222222ff7Be76052e023Ec1a306fCca8F9659D80"
+      },
+      "error": null,
+      "startedAt": "2026-06-04T16:58:16.398Z",
+      "completedAt": "2026-06-04T16:58:26.083Z"
+    },
+    {
+      "name": "002-set-config@emitter",
+      "status": "completed",
+      "output": {
+        "setProxyTx": "0x4daa3f16d5f4a68aab50812dae5c821d2184eb941a3e65a0bb3b22a21d5dbe51",
+        "setRouterTx": "0x9be2a89528f194d5e22ac10b66e4ff4de9a038f3b81363864decedc99ab73440",
+        "basejumpProxy": "0x000000000000000000000000000000000000dead",
+        "intentRouter": "0x000000000000000000000000000000000000000000000000000000000000dead"
+      },
+      "error": null,
+      "startedAt": "2026-06-04T16:58:26.088Z",
+      "completedAt": "2026-06-04T16:58:39.324Z"
+    },
+    {
+      "name": "003-redeploy-emitter",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xa14e6062056c1fb1ebb0aacd0b18306caa9f4165",
+        "proxyAddress": "0x1e755ba323dbfe80caa1bdae37255d6f18f38ce6",
+        "ownerAddress": "0x222222ff7Be76052e023Ec1a306fCca8F9659D80"
+      },
+      "error": null,
+      "startedAt": "2026-06-04T17:50:01.935Z",
+      "completedAt": "2026-06-04T17:50:15.784Z"
+    }
+  ]
+}

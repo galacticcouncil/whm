@@ -6,7 +6,7 @@ set -euo pipefail
 # Deploy the IntentEmitter (NEAR Intents) UUPS proxy on Hydration.
 #
 # Arguments:
-#   <env>   Environment context: prod | fork
+#   <env>   Environment context: prod | fork | lark (hydration)
 #
 # Required env vars (set in shell or root .env):
 #   PK_EMITTER  Hydration deployer (0x...)

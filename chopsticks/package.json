@@ -1,0 +1,19 @@
+{
+  "name": "@whm/chopsticks",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "up": "npx tsx spawn.ts"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./configs": "./lib/configs.ts",
+    "./eth": "./lib/eth/index.ts",
+    "./events": "./lib/events.ts",
+    "./network": "./lib/network.ts",
+    "./queries": "./lib/queries.ts"
+  },
+  "dependencies": {
+    "@galacticcouncil/chopsticks": "2.0.0"
+  }
+}
