@@ -88,6 +88,7 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
         uint32 assetIn,
         uint256 amountIn,
         uint256 minEthOut,
+        uint256 maxFeeIn,
         bytes32 intentId,
         address intentDepositAddress
     ) external {
@@ -98,11 +99,11 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
         IERC20 assetInToken = IERC20(HydrationConsts.toErc20(assetIn));
         IERC20 wethToken = IERC20(HydrationConsts.toErc20(HydrationConsts.WETH_ID));
 
-        assetInToken.safeTransferFrom(msg.sender, address(this), amountIn);
-
         uint256 wethInitial = wethToken.balanceOf(address(this));
 
-        _swap(assetInToken, assetIn, amountIn);
+        assetInToken.safeTransferFrom(msg.sender, address(this), amountIn);
+
+        _swap(assetInToken, assetIn, amountIn, maxFeeIn);
 
         uint256 wethOut = wethToken.balanceOf(address(this)) - wethInitial;
 
@@ -116,7 +117,7 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
 
     // ─── Helpers ─────────────────────────────────────────────────
 
-    function _swap(IERC20 assetInToken, uint32 assetIn, uint256 amountIn) internal {
+    function _swap(IERC20 assetInToken, uint32 assetIn, uint256 amountIn, uint256 maxFeeIn) internal {
         // A is GLMR: Nothing to buy — keep the fee, sell the rest for WETH.
         if (assetIn == HydrationConsts.GLMR_ID) {
             uint256 aIn = amountIn - xcmFee;
@@ -125,14 +126,17 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
             return;
         }
 
-        // No GLMR slippage guard
-        bytes memory buyFeeAsset =
-            HydrationRouter.encodeBuy(assetIn, HydrationConsts.GLMR_ID, xcmFee, type(uint128).max);
+        // Buy the GLMR fee, spending at most `maxFeeIn` of A (caller's slippage).
+        uint256 beforeFee = assetInToken.balanceOf(address(this));
+        bytes memory buyFeeAsset = HydrationRouter.encodeBuy(assetIn, HydrationConsts.GLMR_ID, xcmFee, maxFeeIn);
         _dispatch(buyFeeAsset);
 
-        // Convert the leftover A to WETH — unless A already is WETH.
+        // Convert the caller's leftover A (their deposit minus what the fee buy consumed) to WETH —
+        // unless A already is WETH. Using the per-call delta rather than balanceOf leaves any stray /
+        // donated A in the contract untouched instead of sweeping it into this caller's bridge.
         if (assetIn != HydrationConsts.WETH_ID) {
-            uint256 aIn = assetInToken.balanceOf(address(this));
+            uint256 feeSpent = beforeFee - assetInToken.balanceOf(address(this));
+            uint256 aIn = amountIn - feeSpent;
             bytes memory buyWeth = HydrationRouter.encodeSell(assetIn, HydrationConsts.WETH_ID, aIn, 0);
             _dispatch(buyWeth);
         }

@@ -21,6 +21,7 @@ interface IIntentRouter is IBasejumpReceiver {
     error NotBasejumpLanding(address sender);
     error InvalidDepositAddress();
     error MalformedData();
+    error NativeTransferFailed();
 
     // ─── Admin ───────────────────────────────────────────────────
 

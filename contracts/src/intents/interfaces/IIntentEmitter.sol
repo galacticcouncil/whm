@@ -45,14 +45,17 @@ interface IIntentEmitter {
     /// @param assetIn        Hydration asset id of A
     /// @param amountIn       total amount of A pulled from the caller
     /// @param minEthOut      slippage floor on the WETH bridged out (reverts InsufficientOutput below it).
-    ///                       Applies to the swap paths (A→WETH, GLMR→WETH); ignored when A is already WETH,
-    ///                       since that path has no swap and is bounded by amountIn.
+    ///                       Applies on every path — including A==WETH, where the bridged amount is
+    ///                       amountIn minus the WETH spent buying the GLMR fee.
+    /// @param maxFeeIn       max amount of A to spend buying the GLMR cross-chain fee (slippage bound on
+    ///                       the fee leg). Ignored when A is GLMR — there the fee is withheld, not bought.
     /// @param intentId       UI-computed correlation hash
     /// @param intentDepositAddress OneClick quote's Ethereum deposit address
     function swapAndBridge(
         uint32 assetIn,
         uint256 amountIn,
         uint256 minEthOut,
+        uint256 maxFeeIn,
         bytes32 intentId,
         address intentDepositAddress
     ) external;

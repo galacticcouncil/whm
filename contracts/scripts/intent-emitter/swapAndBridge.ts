@@ -25,6 +25,7 @@ function getConfig() {
   const assetIn = Number(requiredArg("--assetIn")); // Hydration asset id (e.g. DOT=5)
   const amountIn = BigInt(requiredArg("--amountIn")); // total A pulled from caller
   const minEthOut = BigInt(requiredArg("--minEthOut")); // slippage floor on WETH out
+  const maxFeeIn = BigInt(requiredArg("--maxFeeIn")); // max A spent buying the GLMR fee
   const depositAddress = requiredArg("--depositAddress"); // OneClick deposit addr (Ethereum)
   const intentIdArg = optionalArg("--intentId");
 
@@ -46,6 +47,7 @@ function getConfig() {
     assetIn,
     amountIn,
     minEthOut,
+    maxFeeIn,
     depositAddress: depositAddress as `0x${string}`,
     intentId,
   };
@@ -105,12 +107,12 @@ async function main(): Promise<void> {
   await publicClient.waitForTransactionReceipt({ hash: approveHash });
   console.log("approved:", approveHash);
 
-  // 2. swapAndBridge(assetIn, amountIn, minEthOut, intentId, depositAddress)
+  // 2. swapAndBridge(assetIn, amountIn, minEthOut, maxFeeIn, intentId, depositAddress)
   const hash = await walletClient.writeContract({
     address: cfg.address,
     abi,
     functionName: "swapAndBridge",
-    args: [cfg.assetIn, cfg.amountIn, cfg.minEthOut, cfg.intentId, cfg.depositAddress],
+    args: [cfg.assetIn, cfg.amountIn, cfg.minEthOut, cfg.maxFeeIn, cfg.intentId, cfg.depositAddress],
   });
   console.log("swapAndBridge tx:", hash);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });

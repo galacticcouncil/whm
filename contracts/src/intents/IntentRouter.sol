@@ -18,6 +18,10 @@ import {IIntentRouter} from "./interfaces/IIntentRouter.sol";
 contract IntentRouter is Initializable, UUPSUpgradeable, IIntentRouter {
     using SafeERC20 for IERC20;
 
+    /// @notice Sentinel `asset` value (matches BasejumpLandingNative.NATIVE) meaning the delivery
+    ///         is the chain's native currency (ETH) rather than an ERC20.
+    address public constant NATIVE = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     address public owner;
     address public basejumpLanding;
 
@@ -39,6 +43,9 @@ contract IntentRouter is Initializable, UUPSUpgradeable, IIntentRouter {
         basejumpLanding = _basejumpLanding;
     }
 
+    /// @notice Accept native ETH delivered by the landing immediately before the callback.
+    receive() external payable {}
+
     // ─── IBasejumpReceiver ───────────────────────────────────────
 
     function onBasejumpReceive(address asset, uint256 amount, bytes calldata data) external {
@@ -48,9 +55,20 @@ contract IntentRouter is Initializable, UUPSUpgradeable, IIntentRouter {
         (bytes32 intentId, address depositAddress) = abi.decode(data, (bytes32, address));
         if (depositAddress == address(0)) revert InvalidDepositAddress();
 
-        IERC20(asset).safeTransfer(depositAddress, amount);
+        _forward(asset, depositAddress, amount);
 
         emit IntentForwarded(intentId, asset, depositAddress, amount);
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────
+
+    function _forward(address asset, address to, uint256 amount) internal {
+        if (asset == NATIVE) {
+            (bool ok,) = to.call{value: amount}("");
+            if (!ok) revert NativeTransferFailed();
+        } else {
+            IERC20(asset).safeTransfer(to, amount);
+        }
     }
 
     // ─── Upgrade ─────────────────────────────────────────────────
@@ -59,9 +77,8 @@ contract IntentRouter is Initializable, UUPSUpgradeable, IIntentRouter {
 
     // ─── Admin ───────────────────────────────────────────────────
 
-    function sweep(address asset, address to, uint256 amount) external onlyOwner {
-        IERC20(asset).safeTransfer(to, amount);
-        emit Swept(asset, to, amount);
+    function setOwner(address newOwner) external onlyOwner {
+        owner = newOwner;
     }
 
     function setBasejumpLanding(address _basejumpLanding) external onlyOwner {
@@ -69,7 +86,8 @@ contract IntentRouter is Initializable, UUPSUpgradeable, IIntentRouter {
         basejumpLanding = _basejumpLanding;
     }
 
-    function setOwner(address newOwner) external onlyOwner {
-        owner = newOwner;
+    function sweep(address asset, address to, uint256 amount) external onlyOwner {
+        _forward(asset, to, amount);
+        emit Swept(asset, to, amount);
     }
 }

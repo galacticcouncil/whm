@@ -23,6 +23,9 @@ contract MockERC20 {
     }
 }
 
+/// @dev Rejects native ETH (no receive/fallback) so call{value} fails.
+contract RejectEth {}
+
 contract IntentRouterTest is Test {
     IntentRouter public router;
     MockERC20 public usdc;
@@ -42,7 +45,7 @@ contract IntentRouterTest is Test {
             address(impl),
             abi.encodeCall(IntentRouter.initialize, (landing))
         );
-        router = IntentRouter(address(proxy));
+        router = IntentRouter(payable(address(proxy)));
     }
 
     // ─── Deployment ──────────────────────────────────────────────
@@ -91,6 +94,38 @@ contract IntentRouterTest is Test {
         router.onBasejumpReceive(address(otherToken), amount, data);
 
         assertEq(otherToken.balanceOf(depositAddress), amount);
+    }
+
+    function testForwardsNativeEthToDepositAddress() public {
+        uint256 amount = 2 ether;
+        address NATIVE = router.NATIVE();
+
+        // Simulate the landing having already delivered native ETH to the router
+        vm.deal(address(router), amount);
+
+        bytes memory data = abi.encode(intentId, depositAddress);
+
+        vm.expectEmit(true, true, true, true);
+        emit IIntentRouter.IntentForwarded(intentId, NATIVE, depositAddress, amount);
+
+        vm.prank(landing);
+        router.onBasejumpReceive(NATIVE, amount, data);
+
+        assertEq(depositAddress.balance, amount);
+        assertEq(address(router).balance, 0);
+    }
+
+    function testNativeForwardRevertsIfRecipientRejects() public {
+        uint256 amount = 1 ether;
+        address NATIVE = router.NATIVE();
+        vm.deal(address(router), amount);
+
+        // depositAddress is a contract with no receive() → call fails
+        bytes memory data = abi.encode(intentId, address(new RejectEth()));
+
+        vm.prank(landing);
+        vm.expectRevert(IIntentRouter.NativeTransferFailed.selector);
+        router.onBasejumpReceive(NATIVE, amount, data);
     }
 
     function testRevertsWhenSenderNotLanding() public {

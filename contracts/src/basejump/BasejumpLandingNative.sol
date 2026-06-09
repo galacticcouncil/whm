@@ -10,30 +10,36 @@ import {IBasejumpLandingNative} from "./interfaces/IBasejumpLandingNative.sol";
 import {IBasejumpReceiver} from "./interfaces/IBasejumpReceiver.sol";
 
 /// @title BasejumpLandingNative — Instant token delivery for cross-chain bridges on EVM chains
-/// @notice Pre-funded ERC20 pool. Authorized bridges call transfer() to deliver `asset`
-///         to `recipient`. `asset` is the destination-chain ERC20 address — no source↔dest
-///         mapping is maintained here because on EVM the address in the payload IS the
-///         address the bridge wants paid out. (The Hydration landing keeps a mapping only
-///         because substrate currency_id ≠ ERC20 address.)
+/// @notice Pre-funded pool. Authorized bridges call transfer() with the *source-chain* `sourceAsset`
+///         address (the only address the source contract knows when it emits). This landing maps it
+///         to the payout asset on THIS chain via `destAssetFor` — mirroring the Hydration
+///         BasejumpLanding, because the bridge layer cannot know the destination asset id up front.
+///         The destination asset is either an ERC20 (delivered via transfer) or the `NATIVE`
+///         sentinel (delivered as the chain's native currency / ETH).
 ///
-///         If the pool is short on liquidity at delivery time, the transfer is queued
-///         and can be fulfilled by anyone later via `fulfillPending` once the slow
-///         TokenBridge path replenishes the pool (~13 min).
+///         If the pool is short on liquidity at delivery time, the transfer is queued and can be
+///         fulfilled by anyone later via `fulfillPending` once the slow TokenBridge path
+///         replenishes the pool (~13 min).
 ///
-///         When the Basejump payload carries non-empty `data`, the recipient is treated
-///         as a contract implementing IBasejumpReceiver and `onBasejumpReceive` is
-///         invoked atomically with delivery — either immediately (sufficient liquidity)
-///         or at the moment `fulfillPending` drains the queued entry. Quote-side TTL +
-///         OneClick's refund-to-`refundTo` mechanism handles the case where the queue
-///         drains after the receiver's intent expires.
+///         When the Basejump payload carries non-empty `data`, the recipient is treated as a
+///         contract implementing IBasejumpReceiver and `onBasejumpReceive` is invoked atomically
+///         with delivery — either immediately (sufficient liquidity) or at the moment
+///         `fulfillPending` drains the queued entry. The callback receives the resolved
+///         destination asset (the ERC20 actually paid out, or `NATIVE` for ETH). Quote-side TTL +
+///         OneClick's refund-to-`refundTo` mechanism handles the case where the queue drains after
+///         the receiver's intent expires.
 contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandingNative {
     using SafeERC20 for IERC20;
 
+    /// @notice Sentinel `destAsset` value meaning "pay out the chain's native currency (ETH)".
+    address public constant NATIVE = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     address public owner;
     mapping(address => bool) public authorizedBridges;
+    mapping(address => address) public destAssetFor;
 
     struct PendingTransfer {
-        address asset;
+        address sourceAsset;
         uint256 amount;
         bytes32 recipient;
         bytes data;
@@ -73,12 +79,18 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
         owner = msg.sender;
     }
 
+    /// @notice Accept native ETH for pool funding / replenishment.
+    receive() external payable {}
+
     // ─── Core ────────────────────────────────────────────────────
 
-    function transfer(address asset, uint256 amount, bytes32 recipient, bytes memory data)
+    function transfer(address sourceAsset, uint256 amount, bytes32 recipient, bytes memory data)
         external
         onlyAuthorizedBridge
     {
+        address destAsset = destAssetFor[sourceAsset];
+        if (destAsset == address(0)) revert AssetNotConfigured(sourceAsset);
+
         address recipientAddr = address(uint160(uint256(recipient)));
 
         // Validate receiver shape upfront — applies whether we deliver now or queue.
@@ -88,13 +100,13 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
             revert ReceiverNotContract(recipientAddr);
         }
 
-        if (IERC20(asset).balanceOf(address(this)) >= amount) {
-            _deliver(asset, amount, recipientAddr, data);
+        if (_balance(destAsset) >= amount) {
+            _deliver(sourceAsset, destAsset, amount, recipient, data);
         } else {
             uint256 id = pendingTail++;
             pendingTransfers[id] =
-                PendingTransfer({asset: asset, amount: amount, recipient: recipient, data: data});
-            emit TransferQueued(id, asset, recipientAddr, amount);
+                PendingTransfer({sourceAsset: sourceAsset, amount: amount, recipient: recipient, data: data});
+            emit TransferQueued(id, sourceAsset, destAsset, recipient, amount);
         }
     }
 
@@ -103,23 +115,42 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
 
         uint256 id = pendingHead;
         PendingTransfer memory pt = pendingTransfers[id];
-        if (IERC20(pt.asset).balanceOf(address(this)) < pt.amount) revert InsufficientBalance();
+        address destAsset = destAssetFor[pt.sourceAsset];
+        if (_balance(destAsset) < pt.amount) revert InsufficientBalance();
 
         pendingHead++;
         delete pendingTransfers[id];
 
-        address recipientAddr = address(uint160(uint256(pt.recipient)));
-        _deliver(pt.asset, pt.amount, recipientAddr, pt.data);
-        emit PendingTransferFulfilled(id, pt.asset, recipientAddr, pt.amount);
+        _deliver(pt.sourceAsset, destAsset, pt.amount, pt.recipient, pt.data);
+        emit PendingTransferFulfilled(id, pt.sourceAsset, destAsset, pt.recipient, pt.amount);
     }
 
-    function _deliver(address asset, uint256 amount, address recipientAddr, bytes memory data) internal {
-        IERC20(asset).safeTransfer(recipientAddr, amount);
-        emit TransferExecuted(asset, recipientAddr, amount);
+    function isNative(address sourceAsset) external view returns (bool) {
+        return destAssetFor[sourceAsset] == NATIVE;
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────
+
+    function _deliver(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient, bytes memory data)
+        internal
+    {
+        address recipientAddr = address(uint160(uint256(recipient)));
+
+        if (destAsset == NATIVE) {
+            (bool ok,) = recipientAddr.call{value: amount}("");
+            if (!ok) revert NativeTransferFailed();
+        } else {
+            IERC20(destAsset).safeTransfer(recipientAddr, amount);
+        }
+        emit TransferExecuted(sourceAsset, destAsset, recipient, amount);
 
         if (data.length > 0) {
-            IBasejumpReceiver(recipientAddr).onBasejumpReceive(asset, amount, data);
+            IBasejumpReceiver(recipientAddr).onBasejumpReceive(destAsset, amount, data);
         }
+    }
+
+    function _balance(address destAsset) internal view returns (uint256) {
+        return destAsset == NATIVE ? address(this).balance : IERC20(destAsset).balanceOf(address(this));
     }
 
     // ─── Upgrade ─────────────────────────────────────────────────
@@ -138,9 +169,27 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
         authorizedBridges[bridge] = enabled;
     }
 
-    /// @notice Emergency withdrawal of ERC20 tokens
+    /// @notice Map a source asset to its payout asset on this chain — an ERC20, or the `NATIVE`
+    ///         sentinel for native ETH. `setDestNative` is a convenience for the native case.
+    function setDestAsset(address sourceAsset, address destAsset) external onlyOwner {
+        destAssetFor[sourceAsset] = destAsset;
+        emit DestAssetUpdated(sourceAsset, destAsset);
+    }
+
+    /// @notice Map a source asset to native-ETH payout on this chain (alias for setDestAsset(_, NATIVE)).
+    function setDestNative(address sourceAsset) external onlyOwner {
+        destAssetFor[sourceAsset] = NATIVE;
+        emit DestAssetUpdated(sourceAsset, NATIVE);
+    }
+
+    /// @notice Emergency withdrawal of ERC20 tokens (or native ETH when `asset == NATIVE`).
     function withdraw(address asset, uint256 amount, address to) external onlyOwner {
-        IERC20(asset).safeTransfer(to, amount);
+        if (asset == NATIVE) {
+            (bool ok,) = to.call{value: amount}("");
+            if (!ok) revert NativeTransferFailed();
+        } else {
+            IERC20(asset).safeTransfer(to, amount);
+        }
         emit Withdrawn(asset, amount, to);
     }
 }

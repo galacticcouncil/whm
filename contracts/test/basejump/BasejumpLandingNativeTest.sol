@@ -24,7 +24,7 @@ contract MockERC20 {
     }
 }
 
-/// @dev Receiver that records callback arguments.
+/// @dev Receiver that records callback arguments. Payable so it can receive native ETH delivery.
 contract MockReceiver is IBasejumpReceiver {
     address public lastAsset;
     uint256 public lastAmount;
@@ -32,6 +32,8 @@ contract MockReceiver is IBasejumpReceiver {
     uint256 public callCount;
     bool public shouldRevert;
     string public revertReason = "receiver rejected";
+
+    receive() external payable {}
 
     function setShouldRevert(bool v) external {
         shouldRevert = v;
@@ -55,6 +57,10 @@ contract BasejumpLandingNativeTest is Test {
     bytes32 public recipient;
     address public stranger = makeAddr("stranger");
 
+    /// @dev A fake source-chain asset address that maps to native ETH on this chain.
+    address public srcEth = makeAddr("srcEth");
+    address public NATIVE;
+
     uint256 constant POOL_AMOUNT = 100_000e6;
 
     function setUp() public {
@@ -66,9 +72,14 @@ contract BasejumpLandingNativeTest is Test {
             address(impl),
             abi.encodeCall(BasejumpLandingNative.initialize, ())
         );
-        landing = BasejumpLandingNative(address(proxy));
+        landing = BasejumpLandingNative(payable(address(proxy)));
+        NATIVE = landing.NATIVE();
 
         landing.setAuthorizedBridge(bridge, true);
+        // Source→dest mappings: usdc pays out usdc; srcEth pays out native ETH.
+        landing.setDestAsset(address(usdc), address(usdc));
+        landing.setDestNative(srcEth);
+
         usdc.mint(address(landing), POOL_AMOUNT);
     }
 
@@ -79,6 +90,16 @@ contract BasejumpLandingNativeTest is Test {
         assertTrue(landing.authorizedBridges(bridge));
         assertEq(landing.pendingHead(), 0);
         assertEq(landing.pendingTail(), 0);
+        assertEq(landing.destAssetFor(address(usdc)), address(usdc));
+        assertEq(landing.destAssetFor(srcEth), NATIVE);
+        assertTrue(landing.isNative(srcEth));
+        assertFalse(landing.isNative(address(usdc)));
+    }
+
+    function testSetDestNativeRevertsUnauthorized() public {
+        vm.prank(stranger);
+        vm.expectRevert(IBasejumpLandingNative.NotOwner.selector);
+        landing.setDestNative(srcEth);
     }
 
     function testCannotReinitialize() public {
@@ -86,13 +107,22 @@ contract BasejumpLandingNativeTest is Test {
         landing.initialize();
     }
 
+    // ─── Asset mapping ───────────────────────────────────────────
+
+    function testTransferRevertsWhenAssetNotConfigured() public {
+        address unknown = makeAddr("unknown");
+        vm.prank(bridge);
+        vm.expectRevert(abi.encodeWithSelector(IBasejumpLandingNative.AssetNotConfigured.selector, unknown));
+        landing.transfer(unknown, 1_000e6, recipient, "");
+    }
+
     // ─── Immediate delivery (EOA recipient, empty data) ──────────
 
     function testTransferDeliversToEoa() public {
         uint256 amount = 1_000e6;
 
-        vm.expectEmit(true, true, false, true);
-        emit IBasejumpLandingNative.TransferExecuted(address(usdc), recipientAddr, amount);
+        vm.expectEmit(true, true, true, true);
+        emit IBasejumpLandingNative.TransferExecuted(address(usdc), address(usdc), recipient, amount);
 
         vm.prank(bridge);
         landing.transfer(address(usdc), amount, recipient, "");
@@ -108,6 +138,57 @@ contract BasejumpLandingNativeTest is Test {
         vm.prank(stranger);
         vm.expectRevert(IBasejumpLandingNative.NotAuthorizedBridge.selector);
         landing.transfer(address(usdc), 1_000e6, recipient, "");
+    }
+
+    // ─── Native ETH delivery ─────────────────────────────────────
+
+    function testTransferDeliversNativeEthToEoa() public {
+        uint256 amount = 3 ether;
+        vm.deal(address(landing), 10 ether);
+        uint256 before = recipientAddr.balance;
+
+        vm.expectEmit(true, true, true, true);
+        emit IBasejumpLandingNative.TransferExecuted(srcEth, NATIVE, recipient, amount);
+
+        vm.prank(bridge);
+        landing.transfer(srcEth, amount, recipient, "");
+
+        assertEq(recipientAddr.balance, before + amount);
+        assertEq(address(landing).balance, 10 ether - amount);
+    }
+
+    function testTransferQueuesNativeWhenInsufficientEth() public {
+        uint256 amount = 5 ether;
+        vm.deal(address(landing), 1 ether); // not enough
+
+        vm.prank(bridge);
+        landing.transfer(srcEth, amount, recipient, "");
+
+        assertEq(landing.pendingTail(), 1);
+        assertEq(recipientAddr.balance, 0);
+
+        // Replenish and drain
+        vm.deal(address(landing), amount);
+        landing.fulfillPending();
+        assertEq(recipientAddr.balance, amount);
+        assertEq(landing.pendingHead(), 1);
+    }
+
+    function testTransferDeliversNativeEthWithCallback() public {
+        MockReceiver receiver = new MockReceiver();
+        bytes32 receiverBytes32 = bytes32(uint256(uint160(address(receiver))));
+        bytes memory data = abi.encode(bytes32(uint256(0xdead)), makeAddr("depositAddress"));
+        uint256 amount = 2 ether;
+        vm.deal(address(landing), 10 ether);
+
+        vm.prank(bridge);
+        landing.transfer(srcEth, amount, receiverBytes32, data);
+
+        assertEq(address(receiver).balance, amount);
+        assertEq(receiver.callCount(), 1);
+        assertEq(receiver.lastAsset(), NATIVE);
+        assertEq(receiver.lastAmount(), amount);
+        assertEq(receiver.lastData(), data);
     }
 
     // ─── Immediate delivery + receiver callback ──────────────────
@@ -163,8 +244,8 @@ contract BasejumpLandingNativeTest is Test {
     function testTransferQueuesWhenInsufficientBalance() public {
         uint256 over = POOL_AMOUNT + 1e6;
 
-        vm.expectEmit(true, true, true, true);
-        emit IBasejumpLandingNative.TransferQueued(0, address(usdc), recipientAddr, over);
+        vm.expectEmit(true, true, false, true);
+        emit IBasejumpLandingNative.TransferQueued(0, address(usdc), address(usdc), recipient, over);
 
         vm.prank(bridge);
         landing.transfer(address(usdc), over, recipient, "");
@@ -225,8 +306,8 @@ contract BasejumpLandingNativeTest is Test {
         // Replenish pool (simulates slow settlement)
         usdc.mint(address(landing), 10e6);
 
-        vm.expectEmit(true, true, true, true);
-        emit IBasejumpLandingNative.PendingTransferFulfilled(0, address(usdc), recipientAddr, over);
+        vm.expectEmit(true, true, false, true);
+        emit IBasejumpLandingNative.PendingTransferFulfilled(0, address(usdc), address(usdc), recipient, over);
 
         landing.fulfillPending();
 
@@ -329,10 +410,24 @@ contract BasejumpLandingNativeTest is Test {
         assertEq(usdc.balanceOf(dest), 5_000e6);
     }
 
+    function testWithdrawNative() public {
+        vm.deal(address(landing), 4 ether);
+        address dest = makeAddr("dest");
+        landing.withdraw(NATIVE, 1 ether, dest);
+        assertEq(dest.balance, 1 ether);
+        assertEq(address(landing).balance, 3 ether);
+    }
+
     function testWithdrawRevertsUnauthorized() public {
         vm.prank(stranger);
         vm.expectRevert(IBasejumpLandingNative.NotOwner.selector);
         landing.withdraw(address(usdc), 1, stranger);
+    }
+
+    function testSetDestAssetRevertsUnauthorized() public {
+        vm.prank(stranger);
+        vm.expectRevert(IBasejumpLandingNative.NotOwner.selector);
+        landing.setDestAsset(srcEth, NATIVE);
     }
 
     function testSetOwner() public {

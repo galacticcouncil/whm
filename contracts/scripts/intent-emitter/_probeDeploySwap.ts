@@ -64,6 +64,7 @@ const GLMR = 16;
 
 const AMOUNT_IN = 100n * 10n ** 10n; // 100 DOT (10 dec)
 const MIN_ETH_OUT = 1n;
+const MAX_FEE_IN = AMOUNT_IN; // probe: allow up to the full input on the GLMR fee leg
 const INTENT_ID = keccak256(toHex("intent-emitter-chopsticks-test"));
 const INTENT_DEPOSIT_ADDRESS = "0x000000000000000000000000000000000000dead" as const;
 
@@ -164,7 +165,7 @@ async function main(): Promise<void> {
       encodeFunctionData({
         abi: emitterAbi,
         functionName: "swapAndBridge",
-        args: [DOT, AMOUNT_IN, MIN_ETH_OUT, INTENT_ID, INTENT_DEPOSIT_ADDRESS],
+        args: [DOT, AMOUNT_IN, MIN_ETH_OUT, MAX_FEE_IN, INTENT_ID, INTENT_DEPOSIT_ADDRESS],
       }),
     );
     await check(hydration, swapAndBridge, "swapAndBridge");
