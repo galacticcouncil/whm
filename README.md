@@ -46,7 +46,7 @@ Instant cross-chain token bridging between EVM source chains and Hydration via M
 
 ### NEAR Intents
 
-Hydration users buy any NEAR-Intents-supported asset (BTC, ZEC, NEAR-native, Solana SPLs, …) via OneClick quotes. A Hydration-initiated dual-transport (Snowbridge + MRL) deposits native ETH into the quote's `depositAddress` on Ethereum atomically.
+Hydration users buy any NEAR-Intents-supported asset (BTC, ZEC, NEAR-native, …) via OneClick quotes. A Hydration-initiated dual-transport (Snowbridge + MRL) deposits native ETH into the quote's `depositAddress` on Ethereum atomically.
 
 - [Spec](docs/intents/spec.md)
 - [Schema](docs/intents/schema.md)
