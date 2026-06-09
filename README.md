@@ -44,12 +44,13 @@ Instant cross-chain token bridging between EVM source chains and Hydration via M
 - [Schema](docs/basejump/schema.md)
 - [Indexer](docs/basejump/indexer.md)
 
-### NEAR Intents
+### Intents
 
-Hydration users buy any NEAR-Intents-supported asset (BTC, ZEC, NEAR-native, …) via OneClick quotes. A Hydration-initiated dual-transport (Snowbridge + MRL) deposits native ETH into the quote's `depositAddress` on Ethereum atomically.
+Hydration users buy any NEAR-Intents supported asset (BTC, ZEC, NEAR,…) via OneClick quotes. A single Hydration extrinsic swaps the user's chosen asset to WETH and bridges it via Moonbeam + Wormhole; `IntentRouter` forwards native ETH into the quote's `depositAddress` on Ethereum, atomically with the fast-path delivery.
 
 - [Spec](docs/intents/spec.md)
 - [Schema](docs/intents/schema.md)
+- [Fee](docs/intents/fee.md)
 - [Refund](docs/intents/refund.md)
 
 ## Setup

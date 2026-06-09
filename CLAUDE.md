@@ -23,7 +23,7 @@ Cross-chain messaging infrastructure connecting EVM chains, Solana, and Hydratio
 
 - **Oracle Relay** — Solana program reads Kamino Scope prices + SPL stake-pool rates, broadcasts via Wormhole to Moonbeam, which forwards to Hydration's on-chain oracle via XCM. Ethereum-source variant reads wstETH / apyUSD rates directly. See [docs/oracle/spec.md](docs/oracle/spec.md), [docs/oracle/schema.md](docs/oracle/schema.md).
 - **Basejump** — Instant cross-chain token bridging between EVM chains and Hydration via Moonbeam. Fast-path settles in ~2 min against a pre-funded landing pool; slow Wormhole TokenBridge transfer replenishes (~13 min). See [docs/basejump/spec.md](docs/basejump/spec.md), [docs/basejump/schema.md](docs/basejump/schema.md).
-- **NEAR Intents** — Hydration users get any NEAR-Intents-supported asset (BTC, ZEC, NEAR-native, SPLs, …) via OneClick quotes; a Hydration-initiated dual-transport (Snowbridge + MRL) deposits native ETH into the quote's `depositAddress` on Ethereum. See [docs/intents/spec.md](docs/intents/spec.md).
+- **Intents** — Hydration users get any NEAR-Intents-supported asset (BTC, ZEC, NEAR, …) via OneClick quotes. One Hydration extrinsic (`IntentEmitter.swapAndBridge`) swaps the user's asset → WETH and bridges it via Moonbeam + Wormhole (TokenBridge slow replenish + fast VAA); `IntentRouter` forwards native ETH into the quote's `depositAddress` on Ethereum, atomic with the fast-path delivery. See [docs/intents/spec.md](docs/intents/spec.md), [docs/intents/fee.md](docs/intents/fee.md).
 
 ## Build & test
 
@@ -253,7 +253,7 @@ Common scopes: `oracle`, `basejump`, `intents`, `bjscan`, `contracts`, `crates`,
 - **Oracle path (Solana source):** Solana `oracle-emitter` (Anchor) → Wormhole Core Bridge (VAA) → `mrelayer` → `OracleDispatcher` on Moonbeam (extends `MessageReceiver`) → `XcmTransactor` → Hydration oracle pallet.
 - **Oracle path (Ethereum source):** `OracleEmitter` on Ethereum → Wormhole → (parallel) `OracleDispatcher` proxy on Moonbeam → `XcmTransactor` → Hydration. Each source chain has its OWN dispatcher + transactor proxy pair (renounced ownership = no shared infra).
 - **Basejump path:** Source EVM `Basejump.sol` → Wormhole → `BasejumpProxy.sol` (Moonbeam) → `XcmTransactor` → `BasejumpLanding.sol` (Hydration). Fast-path is a separate signed VAA flow handled by `Basejump.completeTransfer`.
-- **Intents path:** `BasejumpHub.sol` (Hydration, future) atomically fires Snowbridge transfer + MRL → Moonbeam `BasejumpProxy` → Wormhole VAA → Ethereum `Basejump` → `BasejumpLanding` (Ethereum) → `IntentRouter.sol` (EVM `IBasejumpReceiver`) → OneClick quote `depositAddress` (native ETH).
+- **Intents path:** `IntentEmitter.sol` (Hydration) swaps the user's asset → WETH, then via XCM `batch_all` (reserve-transfer WETH+GLMR to its Moonbeam MDA + Transact-as-MDA) calls `BasejumpProxy.bridgeViaWormhole` → Wormhole TokenBridge (slow pool replenish) + fast VAA → Ethereum `Basejump` → `BasejumpLandingNative` (remaps source WETH → native ETH via `destAssetFor`) → `IntentRouter.sol` (`IBasejumpReceiver`) → OneClick quote `depositAddress` (native ETH).
 - **Off-chain:** `broadcaster` reads Solana oracle state and signs `send_price` / `send_rate` instructions. `bjscan` indexes Basejump events from Moonbeam/Base/Hydration and exposes them via Fastify. `mrelayer` polls Wormhole for VAAs and submits them to receiver contracts.
 - **Shared:** `@whm/common` exports `chains`, `ifs`, `wallet`, `args`, `migration`. Any change here affects all consumers.
 
