@@ -111,9 +111,3 @@ See [migrations/README.md](migrations/README.md) for the migration model, naming
 | `@whm/bjscan`        | `agents/bjscan/`      | Basejump indexer + Fastify API         |
 
 `agents/mrelayer` ships its own `package-lock.json` and is intentionally NOT a pnpm workspace member.
-
-## Conventions
-
-- **Commit messages**: `scope: description` (lowercase, imperative). Common scopes: `oracle`, `basejump`, `intents`, `bjscan` ...
-- **Migration naming**: deploy-first NNN order, `@<contract>` suffix for setters. See [migrations/README.md](migrations/README.md).
-- **Renounced ownership**: every prod-ready migration ends with `transfer-ownership@*` (to a custodian) or `renounce@*` (to `0x0`).
