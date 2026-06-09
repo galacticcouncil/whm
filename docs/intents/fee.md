@@ -1,4 +1,4 @@
-# Near Intents — Fee Breakdown
+# Intents — Fee Breakdown
 
 Every `swapAndBridge` call passes value across three legs (Hydration swap → Moonbeam bridge → Ethereum delivery) before it funds a OneClick quote on NEAR. Each leg charges on a different surface and is bounded by a different knob. This page is the reference for sizing `amountIn`, `minEthOut`, and `maxFeeIn`, and for understanding where the value goes.
 
@@ -26,7 +26,7 @@ value(amountIn)  ≳  xcmFee  +  assetFee[WETH]  +  oneClick.requiredDeposit
 
 A fixed amount of GLMR (~`1e18`, see [`IntentEmitter.initialize`](../../contracts/src/intents/IntentEmitter.sol)) reserved for the cross-chain hop: destination arrival fee + the remote `BuyExecution` (`xcmExecutionFee`) for the Moonbeam Transact.
 
-- **How it's paid:** in [`_swap`](../../contracts/src/intents/IntentEmitter.sol), unless `A` is already GLMR, the contract *buys* `xcmFee` GLMR by selling `A`.
+- **How it's paid:** in [`_swap`](../../contracts/src/intents/IntentEmitter.sol), unless `A` is already GLMR, the contract _buys_ `xcmFee` GLMR by selling `A`.
 - **Caller knob — `maxFeeIn`:** the max amount of `A` the fee-buy may consume (slippage bound on the fee leg). Set it from the live `A/GLMR` price with headroom; too low → the buy reverts; it caps how much a thin/manipulated pool can extract on this leg.
 - **GLMR-input path:** when `A == GLMR` the fee is withheld (`amountIn − xcmFee`), not bought, so `maxFeeIn` is ignored.
 - **Operator-tunable:** `xcmFee` / `xcmExecutionFee` / gas / weight via `setXcmParams` (`onlyXcmOperator`).
@@ -71,10 +71,10 @@ The `netAmount` ETH must meet the OneClick quote's required origin deposit (`ori
 
 ## Knobs at a glance
 
-| Knob | Where | Set by | Guards |
-| --- | --- | --- | --- |
-| `maxFeeIn` | `swapAndBridge` arg | caller | A spent buying the `xcmFee` GLMR (transport leg) |
-| `minEthOut` | `swapAndBridge` arg | caller | WETH out of the Hydration swap (swap leg) |
-| `xcmFee` / `xcmExecutionFee` | `IntentEmitter` storage | `xcmOperator` | size of the GLMR transport reserve |
-| `assetFee[WETH]` | `BasejumpProxy` storage | proxy owner | Basejump fast-path fee + Wormhole dust buffer |
-| `requiredDeposit` | OneClick quote | OneClick API | minimum ETH the intent needs |
+| Knob                         | Where                   | Set by        | Guards                                           |
+| ---------------------------- | ----------------------- | ------------- | ------------------------------------------------ |
+| `maxFeeIn`                   | `swapAndBridge` arg     | caller        | A spent buying the `xcmFee` GLMR (transport leg) |
+| `minEthOut`                  | `swapAndBridge` arg     | caller        | WETH out of the Hydration swap (swap leg)        |
+| `xcmFee` / `xcmExecutionFee` | `IntentEmitter` storage | `xcmOperator` | size of the GLMR transport reserve               |
+| `assetFee[WETH]`             | `BasejumpProxy` storage | proxy owner   | Basejump fast-path fee + Wormhole dust buffer    |
+| `requiredDeposit`            | OneClick quote          | OneClick API  | minimum ETH the intent needs                     |

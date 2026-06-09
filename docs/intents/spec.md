@@ -1,4 +1,4 @@
-# Near Intents
+# Intents
 
 ## Abstract
 
@@ -14,7 +14,7 @@ The bridge composes two existing systems: **Basejump** (fast-path delivery again
   - `IntentEmitter` on Hydration — swaps any Hydration asset → WETH and initiates the cross-chain bridge in one extrinsic
   - `IntentRouter` on Ethereum (`IBasejumpReceiver`, forwards native ETH to the quote deposit address)
 - Source asset (user side): **any Hydration asset** `A` the router can sell to WETH (GLMR and WETH are special-cased). The bridged/origin asset for the quote is **ETH** (WETH on Hydration/Moonbeam → native ETH at the deposit address).
-- Asset transport: **XCM reserve-transfer** Hydration → Moonbeam (WETH + GLMR to the emitter's MDA), then Wormhole **TokenBridge** Moonbeam → Ethereum (~13 min) — replenishes the `BasejumpLanding` pool. There is **no Snowbridge** in V1.
+- Asset transport: **XCM reserve-transfer** Hydration → Moonbeam (WETH + GLMR to the emitter's MDA), then Wormhole **TokenBridge** Moonbeam → Ethereum (~13 min) — replenishes the `BasejumpLanding` pool.
 - Trigger transport: the same `BasejumpProxy.bridgeViaWormhole` call publishes the fast-path Wormhole VAA (~2 min) alongside the TokenBridge transfer — both legs originate from one Moonbeam call, so they are inherently paired and self-funding (the call pulls and locks the WETH it bridges).
 - Intent hop: Ethereum ETH → OneClick quote deposit → NEAR Intents → destination asset on destination chain
 - Quote model: `OneClickService.getQuote(originAsset = ETH.eth, ...)` returns quote details plus a quote-specific `depositAddress` on Ethereum
@@ -24,7 +24,7 @@ The bridge composes two existing systems: **Basejump** (fast-path delivery again
 - EVM forward step is **atomic** with Basejump fast-path delivery — no keeper involvement, reverts together
 - Hydration-side dispatch is **atomic** in one extrinsic — swap + `batch_all` either all apply or none do
 - Single `nintent` headless keeper: watches `IntentForwarded` events on `IntentRouter` and calls `OneClick.submitDepositTx({ depositAddress, txHash })` as a latency optimization. OneClick auto-detects deposits without it; nintent just makes detection ~seconds instead of one poller interval. No HTTP API, no quote-path involvement, no per-quote registry. Quote acquisition is UI ↔ OneClick direct. Failure unwind is operator-driven outside the agent.
-- Supported destinations: any NEAR Intents-listed asset/chain pair supported by the quote API (ZEC/Zcash, BTC/Bitcoin, NEAR/NEAR, SPL/Solana, …)
+- Supported destinations: any NEAR Intents-listed asset/chain pair supported by the quote API (ZEC/Zcash, BTC/Bitcoin, NEAR/NEAR, …)
 - No on-chain failure handling — happy path only; expired or rejected quotes are unwound off-chain (see [refund.md](refund.md))
 - No shared NEAR recipient account in the NIR path — the quote's origin-chain `depositAddress` is used directly
 
@@ -59,7 +59,7 @@ If any step fails the whole extrinsic reverts — no partial state. Only the cal
 
 ### Moonbeam hop — the emitter's MDA + `BasejumpProxy`
 
-The reserve-transfer credits the emitter's **Multilocation Derived Account** (`xcmSource`) on Moonbeam with the WETH + GLMR, and the `send` leg's Transact executes *as that MDA* (sovereign origin). The Batch precompile approves the proxy and calls `bridgeViaWormhole`, which:
+The reserve-transfer credits the emitter's **Multilocation Derived Account** (`xcmSource`) on Moonbeam with the WETH + GLMR, and the `send` leg's Transact executes _as that MDA_ (sovereign origin). The Batch precompile approves the proxy and calls `bridgeViaWormhole`, which:
 
 - **Slow path** — `TokenBridge.transferTokens(WETH, actualAmount, destChain = Ethereum, destLanding, …)` locks WETH on Moonbeam and delivers the canonical asset to the Ethereum `BasejumpLanding` pool (~13 min), replenishing what the fast path pays out.
 - **Fast path** — `_fastTrack` publishes a Wormhole VAA with `netAmount = actualAmount − assetFee[WETH]`, `recipient = IntentRouter`, and the opaque `data`.
@@ -191,14 +191,14 @@ The OneClick quote takes its own spread on the NEAR side (reflected in the quote
 
 ## How Existing Contracts Map
 
-| Contract / Component  | Role                                                                                                                                                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IntentEmitter`       | **New** — on Hydration. Single user entry. Buys the GLMR fee, swaps `A → WETH`, dispatches `batch_all([reserve-transfer WETH+GLMR → MDA, send→Transact bridgeViaWormhole])`. Carries `(intentId, depositAddress)` in the payload. |
-| `BasejumpProxy`       | On Moonbeam. Called by the emitter's MDA. `bridgeViaWormhole` locks WETH via `TokenBridge.transferTokens` (slow replenishment) **and** publishes the fast-path VAA with `bytes data`. Self-funding; no caller whitelist.          |
-| Wormhole TokenBridge  | Third-party transport. Moves the locked WETH Moonbeam → Ethereum (~13 min), delivering the canonical asset to the `BasejumpLanding` pool. The slow path that replenishes the fast payout. (8-dec normalization — see fee.md.)     |
-| `Basejump`            | On Ethereum. Inbound completion. `completeTransfer(vaa)` verifies the VAA, decodes `data`, and calls `BasejumpLandingNative.transfer(..., data)`.                                                                                |
+| Contract / Component    | Role                                                                                                                                                                                                                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IntentEmitter`         | **New** — on Hydration. Single user entry. Buys the GLMR fee, swaps `A → WETH`, dispatches `batch_all([reserve-transfer WETH+GLMR → MDA, send→Transact bridgeViaWormhole])`. Carries `(intentId, depositAddress)` in the payload.                                                                             |
+| `BasejumpProxy`         | On Moonbeam. Called by the emitter's MDA. `bridgeViaWormhole` locks WETH via `TokenBridge.transferTokens` (slow replenishment) **and** publishes the fast-path VAA with `bytes data`. Self-funding; no caller whitelist.                                                                                      |
+| Wormhole TokenBridge    | Third-party transport. Moves the locked WETH Moonbeam → Ethereum (~13 min), delivering the canonical asset to the `BasejumpLanding` pool. The slow path that replenishes the fast payout. (8-dec normalization — see fee.md.)                                                                                 |
+| `Basejump`              | On Ethereum. Inbound completion. `completeTransfer(vaa)` verifies the VAA, decodes `data`, and calls `BasejumpLandingNative.transfer(..., data)`.                                                                                                                                                             |
 | `BasejumpLandingNative` | On Ethereum. Pre-funded pool with a `destAssetFor` source→dest remap (ERC20 or `NATIVE`). For NIR, Moonbeam-WETH → `NATIVE`: pays native ETH to `IntentRouter` via `call{value:}` and invokes `onBasejumpReceive`. Replenished by the slow Wormhole transfer; queues + `fulfillPending` cover liquidity gaps. |
-| `IntentRouter`        | **New** — `IBasejumpReceiver` that forwards the delivered asset (native ETH or ERC20) to the OneClick quote's Ethereum `depositAddress`.                                                                                          |
-| Defuse / OneClick API | Third-party — returns quote data, quote-specific `depositAddress`, accepts `submitDepositTx`.                                                                                                                                     |
-| `intents.near`        | Third-party — NEAR Intents settlement layer behind the quote flow.                                                                                                                                                               |
-| `nintent` agent       | **New** off-chain — headless keeper. Watches `IntentForwarded`, calls `submitDepositTx` as a latency optimization. No HTTP API, no registry. Not in the quote or status paths. OneClick still completes swaps if `nintent` is offline. |
+| `IntentRouter`          | **New** — `IBasejumpReceiver` that forwards the delivered asset (native ETH or ERC20) to the OneClick quote's Ethereum `depositAddress`.                                                                                                                                                                      |
+| Defuse / OneClick API   | Third-party — returns quote data, quote-specific `depositAddress`, accepts `submitDepositTx`.                                                                                                                                                                                                                 |
+| `intents.near`          | Third-party — NEAR Intents settlement layer behind the quote flow.                                                                                                                                                                                                                                            |
+| `nintent` agent         | **New** off-chain — headless keeper. Watches `IntentForwarded`, calls `submitDepositTx` as a latency optimization. No HTTP API, no registry. Not in the quote or status paths. OneClick still completes swaps if `nintent` is offline.                                                                        |

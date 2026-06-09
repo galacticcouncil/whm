@@ -1,4 +1,4 @@
-# Near Intents Schema
+# Intents Schema
 
 ## Off-chain Prelude (before any chain activity)
 
@@ -224,6 +224,7 @@ The quote's `depositAddress` is the actual origin-chain recipient on Ethereum. `
 ```
 
 Why these boundaries matter:
+
 - Hydration atomic: the swap and the bridge dispatch never half-apply.
 - Self-funding bridge: nobody can trigger a fast-path payout without locking matching WETH in the same call — this is the anti-drain guarantee (it replaces the MDA-whitelist of the earlier Snowbridge design).
 - Ethereum atomic: if the deposit forward fails, the fast-path payout reverts; funds are never stranded at the Router, and the slow path still replenishes the pool.
@@ -234,7 +235,7 @@ Why these boundaries matter:
 | ------------------ | -------------------------------------------------------------------------------------------------- |
 | `quoted`           | Quote returned by OneClick API, including `depositAddress`                                         |
 | `accepted`         | User accepts quote in UI; UI computes `intentId` and sizing params                                 |
-| `bridging`         | `BridgeInitiated` event on Hydration (`IntentEmitter` extrinsic confirmed)                          |
+| `bridging`         | `BridgeInitiated` event on Hydration (`IntentEmitter` extrinsic confirmed)                         |
 | `forwarded`        | `IntentForwarded` event on `IntentRouter` — native ETH transferred to `depositAddress` on Ethereum |
 | `submitted`        | `OneClickService.submitDepositTx({ depositAddress, txHash })` called by `nintent`                  |
 | `processing`       | Quote service acknowledges deposit and starts quoted execution                                     |
@@ -244,13 +245,16 @@ Why these boundaries matter:
 
 ## Timing
 
-| Step                                                       | Approx. duration   |
-| ---------------------------------------------------------- | ------------------ |
-| Off-chain quote acquisition + user accept                  | seconds            |
-| Hydration extrinsic (`IntentEmitter.swapAndBridge`)        | one block          |
-| XCM → Moonbeam → Wormhole VAA → Ethereum + atomic forward  | ~2 min             |
-| `submitDepositTx` call after router forward                | seconds            |
-| Quote processing + solver fill                             | seconds to minutes |
-| **Total user-perceived time**                              | **~2–5 min**       |
-| Wormhole TokenBridge slow settlement (replenishes pool)    | ~13 min            |
+| Step                                                      | Approx. duration   |
+| --------------------------------------------------------- | ------------------ |
+| Off-chain quote acquisition + user accept                 | seconds            |
+| Hydration extrinsic (`IntentEmitter.swapAndBridge`)       | one block          |
+| XCM → Moonbeam → Wormhole VAA → Ethereum + atomic forward | ~2 min             |
+| `submitDepositTx` call after router forward               | seconds            |
+| Quote processing + solver fill                            | seconds to minutes |
+| **Total user-perceived time**                             | **~2–5 min**       |
+| Wormhole TokenBridge slow settlement (replenishes pool)   | ~13 min            |
+
+```
+
 ```
