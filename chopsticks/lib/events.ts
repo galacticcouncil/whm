@@ -13,24 +13,33 @@ export function findEvent(events: EventRecord[], pallet: Pallet, method: string)
     .value;
 }
 
-export function checkIfExtrinsicFailed(events: EventRecord[]): boolean {
-  return events.some(({ event }) => {
-    if (event.type === "System" && event.value.type === "ExtrinsicFailed") {
-      c.error("🥢 ExtrinsicFailed:", toJson(event.value, 0));
-      return true;
-    }
-    return false;
-  });
+export function checkIfExtrinsicSuccess(events: EventRecord[]): boolean {
+  return events.some(
+    ({ event }) => event.type === "System" && event.value.type === "ExtrinsicSuccess",
+  );
 }
 
-export function checkIfEthereumExecuted(events: EventRecord[]): boolean {
-  return events.some(({ event }) => {
-    if (event.type === "Ethereum" && event.value.type === "Executed") {
-      c.error("🥢 Executed:", toJson(event.value, 0));
-      return true;
-    }
-    return false;
-  });
+export function checkIfEthereumExecuted(events: EventRecord[], reason = "Succeed"): boolean {
+  return events.some(
+    ({ event }) =>
+      event.type === "Ethereum" &&
+      event.value.type === "Executed" &&
+      event.value.value.exit_reason.type === reason,
+  );
+}
+
+/** True iff an `EVM.Log` with the given `topic0` (event signature hash) was emitted. */
+export function checkIfEvmLog(events: EventRecord[], topic0: string): boolean {
+  return events.some(
+    ({ event }) =>
+      event.type === "EVM" &&
+      event.value.type === "Log" &&
+      event.value.value.log.topics[0] === topic0,
+  );
+}
+
+export function checkIfXcmSent(events: EventRecord[]): boolean {
+  return events.some(({ event }) => event.type === "PolkadotXcm" && event.value.type === "Sent");
 }
 
 export function checkIfQueueProcessed(events: EventRecord[]): boolean {
@@ -39,6 +48,23 @@ export function checkIfQueueProcessed(events: EventRecord[]): boolean {
       event.type === "MessageQueue" &&
       event.value.type === "Processed" &&
       event.value.value.success === true,
+  );
+}
+
+/** True iff any queued XCM message failed: `MessageQueue.Processed{success:false}` or `ProcessingFailed`. */
+export function checkIfQueueFailed(events: EventRecord[]): boolean {
+  return events.some(
+    ({ event }) =>
+      event.type === "MessageQueue" &&
+      ((event.value.type === "Processed" && event.value.value.success === false) ||
+        event.value.type === "ProcessingFailed"),
+  );
+}
+
+/** True iff the XCM executor raised an error (`PolkadotXcm.ProcessXcmError`, e.g. FailedToTransactAsset). */
+export function checkIfXcmError(events: EventRecord[]): boolean {
+  return events.some(
+    ({ event }) => event.type === "PolkadotXcm" && event.value.type === "ProcessXcmError",
   );
 }
 

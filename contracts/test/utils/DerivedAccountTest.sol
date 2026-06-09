@@ -24,6 +24,18 @@ contract DerivedAccountHarness {
     {
         return DerivedAccount.deriveMultilocationAccountKey20(parents, parachainId, hasParachainId, account);
     }
+
+    function deriveSiblingEvm(uint32 parachainId, address account) external view returns (address) {
+        return DerivedAccount.deriveSiblingEvm(parachainId, account);
+    }
+
+    function deriveMultilocationAccountId32(uint8 parents, uint32 parachainId, bool hasParachainId, bytes32 account)
+        external
+        view
+        returns (address)
+    {
+        return DerivedAccount.deriveMultilocationAccountId32(parents, parachainId, hasParachainId, account);
+    }
 }
 
 contract DerivedAccountTest is Test {
@@ -132,5 +144,16 @@ contract DerivedAccountTest is Test {
         address a = harness.deriveMultilocationAccountKey20(1, 0, false, ACCOUNT_1);
         address b = harness.deriveMultilocationAccountKey20(1, 2034, false, ACCOUNT_1);
         assertEq(a, b);
+    }
+
+    /// @dev An unbound EVM address on a Substrate chain (e.g. Hydration) descends to a sibling as its
+    ///      truncated EVM account (AccountId32 "ETH\0"++h160++0×8), so its MDA is the AccountId32 derivation
+    ///      — NOT the AccountKey20 one used for AccountId20 chains (Moonbeam). The scheme was cross-checked
+    ///      against a real Hydration(2034)→Moonbeam MDA pair; this pins it as a deterministic regression vector.
+    function testDeriveSiblingEvmIsAccountId32Derivation() public view {
+        bytes32 id = bytes32(abi.encodePacked(bytes4(0x45544800), bytes20(ACCOUNT_2), bytes8(0)));
+        assertEq(harness.deriveSiblingEvm(2034, ACCOUNT_2), harness.deriveMultilocationAccountId32(1, 2034, true, id));
+        assertEq(harness.deriveSiblingEvm(2034, ACCOUNT_2), 0x631a0cb3459e79c9E972A6e0a9eaC7F4D7C5eDd6);
+        assertTrue(harness.deriveSiblingEvm(2034, ACCOUNT_2) != harness.deriveSibling(2034, ACCOUNT_2));
     }
 }

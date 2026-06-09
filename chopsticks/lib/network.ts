@@ -26,8 +26,11 @@ export async function spawn(spec: ChainSpec): Promise<Network> {
   const { chain, addr, close } = await setupWithServer({
     endpoint: spec.endpoint,
     port: spec.port,
-    "mock-signature-host": true, // skip signature verification — submit as any origin
+    // Skip signature verification — submit as any origin
+    "mock-signature-host": true,
     "build-block-mode": BuildBlockMode.Manual,
+    // Wasm runtime log verbosity (0=off … 5=trace) — surfaces XCM/frame logs.
+    "runtime-log-level": Number(process.env.RUNTIME_LOG_LEVEL ?? 0),
   });
 
   const url = `ws://${addr}`;

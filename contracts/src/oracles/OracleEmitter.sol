@@ -32,7 +32,7 @@ contract OracleEmitter is Initializable, UUPSUpgradeable {
     error InsufficientFee(uint256 sent, uint256 required);
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
+        _onlyOwner();
         _;
     }
 
@@ -70,6 +70,10 @@ contract OracleEmitter is Initializable, UUPSUpgradeable {
     }
 
     // ─── Internal ────────────────────────────────────────────────
+
+    function _onlyOwner() internal view {
+        if (msg.sender != owner) revert NotOwner();
+    }
 
     function _readSource(bytes32 assetId, Feed memory feed) internal view returns (uint256) {
         (bool ok, bytes memory ret) = feed.source.staticcall(feed.call);

@@ -15,12 +15,26 @@ library DerivedAccount {
     string constant FAMILY_PARENT = "ParentChain";
 
     string constant ACCOUNT_KEY20 = "AccountKey20";
+    string constant ACCOUNT_ID32 = "AccountId32";
+
+    /// @dev Truncated EVM account prefix: b"ETH\0" (0x45 0x54 0x48 0x00).
+    bytes4 constant EVM_ACCOUNT_PREFIX = 0x45544800;
 
     /// @notice Derive H160 for a sibling parachain sender (parents=1, parachainId defined)
     /// @param parachainId Source parachain ID (e.g. 2004 for Moonbeam)
     /// @param account     Source Ethereum address on the origin chain
     function deriveSibling(uint32 parachainId, address account) internal view returns (address) {
         return deriveMultilocationAccountKey20(PARENTS_SIBLING, parachainId, true, account);
+    }
+
+    /// @notice Derive H160 for a sibling parachain EVM-account sender (parents=1, parachainId defined)
+    /// @dev An EVM account's substrate identity is its truncated EVM account (b"ETH\0" ++ h160 ++ [0u8;8]),
+    ///      an AccountId32 — so its MDA uses the AccountId32 derivation, not AccountKey20.
+    /// @param parachainId Source parachain ID (e.g. 2034 for Hydration)
+    /// @param account     Source Ethereum address on the origin chain
+    function deriveSiblingEvm(uint32 parachainId, address account) internal view returns (address) {
+        bytes32 id = bytes32(abi.encodePacked(EVM_ACCOUNT_PREFIX, bytes20(account), bytes8(0)));
+        return deriveMultilocationAccountId32(PARENTS_SIBLING, parachainId, true, id);
     }
 
     /// @notice Derive H160 for a child parachain sender (parents=0, parachainId defined)
@@ -43,6 +57,19 @@ library DerivedAccount {
         bytes32 hash = _deriveMultilocationHash(
             parents, parachainId, hasParachainId, ACCOUNT_KEY20, 32, abi.encodePacked(bytes20(account))
         );
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return address(bytes20(hash));
+    }
+
+    /// @notice MDA for AccountId32 (Substrate-style)
+    /// @dev hash preimage: family ++ compact(para?) ++ compact(len("AccountId32")+32) ++ "AccountId32" ++ account
+    function deriveMultilocationAccountId32(uint8 parents, uint32 parachainId, bool hasParachainId, bytes32 account)
+        internal
+        view
+        returns (address)
+    {
+        bytes32 hash =
+            _deriveMultilocationHash(parents, parachainId, hasParachainId, ACCOUNT_ID32, 43, abi.encodePacked(account));
         // forge-lint: disable-next-line(unsafe-typecast)
         return address(bytes20(hash));
     }

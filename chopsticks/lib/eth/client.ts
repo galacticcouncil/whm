@@ -1,10 +1,15 @@
 import { getContractAddress, type Hex } from "viem";
+import { TypedApi } from "polkadot-api";
+
+import { hydration } from "@galacticcouncil/descriptors";
 
 import type { Network } from "../network";
+import type { EventRecord } from "../events";
+
 import { sendRawEthTx, type EthTxResult } from "./submit";
 
 const DEFAULT_GAS = 6_000_000n;
-const DEFAULT_GAS_PRICE = 100n * 10n ** 9n; // 100 gwei
+const DEFAULT_GAS_PRICE = 10_000_000n; // 0.01 gwei — realistic Hydration EVM gas price
 
 export interface EthClientOpts {
   chainId: number;
@@ -49,6 +54,10 @@ export class EthClient {
     return this.account.address;
   }
 
+  get api(): TypedApi<typeof hydration> {
+    return this.net.client.getTypedApi(hydration);
+  }
+
   private async submit(fields: { to?: Hex; data: Hex; value?: bigint }): Promise<EthTxResult> {
     const rawTx = await this.account.signTransaction({
       type: "legacy",
@@ -75,5 +84,9 @@ export class EthClient {
   /** Call an existing contract. */
   call(to: Hex, data: Hex, value = 0n): Promise<EthTxResult> {
     return this.submit({ to, data, value });
+  }
+
+  events(blockHash: string): Promise<EventRecord[]> {
+    return this.api.query.System.Events.getValue({ at: blockHash });
   }
 }

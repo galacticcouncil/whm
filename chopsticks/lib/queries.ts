@@ -1,33 +1,14 @@
-import { AccountId, Binary, type SizedHex } from "polkadot-api";
+import { Binary, type SizedHex } from "polkadot-api";
 
 import { hydration } from "@galacticcouncil/descriptors";
 
 import type { Network } from "./network";
 import type { EventRecord } from "./events";
 
-const ss58Codec = AccountId();
-const toSs58 = (account: string): string =>
-  account.startsWith("0x") ? ss58Codec.dec(account) : account;
-
-/**
- * Run a state/event read against an explicit block hash, retrying while papi's WS chainHead lags
- * behind the chopsticks-built block (avoids the `latest`/`head` race entirely).
- */
-export async function atBlock<T>(fn: () => Promise<T>, tries = 40): Promise<T> {
-  for (let i = 0; i < tries - 1; i++) {
-    try {
-      return await fn();
-    } catch {
-      await new Promise((r) => setTimeout(r, 250));
-    }
-  }
-  return fn();
-}
-
 /** Read a block's events at an explicit hash (typed against the runtime), retrying through WS lag. */
 export async function getEventsAt(net: Network, blockHash: string): Promise<EventRecord[]> {
   const api = net.client.getTypedApi(hydration);
-  return atBlock(() => api.query.System.Events.getValue({ at: blockHash }));
+  return api.query.System.Events.getValue({ at: blockHash });
 }
 
 /**

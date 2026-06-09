@@ -56,12 +56,12 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
     // ─── Modifiers ───────────────────────────────────────────────
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
+        _onlyOwner();
         _;
     }
 
     modifier onlyXcmOperator() {
-        if (!xcmOperators[msg.sender]) revert NotXcmOperator();
+        _onlyXcmOperator();
         _;
     }
 
@@ -73,7 +73,7 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
 
     function initialize() public initializer {
         owner = msg.sender;
-        xcmSource = DerivedAccount.deriveSibling(HydrationConsts.PARA_ID, address(this));
+        xcmSource = DerivedAccount.deriveSiblingEvm(HydrationConsts.PARA_ID, address(this));
         xcmFee = 1_000_000_000_000_000_000; // 1 GLMR: dest arrival fee (<0.1) + remote execution (<0.9)
         xcmExecutionFee = 900_000_000_000_000_000; // 0.9 GLMR: transact-leg BuyExecution
         xcmGasLimit = 5_000_000;
@@ -109,10 +109,33 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
         // Slippage check
         if (wethOut < minEthOut) revert InsufficientOutput();
 
-        // TEMP DEBUG: bridge leg disabled to isolate the swap path. Re-enable before merging.
-        // _bridge(wethOut, intentId, intentDepositAddress);
+        _bridge(wethOut, intentId, intentDepositAddress);
 
         emit BridgeInitiated(intentId, msg.sender, assetIn, amountIn, wethOut, intentDepositAddress);
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────
+
+    function _swap(IERC20 assetInToken, uint32 assetIn, uint256 amountIn) internal {
+        // A is GLMR: Nothing to buy — keep the fee, sell the rest for WETH.
+        if (assetIn == HydrationConsts.GLMR_ID) {
+            uint256 aIn = amountIn - xcmFee;
+            bytes memory buyWeth = HydrationRouter.encodeSell(assetIn, HydrationConsts.WETH_ID, aIn, 0);
+            _dispatch(buyWeth);
+            return;
+        }
+
+        // No GLMR slippage guard
+        bytes memory buyFeeAsset =
+            HydrationRouter.encodeBuy(assetIn, HydrationConsts.GLMR_ID, xcmFee, type(uint128).max);
+        _dispatch(buyFeeAsset);
+
+        // Convert the leftover A to WETH — unless A already is WETH.
+        if (assetIn != HydrationConsts.WETH_ID) {
+            uint256 aIn = assetInToken.balanceOf(address(this));
+            bytes memory buyWeth = HydrationRouter.encodeSell(assetIn, HydrationConsts.WETH_ID, aIn, 0);
+            _dispatch(buyWeth);
+        }
     }
 
     /// @dev Builds and dispatches batch_all([transfer_assets_using_type_and_then, send]).
@@ -146,29 +169,6 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
         _dispatch(HydrationUtility.batchAll(transferCall, sendCall));
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────
-
-    function _swap(IERC20 assetInToken, uint32 assetIn, uint256 amountIn) internal {
-        // A is GLMR: Nothing to buy — keep the fee, sell the rest for WETH.
-        if (assetIn == HydrationConsts.GLMR_ID) {
-            uint256 aIn = amountIn - xcmFee;
-            bytes memory buyWeth = HydrationRouter.encodeSell(assetIn, HydrationConsts.WETH_ID, aIn, 0);
-            _dispatch(buyWeth);
-            return;
-        }
-
-        bytes memory buyFeeAsset =
-            HydrationRouter.encodeBuy(assetIn, HydrationConsts.GLMR_ID, xcmFee, type(uint128).max);
-        _dispatch(buyFeeAsset);
-
-        // Convert the leftover A to WETH — unless A already is WETH.
-        if (assetIn != HydrationConsts.WETH_ID) {
-            uint256 aIn = assetInToken.balanceOf(address(this));
-            bytes memory buyWeth = HydrationRouter.encodeSell(assetIn, HydrationConsts.WETH_ID, aIn, 0);
-            _dispatch(buyWeth);
-        }
-    }
-
     function _dispatch(bytes memory call) internal {
         (bool success,) = HydrationConsts.DISPATCH_PRECOMPILE.call(call);
         if (!success) revert DispatchFailed();
@@ -199,6 +199,16 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
 
         bytes memory input = abi.encodeWithSelector(IBatch.batchAll.selector, to, values, callData, gasLimit);
         return MoonbeamEthereumXcm.transact(xcmGasLimit, MoonbeamConsts.BATCH_PRECOMPILE, input);
+    }
+
+    // ─── Internal ───────────────────────────────────────────────
+
+    function _onlyOwner() internal view {
+        if (msg.sender != owner) revert NotOwner();
+    }
+
+    function _onlyXcmOperator() internal view {
+        if (!xcmOperators[msg.sender]) revert NotXcmOperator();
     }
 
     // ─── Upgrade ─────────────────────────────────────────────────
