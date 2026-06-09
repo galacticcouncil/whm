@@ -15,144 +15,155 @@
 │              │    4. UI computes intentId =
 │              │       keccak256(quoteId, depositAddress, srcAmount,
 │              │                  destAsset, destRecipient, deadline, nonce)
+│              │    5. UI sizes amountIn / minEthOut / maxFeeIn (see fee.md)
 └──────────────┘
-
-The UI talks to OneClick directly — nintent is not in this path. The UI now holds
-(intentId, depositAddress) and is ready to call IntentEmitter.bridgeAndForward
-on Hydration. The user pays in WETH on Hydration; native ETH lands at depositAddress
-on Ethereum.
 ```
+
+The UI talks to OneClick directly — `nintent` is not in this path. The UI now holds
+`(intentId, depositAddress)` and the sizing params, and is ready to call
+`IntentEmitter.swapAndBridge(...)` on Hydration. The user pays in **any Hydration asset `A`**
+(swapped to WETH on Hydration); **native ETH** lands at `depositAddress` on Ethereum.
 
 ## End-to-End Flow (on-chain)
 
+The asset and the trigger travel the **same** route: Hydration → (XCM reserve-transfer) →
+Moonbeam MDA → `BasejumpProxy.bridgeViaWormhole`, which fires both Basejump paths — a slow
+Wormhole **TokenBridge** transfer (replenishes the pool, ~13 min) and an instant fast-path VAA
+(~2 min). Both originate from one Moonbeam call, so they are inherently paired and self-funding.
+
 ```
-A: Hydration                B: Snowbridge       C: Moonbeam (proxy)   M: off-chain    D: Ethereum (1 atomic tx on fast-path VAA)       E: Defuse / OneClick +     F: Destination chain
-   (IntentEmitter)               transport            (BasejumpProxy)      (mrelayer +     (Basejump + BasejumpLanding +                     NEAR Intents + solvers     (Zcash, BTC, NEAR, ...)
-                                                                          nintent)        IntentRouter + depositAddress)
-┌──────────────────────┐    ┌────────────────┐  ┌──────────────────┐  ┌────────────┐  ┌─────────────────────────────────────────────┐   ┌──────────────────────┐   ┌──────────────────┐
-│ User                 │    │ Snowbridge     │  │ BasejumpProxy    │  │ mrelayer / │  │ Basejump +                                  │   │ Quote API +          │   │ User wallet      │
-│                      │    │ (Hydration ⇄   │  │ (whitelist gated │  │ nintent    │  │ BasejumpLanding (native ETH pool) +         │   │ deposit detection +  │   │ (Zcash address)  │
-│                      │    │  Ethereum;     │  │  msg.sender =    │  │            │  │ IntentRouter (forwards native ETH) +   │   │ NEAR Intents +       │   │                  │
-│                      │    │  WETH→ETH      │  │  IntentEmitterMDA) │  │            │  │ quote depositAddress (ETH EOA/contract)     │   │ solvers              │   │                  │
-│                      │    │  unwrap at     │  │                  │  │            │  │                                             │   │                      │   │                  │
-│                      │    │  bridge edge)  │  │                  │  │            │  │                                             │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│ 1. IntentEmitter       │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│    .bridgeAndForward │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│    (ethAmount,       │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│     intentId,        │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│     depositAddress)  │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│ 2a. Snowbridge leg ──┼───►│ 2b. transfer   │  │                  │  │            │  │                                             │   │                      │   │                  │
-│     WETH → ETH       │    │     (slow,     │  │                  │  │            │  │                                             │   │                      │   │                  │
-│     to Basejump      │    │     ~30 min)   │  │                  │  │            │  │                                             │   │                      │   │                  │
-│     Landing          │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│ 2c. MRL leg ─────────┼────┼────────────────┼─►│ 3. proxy receives│  │            │  │                                             │   │                      │   │                  │
-│     XCM to Moonbeam, │    │                │  │    XCM as        │  │            │  │                                             │   │                      │   │                  │
-│     calls            │    │                │  │    IntentEmitter   │  │            │  │                                             │   │                      │   │                  │
-│     BasejumpProxy    │    │                │  │    MDA           │  │            │  │                                             │   │                      │   │                  │
-│     .bridgeVia       │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│     Wormhole(ETH,    │    │                │  │ 4. wormhole      │  │            │  │                                             │   │                      │   │                  │
-│     amount, ETH,     │    │                │  │    .publishMsg() │─►│ 5. pick    │  │                                             │   │                      │   │                  │
-│     Router, data=    │    │                │  │    payload =     │  │    up      │  │                                             │   │                      │   │                  │
-│     (intentId,       │    │                │  │    (ETH, amount, │  │    instant │  │                                             │   │                      │   │                  │
-│     depositAddress)) │    │                │  │     Router, data)│  │    VAA     │  │                                             │   │                      │   │                  │
-│                      │    │                │  │    finality=200  │  │    (~2s)   │  │                                             │   │                      │   │                  │
-│ (atomic — both legs  │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│  fire or extrinsic   │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│  reverts)            │    │                │  │                  │  │ 6. submit  │  │ 7. Basejump.completeTransfer(vaa)           │   │                      │   │                  │
-│                      │    │                │  │                  │  │    VAA to  │─►│    (atomic, all-or-nothing):                │   │                      │   │                  │
-│                      │    │                │  │                  │  │    Ethereum│  │                                             │   │                      │   │                  │
-│                      │    │                │  │                  │  │    Basejump│  │  → BasejumpLanding.transfer(                │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │      ETH, amount, Router, data)             │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │  → Router.onBasejumpReceive(                │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │      asset=ETH, amount, data) payable       │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │    decode (intentId, depositAddress)        │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │  → depositAddress.call{value: amount}("")   │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │    (native ETH delivered;                   │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │     no unwrap needed)                       │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │  emit IntentForwarded(                      │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │    intentId, depositAddress, amount)        │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │                                             │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │  Reverts here roll back the whole tx;       │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │  Snowbridge slow leg still replenishes      │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  │  Landing's pool.                            │   │                      │   │                  │
-│                      │    │                │  │                  │  │            │  └─────────────────────────────────────────────┘   │                      │   │                  │
-│                      │    │                │  │                  │  │            │                                                    │                      │   │                  │
-│                      │    │                │  │                  │  │ 8. observe │◄──────────────── IntentForwarded ───────────────── │                      │   │                  │
-│                      │    │                │  │                  │  │   IntentFwd│                                                    │                      │   │                  │
-│                      │    │                │  │                  │  │   capture  │                                                    │                      │   │                  │
-│                      │    │                │  │                  │  │   txHash   │                                                    │                      │   │                  │
-│                      │    │                │  │                  │  │            │                                                    │                      │   │                  │
-│                      │    │                │  │                  │  │ 9. submit  │                                                    │ 10. detect deposit   │   │                  │
-│                      │    │                │  │                  │  │  DepositTx │────────────────────────────────────────────────────►│   on depositAddress │   │                  │
-│                      │    │                │  │                  │  │  ({deposit │                                                    │   start quoted       │   │                  │
-│                      │    │                │  │                  │  │  Address,  │                                                    │   processing         │   │                  │
-│                      │    │                │  │                  │  │  txHash}); │                                                    │                      │   │                  │
-│                      │    │                │  │                  │  │            │                                                    │ 11. NEAR Intents     │   │                  │
-│                      │    │                │  │                  │  │            │                                                    │     settles; solver  │   │ 12. user receives│
-│                      │    │                │  │                  │  │            │                                                    │     claims and       │──►│     destination  │
-│                      │    │                │  │                  │  │            │                                                    │     delivers dest    │   │     asset        │
-│                      │    │                │  │                  │  │            │                                                    │     asset            │   │                  │
-│                      │    │                │  │                  │  │ 13. poll   │◄─────────────────────────────────────────────────  │                      │   │                  │
-│                      │    │                │  │                  │  │   quote    │                                                    │                      │   │                  │
-│                      │    │                │  │                  │  │   status   │                                                    │                      │   │                  │
-└──────────────────────┘    └────────────────┘  └──────────────────┘  └────────────┘                                                    └──────────────────────┘   └──────────────────┘
+A: Hydration (IntentEmitter)        C: Moonbeam            M: off-chain     D: Ethereum (1 atomic tx on fast-path VAA)     E: OneClick + NEAR       F: dest chain
+   swap A→WETH, buy GLMR fee,          MDA + BasejumpProxy    (mrelayer +      (Basejump + BasejumpLandingNative +            Intents + solvers        (ZEC/BTC/…)
+   dispatch batch_all                                         nintent)         IntentRouter + depositAddress)
+
+┌────────────────────────┐  ┌──────────────────────┐  ┌────────────┐  ┌───────────────────────────────────────────┐  ┌──────────────────┐  ┌──────────────┐
+│ 1. swapAndBridge(      │  │                      │  │            │  │                                           │  │                  │  │              │
+│    assetIn, amountIn,  │  │                      │  │            │  │                                           │  │                  │  │              │
+│    minEthOut, maxFeeIn,│  │                      │  │            │  │                                           │  │                  │  │              │
+│    intentId,           │  │                      │  │            │  │                                           │  │                  │  │              │
+│    depositAddress)     │  │                      │  │            │  │                                           │  │                  │  │              │
+│                        │  │                      │  │            │  │                                           │  │                  │  │              │
+│ 2. _swap: buy xcmFee   │  │                      │  │            │  │                                           │  │                  │  │              │
+│    GLMR (≤maxFeeIn),   │  │                      │  │            │  │                                           │  │                  │  │              │
+│    sell rest A → WETH; │  │                      │  │            │  │                                           │  │                  │  │              │
+│    require ethOut ≥    │  │                      │  │            │  │                                           │  │                  │  │              │
+│    minEthOut           │  │                      │  │            │  │                                           │  │                  │  │              │
+│                        │  │                      │  │            │  │                                           │  │                  │  │              │
+│ 3. batch_all([         │  │                      │  │            │  │                                           │  │                  │  │              │
+│   a. transfer_assets ──┼─►│ 4. MDA credited with │  │            │  │                                           │  │                  │  │              │
+│      [GLMR,WETH]→MDA   │  │    GLMR + WETH       │  │            │  │                                           │  │                  │  │              │
+│   b. send→Transact ────┼─►│ 5. as MDA: Batch[    │  │            │  │                                           │  │                  │  │              │
+│      (as MDA)          │  │     WETH.approve,    │  │            │  │                                           │  │                  │  │              │
+│   ])                   │  │     bridgeViaWormhole│  │            │  │                                           │  │                  │  │              │
+│                        │  │     (WETH, ethOut,   │  │            │  │                                           │  │                  │  │              │
+│ (atomic — swap+dispatch│  │      ETH_WH_ID=2,    │  │            │  │                                           │  │                  │  │              │
+│  apply together or the │  │      Router, data=   │  │            │  │                                           │  │                  │  │              │
+│  extrinsic reverts)    │  │      (intentId,      │  │            │  │                                           │  │                  │  │              │
+│                        │  │       depositAddr))] │  │            │  │                                           │  │                  │  │              │
+│                        │  │                      │  │            │  │                                           │  │                  │  │              │
+│                        │  │ 6a. TokenBridge      │  │            │  │                                           │  │                  │  │              │
+│                        │  │     .transferTokens ─┼──┼────────────┼──┼──► (slow, ~13 min) replenishes pool ─┐    │  │                  │  │              │
+│                        │  │     (WETH → Landing) │  │            │  │                                       │   │  │                  │  │              │
+│                        │  │ 6b. _fastTrack:      │  │            │  │                                       │   │  │                  │  │              │
+│                        │  │     publishMessage  ─┼─►│ 7. pick up │  │                                       │   │  │                  │  │              │
+│                        │  │     payload=(WETH,   │  │  instant   │  │                                       │   │  │                  │  │              │
+│                        │  │      netAmount,      │  │  VAA (~2s) │  │                                       │   │  │                  │  │              │
+│                        │  │      Router, data)   │  │            │  │                                       │   │  │                  │  │              │
+│                        │  │                      │  │ 8. submit ─┼─►│ 9. Basejump.completeTransfer(vaa)     │   │  │                  │  │              │
+│                        │  │                      │  │    VAA to  │  │    (atomic, all-or-nothing):          ▼   │  │                  │  │              │
+│                        │  │                      │  │    Ethereum│  │  → LandingNative.transfer(            (pool)│                  │  │              │
+│                        │  │                      │  │            │  │      MoonbeamWETH, netAmount,             │  │                  │  │              │
+│                        │  │                      │  │            │  │      Router, data)                        │  │                  │  │              │
+│                        │  │                      │  │            │  │     destAssetFor[WETH]=NATIVE →           │  │                  │  │              │
+│                        │  │                      │  │            │  │     Router.call{value:netAmount}          │  │                  │  │              │
+│                        │  │                      │  │            │  │  → Router.onBasejumpReceive(              │  │                  │  │              │
+│                        │  │                      │  │            │  │      NATIVE, netAmount, data)             │  │                  │  │              │
+│                        │  │                      │  │            │  │    decode (intentId, depositAddress)      │  │                  │  │              │
+│                        │  │                      │  │            │  │  → depositAddress.call{value:netAmount}   │  │                  │  │              │
+│                        │  │                      │  │            │  │  emit IntentForwarded(intentId, NATIVE,   │  │                  │  │              │
+│                        │  │                      │  │            │  │    depositAddress, netAmount)             │  │                  │  │              │
+│                        │  │                      │  │            │  │  (any revert rolls back; slow leg still   │  │                  │  │              │
+│                        │  │                      │  │            │  │   replenishes the pool)                   │  │                  │  │              │
+│                        │  │                      │  │            │  └───────────────────────────────────────────┘  │                  │  │              │
+│                        │  │                      │  │ 10. observe│◄──────────────── IntentForwarded ─────────────── │                  │  │              │
+│                        │  │                      │  │  IntentFwd │                                                  │                  │  │              │
+│                        │  │                      │  │  capture   │                                                  │                  │  │              │
+│                        │  │                      │  │  txHash    │                                                  │                  │  │              │
+│                        │  │                      │  │ 11. submit ┼─────────────────────────────────────────────────►│ 12. detect      │  │              │
+│                        │  │                      │  │  DepositTx │                                                  │   deposit, start │  │              │
+│                        │  │                      │  │  ({deposit │                                                  │   processing     │  │              │
+│                        │  │                      │  │  Address,  │                                                  │ 13. NEAR Intents │  │ 14. user     │
+│                        │  │                      │  │  txHash})  │                                                  │   settles;       │─►│   receives   │
+│                        │  │                      │  │            │                                                  │   solver delivers│  │   dest asset │
+│                        │  │                      │  │ 15. poll  ◄┼──────────────────────────────────────────────────│   dest asset     │  │              │
+│                        │  │                      │  │   status   │                                                  │                  │  │              │
+└────────────────────────┘  └──────────────────────┘  └────────────┘                                                  └──────────────────┘  └──────────────┘
 
 
-                            ┌────────────────────────────────────────────────────────────────────────────────┐
-                            │ Background — Snowbridge slow settlement                                        │
-                            │                                                                                │
-                            │ ~30 min after step 2b:                                                         │
-                            │   Snowbridge finalizes the Hydration → Ethereum transfer (WETH→ETH at edge).   │
-                            │   Native ETH lands in BasejumpLanding pool on Ethereum, replenishing the pool  │
-                            │   that the fast-path payout drew from. Independent of steps 7–13.              │
-                            └────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ Background — Wormhole TokenBridge slow settlement                              │
+│                                                                                │
+│ ~13 min after step 6a:                                                         │
+│   The TokenBridge transfer finalizes on Ethereum; the canonical WETH lands in  │
+│   BasejumpLandingNative, replenishing the pool the fast-path payout drew from. │
+│   (For a NATIVE-mapped pool the replenishment WETH is unwrapped to ETH —        │
+│    off-chain keeper or a permissionless unwrap helper.) Independent of 9–15.    │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Component Relationships
 
 ```
-┌──────────────────┐  Snowbridge (WETH→ETH at edge, slow)                ┌───────────────────────────────┐
-│ User (Hydration) │ ──────────────────────────────────────────────────► │ BasejumpLanding (ETH pool)    │
-│ WETH + accepted  │                                                     │ on Ethereum                   │
-│ quote            │                                                     └──────────────┬────────────────┘
-└────────┬─────────┘                                                                    │ onBasejumpReceive
-         │ IntentEmitter.bridgeAndForward(ethAmount, intentId, depositAddress)            │ (fast-path VAA)
-         │                                                                              ▼
-         │  ┌──────────────────────┐  MRL/XCM (no token)   ┌─────────────────┐  ┌────────────────────┐  native ETH  ┌────────────────────────────┐
-         └─►│ IntentEmitter          │ ───────────────────►  │ BasejumpProxy   │  │ IntentRouter  │ ───────────► │ quote.depositAddress (ETH) │
-            │ (Hydration, atomic   │  msg.sender check:    │ (Moonbeam,      │  │ (Ethereum,         │  forward     │ origin-chain deposit addr  │
-            │  dual-transport)     │  IntentEmitter MDA      │  publishMessage │  │  IBasejumpReceiver,│  (no unwrap) └─────────────┬──────────────┘
-            │                      │  only                 │  only — no      │  │  forwards native   │                            │ funds present here
-            │                      │                       │  TokenBridge    │  │  ETH to deposit    │                            │ once Router tx mined
-            └──────────────────────┘                       └────────┬────────┘  └────────┬───────────┘                            ▼
-                                                                    │ Wormhole VAA       │ emit IntentForwarded
-                                                                    ▼                    ▼
-                                                          ┌──────────────────┐   ┌────────────────────┐    submitDepositTx          ┌──────────────────────────┐
-                                                          │ mrelayer (fast)  │   │ nintent agent      │ ─────────────────────────►  │ Defuse / OneClick API    │
-                                                          │ submits VAA to   │   │ (off-chain)        │  ({ depositAddress,         │                          │
-                                                          │ Basejump on ETH  │   │                    │     txHash })               └─────────────┬────────────┘
-                                                          └──────────────────┘   └────────────────────┘                                           │ quoted processing
-                                                                                                                                                  ▼
-                                                                                                                                     ┌────────────────────────────┐
-                                                                                                                                     │ NEAR Intents + solvers     │
-                                                                                                                                     └─────────────┬──────────────┘
-                                                                                                                                                   │ destination asset
-                                                                                                                                                   ▼
-                                                                                                                                     ┌────────────────────────────┐
-                                                                                                                                     │ Destination wallet         │
-                                                                                                                                     │ (Zcash / BTC / SOL / ...)  │
-                                                                                                                                     └────────────────────────────┘
+┌──────────────────┐
+│ User (Hydration) │  any asset A + accepted quote
+│                  │
+└────────┬─────────┘
+         │ IntentEmitter.swapAndBridge(assetIn, amountIn, minEthOut, maxFeeIn, intentId, depositAddress)
+         ▼
+┌──────────────────────┐  XCM batch_all      ┌──────────────────────────────┐
+│ IntentEmitter        │ ──────────────────► │ Moonbeam MDA (emitter's      │
+│ (Hydration)          │  reserve-transfer   │ sovereign acct) → as MDA:    │
+│ swap A→WETH,         │  WETH+GLMR → MDA,   │ BasejumpProxy.bridgeViaWorm- │
+│ buy GLMR fee         │  send→Transact      │ hole(WETH, ethOut, …, data)  │
+└──────────────────────┘                     └───────┬──────────────┬───────┘
+                                          slow:      │              │   fast:
+                              TokenBridge.transferTokens          _fastTrack
+                              (WETH → Landing, ~13 min)           publishMessage (VAA)
+                                                     │              │
+                                                     ▼              ▼
+                                       ┌────────────────────┐  ┌──────────────────┐
+                                       │ BasejumpLandingNat │  │ mrelayer (fast)  │
+                                       │ (Ethereum, ETH pool│  │ submits VAA to   │
+                                       │  via destAssetFor  │◄─│ Basejump on ETH  │
+                                       │  WETH→NATIVE)      │  └──────────────────┘
+                                       └─────────┬──────────┘
+                                                 │ call{value:} + onBasejumpReceive(NATIVE, …)
+                                                 ▼
+                                       ┌────────────────────┐  native ETH   ┌────────────────────────────┐
+                                       │ IntentRouter (ETH, │ ────────────► │ quote.depositAddress (ETH) │
+                                       │ IBasejumpReceiver) │  _forward     │ origin-chain deposit addr  │
+                                       └─────────┬──────────┘               └─────────────┬──────────────┘
+                                                 │ emit IntentForwarded                   │ funds present once Router tx mined
+                                                 ▼                                        ▼
+                                       ┌────────────────────┐  submitDepositTx  ┌──────────────────────────┐
+                                       │ nintent (off-chain)│ ────────────────► │ Defuse / OneClick API    │
+                                       └────────────────────┘  ({depositAddr,   └─────────────┬────────────┘
+                                                                  txHash})                     │ quoted processing
+                                                                                               ▼
+                                                                                  ┌────────────────────────────┐
+                                                                                  │ NEAR Intents + solvers     │
+                                                                                  └─────────────┬──────────────┘
+                                                                                                │ destination asset
+                                                                                                ▼
+                                                                                  ┌────────────────────────────┐
+                                                                                  │ Destination wallet         │
+                                                                                  │ (Zcash / BTC / SOL / ...)  │
+                                                                                  └────────────────────────────┘
 ```
 
 ## Intent ID Threading
 
-The local `intentId` is the correlation key across quote acquisition, both Hydration transports, the EVM forward, and status monitoring:
+The local `intentId` is the correlation key across quote acquisition, the Hydration dispatch, the EVM forward, and status monitoring:
 
 ```
                  accepted quote            IntentEmitter call       Basejump VAA `data`        Router event              submitDepositTx
@@ -171,7 +182,7 @@ The local `intentId` is the correlation key across quote acquisition, both Hydra
              ))
 ```
 
-The quote's `depositAddress` is the actual origin-chain recipient on Ethereum. `intentId` is the local join key used by `nintent` and emitted by both `IntentEmitter` (`BasejumpInitiated`) on Hydration and `IntentRouter` (`IntentForwarded`) on Ethereum.
+The quote's `depositAddress` is the actual origin-chain recipient on Ethereum. `intentId` is the local join key used by `nintent` and emitted by both `IntentEmitter` (`BridgeInitiated`) on Hydration and `IntentRouter` (`IntentForwarded`) on Ethereum.
 
 ## Atomicity Boundaries
 
@@ -179,60 +190,67 @@ The quote's `depositAddress` is the actual origin-chain recipient on Ethereum. `
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │ Hydration extrinsic (1 transaction)                                                 │
 │                                                                                     │
-│   IntentEmitter.bridgeAndForward(...)                                               │
-│     ├─ Snowbridge leg dispatched (WETH on Hydration → native ETH at                 │
-│     │  BasejumpLanding on Ethereum, ~30 min finality)                               │
-│     └─ MRL leg dispatched (XCM → Moonbeam BasejumpProxy)                            │
+│   IntentEmitter.swapAndBridge(...)                                                  │
+│     ├─ buy xcmFee GLMR (≤ maxFeeIn) + sell rest of A → WETH (≥ minEthOut)            │
+│     └─ DISPATCH batch_all([ reserve-transfer WETH+GLMR → MDA , send→Transact ])      │
 │                                                                                     │
-│   Either both legs are dispatched, or the extrinsic reverts. No partial state.      │
-│   Once dispatched, each leg has independent cross-chain finality.                   │
+│   Swap and dispatch apply together, or the extrinsic reverts. No partial state.     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│ Moonbeam Transact (as the emitter's MDA)                                            │
+│                                                                                     │
+│   BasejumpProxy.bridgeViaWormhole(WETH, ethOut, ETH_WH_ID, Router, data)            │
+│     ├─ slow: TokenBridge.transferTokens (locks WETH, replenishes pool, ~13 min)     │
+│     └─ fast: _fastTrack publishMessage (VAA, ~2 min)                                │
+│                                                                                     │
+│   Self-funding: the call pulls and locks the WETH it bridges, so the fast payout    │
+│   always has a matching slow replenishment in flight — no caller whitelist needed.  │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │ Ethereum transaction (1 transaction — fast-path VAA completion)                     │
 │                                                                                     │
 │   Basejump.completeTransfer(vaa)                                                    │
-│     └─ BasejumpLanding.transfer(ETH, amount, Router, data)                          │
-│          (native ETH paid to Router via call{value:})                               │
-│          └─ Router.onBasejumpReceive(asset, amount, data) payable                   │
-│               ├─ depositAddress.call{value: amount}("")                             │
-│               └─ emit IntentForwarded(intentId, depositAddress, amount)             │
+│     └─ BasejumpLandingNative.transfer(MoonbeamWETH, netAmount, Router, data)        │
+│          destAssetFor[WETH]=NATIVE → pay native ETH to Router via call{value:}      │
+│          └─ Router.onBasejumpReceive(NATIVE, netAmount, data)                       │
+│               ├─ depositAddress.call{value: netAmount}("")                          │
+│               └─ emit IntentForwarded(intentId, NATIVE, depositAddress, netAmount)  │
 │                                                                                     │
-│   Any revert here rolls back the entire Ethereum tx. Snowbridge slow leg is         │
-│   independent — its WETH still arrives in BasejumpLanding's pool, replenishing the  │
-│   pool for the next operation.                                                      │
+│   Any revert here rolls back the entire Ethereum tx. The slow TokenBridge leg is    │
+│   independent — its WETH still arrives in the pool, replenishing it.                │
 └─────────────────────────────────────────────────────────────────────────────────────┘
-
-Why two atomicity boundaries matter:
-- Hydration atomic: nobody can trigger the fast-path payout without committing the
-  matching Snowbridge replenishment. This is the protocol's anti-drain guarantee.
-- Ethereum atomic: if the deposit forward fails, the fast-path payout is reverted.
-  Funds are never stranded at the Router — the user has the Snowbridge replenishment
-  to claim against (operationally, in V1).
 ```
+
+Why these boundaries matter:
+- Hydration atomic: the swap and the bridge dispatch never half-apply.
+- Self-funding bridge: nobody can trigger a fast-path payout without locking matching WETH in the same call — this is the anti-drain guarantee (it replaces the MDA-whitelist of the earlier Snowbridge design).
+- Ethereum atomic: if the deposit forward fails, the fast-path payout reverts; funds are never stranded at the Router, and the slow path still replenishes the pool.
 
 ## Intent Lifecycle (off-chain state)
 
 | State              | Trigger                                                                                            |
 | ------------------ | -------------------------------------------------------------------------------------------------- |
 | `quoted`           | Quote returned by OneClick API, including `depositAddress`                                         |
-| `accepted`         | User accepts quote in UI; UI computes `intentId`                                                   |
-| `bridging`         | `BasejumpInitiated` event on Hydration (`IntentEmitter` extrinsic confirmed)                       |
+| `accepted`         | User accepts quote in UI; UI computes `intentId` and sizing params                                 |
+| `bridging`         | `BridgeInitiated` event on Hydration (`IntentEmitter` extrinsic confirmed)                          |
 | `forwarded`        | `IntentForwarded` event on `IntentRouter` — native ETH transferred to `depositAddress` on Ethereum |
 | `submitted`        | `OneClickService.submitDepositTx({ depositAddress, txHash })` called by `nintent`                  |
 | `processing`       | Quote service acknowledges deposit and starts quoted execution                                     |
 | `fulfilled`        | Solver delivered destination asset; user reported success                                          |
 | `expired`          | Quote deadline passed before deposit processing completed; operator unwinds manually               |
-| `replenished` (bg) | Snowbridge slow path finalized; native ETH landed in `BasejumpLanding`'s pool                      |
+| `replenished` (bg) | Wormhole TokenBridge slow path finalized; canonical WETH landed in `BasejumpLandingNative`'s pool  |
 
 ## Timing
 
-| Step                                                      | Approx. duration   |
-| --------------------------------------------------------- | ------------------ |
-| Off-chain quote acquisition + user accept                 | seconds            |
-| Hydration extrinsic (`IntentEmitter.bridgeAndForward`)    | one block          |
-| MRL leg → Moonbeam → Wormhole VAA → Ethereum + atomic fwd | ~2 min             |
-| `submitDepositTx` call after router forward               | seconds            |
-| Quote processing + solver fill                            | seconds to minutes |
-| **Total user-perceived time**                             | **~2–5 min**       |
-| Snowbridge slow settlement (replenishes pool, background) | ~30 min            |
+| Step                                                       | Approx. duration   |
+| ---------------------------------------------------------- | ------------------ |
+| Off-chain quote acquisition + user accept                  | seconds            |
+| Hydration extrinsic (`IntentEmitter.swapAndBridge`)        | one block          |
+| XCM → Moonbeam → Wormhole VAA → Ethereum + atomic forward  | ~2 min             |
+| `submitDepositTx` call after router forward                | seconds            |
+| Quote processing + solver fill                             | seconds to minutes |
+| **Total user-perceived time**                              | **~2–5 min**       |
+| Wormhole TokenBridge slow settlement (replenishes pool)    | ~13 min            |
+```

@@ -7,3 +7,6 @@ package-lock.json
 # Testnet (Fork) deployments
 deployments/fork/
 deployments/lark/
+
+# Audit reports
+*audit*.md

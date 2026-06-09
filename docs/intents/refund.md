@@ -18,7 +18,7 @@ The core design goal is simple:
 
 ## Key Assumption
 
-In the current NIR design, the 1Click origin chain is **Ethereum** and the origin asset is **native ETH**. The user pays in WETH on Hydration; Snowbridge converts WETH→ETH at the bridge boundary so native ETH arrives at `BasejumpLanding` and is forwarded by `IntentRouter` to the quote's `depositAddress`.
+In the current NIR design, the 1Click origin chain is **Ethereum** and the origin asset is **native ETH**. The user pays in any Hydration asset (swapped to WETH on Hydration); the WETH is bridged Hydration → Moonbeam (XCM) → Ethereum (Wormhole TokenBridge), and `BasejumpLandingNative` pays out **native ETH** (via the `destAssetFor` WETH→`NATIVE` remap) which `IntentRouter` forwards to the quote's `depositAddress`.
 
 That means:
 
@@ -113,7 +113,7 @@ Recommended handling:
 2. Quote is requested with:
    - `refundType = ORIGIN_CHAIN`
    - `refundTo = userH160`
-3. `IntentEmitter.bridgeAndForward` fires the dual transport on Hydration; the fast-path completes and `IntentRouter` forwards native ETH to the quote's `depositAddress`.
+3. `IntentEmitter.swapAndBridge` swaps to WETH and dispatches the bridge on Hydration; the fast-path completes and `IntentRouter` forwards native ETH to the quote's `depositAddress`.
 4. 1Click processes the deposit.
 5. If the swap cannot complete, 1Click returns funds to `userH160` on Ethereum.
 6. Operator or automation checks status using `depositAddress` and `depositMemo`.
