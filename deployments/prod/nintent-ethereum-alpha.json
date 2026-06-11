@@ -1,0 +1,129 @@
+{
+  "migration": "nintent-ethereum-alpha",
+  "environment": "prod",
+  "startedAt": "2026-06-10T14:14:05.824Z",
+  "completedAt": "2026-06-11T10:42:39.256Z",
+  "steps": [
+    {
+      "name": "001-deploy-proxy",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xd1a8dfa34504515ecc222956d5b9ac1fe0d620a8",
+        "proxyAddress": "0xa108bd5dbc6ce665aebb6895351e0609c76f8efc",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:14:05.828Z",
+      "completedAt": "2026-06-10T14:14:31.796Z"
+    },
+    {
+      "name": "002-deploy-basejump",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xd1dc3517732c98502b5c1ba2389aca9e9016d89a",
+        "proxyAddress": "0xdcdd08bfb7b3b9381149a852ba5f69bd5d87676f",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2",
+        "wormholeId": "2"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:14:31.804Z",
+      "completedAt": "2026-06-10T14:15:26.284Z"
+    },
+    {
+      "name": "003-deploy-landing",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xe58d508743dd36368946d5a72a7dcd7ce960ce12",
+        "proxyAddress": "0xa84b362290b0cfdb55e877dfc633284091e0b3f7",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:15:26.289Z",
+      "completedAt": "2026-06-10T14:16:39.776Z"
+    },
+    {
+      "name": "004-deploy-router",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xe3ed8e1217ab419123d54e2f0850bc736b595d68",
+        "proxyAddress": "0x27afd50e83379a53458446e9d5f4a557b5f55c19",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:16:39.778Z",
+      "completedAt": "2026-06-10T14:17:15.984Z"
+    },
+    {
+      "name": "005-authorize-basejump@landing",
+      "status": "completed",
+      "output": {
+        "txHash": "0xe49cd965d77f7a11e3a5b68ef2e9b64891c4292da30f1af2a19b6031507a9abf",
+        "bridgeAddress": "0xdcdd08bfb7b3b9381149a852ba5f69bd5d87676f",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:17:15.986Z",
+      "completedAt": "2026-06-10T14:17:26.521Z"
+    },
+    {
+      "name": "006-set-emitter@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x32cbb8a643ea6993397d2d8151495964f16453230b82de3a41cacfdf771c1f18",
+        "emitterChain": "16",
+        "emitter": "0x000000000000000000000000a108bd5dbc6ce665aebb6895351e0609c76f8efc"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:17:26.523Z",
+      "completedAt": "2026-06-10T14:17:40.723Z"
+    },
+    {
+      "name": "007-set-landing@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x11990698328b0f9482461fc7f2ab4d3001e7e8be75311ea1b51dd91f216789c6",
+        "landing": "0x000000000000000000000000a84b362290b0cfdb55e877dfc633284091e0b3f7"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:17:40.729Z",
+      "completedAt": "2026-06-10T14:17:52.747Z"
+    },
+    {
+      "name": "008-set-landing-dest@proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x535aaf637fc8674fe4edcfd2800f07a9a9170dbe971cfef562ef7d4b143312a4",
+        "toWhChain": "2",
+        "landingDest": "0x000000000000000000000000a84b362290b0cfdb55e877dfc633284091e0b3f7"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:17:52.749Z",
+      "completedAt": "2026-06-10T14:18:02.898Z"
+    },
+    {
+      "name": "009-set-weth-fee@proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x1774a0d703cd12332ad81ce8bd02cebbf3ce4b8db4a7431cf53221c86fb73e98",
+        "asset": "0xab3f0245B83feB11d15AAffeFD7AD465a59817eD",
+        "fee": "100000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-06-10T14:18:02.900Z",
+      "completedAt": "2026-06-10T14:18:08.412Z"
+    },
+    {
+      "name": "010-set-weth@landing",
+      "status": "completed",
+      "output": {
+        "setDestNativeTx": "0xcd2d764ff7ad03aee6790872d9bf60bdee9970d3065b76e50fb117e6cbcfc2cf",
+        "setWrappedNativeTx": "0x981cafaa8e928a66a5d4af7916ffa68aabdb09d24df63c23c7991e61599c5aa5",
+        "sourceAsset": "0xab3f0245B83feB11d15AAffeFD7AD465a59817eD",
+        "wrappedNative": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+      },
+      "error": null,
+      "startedAt": "2026-06-11T10:42:15.536Z",
+      "completedAt": "2026-06-11T10:42:39.253Z"
+    }
+  ]
+}

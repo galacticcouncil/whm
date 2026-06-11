@@ -15,6 +15,7 @@ interface IBasejumpLandingNative {
     );
     event Withdrawn(address indexed asset, uint256 amount, address indexed to);
     event DestAssetUpdated(address indexed sourceAsset, address indexed destAsset);
+    event WrappedNativeUpdated(address indexed previous, address indexed current);
 
     // ─── Errors ──────────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ interface IBasejumpLandingNative {
     // ─── Views ───────────────────────────────────────────────────
 
     function NATIVE() external view returns (address);
+    function wrappedNative() external view returns (address);
     function owner() external view returns (address);
     function authorizedBridges(address bridge) external view returns (bool);
     function destAssetFor(address sourceAsset) external view returns (address);
@@ -62,6 +64,8 @@ interface IBasejumpLandingNative {
     function setAuthorizedBridge(address bridge, bool enabled) external;
     function setDestAsset(address sourceAsset, address destAsset) external;
     function setDestNative(address sourceAsset) external;
+    function setWrappedNative(address wrappedNative) external;
     function isNative(address sourceAsset) external view returns (bool);
+    function unwrapEnabled() external view returns (bool);
     function withdraw(address asset, uint256 amount, address to) external;
 }

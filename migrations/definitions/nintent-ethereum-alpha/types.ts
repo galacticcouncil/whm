@@ -7,8 +7,10 @@ import type {
 
 type EvmWallet = ReturnType<typeof wallet.getWallet>;
 
+/** Two-chain wallet context — the Moonbeam → Ethereum (2nd) leg of the Intents bridge. */
 export interface WalletContext {
-  hydration: EvmWallet;
+  moonbeam: EvmWallet;
+  ethereum: EvmWallet;
 }
 
 export type MigrationStep = BS<WalletContext>;

@@ -9,6 +9,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IBasejumpLandingNative} from "./interfaces/IBasejumpLandingNative.sol";
 import {IBasejumpReceiver} from "./interfaces/IBasejumpReceiver.sol";
 
+interface IWETH {
+    function withdraw(uint256 amount) external;
+}
+
 /// @title BasejumpLandingNative — Instant token delivery for cross-chain bridges on EVM chains
 /// @notice Pre-funded pool. Authorized bridges call transfer() with the *source-chain* `sourceAsset`
 ///         address (the only address the source contract knows when it emits). This landing maps it
@@ -48,6 +52,11 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
     uint256 public pendingHead;
     uint256 public pendingTail;
     mapping(uint256 => PendingTransfer) public pendingTransfers;
+
+    /// @notice Wrapped-native token (e.g. WETH) unwrapped to satisfy NATIVE payouts. Required
+    ///         because the NATIVE sentinel isn't a real token address — this is what `withdraw()`
+    ///         is called on. Unset → NATIVE payouts use the native balance directly.
+    address public wrappedNative;
 
     // ─── Modifiers ───────────────────────────────────────────────
 
@@ -129,6 +138,11 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
         return destAssetFor[sourceAsset] == NATIVE;
     }
 
+    /// @notice True when NATIVE payouts unwrap the configured wrapped-native; false → pure native reserve.
+    function unwrapEnabled() public view returns (bool) {
+        return wrappedNative != address(0);
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────
 
     function _deliver(address sourceAsset, address destAsset, uint256 amount, bytes32 recipient, bytes memory data)
@@ -136,12 +150,19 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
     {
         address recipientAddr = address(uint160(uint256(recipient)));
 
+        // NATIVE → pay native ETH from the native balance; if it's short, unwrap the WHOLE WETH
+        // reserve to ETH (the pool self-converts to ETH on the first short delivery).
+        // Any other destAsset is delivered as that ERC20 as-is (e.g. USDC → USDC).
         if (destAsset == NATIVE) {
-            (bool ok,) = recipientAddr.call{value: amount}("");
-            if (!ok) revert NativeTransferFailed();
+            if (unwrapEnabled() && address(this).balance < amount) {
+                uint256 wrappedBal = IERC20(wrappedNative).balanceOf(address(this));
+                IWETH(wrappedNative).withdraw(wrappedBal); // all wrapped-native → native ETH
+            }
+            _sendNative(recipientAddr, amount);
         } else {
             IERC20(destAsset).safeTransfer(recipientAddr, amount);
         }
+
         emit TransferExecuted(sourceAsset, destAsset, recipient, amount);
 
         if (data.length > 0) {
@@ -150,7 +171,17 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
     }
 
     function _balance(address destAsset) internal view returns (uint256) {
-        return destAsset == NATIVE ? address(this).balance : IERC20(destAsset).balanceOf(address(this));
+        if (destAsset == NATIVE) {
+            // native + wrapped-native form one ETH-equivalent reserve (unwrapped on a short delivery)
+            uint256 wrappedBal = unwrapEnabled() ? IERC20(wrappedNative).balanceOf(address(this)) : 0;
+            return address(this).balance + wrappedBal;
+        }
+        return IERC20(destAsset).balanceOf(address(this));
+    }
+
+    function _sendNative(address to, uint256 amount) private {
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert NativeTransferFailed();
     }
 
     // ─── Upgrade ─────────────────────────────────────────────────
@@ -182,11 +213,17 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
         emit DestAssetUpdated(sourceAsset, NATIVE);
     }
 
+    /// @notice Set the wrapped-native token that backs NATIVE payouts via unwrap.
+    ///         Set to address(0) to disable unwrap (native-out then uses only the native balance).
+    function setWrappedNative(address _wrappedNative) external onlyOwner {
+        emit WrappedNativeUpdated(wrappedNative, _wrappedNative);
+        wrappedNative = _wrappedNative;
+    }
+
     /// @notice Emergency withdrawal of ERC20 tokens (or native ETH when `asset == NATIVE`).
     function withdraw(address asset, uint256 amount, address to) external onlyOwner {
         if (asset == NATIVE) {
-            (bool ok,) = to.call{value: amount}("");
-            if (!ok) revert NativeTransferFailed();
+            _sendNative(to, amount);
         } else {
             IERC20(asset).safeTransfer(to, amount);
         }

@@ -4,7 +4,8 @@
   "private": true,
   "exports": {
     ".": "./index.ts",
+    "./evm": "./evm/index.ts",
     "./migration": "./migration/index.ts",
-    "./evm": "./evm/index.ts"
+    "./wormhole": "./wormhole/index.ts"
   }
 }
