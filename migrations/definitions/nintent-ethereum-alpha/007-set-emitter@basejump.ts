@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { setAuthorizedEmitter } from "../../actions/basejump/setAuthorizedEmitter";
 
 const step: MigrationStep = {
-  name: "006-set-emitter@basejump",
+  name: "007-set-emitter@basejump",
   description: "Register Moonbeam BasejumpProxy as authorized emitter on Ethereum Basejump",
   action: async (ctx) => {
     const required = (k: string) => {

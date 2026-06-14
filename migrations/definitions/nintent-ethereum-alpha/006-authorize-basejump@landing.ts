@@ -2,7 +2,7 @@ import type { MigrationStep } from "./types";
 import { setAuthorizedBridge } from "../../actions/basejump-landing-native/setAuthorizedBridge";
 
 const step: MigrationStep = {
-  name: "005-authorize-basejump@landing",
+  name: "006-authorize-basejump@landing",
   description: "Authorize Ethereum Basejump as a bridge on BasejumpLandingNative",
   action: async (ctx) => {
     const basejumpLandingAddress = ctx.outputs["003-deploy-landing"].proxyAddress;

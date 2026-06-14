@@ -26,13 +26,15 @@ const DESTINATION_ASSET = "nep141:wrap.near";
 const SLIPPAGE_BPS = 100;
 
 /**
- * End-to-end NIR (Near Intent Routing) leg-2 driver.
+ * End-to-end NIR (Near Intent Routing) leg-2 driver — BJP (Basejump-proxy) path.
  *
  *   1. 1Click quote (ORIGIN_ASSET → DESTINATION_ASSET) → quote-specific Ethereum depositAddress.
  *   2. intentId + (intentId, depositAddress) payload that IntentRouter decodes.
  *   3. Bridge quote.amountIn + proxyFee WETH via BasejumpProxy.bridgeViaWormhole (Moonbeam) → IntentRouter.
  *   4. If --basejump is given: fetch the fast-path VAA from Wormholescan, completeTransfer on
  *      Ethereum (delivers native ETH to depositAddress), then submitDepositTx so 1Click continues.
+ *
+ * For the direct Wormhole-TokenBridge (payload-3) path that drops the pre-funded pool, see nirViaWtt.ts.
  *
  * NOTE: the relay step needs a real network (Guardians sign + Wormholescan indexes) — not a bare fork.
  *
@@ -66,7 +68,7 @@ async function main(): Promise<void> {
   // 1Click client config
   const { publicClient } = getWallet(rpcUrl, chainId, privateKey);
   const refundTo = privateKeyToAccount(privateKey).address; // always the signer
-  const deadline = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
   // 1. Quote
   const quoteRequest: QuoteRequest = {

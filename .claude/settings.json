@@ -39,5 +39,8 @@
       "Bash(git push --force:*)",
       "Bash(git reset --hard:*)"
     ]
+  },
+  "enabledPlugins": {
+    "andrej-karpathy-skills@karpathy-skills": true
   }
 }

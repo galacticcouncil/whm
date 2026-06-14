@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { setProxyLandingDest } from "../../actions/basejump/setProxyLandingDest";
 
 const step: MigrationStep = {
-  name: "008-set-landing-dest@proxy",
+  name: "009-set-landing-dest@proxy",
   description: "Register Ethereum BasejumpLandingNative as LandingDest on Moonbeam BasejumpProxy",
   action: async (ctx) => {
     const required = (k: string) => {

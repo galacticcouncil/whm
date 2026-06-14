@@ -2,7 +2,7 @@
   "migration": "nintent-ethereum-alpha",
   "environment": "prod",
   "startedAt": "2026-06-10T14:14:05.824Z",
-  "completedAt": "2026-06-11T10:42:39.256Z",
+  "completedAt": "2026-06-12T11:45:28.856Z",
   "steps": [
     {
       "name": "001-deploy-proxy",
@@ -54,7 +54,19 @@
       "completedAt": "2026-06-10T14:17:15.984Z"
     },
     {
-      "name": "005-authorize-basejump@landing",
+      "name": "005-deploy-receiver",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xec1316534fded21fd34984a12d4b43d6a9782b7b",
+        "proxyAddress": "0xf1a5fe4252d9a1c39b0fb9de1f19049ee57ed188",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-06-12T11:45:08.473Z",
+      "completedAt": "2026-06-12T11:45:28.847Z"
+    },
+    {
+      "name": "006-authorize-basejump@landing",
       "status": "completed",
       "output": {
         "txHash": "0xe49cd965d77f7a11e3a5b68ef2e9b64891c4292da30f1af2a19b6031507a9abf",
@@ -66,7 +78,7 @@
       "completedAt": "2026-06-10T14:17:26.521Z"
     },
     {
-      "name": "006-set-emitter@basejump",
+      "name": "007-set-emitter@basejump",
       "status": "completed",
       "output": {
         "txHash": "0x32cbb8a643ea6993397d2d8151495964f16453230b82de3a41cacfdf771c1f18",
@@ -78,7 +90,7 @@
       "completedAt": "2026-06-10T14:17:40.723Z"
     },
     {
-      "name": "007-set-landing@basejump",
+      "name": "008-set-landing@basejump",
       "status": "completed",
       "output": {
         "txHash": "0x11990698328b0f9482461fc7f2ab4d3001e7e8be75311ea1b51dd91f216789c6",
@@ -89,7 +101,7 @@
       "completedAt": "2026-06-10T14:17:52.747Z"
     },
     {
-      "name": "008-set-landing-dest@proxy",
+      "name": "009-set-landing-dest@proxy",
       "status": "completed",
       "output": {
         "txHash": "0x535aaf637fc8674fe4edcfd2800f07a9a9170dbe971cfef562ef7d4b143312a4",
@@ -101,7 +113,7 @@
       "completedAt": "2026-06-10T14:18:02.898Z"
     },
     {
-      "name": "009-set-weth-fee@proxy",
+      "name": "010-set-weth-fee@proxy",
       "status": "completed",
       "output": {
         "txHash": "0x1774a0d703cd12332ad81ce8bd02cebbf3ce4b8db4a7431cf53221c86fb73e98",
@@ -113,7 +125,7 @@
       "completedAt": "2026-06-10T14:18:08.412Z"
     },
     {
-      "name": "010-set-weth@landing",
+      "name": "011-set-weth@landing",
       "status": "completed",
       "output": {
         "setDestNativeTx": "0xcd2d764ff7ad03aee6790872d9bf60bdee9970d3065b76e50fb117e6cbcfc2cf",

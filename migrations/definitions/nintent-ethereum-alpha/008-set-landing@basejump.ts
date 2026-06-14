@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { setLanding } from "../../actions/basejump/setLanding";
 
 const step: MigrationStep = {
-  name: "007-set-landing@basejump",
+  name: "008-set-landing@basejump",
   description: "Set BasejumpLandingNative as the landing on Ethereum Basejump",
   action: async (ctx) => {
     const basejumpAddress = ctx.outputs["002-deploy-basejump"].proxyAddress;

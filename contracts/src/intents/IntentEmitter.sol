@@ -15,13 +15,10 @@ import {HydrationPolkadotXcm} from "../utils/hydration/HydrationPolkadotXcm.sol"
 import {HydrationUtility} from "../utils/hydration/HydrationUtility.sol";
 
 import {MoonbeamConsts} from "../utils/moonbeam/MoonbeamConsts.sol";
-import {MoonbeamEthereumXcm} from "../utils/moonbeam/MoonbeamEthereumXcm.sol";
-import {IBatch} from "../utils/moonbeam/MoonbeamPrecompiles.sol";
 
-import {IBasejumpProxy} from "../basejump/interfaces/IBasejumpProxy.sol";
 import {IIntentEmitter} from "./interfaces/IIntentEmitter.sol";
 
-/// @title IntentEmitter — Hydration entry point for NEAR-Intents bridging
+/// @title IntentEmitter — shared Hydration→Moonbeam entry point for NEAR-Intents bridging
 /// @notice One atomic extrinsic, dispatched through Hydration's runtime via the DISPATCH precompile:
 ///
 ///           1. FEE  — reserve a fixed `xcmFee` of GLMR for the x-chain hop: bought from A,
@@ -29,19 +26,21 @@ import {IIntentEmitter} from "./interfaces/IIntentEmitter.sol";
 ///           2. SWAP — sell the remaining A for WETH (skipped when A is already WETH).
 ///           3. BATCH_ALL of two XCM calls to Moonbeam:
 ///                a. transfer_assets_using_type_and_then — reserve-transfer [GLMR, WETH] to the MDA.
-///                b. send — Transact AS the MDA via Moonbeam's Batch precompile: WETH.approve(proxy)
-///                   then BasejumpProxy.bridgeViaWormhole(...). From there Basejump → IntentRouter
-///                   delivers native ETH to the OneClick quote's intentDepositAddress.
-contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
+///                b. send — Transact AS the MDA via Moonbeam's Batch precompile. The exact bridge
+///                   call is the ONLY thing that varies between deployments, so it's left to the
+///                   `_bridgeViaWormholeCall` hook: a Basejump batch (IntentEmitterBjp) or a direct
+///                   TokenBridge `transferTokensWithPayload` batch (IntentEmitterWtt). Either way
+///                   native ETH lands at the OneClick quote's intentDepositAddress on Ethereum.
+///
+///         Concrete variants implement `_bridgeViaWormholeCall` and own their path-specific config;
+///         everything else (swap, fee, XCM batch, dispatch, params) is shared.
+abstract contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
     using SafeERC20 for IERC20;
 
     uint16 public constant ETHEREUM_WORMHOLE_ID = 2;
 
     address public owner;
     mapping(address => bool) public xcmOperators;
-
-    address public basejumpProxy;
-    bytes32 public intentRouter;
 
     // --- XCM source (derived H160 on Moonbeam) ---
     address public xcmSource;
@@ -71,7 +70,7 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
         _disableInitializers();
     }
 
-    function initialize() public initializer {
+    function _initEmitter() internal onlyInitializing {
         owner = msg.sender;
         xcmSource = DerivedAccount.deriveSiblingEvm(HydrationConsts.PARA_ID, address(this));
         xcmFee = 1_000_000_000_000_000_000; // 1 GLMR: dest arrival fee (<0.1) + remote execution (<0.9)
@@ -94,7 +93,6 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
     ) external {
         if (amountIn == 0) revert ZeroAmount();
         if (intentDepositAddress == address(0)) revert InvalidDepositAddress();
-        if (basejumpProxy == address(0) || intentRouter == bytes32(0)) revert NotConfigured();
 
         IERC20 assetInToken = IERC20(HydrationConsts.toErc20(assetIn));
         IERC20 wethToken = IERC20(HydrationConsts.toErc20(HydrationConsts.WETH_ID));
@@ -114,6 +112,11 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
 
         emit BridgeInitiated(intentId, msg.sender, assetIn, amountIn, wethOut, intentDepositAddress);
     }
+
+    // ─── Hook (implemented by concrete variants) ─────────────────
+
+    /// @dev Build the Moonbeam ethereumXcm.transact payload
+    function _bridgeViaWormholeCall(uint256 ethOut, bytes memory data) internal view virtual returns (bytes memory);
 
     // ─── Helpers ─────────────────────────────────────────────────
 
@@ -178,33 +181,6 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
         if (!success) revert DispatchFailed();
     }
 
-    /// @dev Moonbeam ethereumXcm.transact → Batch precompile, atomically running (as the MDA):
-    ///        1. WETH.approve(basejumpProxy, ethOut)   — so the proxy can pull the delivered WETH
-    ///        2. BasejumpProxy.bridgeViaWormhole(WETH, ethOut, ETHEREUM_WORMHOLE_ID, intentRouter, data)
-    function _bridgeViaWormholeCall(uint256 ethOut, bytes memory data) internal view returns (bytes memory) {
-        address[] memory to = new address[](2);
-        to[0] = MoonbeamConsts.WETH;
-        to[1] = basejumpProxy;
-
-        uint256[] memory values = new uint256[](2); // [0, 0]
-
-        bytes[] memory callData = new bytes[](2);
-        callData[0] = abi.encodeWithSelector(IERC20.approve.selector, basejumpProxy, ethOut);
-        callData[1] = abi.encodeWithSelector(
-            IBasejumpProxy.bridgeViaWormhole.selector,
-            MoonbeamConsts.WETH,
-            ethOut,
-            ETHEREUM_WORMHOLE_ID,
-            intentRouter,
-            data
-        );
-
-        uint64[] memory gasLimit = new uint64[](2); // [0, 0] = forward remaining gas
-
-        bytes memory input = abi.encodeWithSelector(IBatch.batchAll.selector, to, values, callData, gasLimit);
-        return MoonbeamEthereumXcm.transact(xcmGasLimit, MoonbeamConsts.BATCH_PRECOMPILE, input);
-    }
-
     // ─── Internal ───────────────────────────────────────────────
 
     function _onlyOwner() internal view {
@@ -223,14 +199,6 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
 
     function setOwner(address newOwner) external onlyOwner {
         owner = newOwner;
-    }
-
-    function setRouter(bytes32 _intentRouter) external onlyOwner {
-        intentRouter = _intentRouter;
-    }
-
-    function setProxy(address _basejumpProxy) external onlyOwner {
-        basejumpProxy = _basejumpProxy;
     }
 
     function setXcmOperator(address operator, bool enabled) external onlyOwner {

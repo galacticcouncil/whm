@@ -2,7 +2,7 @@ import type { MigrationStep } from "./types";
 import { setAssetFee } from "../../actions/basejump/setAssetFee";
 
 const step: MigrationStep = {
-  name: "009-set-weth-fee@proxy",
+  name: "010-set-weth-fee@proxy",
   description: "Configure the WETH fast-path fee on the Moonbeam BasejumpProxy",
   action: async (ctx) => {
     const proxyAddress = ctx.outputs["001-deploy-proxy"].proxyAddress;
