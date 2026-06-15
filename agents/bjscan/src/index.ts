@@ -6,8 +6,8 @@ import ui from "./ui";
 import { start as startEndpoints } from "./endpoints";
 import { subscribe } from "./subscribers";
 
-import { source, destination, pollIntervalMs } from "./config";
-import { sourceClient, destinationClient } from "./clients";
+import { sources, destination, pollIntervalMs } from "./config";
+import { sourceClients, destinationClient } from "./clients";
 import { EvmWatcher, SubstrateWatcher } from "./watchers";
 
 import { Processor, basejump, landing } from "./handlers";
@@ -25,17 +25,20 @@ const BANNER = String.raw`
 async function main(): Promise<void> {
   console.log(BANNER);
   log.info("bjscan starting...");
-  log.info(`  source: ${source.name} @ ${source.contract}`);
+  for (const s of sources) log.info(`  source: ${s.name} @ ${s.contract}`);
   log.info(`  destination: ${destination.name} @ ${destination.contract}`);
 
   await db.init();
 
-  const processor = new Processor({ ...basejump(sourceClient), ...landing(destinationClient) });
+  const processor = new Processor(
+    { ...basejump(sourceClients), ...landing(destinationClient) },
+    [...sources.map((s) => s.name), destination.name],
+  );
   const nudge = () => processor.trigger();
-  const srcWatch = new EvmWatcher(source, sourceClient, nudge);
+  const srcWatchers = sources.map((s) => new EvmWatcher(s, sourceClients[s.name], nudge));
   const dstWatch = new SubstrateWatcher(destination, destinationClient, nudge);
 
-  api(srcWatch, dstWatch);
+  api(srcWatchers, dstWatch);
   ui();
 
   subscribe((u) => {
@@ -46,7 +49,7 @@ async function main(): Promise<void> {
 
   await startEndpoints();
   await Promise.all([
-    srcWatch.start(pollIntervalMs),
+    ...srcWatchers.map((w) => w.start(pollIntervalMs)),
     dstWatch.start(pollIntervalMs),
     processor.start(pollIntervalMs),
   ]);

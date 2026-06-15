@@ -25,6 +25,8 @@ type DeliveryArgs = {
 export function landing(client: PolkadotClient): HandlerMap {
   const { withBlockTime } = createUtils(client);
 
+  // Both corridors share one landing, so the emitting address can't pin the source chain.
+  // findInitiated keys on source asset (USDC vs EURC), which already separates the corridors.
   async function executed(ev: LogEvent): Promise<void> {
     const a = ev.args as DeliveryArgs;
     const recipient = normalizeRecipient(a.recipient);

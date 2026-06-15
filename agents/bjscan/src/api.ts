@@ -1,30 +1,39 @@
-import { source, destination } from "./config";
+import { sources, destination } from "./config";
 import { getTransfer, listTransfers, loadCursor, stateCounts, type TransferState } from "./db";
 import { app } from "./endpoints";
 import { addressFilter } from "./filters";
 import { subscribe } from "./subscribers";
 import { EvmWatcher, SubstrateWatcher } from "./watchers";
 
-export default function apiHandler(base: EvmWatcher, hydration: SubstrateWatcher): void {
+export default function apiHandler(srcWatchers: EvmWatcher[], hydration: SubstrateWatcher): void {
   app.get("/api/health", async () => ({ ok: true }));
 
   app.get("/api/status", async () => {
-    const [srcCursor, dstCursor, srcSafe, dstSafe, counts] = await Promise.all([
-      loadCursor(source.name),
+    const [srcStates, dstCursor, dstSafe, counts] = await Promise.all([
+      Promise.all(
+        srcWatchers.map(async (w) => ({
+          cursor: await loadCursor(w.cfg.name),
+          safe: await w.latestSafe().catch(() => null),
+        })),
+      ),
       loadCursor(destination.name),
-      base.latestSafe().catch(() => null),
       hydration.latestSafe().catch(() => null),
       stateCounts(),
     ]);
     return {
       uptime: process.uptime(),
       chains: {
-        [source.name]: {
-          contract: source.contract,
-          chainId: source.chain.id,
-          cursor: srcCursor?.toString() ?? null,
-          safe: srcSafe?.toString() ?? null,
-        },
+        ...Object.fromEntries(
+          sources.map((s, i) => [
+            s.name,
+            {
+              contract: s.contract,
+              chainId: s.chain.id,
+              cursor: srcStates[i].cursor?.toString() ?? null,
+              safe: srcStates[i].safe?.toString() ?? null,
+            },
+          ]),
+        ),
         [destination.name]: {
           contract: destination.contract,
           chainId: destination.chainId,

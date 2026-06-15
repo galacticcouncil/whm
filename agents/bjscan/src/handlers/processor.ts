@@ -18,7 +18,10 @@ export class Processor {
   private draining = false;
   private pending = false;
 
-  constructor(private handlers: HandlerMap) {
+  constructor(
+    private handlers: HandlerMap,
+    private chains: string[],
+  ) {
     this.abis = Object.values(handlers).map((h) => h.abi);
   }
 
@@ -60,7 +63,7 @@ export class Processor {
   private async drain(): Promise<void> {
     let processed = 0;
     for (;;) {
-      const rows = await takePendingEvents(BATCH_SIZE);
+      const rows = await takePendingEvents(BATCH_SIZE, this.chains);
       if (rows.length === 0) break;
       for (const row of rows) await this.apply(row);
       processed += rows.length;
