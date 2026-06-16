@@ -1,14 +1,17 @@
 /**
- * PROBE (BJP path): full deploy + swap of IntentEmitterBjp on a chopsticks Hydration fork, driven by
+ * PROBE (WTT path): full deploy + swap of IntentEmitterWtt on a chopsticks Hydration fork, driven by
  * real viem-signed eth transactions submitted as `pallet_ethereum::transact` (the
  * eth_sendRawTransaction path). Mirrors how hardhat/foundry deploy via the EVM RPC. Throwaway.
  *
- * Bridges the swapped WETH via Basejump's fast-path proxy on Moonbeam → IntentRouter on Ethereum.
- * For the direct Wormhole-TokenBridge variant, see _probeDeploySwapWtt.ts.
+ * Bridges the swapped WETH straight through the Wormhole TokenBridge (`transferTokensWithPayload`)
+ * → IntentReceiver on Ethereum — no Basejump pool. For the pooled fast-path, see _probeDeploySwapBjp.ts.
  *
- *   spawn → fund deployer → deploy impl + proxy (CREATE) → setProxy/setRouter → approve + swapAndBridge
+ * Uses the REAL prod tokenBridge + intentReceiver addresses (not placeholders), so the Moonbeam
+ * Transact leg encodes against the actual config and the measured gas reflects reality.
  *
- *   npx tsx contracts/scripts/intent-emitter/_probeDeploySwapBjp.ts
+ *   spawn → fund deployer → deploy impl + proxy (CREATE) → setTokenBridge/setIntentReceiver → approve + swapAndBridge
+ *
+ *   npx tsx contracts/scripts/intent-emitter/_probeDeploySwapWtt.ts
  */
 import {
   encodeDeployData,
@@ -38,7 +41,7 @@ import {
 import { spawnForks, teardownForks, type Network } from "@whm/chopsticks/network";
 import { getEventsAt, getTokenBalance } from "@whm/chopsticks/queries";
 
-import intentEmitterJson from "../../out/IntentEmitterBjp.sol/IntentEmitterBjp.json";
+import intentEmitterJson from "../../out/IntentEmitterWtt.sol/IntentEmitterWtt.json";
 import erc1967ProxyJson from "../../out/ERC1967Proxy.sol/ERC1967Proxy.json";
 import { toJson } from "@whm/chopsticks";
 
@@ -72,8 +75,10 @@ const INTENT_ID = keccak256(toHex("intent-emitter-chopsticks-test"));
 const INTENT_DEPOSIT_ADDRESS = "0x000000000000000000000000000000000000dead" as const;
 const MAX_RELAY_FEE = 0n; // probe: no dest relay fee
 
-const BASEJUMP_PROXY = "0x00000000000000000000000000000000ba53ec00" as const;
-const INTENT_ROUTER = pad("0x00000000000000000000000000000000c0ffee00", { size: 32 }) as Hex;
+// Real prod addresses (nintent-ethereum-alpha) so the Moonbeam Transact leg encodes against the
+// actual config and the measured gas matches production.
+const TOKEN_BRIDGE = "0xB1731c586ca89a23809861c6103F0b96B3F57D92" as const; // Moonbeam Wormhole TokenBridge
+const INTENT_RECEIVER = pad("0xf1a5fe4252d9a1c39b0fb9de1f19049ee57ed188", { size: 32 }) as Hex; // Ethereum IntentReceiver
 
 const FUND = { hdx: 1_000n * 10n ** 12n, dot: 1_000n * 10n ** 10n, weth: 100n * 10n ** 18n };
 
@@ -122,7 +127,7 @@ async function main(): Promise<void> {
     const client = new EthClient(hydration, account, { chainId: CHAIN_ID, gas: 15_000_000n });
 
     // ── deploy impl + proxy ────────────────────────────────────────
-    console.log("\n🥢 IntentEmitter deploy");
+    console.log("\n🥢 IntentEmitterWtt deploy");
 
     const { address: implAddr, res: implRes } = await client.deploy(emitterBytecode);
     await check(hydration, implRes, `deploy ${implAddr}`);
@@ -137,22 +142,26 @@ async function main(): Promise<void> {
     await check(hydration, proxyRes, `deploy ${proxyAddr}`);
 
     // ── configure proxy ────────────────────────────────────────────
-    console.log("\n🥢 IntentEmitter setup");
+    console.log("\n🥢 IntentEmitterWtt setup");
 
-    const setProxy = await client.call(
+    const setTokenBridge = await client.call(
       proxyAddr,
-      encodeFunctionData({ abi: emitterAbi, functionName: "setProxy", args: [BASEJUMP_PROXY] }),
+      encodeFunctionData({ abi: emitterAbi, functionName: "setTokenBridge", args: [TOKEN_BRIDGE] }),
     );
-    await check(hydration, setProxy, "setProxy");
+    await check(hydration, setTokenBridge, "setTokenBridge");
 
-    const setRouter = await client.call(
+    const setIntentReceiver = await client.call(
       proxyAddr,
-      encodeFunctionData({ abi: emitterAbi, functionName: "setRouter", args: [INTENT_ROUTER] }),
+      encodeFunctionData({
+        abi: emitterAbi,
+        functionName: "setIntentReceiver",
+        args: [INTENT_RECEIVER],
+      }),
     );
-    await check(hydration, setRouter, "setRouter");
+    await check(hydration, setIntentReceiver, "setIntentReceiver");
 
     // ── approve + swapAndBridge ────────────────────────────────────
-    console.log("\n🥢 IntentEmitter execution");
+    console.log("\n🥢 IntentEmitterWtt execution");
 
     const approve = await client.call(
       ERC20.fromAssetId(DOT) as Hex,
@@ -215,9 +224,14 @@ async function main(): Promise<void> {
     console.log(`   deployer WETH  ${deployerWeth} (was ${FUND.weth})`);
 
     // ── relay the bridge XCM → Moonbeam ────────────────────────────
+    // Drive blocks via the in-process `chain.newBlock` (one block each), NOT the RPC `dev_newBlock`
+    // wrapper (`Network.newBlock`). With a REAL Moonbeam target the delivery can't settle in a single
+    // block, and the RPC path's auto-HRMP relay then rebuilds blocks forever (see chopsticks/README.md).
+    // `chain.newBlock` is also exactly how every eth tx above is sealed (sendRawEthTx).
     console.log("\n🥢 Relay → Moonbeam");
-    await hydration.newBlock(); // Flush HRMP outbound
-    const moonHash = await moonbeam.newBlock(); // Moonbeam receives + processes
+    await hydration.chain.newBlock(); // Flush HRMP outbound
+    const moonBlock = await moonbeam.chain.newBlock(); // Moonbeam receives + processes
+    const moonHash = moonBlock.hash;
 
     const moonEventsRaw = await moonbeam.client
       .getUnsafeApi()
