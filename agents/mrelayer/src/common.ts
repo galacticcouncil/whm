@@ -1,22 +1,27 @@
 // @ts-nocheck
 import logger from "./logger";
-import {ethers} from "ethers";
+import { ethers } from "ethers";
 
 // Patch global fetch to inject Wormhole API key for wormholescan requests
 if (process.env.WORMHOLE_API_KEY) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    if (url.includes('wormholescan.io')) {
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.includes("wormholescan.io")) {
       init = init || {};
       init.headers = new Headers(init.headers);
-      init.headers.set('X-API-KEY', process.env.WORMHOLE_API_KEY!);
+      init.headers.set("X-API-KEY", process.env.WORMHOLE_API_KEY!);
     }
     return originalFetch(input, init);
   };
 }
 
-export async function loadVaaFromWormholeApi(emitterChain: number, emitterAddr: string, sequence: number) {
+export async function loadVaaFromWormholeApi(
+  emitterChain: number,
+  emitterAddr: string,
+  sequence: number,
+) {
   const url = `https://api.wormholescan.io/api/v1/vaas/${emitterChain}/${emitterAddr}/${sequence}?parsedPayload=true`;
 
   try {
@@ -24,14 +29,14 @@ export async function loadVaaFromWormholeApi(emitterChain: number, emitterAddr: 
     const apiData = await response.json();
 
     if (!apiData.data) {
-      throw new Error('No VAA data found');
+      throw new Error("No VAA data found");
     }
 
-    const {data} = apiData;
-    const {payload} = data;
+    const { data } = apiData;
+    const { payload } = data;
 
-    const vaaBytes = Buffer.from(data.vaa, 'base64');
-    const to = payload.toAddress.replace('0x', '').toLowerCase();
+    const vaaBytes = Buffer.from(data.vaa, "base64");
+    const to = payload.toAddress.replace("0x", "").toLowerCase();
     const toChain = payload.toChain;
     const payloadType = payload.payloadType;
     const amount = payload.amount;
@@ -42,13 +47,13 @@ export async function loadVaaFromWormholeApi(emitterChain: number, emitterAddr: 
     const tokenBridgePayload = {
       payloadType,
       toChain,
-      to: Buffer.from(to, 'hex'),
+      to: Buffer.from(to, "hex"),
       tokenTransferPayload: {
         amount: BigInt(amount),
         fromAddress,
         tokenAddress,
-        tokenChain
-      }
+        tokenChain,
+      },
     };
 
     return {
@@ -57,9 +62,8 @@ export async function loadVaaFromWormholeApi(emitterChain: number, emitterAddr: 
       timestamp: data.timestamp,
       emitterChain: data.emitterChain,
       sequence: data.sequence,
-      vaaBytes
+      vaaBytes,
     };
-
   } catch (error) {
     logger.error(`Failed to load VAA from Wormhole API: ${error.message}`);
     throw error;
@@ -67,14 +71,14 @@ export async function loadVaaFromWormholeApi(emitterChain: number, emitterAddr: 
 }
 
 export async function getPayloadWithFallback(ctx: any, ctxLogger: any) {
-  const {vaa} = ctx;
-  let {payload} = ctx.tokenBridge;
+  const { vaa } = ctx;
+  let { payload } = ctx.tokenBridge;
 
   if (!payload) {
-    ctxLogger.info('Payload missing, attempting to load from Wormhole API...');
+    ctxLogger.info("Payload missing, attempting to load from Wormhole API...");
 
     const emitterChain = vaa.emitterChain;
-    const emitterAddr = vaa.emitterAddress.toString('hex');
+    const emitterAddr = vaa.emitterAddress.toString("hex");
     const sequence = vaa.sequence;
 
     ctxLogger.info(`Loading VAA ${emitterChain}/${emitterAddr}/${sequence} from API`);
@@ -82,8 +86,8 @@ export async function getPayloadWithFallback(ctx: any, ctxLogger: any) {
     const apiVaaData = await loadVaaFromWormholeApi(emitterChain, emitterAddr, Number(sequence));
     payload = apiVaaData.payload;
 
-    ctxLogger.info('Successfully loaded payload from Wormhole API');
-    ctxLogger.debug('API payload', payload);
+    ctxLogger.info("Successfully loaded payload from Wormhole API");
+    ctxLogger.debug("API payload", payload);
   }
 
   return payload;
@@ -91,8 +95,9 @@ export async function getPayloadWithFallback(ctx: any, ctxLogger: any) {
 
 export type TransferTask = {
   vaa: any;
-  type?: 'mrl' | 'insta' | 'oracle';
+  type?: "mrl" | "insta" | "oracle" | "intent";
   payloadType?: number;
+  feeRequested?: string;
   logger: any;
   next: () => void;
 };
@@ -100,7 +105,7 @@ export type TransferTask = {
 export function createTransferQueue(
   provider: ethers.providers.JsonRpcProvider,
   signer: ethers.Wallet,
-  executeTransfer: (task: TransferTask, nonce: number) => Promise<string>
+  executeTransfer: (task: TransferTask, nonce: number) => Promise<string>,
 ) {
   let currentNonce: number;
   const transferQueue: TransferTask[] = [];
@@ -114,20 +119,21 @@ export function createTransferQueue(
   let chainLabel: string | undefined;
 
   const CHAIN_NAMES: Record<number, string> = {
-    1: 'ethereum',
-    8453: 'base',
-    1284: 'moonbeam',
-    1285: 'moonriver',
-    11155111: 'sepolia',
-    84532: 'base-sepolia',
-    1287: 'moonbase-alpha',
+    1: "ethereum",
+    8453: "base",
+    1284: "moonbeam",
+    1285: "moonriver",
+    11155111: "sepolia",
+    84532: "base-sepolia",
+    1287: "moonbase-alpha",
   };
 
   async function getChainLabel() {
     if (chainLabel) return chainLabel;
     const network = await provider.getNetwork();
-    const name = CHAIN_NAMES[network.chainId]
-      ?? (network.name && network.name !== 'unknown' ? network.name : null);
+    const name =
+      CHAIN_NAMES[network.chainId] ??
+      (network.name && network.name !== "unknown" ? network.name : null);
     chainLabel = name ? `${name} (${network.chainId})` : `chain ${network.chainId}`;
     return chainLabel;
   }
@@ -136,9 +142,9 @@ export function createTransferQueue(
     if (!discordWebhook) return;
     try {
       await fetch(discordWebhook, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: message}),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: message }),
       });
     } catch (e: any) {
       logger.error(`Failed to send Discord notification: ${e.message || e}`);
@@ -154,16 +160,14 @@ export function createTransferQueue(
     const minBalance = gasPrice.mul(minGas);
     const warnBalance = minBalance.mul(warnMultiplier);
     const balanceStr = (+ethers.utils.formatEther(balance)).toFixed(4);
-    const gweiStr = (+ethers.utils.formatUnits(gasPrice, 'gwei')).toFixed(2);
+    const gweiStr = (+ethers.utils.formatUnits(gasPrice, "gwei")).toFixed(2);
 
     const warnMulN = warnMultiplier.toNumber();
-    const multiplier = minBalance.gt(0)
-      ? balance.mul(100).div(minBalance).toNumber() / 100
-      : 0;
+    const multiplier = minBalance.gt(0) ? balance.mul(100).div(minBalance).toNumber() / 100 : 0;
     const pct = Math.min(100, Math.round((multiplier / warnMulN) * 100));
     const blocks = 20;
     const filled = Math.round((pct / 100) * blocks);
-    const bar = '█'.repeat(filled) + '░'.repeat(blocks - filled);
+    const bar = "█".repeat(filled) + "░".repeat(blocks - filled);
 
     const summary = `${chain} | \`${signer.address}\` | ${multiplier.toFixed(1)}x/${warnMulN}x [${bar}] ${pct}% | ${balanceStr} ETH @ ${gweiStr} gwei`;
 
@@ -208,13 +212,17 @@ export function createTransferQueue(
       task.next();
     } catch (e) {
       const text = JSON.stringify(e);
-      if (text.indexOf('transfer already completed') !== -1 || text.indexOf('already been redeemed') !== -1 || text.indexOf('VAA already processed') !== -1) {
+      if (
+        text.indexOf("transfer already completed") !== -1 ||
+        text.indexOf("already been redeemed") !== -1 ||
+        text.indexOf("VAA already processed") !== -1
+      ) {
         task.logger.info(`Transfer already completed`);
         task.next();
-      } else if (text.indexOf('Invalid GMP Payload') !== -1) {
+      } else if (text.indexOf("Invalid GMP Payload") !== -1) {
         task.logger.error(`Invalid GMP payload`);
         task.next();
-      } else if (text.indexOf('nonce too low') !== -1) {
+      } else if (text.indexOf("nonce too low") !== -1) {
         task.logger.info(`nonce too low, reloading nonce...`);
         currentNonce = await provider.getTransactionCount(signer.address);
         transferQueue.unshift(task);
@@ -234,5 +242,5 @@ export function createTransferQueue(
     processQueue();
   }
 
-  return {initNonce, addToQueue, getCurrentNonce: () => currentNonce};
+  return { initNonce, addToQueue, getCurrentNonce: () => currentNonce };
 }

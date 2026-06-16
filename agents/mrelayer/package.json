@@ -6,9 +6,11 @@
     "start": "node app.js",
     "start:base": "node app-base.js",
     "start:eth": "node app-eth.js",
+    "start:intent": "node app-intent.js",
     "dev": "ts-node src/app.ts",
     "dev:base": "ts-node src/app-base.ts",
     "dev:eth": "ts-node src/app-eth.ts",
+    "dev:intent": "ts-node src/app-intent.ts",
     "build": "tsc",
     "watch": "tsc --watch",
     "redis": "docker run --rm -p 6379:6379 --name redis-docker -d redis",
@@ -16,7 +18,8 @@
     "testnet-spy": "docker run --platform=linux/amd64 -p 7073:7073 --entrypoint /guardiand ghcr.io/wormhole-foundation/guardiand:latest spy --nodeKey /node.key --spyRPC \"[::]:7073\" --network /wormhole/testnet/2/1 --bootstrap '/dns4/t-guardian-01.nodes.stable.io/udp/8999/quic/p2p/12D3KooWCW3LGUtkCVkHZmVSZHzL3C4WRKWfqAiJPz1NR7dT9Bxh,/dns4/t-guardian-02.nodes.stable.io/udp/8999/quic/p2p/12D3KooWJXA6goBCiWM8ucjzc4jVUBSqL9Rri6UpjHbkMPErz5zK'",
     "docker:build": "docker build -t galacticcouncil/mrelayer:latest .",
     "docker:push": "docker push galacticcouncil/mrelayer:latest",
-    "docker:deploy": "npm run docker:build && npm run docker:push"
+    "docker:deploy": "npm run docker:build && npm run docker:push",
+    "docker:deployx": "docker buildx build --platform linux/amd64 -t galacticcouncil/mrelayer:latest --push ."
   },
   "dependencies": {
     "@certusone/wormhole-sdk": "^0.9.11",

@@ -54,6 +54,25 @@ services:
     deploy:
       labels:
         swarmpit.service.deployment.autoredeploy: 'true'
+  intent:
+    image: galacticcouncil/mrelayer:latest
+    command:
+      - start:intent
+    environment:
+      MOONBEAM_FROM_SEQ: '0'
+      INTENT_PRIVKEY: FILL THIS KEY ALWAYS
+      INTENT_RECEIVER: FILL THIS ADDRESS
+      QUOTER_URL: http://quoter:8080 # reachable quoter service (deployed separately)
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
   redis:
     image: redis:latest
     volumes:
