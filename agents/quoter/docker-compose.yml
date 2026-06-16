@@ -1,0 +1,24 @@
+version: "3.3"
+services:
+  app:
+    image: galacticcouncil/quoter:latest
+    environment:
+      - PORT=8080
+      - FEE_MARGIN_BPS=2000
+      - HYDRATION_RPC=
+      - ETH_RPC=
+      - ETH_WRAPPED_NATIVE=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+      - ETH_GAS_LIMIT=150000
+      - ETH_GAS_PRICING_ASSET_ID=20
+    ports:
+      - "8080:8080"
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+networks:
+  default:
+    driver: overlay

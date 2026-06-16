@@ -1,0 +1,13 @@
+# Build context: only .docker/node_modules, dist/index.js and package.json are used.
+node_modules
+.env
+*.log
+.git
+.DS_Store
+build-meta.json
+test.sh
+src
+tsconfig.json
+esbuild.*.mjs
+.docker/package.json
+.docker/pnpm-lock.yaml
