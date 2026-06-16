@@ -3,10 +3,12 @@ import { encodeFunctionData } from "viem";
 import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
-import intentEmitterJson from "../../../contracts/out/IntentEmitter.sol/IntentEmitter.json";
 import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
 
 export type DeployParams = WalletContext & {
+  /** Concrete emitter artifact to deploy (IntentEmitterWtt / IntentEmitterBjp) — the base is abstract. */
+  artifact: ifs.ContractArtifact;
+  /** Existing proxy to upgrade in place; omit for a fresh impl + ERC1967Proxy deploy. */
   proxy?: `0x${string}`;
 };
 
@@ -17,8 +19,8 @@ export type DeployResult = {
 };
 
 export async function deploy(params: DeployParams): Promise<DeployResult> {
-  const { publicClient, walletClient, account, proxy } = params;
-  const { abi, bytecode } = intentEmitterJson as ifs.ContractArtifact;
+  const { publicClient, walletClient, account, artifact, proxy } = params;
+  const { abi, bytecode } = artifact;
 
   const implHash = await walletClient.deployContract({
     abi,
