@@ -67,6 +67,7 @@ const MIN_ETH_OUT = 1n;
 const MAX_FEE_IN = AMOUNT_IN; // probe: allow up to the full input on the GLMR fee leg
 const INTENT_ID = keccak256(toHex("intent-emitter-chopsticks-test"));
 const INTENT_DEPOSIT_ADDRESS = "0x000000000000000000000000000000000000dead" as const;
+const MAX_RELAY_FEE = 0n; // probe: no dest relay fee
 
 const BASEJUMP_PROXY = "0x00000000000000000000000000000000ba53ec00" as const;
 const INTENT_ROUTER = pad("0x00000000000000000000000000000000c0ffee00", { size: 32 }) as Hex;
@@ -165,7 +166,7 @@ async function main(): Promise<void> {
       encodeFunctionData({
         abi: emitterAbi,
         functionName: "swapAndBridge",
-        args: [DOT, AMOUNT_IN, MIN_ETH_OUT, MAX_FEE_IN, INTENT_ID, INTENT_DEPOSIT_ADDRESS],
+        args: [DOT, AMOUNT_IN, MIN_ETH_OUT, MAX_FEE_IN, INTENT_ID, INTENT_DEPOSIT_ADDRESS, MAX_RELAY_FEE],
       }),
     );
     await check(hydration, swapAndBridge, "swapAndBridge");

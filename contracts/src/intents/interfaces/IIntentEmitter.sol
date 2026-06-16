@@ -51,13 +51,17 @@ interface IIntentEmitter {
     ///                       the fee leg). Ignored when A is GLMR — there the fee is withheld, not bought.
     /// @param intentId       UI-computed correlation hash
     /// @param intentDepositAddress OneClick quote's Ethereum deposit address
+    /// @param maxRelayFee    ceiling on the destination relay fee, carried in the bridged payload.
+    ///                       Only the direct-TokenBridge variant (IntentEmitterWtt) embeds it; the
+    ///                       Basejump variant ignores it.
     function swapAndBridge(
         uint32 assetIn,
         uint256 amountIn,
         uint256 minEthOut,
         uint256 maxFeeIn,
         bytes32 intentId,
-        address intentDepositAddress
+        address intentDepositAddress,
+        uint256 maxRelayFee
     ) external;
 
     // ─── Admin ───────────────────────────────────────────────────

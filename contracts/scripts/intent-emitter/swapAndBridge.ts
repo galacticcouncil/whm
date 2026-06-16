@@ -27,6 +27,7 @@ function getConfig() {
   const minEthOut = BigInt(requiredArg("--minEthOut")); // slippage floor on WETH out
   const maxFeeIn = BigInt(requiredArg("--maxFeeIn")); // max A spent buying the GLMR fee
   const depositAddress = requiredArg("--depositAddress"); // OneClick deposit addr (Ethereum)
+  const maxRelayFee = BigInt(optionalArg("--maxRelayFee") ?? "0"); // dest relay-fee ceiling (Wtt only; 0 for Bjp)
   const intentIdArg = optionalArg("--intentId");
 
   if (!isAddress(address)) throw new Error("Invalid --address (IntentEmitter).");
@@ -49,6 +50,7 @@ function getConfig() {
     minEthOut,
     maxFeeIn,
     depositAddress: depositAddress as `0x${string}`,
+    maxRelayFee,
     intentId,
   };
 }
@@ -107,12 +109,12 @@ async function main(): Promise<void> {
   await publicClient.waitForTransactionReceipt({ hash: approveHash });
   console.log("approved:", approveHash);
 
-  // 2. swapAndBridge(assetIn, amountIn, minEthOut, maxFeeIn, intentId, depositAddress)
+  // 2. swapAndBridge(assetIn, amountIn, minEthOut, maxFeeIn, intentId, depositAddress, maxRelayFee)
   const hash = await walletClient.writeContract({
     address: cfg.address,
     abi,
     functionName: "swapAndBridge",
-    args: [cfg.assetIn, cfg.amountIn, cfg.minEthOut, cfg.maxFeeIn, cfg.intentId, cfg.depositAddress],
+    args: [cfg.assetIn, cfg.amountIn, cfg.minEthOut, cfg.maxFeeIn, cfg.intentId, cfg.depositAddress, cfg.maxRelayFee],
   });
   console.log("swapAndBridge tx:", hash);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });

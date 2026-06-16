@@ -20,8 +20,8 @@ interface IWETH {
 ///         Moonbeam finalizes in ~seconds, so fronting liquidity from a pre-funded pool to beat
 ///         slow source finality buys nothing here. Instead the source bridges WETH straight through
 ///         the Wormhole TokenBridge with a payload (`transferTokensWithPayload`); a relayer calls
-///         `redeem(vaa)` on this contract, which pulls the released WETH, unwraps it to native ETH,
-///         and forwards the exact redeemed amount to the OneClick `depositAddress` from the payload.
+///         `redeem(vaa, feeRequested)` on this contract, which pulls the released WETH, unwraps it to
+///         native ETH, reimburses the relayer, and forwards the rest to the OneClick `depositAddress`.
 ///
 ///         Holds no liquidity in the happy path. Redemption is permissionless — the payload, not the
 ///         caller, dictates the destination, and the TokenBridge restricts `completeTransferWithPayload`
@@ -31,13 +31,15 @@ interface IWETH {
 ///
 ///         The unwrap path is taken only when the delivered token equals the configured
 ///         `wrappedNative`; any other token is forwarded as the delivered ERC20, so a token-identity
-///         mismatch degrades to an ERC20 forward instead of bricking. The relay-cost fee, if charged,
-///         belongs here on the destination side (native in, native out — no FX), deducted from
-///         `amount` before the forward; left out for now.
+///         mismatch degrades to an ERC20 forward instead of bricking.
+///
+///         The relay fee is charged here on the destination side (native in, native out — no FX):
+///         the caller names `feeRequested`, bounded by the `maxRelayFee` ceiling in the payload, and
+///         is paid in the delivered asset.
 contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
     using SafeERC20 for IERC20;
 
-    /// @notice Sentinel `asset` value for native ETH in `sweep`.
+    /// @notice Sentinel `asset` value for native ETH.
     address public constant NATIVE = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     address public owner;
@@ -66,12 +68,12 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
         wrappedNative = _wrappedNative;
     }
 
-    /// @notice Accept native ETH produced by `IWETH.withdraw`.
+    /// @notice Accept native ETH.
     receive() external payable {}
 
     // ─── Core ────────────────────────────────────────────────────
 
-    function redeem(bytes calldata vaa) external {
+    function redeem(bytes calldata vaa, uint256 feeRequested) external {
         // 1. Redeem — TokenBridge releases the token to this contract and returns the transfer body.
         ITokenBridge.TransferWithPayload memory t =
             tokenBridge.parseTransferWithPayload(tokenBridge.completeTransferWithPayload(vaa));
@@ -86,23 +88,33 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
         uint256 amount = IERC20(delivered).balanceOf(address(this));
         if (amount == 0) revert NothingDelivered();
 
-        if (t.payload.length != 64) revert MalformedPayload();
-        (bytes32 intentId, address depositAddress) = abi.decode(t.payload, (bytes32, address));
+        if (t.payload.length != 96) revert MalformedPayload();
+        (bytes32 intentId, address depositAddress, uint256 maxRelayFee) =
+            abi.decode(t.payload, (bytes32, address, uint256));
         if (depositAddress == address(0)) revert MalformedPayload();
 
-        // If the delivered token is the wrapped-native, unwrap it and pay native ETH; otherwise
-        // forward the ERC20 as-is.
+        // The relayer (msg.sender) names its fee, bounded by the user-authorized ceiling. The rest goes
+        // to depositAddress; `amount - feeRequested` underflow-reverts if it ever exceeds the delivery.
+        if (feeRequested > maxRelayFee) revert FeeExceedsCeiling();
+        uint256 forwardAmount = amount - feeRequested;
+
+        // Settle in the delivered asset: unwrap the wrapped-native to ETH, else pay the ERC20 as-is.
+        // Both the forward and the relay fee go through _pay.
         address asset;
         if (delivered == wrappedNative) {
             IWETH(wrappedNative).withdraw(amount);
-            _sendNative(depositAddress, amount);
             asset = NATIVE;
         } else {
-            IERC20(delivered).safeTransfer(depositAddress, amount);
             asset = delivered;
         }
 
-        emit IntentForwarded(intentId, asset, depositAddress, amount);
+        _pay(asset, depositAddress, forwardAmount);
+        emit IntentForwarded(intentId, asset, depositAddress, forwardAmount);
+
+        if (feeRequested > 0) {
+            _pay(asset, msg.sender, feeRequested);
+            emit RelayFeePaid(intentId, msg.sender, feeRequested);
+        }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────
@@ -111,9 +123,14 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
         return address(uint160(uint256(b)));
     }
 
-    function _sendNative(address to, uint256 amount) private {
-        (bool ok,) = to.call{value: amount}("");
-        if (!ok) revert NativeTransferFailed();
+    /// @dev Pay `to` in `asset`: native ETH for the NATIVE sentinel, else an ERC20 transfer.
+    function _pay(address asset, address to, uint256 amount) private {
+        if (asset == NATIVE) {
+            (bool ok,) = to.call{value: amount}("");
+            if (!ok) revert NativeTransferFailed();
+        } else {
+            IERC20(asset).safeTransfer(to, amount);
+        }
     }
 
     // ─── Upgrade ─────────────────────────────────────────────────
@@ -131,13 +148,9 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
         wrappedNative = _wrappedNative;
     }
 
-    /// @notice Emergency withdrawal of ERC20 tokens (or native ETH when `asset == NATIVE`).
+    /// @notice Emergency withdrawal of assets.
     function sweep(address asset, address to, uint256 amount) external onlyOwner {
-        if (asset == NATIVE) {
-            _sendNative(to, amount);
-        } else {
-            IERC20(asset).safeTransfer(to, amount);
-        }
+        _pay(asset, to, amount);
         emit Swept(asset, to, amount);
     }
 }

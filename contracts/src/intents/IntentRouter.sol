@@ -18,8 +18,7 @@ import {IIntentRouter} from "./interfaces/IIntentRouter.sol";
 contract IntentRouter is Initializable, UUPSUpgradeable, IIntentRouter {
     using SafeERC20 for IERC20;
 
-    /// @notice Sentinel `asset` value (matches BasejumpLandingNative.NATIVE) meaning the delivery
-    ///         is the chain's native currency (ETH) rather than an ERC20.
+    /// @notice Sentinel `asset` value for native ETH.
     address public constant NATIVE = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     address public owner;
@@ -43,7 +42,7 @@ contract IntentRouter is Initializable, UUPSUpgradeable, IIntentRouter {
         basejumpLanding = _basejumpLanding;
     }
 
-    /// @notice Accept native ETH delivered by the landing immediately before the callback.
+    /// @notice Accept native ETH.
     receive() external payable {}
 
     // ─── IBasejumpReceiver ───────────────────────────────────────
@@ -86,6 +85,7 @@ contract IntentRouter is Initializable, UUPSUpgradeable, IIntentRouter {
         basejumpLanding = _basejumpLanding;
     }
 
+    /// @notice Emergency withdrawal of assets.
     function sweep(address asset, address to, uint256 amount) external onlyOwner {
         _forward(asset, to, amount);
         emit Swept(asset, to, amount);

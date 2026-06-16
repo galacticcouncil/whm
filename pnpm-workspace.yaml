@@ -5,6 +5,8 @@ packages:
   - crates/solana
   - agents/broadcaster
   - agents/bjscan
+  - agents/quoter
+  - agents/mrelayer
 
 onlyBuiltDependencies:
   - esbuild

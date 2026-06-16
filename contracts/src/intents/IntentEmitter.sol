@@ -89,7 +89,8 @@ abstract contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitte
         uint256 minEthOut,
         uint256 maxFeeIn,
         bytes32 intentId,
-        address intentDepositAddress
+        address intentDepositAddress,
+        uint256 maxRelayFee
     ) external {
         if (amountIn == 0) revert ZeroAmount();
         if (intentDepositAddress == address(0)) revert InvalidDepositAddress();
@@ -108,7 +109,7 @@ abstract contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitte
         // Slippage check
         if (wethOut < minEthOut) revert InsufficientOutput();
 
-        _bridge(wethOut, intentId, intentDepositAddress);
+        _bridge(wethOut, intentId, intentDepositAddress, maxRelayFee);
 
         emit BridgeInitiated(intentId, msg.sender, assetIn, amountIn, wethOut, intentDepositAddress);
     }
@@ -117,6 +118,18 @@ abstract contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitte
 
     /// @dev Build the Moonbeam ethereumXcm.transact payload
     function _bridgeViaWormholeCall(uint256 ethOut, bytes memory data) internal view virtual returns (bytes memory);
+
+    /// @dev Encode the opaque payload bridged end-to-end to the destination receiver. Default carries
+    ///      `(intentId, depositAddress)`; the direct-TokenBridge variant overrides to append
+    ///      `maxRelayFee` so its receiver can bound the relayer's fee claim.
+    function _encodePayload(bytes32 intentId, address depositAddress, uint256 /*maxRelayFee*/)
+        internal
+        pure
+        virtual
+        returns (bytes memory)
+    {
+        return abi.encode(intentId, depositAddress);
+    }
 
     // ─── Helpers ─────────────────────────────────────────────────
 
@@ -147,7 +160,9 @@ abstract contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitte
 
     /// @dev Builds and dispatches batch_all([transfer_assets_using_type_and_then, send]).
     ///      Split out of swapAndBridge to keep stack depth manageable.
-    function _bridge(uint256 ethOut, bytes32 intentId, address intentDepositAddress) internal {
+    function _bridge(uint256 ethOut, bytes32 intentId, address intentDepositAddress, uint256 maxRelayFee)
+        internal
+    {
         bytes memory beneficiary = XcmV4.accountKey20(xcmSource);
 
         bytes memory transferCall = HydrationPolkadotXcm.encodeTransferAssets(
@@ -168,7 +183,7 @@ abstract contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitte
                 feeAmount: xcmExecutionFee,
                 refTime: xcmTransactRefTime,
                 proofSize: xcmTransactProofSize,
-                transactCall: _bridgeViaWormholeCall(ethOut, abi.encode(intentId, intentDepositAddress)),
+                transactCall: _bridgeViaWormholeCall(ethOut, _encodePayload(intentId, intentDepositAddress, maxRelayFee)),
                 beneficiary: beneficiary
             })
         );

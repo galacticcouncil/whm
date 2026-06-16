@@ -35,7 +35,7 @@ interface IWETH {
 contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandingNative {
     using SafeERC20 for IERC20;
 
-    /// @notice Sentinel `destAsset` value meaning "pay out the chain's native currency (ETH)".
+    /// @notice Sentinel `asset` value for native ETH.
     address public constant NATIVE = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     address public owner;
@@ -220,7 +220,7 @@ contract BasejumpLandingNative is Initializable, UUPSUpgradeable, IBasejumpLandi
         wrappedNative = _wrappedNative;
     }
 
-    /// @notice Emergency withdrawal of ERC20 tokens (or native ETH when `asset == NATIVE`).
+    /// @notice Emergency withdrawal of assets.
     function withdraw(address asset, uint256 amount, address to) external onlyOwner {
         if (asset == NATIVE) {
             _sendNative(to, amount);

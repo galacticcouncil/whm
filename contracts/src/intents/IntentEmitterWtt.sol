@@ -14,7 +14,7 @@ import {IntentEmitter} from "./IntentEmitter.sol";
 /// @title IntentEmitterWtt — Wrapped-Token-Transfer variant of the NEAR-Intents entry point
 /// @notice Bridges the swapped WETH straight through the Wormhole TokenBridge with a payload
 ///         (`transferTokensWithPayload`): on Moonbeam the MDA approves the TokenBridge and calls it
-///         with `data = (intentId, depositAddress)` as the payload; on Ethereum, IntentReceiver
+///         with `data = (intentId, depositAddress, maxRelayFee)` as the payload; on Ethereum, IntentReceiver
 ///         redeems the payload-3 VAA, unwraps WETH → native ETH, and forwards it to the deposit
 ///         address. No Basejump pool / fast-path — Moonbeam finalizes in ~seconds, so fronting
 ///         liquidity to beat source finality buys nothing for this direction.
@@ -26,12 +26,24 @@ contract IntentEmitterWtt is IntentEmitter {
         _initEmitter();
     }
 
+    // ─── Payload ─────────────────────────────────────────────────
+
+    /// @dev Append `maxRelayFee` to the payload so IntentReceiver can bound the relayer's fee claim.
+    function _encodePayload(bytes32 intentId, address depositAddress, uint256 maxRelayFee)
+        internal
+        pure
+        override
+        returns (bytes memory)
+    {
+        return abi.encode(intentId, depositAddress, maxRelayFee);
+    }
+
     // ─── Hook ────────────────────────────────────────────────────
 
     /// @dev Moonbeam ethereumXcm.transact → Batch precompile, atomically running (as the MDA):
     ///        1. WETH.approve(tokenBridge, ethOut)
     ///        2. tokenBridge.transferTokensWithPayload(WETH, ethOut, ETHEREUM_WORMHOLE_ID,
-    ///             intentReceiver, nonce=0, data)   — `data` = (intentId, depositAddress) payload
+    ///             intentReceiver, nonce=0, data)   — `data` = (intentId, depositAddress, maxRelayFee) payload
     function _bridgeViaWormholeCall(uint256 ethOut, bytes memory data)
         internal
         view
