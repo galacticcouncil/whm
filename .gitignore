@@ -10,3 +10,6 @@ deployments/lark/
 
 # Audit reports
 *audit*.md
+
+# Site build output
+build-meta.json
