@@ -43,7 +43,7 @@ export class HydrationPricer implements Pricer {
     }
 
     const router = await this.router();
-    const trade = await router.getBestSell(chain.nativeAssetId, assetId, costNative);
+    const trade = await router.getBestSell(chain.gasPricingAssetId, assetId, costNative);
     return this.withMargin(trade.amountOut, marginBps);
   }
 }
