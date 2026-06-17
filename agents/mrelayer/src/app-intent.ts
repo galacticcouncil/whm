@@ -24,13 +24,18 @@ const INTENT_RECEIVER = (process.env.INTENT_RECEIVER || "").toLowerCase();
 // quoter service that prices the relay fee (see agents/quoter).
 const QUOTER_URL = process.env.QUOTER_URL || "http://localhost:8080";
 
+// Re-quote + retry an unprofitable intent before dropping it — gas can fall within minutes, so a fee
+// currently above the user's maxRelayFee may become payable shortly. Default: 3 attempts, 2 min apart.
+const INTENT_MAX_ATTEMPTS = Number(process.env.INTENT_MAX_ATTEMPTS || 3);
+const INTENT_RETRY_DELAY_MS = Number(process.env.INTENT_RETRY_DELAY_MS || 120_000);
+
 const eth = new ethers.providers.JsonRpcProvider(process.env.ETH_RPC || "https://eth.llamarpc.com");
 // Dedicated, reimbursed wallet — separate from the generic app-eth relayer (PRIVKEY).
 const signer = new ethers.Wallet(process.env.INTENT_PRIVKEY, eth);
 
 const intentReceiver = new Contract(
   INTENT_RECEIVER,
-  ["function redeem(bytes vaa, uint256 feeRequested) external"],
+  ["function redeem(bytes vaa, uint256 feeRequested) external", "error AlreadyRedeemed()"],
   signer,
 );
 const tokenBridge = new Contract(
@@ -162,25 +167,51 @@ async function quoteRelayFee(feeAsset: string): Promise<bigint> {
         vaa.payload,
       );
       const feeAsset = await deliveredToken(tokenAddress, tokenChain);
-      const feeRequested = await quoteRelayFee(feeAsset);
 
-      if (feeRequested > maxRelayFee) {
+      // Re-quote and queue once the fee is within the user's maxRelayFee. If still unprofitable,
+      // retry up to INTENT_MAX_ATTEMPTS (spaced INTENT_RETRY_DELAY_MS apart) before dropping it —
+      // gas may fall in the meantime. Retries run out-of-band so the engine's queue isn't blocked.
+      const attempt = async (n: number) => {
+        let feeRequested: bigint;
+        try {
+          feeRequested = await quoteRelayFee(feeAsset);
+        } catch (e) {
+          ctxLogger.error(`quote failed (attempt ${n}/${INTENT_MAX_ATTEMPTS}): ${e.message || e}`);
+          feeRequested = maxRelayFee + 1n; // treat as unprofitable → retry/skip
+        }
+
+        if (feeRequested <= maxRelayFee) {
+          ctxLogger.info(
+            `Intent → ${depositAddress}: feeRequested ${feeRequested} ≤ maxRelayFee ${maxRelayFee} (attempt ${n})`,
+          );
+          queue.addToQueue({
+            vaa,
+            type: "intent",
+            feeRequested: feeRequested.toString(),
+            logger: ctxLogger,
+            next,
+          });
+          return;
+        }
+
+        if (n >= INTENT_MAX_ATTEMPTS) {
+          ctxLogger.info(
+            `Skip after ${n} attempts: feeRequested ${feeRequested} > maxRelayFee ${maxRelayFee}`,
+          );
+          return next();
+        }
+
         ctxLogger.info(
-          `Skip: feeRequested ${feeRequested} > maxRelayFee ${maxRelayFee} (unprofitable)`,
+          `Unprofitable (attempt ${n}/${INTENT_MAX_ATTEMPTS}): ${feeRequested} > ${maxRelayFee}; retry in ${INTENT_RETRY_DELAY_MS}ms`,
         );
-        return next();
-      }
+        setTimeout(() => {
+          attempt(n + 1).catch((e) =>
+            ctxLogger.error(`intent retry ${n + 1} failed: ${e.message || e}`),
+          );
+        }, INTENT_RETRY_DELAY_MS);
+      };
 
-      ctxLogger.info(
-        `Intent → ${depositAddress}: feeRequested ${feeRequested} ≤ maxRelayFee ${maxRelayFee}`,
-      );
-      queue.addToQueue({
-        vaa,
-        type: "intent",
-        feeRequested: feeRequested.toString(),
-        logger: ctxLogger,
-        next,
-      });
+      await attempt(1);
     } catch (e) {
       ctxLogger.error(`intent decode/quote failed: ${e.message || e}`);
       return next();

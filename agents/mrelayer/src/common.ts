@@ -215,7 +215,8 @@ export function createTransferQueue(
       if (
         text.indexOf("transfer already completed") !== -1 ||
         text.indexOf("already been redeemed") !== -1 ||
-        text.indexOf("VAA already processed") !== -1
+        text.indexOf("VAA already processed") !== -1 ||
+        text.indexOf("AlreadyRedeemed") !== -1
       ) {
         task.logger.info(`Transfer already completed`);
         task.next();
