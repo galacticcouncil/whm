@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {ITokenBridge} from "wormhole-solidity-sdk/interfaces/ITokenBridge.sol";
+import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
 import {IntentReceiver} from "../../src/intents/IntentReceiver.sol";
 import {IIntentReceiver} from "../../src/intents/interfaces/IIntentReceiver.sol";
@@ -15,17 +16,48 @@ import {MockWETH} from "../mocks/MockWETH.sol";
 ///      ignored; the test pre-configures the transfer body and the token to release. On
 ///      completeTransferWithPayload the mock transfers the configured token to the caller (the
 ///      receiver), mirroring how the real bridge releases the redeemed amount.
+/// @dev Minimal Wormhole core mock — only parseVM is exercised (freshness guard + exclusive window).
+contract MockWormholeCore {
+    uint32 public ts;
+    bytes32 public vaaHash = keccak256("mock-vaa");
+
+    function setTimestamp(uint32 t) external {
+        ts = t;
+    }
+
+    function parseVM(bytes memory) external view returns (IWormhole.VM memory parsed) {
+        parsed.timestamp = ts;
+        parsed.hash = vaaHash;
+    }
+}
+
 contract MockInboundTokenBridge {
     uint16 public immutable homeChainId;
     address public releaseToken; // token transferred to the redeemer on completion
     ITokenBridge.TransferWithPayload body;
 
+    MockWormholeCore public core;
+    bool public completed; // toggles isTransferCompleted → exercises the freshness guard
+
     constructor(uint16 _homeChainId) {
         homeChainId = _homeChainId;
+        core = new MockWormholeCore();
     }
 
     function chainId() external view returns (uint16) {
         return homeChainId;
+    }
+
+    function wormhole() external view returns (IWormhole) {
+        return IWormhole(address(core));
+    }
+
+    function isTransferCompleted(bytes32) external view returns (bool) {
+        return completed;
+    }
+
+    function setCompleted(bool c) external {
+        completed = c;
     }
 
     /// @dev Home-chain canonical assets only in these tests; wrapped lookups aren't exercised.
@@ -238,6 +270,90 @@ contract IntentReceiverTest is Test {
         vm.prank(relayer);
         vm.expectRevert(IIntentReceiver.NothingDelivered.selector);
         receiver.redeem("", 0);
+    }
+
+    // ─── redeem: freshness guard ─────────────────────────────────
+
+    function testRedeemRevertsWhenAlreadyRedeemed() public {
+        _configureWeth(10 ether, 1 ether);
+        bridge.setCompleted(true); // VAA already consumed (lost race)
+
+        vm.prank(relayer);
+        vm.expectRevert(IIntentReceiver.AlreadyRedeemed.selector);
+        receiver.redeem("", 0.1 ether);
+    }
+
+    // ─── redeem: allowlist gating ────────────────────────────────
+
+    function testRedeemPermissionlessWhenAllowlistEmpty() public {
+        // No authorized relayer → anyone earns the fee (default behavior).
+        uint256 amount = 10 ether;
+        uint256 fee = 0.4 ether;
+        _configureWeth(amount, 1 ether);
+
+        vm.prank(stranger);
+        receiver.redeem("", fee);
+
+        assertEq(stranger.balance, fee, "anyone earns fee while allowlist empty");
+        assertEq(depositAddress.balance, amount - fee);
+    }
+
+    function testRedeemGatedAuthorizedEarnsInWindow() public {
+        receiver.setAuthorizedRelayer(relayer, true);
+        bridge.core().setTimestamp(uint32(block.timestamp)); // issued now → inside exclusive window
+        uint256 amount = 10 ether;
+        uint256 fee = 0.3 ether;
+        _configureWeth(amount, 1 ether);
+
+        vm.prank(relayer);
+        receiver.redeem("", fee);
+
+        assertEq(relayer.balance, fee, "authorized relayer earns in window");
+        assertEq(depositAddress.balance, amount - fee);
+    }
+
+    function testRedeemUnauthorizedRevertsInWindow() public {
+        receiver.setAuthorizedRelayer(relayer, true);
+        bridge.core().setTimestamp(uint32(block.timestamp)); // inside the exclusive window
+        _configureWeth(10 ether, 1 ether);
+
+        vm.prank(stranger);
+        vm.expectRevert(IIntentReceiver.Unauthorized.selector);
+        receiver.redeem("", 0.3 ether);
+    }
+
+    function testRedeemUnauthorizedAllowedAfterWindow() public {
+        receiver.setAuthorizedRelayer(relayer, true);
+        bridge.core().setTimestamp(uint32(block.timestamp));
+        vm.warp(block.timestamp + 5 minutes); // window elapsed → public fallback
+        uint256 amount = 10 ether;
+        uint256 fee = 0.3 ether;
+        _configureWeth(amount, 1 ether);
+
+        vm.prank(stranger);
+        receiver.redeem("", fee);
+
+        assertEq(stranger.balance, fee, "anyone earns after the exclusive window");
+        assertEq(depositAddress.balance, amount - fee);
+    }
+
+    function testSetAuthorizedRelayerCountAndGuards() public {
+        assertEq(receiver.authorizedRelayerCount(), 0);
+
+        receiver.setAuthorizedRelayer(relayer, true);
+        assertEq(receiver.authorizedRelayerCount(), 1);
+        assertTrue(receiver.authorizedRelayer(relayer));
+
+        receiver.setAuthorizedRelayer(relayer, true); // idempotent — no double count
+        assertEq(receiver.authorizedRelayerCount(), 1);
+
+        receiver.setAuthorizedRelayer(relayer, false);
+        assertEq(receiver.authorizedRelayerCount(), 0);
+        assertFalse(receiver.authorizedRelayer(relayer));
+
+        vm.prank(stranger);
+        vm.expectRevert(IIntentReceiver.NotOwner.selector);
+        receiver.setAuthorizedRelayer(stranger, true);
     }
 
     // ─── Admin ───────────────────────────────────────────────────

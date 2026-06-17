@@ -2,7 +2,7 @@
   "migration": "nintent-ethereum-alpha",
   "environment": "prod",
   "startedAt": "2026-06-10T14:14:05.824Z",
-  "completedAt": "2026-06-16T12:37:26.874Z",
+  "completedAt": "2026-06-17T09:38:40.834Z",
   "steps": [
     {
       "name": "001-deploy-proxy",
@@ -62,8 +62,8 @@
         "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
       },
       "error": null,
-      "startedAt": "2026-06-16T12:36:31.002Z",
-      "completedAt": "2026-06-16T12:37:26.870Z"
+      "startedAt": "2026-06-17T09:20:43.187Z",
+      "completedAt": "2026-06-17T09:22:28.715Z"
     },
     {
       "name": "006-authorize-basejump@landing",
@@ -136,6 +136,18 @@
       "error": null,
       "startedAt": "2026-06-11T10:42:15.536Z",
       "completedAt": "2026-06-11T10:42:39.253Z"
+    },
+    {
+      "name": "012-authorize-relayer-1@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0xe6789deb19e1a33b6ee94da33b0a8c481b928e3b0cd8783b409c1ec2e341a360",
+        "receiver": "0xf1a5fe4252d9a1c39b0fb9de1f19049ee57ed188",
+        "authorizedRelayer": "0x43A8A728e2514EDEAe8e0C9FAb8B79fb5E4ecD5F"
+      },
+      "error": null,
+      "startedAt": "2026-06-17T09:38:09.285Z",
+      "completedAt": "2026-06-17T09:38:40.828Z"
     }
   ]
 }

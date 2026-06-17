@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {ITokenBridge} from "wormhole-solidity-sdk/interfaces/ITokenBridge.sol";
+import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
 import {IIntentReceiver} from "./interfaces/IIntentReceiver.sol";
 
@@ -42,12 +43,24 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
     /// @notice Sentinel `asset` value for native ETH.
     address public constant NATIVE = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
+    /// @notice Window after a VAA is issued during which only authorized relayers may redeem it (when
+    ///         an allowlist is set). Once it elapses, redemption is public again (liveness fallback).
+    uint256 internal constant EXCLUSIVE_WINDOW = 5 minutes;
+
     address public owner;
     ITokenBridge public tokenBridge;
 
     /// @notice Wrapped-native token (e.g. WETH) unwrapped to native ETH on delivery. A delivered
     ///         token equal to this is unwrapped to native; any other delivered token is forwarded as-is.
     address public wrappedNative;
+
+    /// @notice Relayers with exclusive right to redeem during EXCLUSIVE_WINDOW after a VAA is issued.
+    ///         Permissionless by default: while the allowlist is empty (`authorizedRelayerCount == 0`)
+    ///         anyone may redeem at any time. Once any relayer is authorized, only authorized callers may
+    ///         redeem until the window elapses; after that redemption is public again (liveness fallback).
+    ///         `maxRelayFee` (user-signed) caps the fee throughout.
+    mapping(address => bool) public authorizedRelayer;
+    uint256 public authorizedRelayerCount;
 
     modifier onlyOwner() {
         _onlyOwner();
@@ -74,7 +87,12 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
     // ─── Core ────────────────────────────────────────────────────
 
     function redeem(bytes calldata vaa, uint256 feeRequested) external {
-        // 1. Redeem — TokenBridge releases the token to this contract and returns the transfer body.
+        // Freshness guard BEFORE the expensive completeTransferWithPayload (which verifies every
+        // guardian signature, then reverts if the VAA was already consumed).
+        IWormhole.VM memory parsed = tokenBridge.wormhole().parseVM(vaa);
+        if (tokenBridge.isTransferCompleted(parsed.hash)) revert AlreadyRedeemed();
+
+        // Redeem — TokenBridge releases the token to this contract and returns the transfer body.
         ITokenBridge.TransferWithPayload memory t =
             tokenBridge.parseTransferWithPayload(tokenBridge.completeTransferWithPayload(vaa));
 
@@ -93,13 +111,19 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
             abi.decode(t.payload, (bytes32, address, uint256));
         if (depositAddress == address(0)) revert MalformedPayload();
 
-        // The relayer (msg.sender) names its fee, bounded by the user-authorized ceiling. The rest goes
-        // to depositAddress; `amount - feeRequested` underflow-reverts if it ever exceeds the delivery.
+        // Exclusive window: once an allowlist is set, only authorized relayers may redeem until
+        // EXCLUSIVE_WINDOW has elapsed since the VAA was issued; after that anyone may (public
+        // fallback). While the allowlist is empty, redemption is permissionless at any time.
+        if (authorizedRelayerCount > 0 && !authorizedRelayer[msg.sender]) {
+            if (block.timestamp < parsed.timestamp + EXCLUSIVE_WINDOW) revert Unauthorized();
+        }
+
+        // Fee bounded by the user-signed ceiling; the rest goes to depositAddress. `amount - feeRequested`
+        // underflow-reverts if the fee ever exceeds the delivery.
         if (feeRequested > maxRelayFee) revert FeeExceedsCeiling();
         uint256 forwardAmount = amount - feeRequested;
 
         // Settle in the delivered asset: unwrap the wrapped-native to ETH, else pay the ERC20 as-is.
-        // Both the forward and the relay fee go through _pay.
         address asset;
         if (delivered == wrappedNative) {
             IWETH(wrappedNative).withdraw(amount);
@@ -146,6 +170,13 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
     function setWrappedNative(address _wrappedNative) external onlyOwner {
         emit WrappedNativeUpdated(wrappedNative, _wrappedNative);
         wrappedNative = _wrappedNative;
+    }
+
+    function setAuthorizedRelayer(address relayer, bool enabled) external onlyOwner {
+        if (authorizedRelayer[relayer] == enabled) return;
+        authorizedRelayer[relayer] = enabled;
+        enabled ? authorizedRelayerCount++ : authorizedRelayerCount--;
+        emit RelayerAuthorized(relayer, enabled);
     }
 
     /// @notice Emergency withdrawal of assets.

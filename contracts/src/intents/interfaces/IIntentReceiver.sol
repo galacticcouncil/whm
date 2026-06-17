@@ -24,6 +24,7 @@ interface IIntentReceiver {
 
     event Swept(address indexed asset, address indexed to, uint256 amount);
     event WrappedNativeUpdated(address indexed previous, address indexed current);
+    event RelayerAuthorized(address indexed relayer, bool enabled);
 
     // ─── Errors ──────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ interface IIntentReceiver {
     error NothingDelivered();
     error MalformedPayload();
     error FeeExceedsCeiling();
+    error AlreadyRedeemed();
+    error Unauthorized();
 
     // ─── Core ────────────────────────────────────────────────────
 
@@ -49,7 +52,10 @@ interface IIntentReceiver {
 
     function owner() external view returns (address);
     function wrappedNative() external view returns (address);
+    function authorizedRelayer(address relayer) external view returns (bool);
+    function authorizedRelayerCount() external view returns (uint256);
     function setOwner(address newOwner) external;
     function setWrappedNative(address wrappedNative) external;
+    function setAuthorizedRelayer(address relayer, bool enabled) external;
     function sweep(address asset, address to, uint256 amount) external;
 }
