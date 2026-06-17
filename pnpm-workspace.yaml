@@ -7,6 +7,7 @@ packages:
   - agents/bjscan
   - agents/quoter
   - agents/mrelayer
+  - agents/nintent
 
 onlyBuiltDependencies:
   - esbuild

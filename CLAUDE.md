@@ -80,7 +80,9 @@ Full migration model + conventions: [migrations/README.md](migrations/README.md)
 agents/
   broadcaster/            # @whm/broadcaster — Solana → Wormhole price/rate publisher
   bjscan/                 # @whm/bjscan — Basejump indexer
-  mrelayer/               # standalone npm project (NOT a workspace member)
+  nintent/                # @whm/nintent — intent deposit notifier (IntentForwarded → 1Click)
+  quoter/                 # @whm/quoter — relay-fee quoter service
+  mrelayer/               # @whm/mrelayer — Wormhole VAA relayer
 
 common/                   # @whm/common — shared TS (evm, args, migration)
 
@@ -115,13 +117,17 @@ Declared in [pnpm-workspace.yaml](pnpm-workspace.yaml):
 
 ```
 common
+chopsticks
 contracts
 crates/solana
 agents/broadcaster
 agents/bjscan
+agents/quoter
+agents/mrelayer
+agents/nintent
 ```
 
-`agents/mrelayer` is intentionally **not** a pnpm workspace member — it pre-dates the workspace setup and ships its own `package-lock.json`. Treat it as a standalone npm project.
+**Agents declare ONLY runtime deps.** The TS toolchain — `typescript`, `tsx`, `esbuild`, `dotenv`, `@types/*` — lives in the **root** `package.json` and resolves from agent packages via upward `node_modules` lookup. Never add these as agent `devDependencies` (a package-specific type like `@types/pg` is the only acceptable exception). New agents follow the `broadcaster`/`bjscan` pattern: workspace member, runtime-deps-only `package.json`, esbuild bundle to `dist/index.js`, `node:NN-slim` Docker copying just the bundle, and a modular `src/` (`config` / `clients` / `watcher` / `api` / `endpoints` / `index`) — not one fat `index.ts`.
 
 ### Dependency graph
 
@@ -147,7 +153,7 @@ Cross-platform glue lives at the **migration** layer and the **IDL/ABI sync** la
 - **Crash-safe.** State is persisted after each step. Resume by re-running the same command; reset a stage with `--from <step-name>`; pause early with `--pause-at <step-name>`.
 - **Upgradeable contracts.** Solidity inherits OZ UUPS upgradeable patterns. Initialization is done in migration steps, not constructors.
 - **Wormhole SDKs.** EVM uses `wormhole-solidity-sdk` (pinned via Soldeer). Solana uses Wormhole Core Bridge through Anchor. `mrelayer` agent uses `@wormhole-foundation/relayer-engine`.
-- **Agent bundling.** `broadcaster` and `bjscan` bundle to a single `dist/index.js` via esbuild (CJS, node platform; see [esbuild.config.mjs](esbuild.config.mjs)). Avoid top-level await / ESM-only constructs in their `src/`.
+- **Agent bundling.** `broadcaster`, `bjscan`, and `nintent` bundle to a single `dist/index.js` via esbuild (CJS, node platform; see [esbuild.config.mjs](esbuild.config.mjs)). Avoid top-level await / ESM-only constructs in their `src/`. Agents carry only runtime deps — esbuild, tsx, typescript, and dotenv come from the **root** package.json (see Workspace members).
 - **IDL sync.** `broadcaster` consumes the Solana program's IDL — `pnpm run sync-idl` in `agents/broadcaster/` copies `crates/solana/target/idl/oracle_emitter.json` and `crates/solana/target/types/oracle_emitter.ts` into `agents/broadcaster/src/emitter/`. Re-run after Solana program changes.
 - **Ops scripts.** `contracts/scripts/<feature>/` (EVM) and `crates/solana/scripts/<program>/` (Solana) hold one-shot `tsx`/`bash` entry points. They use the per-package `package.json` plus root `.env` for PKs.
 
@@ -242,7 +248,7 @@ Common scopes: `oracle`, `basejump`, `intents`, `bjscan`, `contracts`, `crates`,
 ### Before editing any file
 
 1. **Identify the package** the file belongs to and read its `package.json` for scripts and deps.
-2. **Check `pnpm-workspace.yaml`** — `mrelayer` is intentionally NOT a workspace member.
+2. **Check `pnpm-workspace.yaml`** — agents are workspace members; their `package.json` lists runtime deps only, the TS toolchain is in the root.
 3. **For TS:** check the root `tsconfig.json`; per-package `tsconfig.json` extends it.
 4. **For contracts:** check `contracts/foundry.toml` and `contracts/remappings.txt` before adding imports.
 5. **For the Solana program:** check `crates/solana/Anchor.toml`, `crates/solana/Cargo.toml`, and existing accounts under `crates/solana/programs/oracle-emitter/src/`.
@@ -271,7 +277,7 @@ Common scopes: `oracle`, `basejump`, `intents`, `bjscan`, `contracts`, `crates`,
 - **Do not bypass the migration runner** with ad-hoc deploy scripts — the runner is the single source of truth for crash safety, resume, and audit.
 - **Keep contracts upgradeable-safe** — they inherit OZ UUPS upgradeable; never add state-init constructors; respect storage layout when adding fields.
 - **Do not commit `.env`** (gitignored). `.env.<context>` templates are checked in (no secrets, just RPCs).
-- **Do not modify `agents/mrelayer` as a workspace package** — it has its own `package-lock.json`. Run `npm install` inside it, not pnpm.
-- **`broadcaster` and `bjscan` bundle to CJS** via esbuild — avoid top-level await or ESM-only constructs in `src/`.
+- **Do not add a TS toolchain dep (`typescript`/`tsx`/`esbuild`/`dotenv`/`@types/*`) to an agent's `package.json`** — those live in the **root** and resolve upward. Agents declare runtime deps only.
+- **`broadcaster`, `bjscan`, and `nintent` bundle to CJS** via esbuild — avoid top-level await or ESM-only constructs in `src/`.
 - **Sync IDL/types before merging Solana program changes** — `broadcaster` will silently break against outdated types.
 - **Don't add `ctx.ref` cross-migration calls** — that pattern was removed. Cross-deployment dependencies go through env-config copies.

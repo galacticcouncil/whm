@@ -1,0 +1,22 @@
+{
+  "name": "@whm/nintent",
+  "private": true,
+  "scripts": {
+    "start": "node dist/index.js",
+    "prebuild": "npm run clean",
+    "build": "node ./esbuild.dist.mjs",
+    "clean": "rm -rf dist/",
+    "dev": "node ./esbuild.dev.mjs",
+    "docker:build": "docker build -t galacticcouncil/nintent:latest .",
+    "docker:deployx": "docker buildx build --platform linux/amd64 -t galacticcouncil/nintent:latest --push .",
+    "docker:deploy": "docker buildx build --platform linux/amd64,linux/arm64 -t galacticcouncil/nintent:latest --push .",
+    "docker:up": "docker stack deploy -c docker-compose.yml nintent"
+  },
+  "dependencies": {
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.17",
+    "@fastify/cors": "^10.0.2",
+    "fastify": "^5.2.0",
+    "viem": "^2.46.1",
+    "winston": "^3.8.2"
+  }
+}
