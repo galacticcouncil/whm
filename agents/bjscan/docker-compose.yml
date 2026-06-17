@@ -3,10 +3,16 @@ services:
   bjscan:
     image: galacticcouncil/bjscan:latest
     environment:
+      # Source RPCs must be websocket (ws:// or wss://) — the live tail uses eth_subscribe; an http(s) url fails at boot.
       - BASE_RPC_URL=
       - BASE_START_BLOCK=44386800
+      # Ethereum source is optional — set both to enable the second corridor (USDC).
+      # - ETHEREUM_RPC_URL=
+      # - ETHEREUM_CONTRACT=
       - HYDRATION_WSS_URL=
       - HYDRATION_START_BLOCK=12011000
+      # Safety-sweep cadence for the live tail (ms); subscriptions drive ingestion, this just backstops gaps.
+      # - LIVE_POLL_INTERVAL_MS=12000
       - DATABASE_URL=postgres://bjscan:bjscan@postgres:5432/bjscan
     ports:
       - "8080:8080"

@@ -49,8 +49,8 @@ async function main(): Promise<void> {
 
   await startEndpoints();
   await Promise.all([
-    ...srcWatchers.map((w) => w.start(pollIntervalMs)),
-    dstWatch.start(pollIntervalMs),
+    ...srcWatchers.map((w) => w.start()),
+    dstWatch.start(),
     processor.start(pollIntervalMs),
   ]);
 
