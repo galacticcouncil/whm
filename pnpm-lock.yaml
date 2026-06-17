@@ -199,6 +199,9 @@ importers:
 
   agents/quoter:
     dependencies:
+      '@fastify/cors':
+        specifier: ^10.0.2
+        version: 10.1.0
       '@galacticcouncil/sdk-next':
         specifier: ^1.3.0
         version: 1.3.0(@galacticcouncil/common@1.0.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3)))(@galacticcouncil/descriptors@2.4.0)(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(viem@2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76))
