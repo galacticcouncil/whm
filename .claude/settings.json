@@ -34,12 +34,11 @@
       "Bash(cat:*)",
       "Bash(tree:*)"
     ],
-    "deny": [
-      "Bash(rm -rf:*)",
-      "Bash(git push --force:*)",
-      "Bash(git reset --hard:*)"
-    ]
+    "deny": ["Bash(rm -rf:*)", "Bash(git push --force:*)", "Bash(git reset --hard:*)"]
   },
+  "instructions": [
+    "When editing code, treat all comments as immutable. If code changes make a comment inaccurate, stop and ask for guidance instead of modifying the comment."
+  ],
   "enabledPlugins": {
     "andrej-karpathy-skills@karpathy-skills": true
   }
