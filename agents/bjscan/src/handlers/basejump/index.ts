@@ -8,8 +8,10 @@ import { normalizeRecipient } from "../../utils";
 import { BridgeInitiatedEvt } from "./abi";
 import { createUtils } from "./utils";
 
-export function basejump(client: PublicClient): HandlerMap {
-  const { withBlockTime, getSender } = createUtils(client);
+export function basejump(clients: Record<string, PublicClient>): HandlerMap {
+  const utils = Object.fromEntries(
+    Object.entries(clients).map(([chain, client]) => [chain, createUtils(client)]),
+  );
 
   async function initiated(ev: LogEvent): Promise<void> {
     const a = ev.args as {
@@ -24,6 +26,7 @@ export function basejump(client: PublicClient): HandlerMap {
     const netAmount = (a.amount - a.fee).toString();
     const id = `init-${ev.chain}-${a.transferSequence}`;
 
+    const { withBlockTime, getSender } = utils[ev.chain];
     const [sender, ref] = await Promise.all([getSender(ev.ref), withBlockTime(ev.ref)]);
 
     const { row, created, previousState } = await upsertTransfer(id, "initiated", {

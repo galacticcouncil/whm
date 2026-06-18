@@ -4,6 +4,9 @@ import { PolkadotClient } from "polkadot-api";
 import log from "../logger";
 import { insertEvent, loadCursor, saveCursor } from "../db";
 import { BoundedQueue } from "../utils";
+import { liveIntervalMs } from "../config";
+
+const FINALIZED_STALE_MS = 60_000;
 
 export interface SubstrateChainCfg {
   name: string;
@@ -26,6 +29,10 @@ type Block = { number: bigint; hash: `0x${string}`; logs: IndexedLog[] };
 
 export class SubstrateWatcher {
   private timer?: NodeJS.Timeout;
+  private sub?: { unsubscribe(): void };
+  private pendingSafe?: bigint;
+  private lastBlockAt = 0;
+  private busy = false;
 
   constructor(
     public readonly cfg: SubstrateChainCfg,
@@ -39,25 +46,63 @@ export class SubstrateWatcher {
     return tip > this.cfg.confirmations ? tip - this.cfg.confirmations : 0n;
   }
 
-  async start(pollIntervalMs: number): Promise<void> {
-    const tick = async () => {
-      try {
-        await this.tick();
-      } catch (e) {
-        log.error(`[${this.cfg.name}] tick: ${(e as Error).stack ?? String(e)}`);
-      }
-    };
-    await tick();
-    this.timer = setInterval(tick, pollIntervalMs);
+  async start(): Promise<void> {
+    this.lastBlockAt = Date.now();
+    this.pendingSafe = await this.latestSafe();
+    await this.drain();
+    this.subscribe();
+    this.timer = setInterval(() => void this.drain(), liveIntervalMs);
+    log.info(`[${this.cfg.name}] live: finalized-block subscription`);
   }
 
   stop(): void {
+    this.sub?.unsubscribe();
     if (this.timer) clearInterval(this.timer);
     this.client?.destroy();
   }
 
-  private async tick(): Promise<void> {
-    const safe = await this.latestSafe();
+  // ─── live tail ───────────────────────────────────────────────────
+
+  private subscribe(): void {
+    this.sub?.unsubscribe();
+    this.sub = this.client.finalizedBlock$.subscribe({
+      next: (b) => {
+        const n = BigInt(b.number);
+        this.pendingSafe = n > this.cfg.confirmations ? n - this.cfg.confirmations : 0n;
+        this.lastBlockAt = Date.now();
+        void this.drain();
+      },
+      error: (e) => {
+        log.error(`[${this.cfg.name}] finalizedBlock$: ${(e as Error)?.message ?? String(e)}`);
+        setTimeout(() => this.subscribe(), 5_000);
+      },
+    });
+  }
+
+  private async drain(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const stale = Date.now() - this.lastBlockAt > FINALIZED_STALE_MS;
+      if (this.pendingSafe === undefined && stale) this.pendingSafe = await this.latestSafe();
+      while (this.pendingSafe !== undefined) {
+        const safe = this.pendingSafe;
+        this.pendingSafe = undefined;
+        await this.tick(safe);
+      }
+      if (stale) {
+        log.warn(`[${this.cfg.name}] finalized stream stale, re-subscribing`);
+        this.subscribe();
+      }
+    } catch (e) {
+      log.error(`[${this.cfg.name}] drain: ${(e as Error).stack ?? String(e)}`);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async tick(safeHint?: bigint): Promise<void> {
+    const safe = safeHint ?? (await this.latestSafe());
     const cursor = (await loadCursor(this.cfg.name)) ?? this.cfg.startBlock - 1n;
     if (safe <= cursor) return;
     log.info(`[${this.cfg.name}] indexing ${cursor + 1n}..${safe}`);

@@ -12,6 +12,8 @@
     "migration:run": "npx tsx migrations/run.ts",
     "migrate:basejump-base": "bash sh/migrate-basejump-base.sh prod",
     "migrate:basejump-base:fork": "bash sh/migrate-basejump-base.sh fork",
+    "migrate:basejump-ethereum": "bash sh/migrate-basejump-ethereum.sh prod",
+    "migrate:basejump-ethereum:fork": "bash sh/migrate-basejump-ethereum.sh fork",
     "migrate:oracle-relay-solana": "bash sh/migrate-oracle-relay-solana.sh prod",
     "migrate:oracle-relay-solana:fork": "bash sh/migrate-oracle-relay-solana.sh fork",
     "migrate:oracle-relay-ethereum": "bash sh/migrate-oracle-relay-ethereum.sh prod",

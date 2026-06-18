@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -331,6 +331,10 @@
           label: e.txHash,
           url: "https://basescan.org/tx/" + e.txHash,
         }),
+        ethereum: (e) => ({
+          label: e.txHash,
+          url: "https://etherscan.io/tx/" + e.txHash,
+        }),
         hydration: (e) => ({
           label: e.blockNumber + "-" + e.logIndex,
           url: "https://hydration.subscan.io/event/" + e.blockNumber + "-" + e.logIndex,
@@ -339,11 +343,13 @@
 
       const ADDR_EXPLORER = {
         base: (a) => "https://basescan.org/address/" + a,
+        ethereum: (a) => "https://etherscan.io/address/" + a,
         hydration: (a) => "https://hydration.subscan.io/address/" + a,
       };
 
       const WORMHOLE_CHAIN_ID = {
         base: 30,
+        ethereum: 2,
       };
 
       const BRIDGE_CONTRACT = {
@@ -362,6 +368,7 @@
 
       const ASSETS = {
         "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42": { symbol: "EURC", decimals: 6 },
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": { symbol: "USDC", decimals: 6 },
       };
 
       function fmtAmount(raw, decimals) {
@@ -429,7 +436,9 @@
           const short = esc(truncMiddle(v, 8, 6));
           const url = ADDR_EXPLORER[chain]?.(v);
           this.innerHTML = url
-            ? `<a href="${esc(url)}" target="_blank" rel="noopener"><code title="${esc(v)}">${short}</code></a>`
+            ? `<a href="${esc(url)}" target="_blank" rel="noopener"><code title="${esc(
+                v
+              )}">${short}</code></a>`
             : `<code title="${esc(v)} (click to copy)" style="cursor:pointer">${short}</code>`;
           if (!url) this.onclick = () => navigator.clipboard?.writeText(v);
         }
@@ -451,7 +460,9 @@
           }
           const short = esc(truncMiddle(info.label, 8, 6));
           this.innerHTML = info.url
-            ? `<a href="${esc(info.url)}" target="_blank" rel="noopener"><code title="${esc(info.label)}">${short}</code></a>`
+            ? `<a href="${esc(info.url)}" target="_blank" rel="noopener"><code title="${esc(
+                info.label
+              )}">${short}</code></a>`
             : `<code title="${esc(info.label)}">${short}</code>`;
         }
       }
@@ -528,7 +539,9 @@
         rows.push(["ID", `<code>${esc(t.id)}</code>`]);
         rows.push([
           "Status",
-          `<span class="pill state-${esc(t.state)}"><span class="pill-dot"></span>${esc(t.state)}</span>`,
+          `<span class="pill state-${esc(t.state)}"><span class="pill-dot"></span>${esc(
+            t.state
+          )}</span>`,
         ]);
         rows.push(["Action", "transfer"]);
         if (sent) {
@@ -536,19 +549,33 @@
         }
         if (recv) {
           const delta = sent
-            ? ` <span class="delta"><x-delta from="${esc(sent.blockTimestamp)}" to="${esc(recv.blockTimestamp)}"></x-delta></span>`
+            ? ` <span class="delta"><x-delta from="${esc(sent.blockTimestamp)}" to="${esc(
+                recv.blockTimestamp
+              )}"></x-delta></span>`
             : "";
           rows.push(["Received", `<x-time value="${esc(recv.blockTimestamp)}"></x-time>${delta}`]);
         }
         rows.push([
           "From",
-          `<div class="party"><span class="party-head">${chainBadge(t.source_chain)}${esc(t.source_chain)}</span>${t.sender ? '<x-addr value="' + esc(t.sender) + '" chain="' + esc(t.source_chain) + '"></x-addr>' : ""}</div>`,
+          `<div class="party"><span class="party-head">${chainBadge(t.source_chain)}${esc(
+            t.source_chain
+          )}</span>${
+            t.sender
+              ? '<x-addr value="' +
+                esc(t.sender) +
+                '" chain="' +
+                esc(t.source_chain) +
+                '"></x-addr>'
+              : ""
+          }</div>`,
         ]);
         rows.push([
           "To",
           (() => {
             const dc = t.dest_chain ?? "hydration";
-            return `<div class="party"><span class="party-head">${chainBadge(dc)}${esc(dc)}</span><x-addr value="${esc(t.recipient)}" chain="${esc(dc)}"></x-addr></div>`;
+            return `<div class="party"><span class="party-head">${chainBadge(dc)}${esc(
+              dc
+            )}</span><x-addr value="${esc(t.recipient)}" chain="${esc(dc)}"></x-addr></div>`;
           })(),
         ]);
         const asset = t.source_asset || t.dest_asset;
@@ -564,7 +591,9 @@
         if (!t.initiated || !t.completed) return "";
         const chains = [t.initiated.chain];
         if (t.completed.chain !== t.initiated.chain) chains.push(t.completed.chain);
-        const delta = ` <x-delta from="${esc(t.initiated.blockTimestamp)}" to="${esc(t.completed.blockTimestamp)}"></x-delta>`;
+        const delta = ` <x-delta from="${esc(t.initiated.blockTimestamp)}" to="${esc(
+          t.completed.blockTimestamp
+        )}"></x-delta>`;
         return chains.map(esc).join('<span class="arrow">→</span>') + delta;
       }
 
@@ -586,7 +615,9 @@
           return `
             <div class="leg pending">
               <div class="leg-head">
-                <div class="leg-title">${chain ? chainBadge(chain) + "<span>" + esc(chain) + "</span>" : ""}<span class="leg-kind pending">· PENDING</span></div>
+                <div class="leg-title">${
+                  chain ? chainBadge(chain) + "<span>" + esc(chain) + "</span>" : ""
+                }<span class="leg-kind pending">· PENDING</span></div>
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" width="20" height="20" class="spin">
                   <circle cx="10" cy="10" r="8" stroke="#F59E0B" stroke-opacity="0.3" stroke-width="2"/>
                   <path d="M10 2a8 8 0 018 8" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
@@ -597,11 +628,17 @@
         return `
           <div class="leg">
             <div class="leg-head">
-              <div class="leg-title">${chainBadge(e.chain)}<span>${esc(e.chain)}</span><span class="leg-kind">· ${esc(kind)}</span></div>
+              <div class="leg-title">${chainBadge(e.chain)}<span>${esc(
+          e.chain
+        )}</span><span class="leg-kind">· ${esc(kind)}</span></div>
               <span class="check">✓</span>
             </div>
             <div class="leg-body">
-              <div>${esc(CHAIN_REF_LABEL[e.chain] ?? "Tx")}: <span class="hash"><x-hash value="${esc(e.txHash)}" block="${esc(e.blockNumber)}" log-index="${esc(e.logIndex)}" chain="${esc(e.chain)}"></x-hash></span></div>
+              <div>${esc(
+                CHAIN_REF_LABEL[e.chain] ?? "Tx"
+              )}: <span class="hash"><x-hash value="${esc(e.txHash)}" block="${esc(
+          e.blockNumber
+        )}" log-index="${esc(e.logIndex)}" chain="${esc(e.chain)}"></x-hash></span></div>
               <div>Block: ${esc(e.blockNumber)}</div>
               <div><x-time value="${esc(e.blockTimestamp)}"></x-time></div>
             </div>
@@ -611,12 +648,18 @@
       function wormholeCard(t) {
         const ref = wormholeRef(t);
         const link = ref
-          ? `<div>Tx: <span class="hash"><a href="${esc(ref.url)}" target="_blank" rel="noopener" title="${esc(ref.id)}"><code>${esc(truncMiddle(ref.id, 10, 8))}</code></a></span></div>`
+          ? `<div>Tx: <span class="hash"><a href="${esc(
+              ref.url
+            )}" target="_blank" rel="noopener" title="${esc(ref.id)}"><code>${esc(
+              truncMiddle(ref.id, 10, 8)
+            )}</code></a></span></div>`
           : "";
         return `
           <div class="leg">
             <div class="leg-head">
-              <div class="leg-title">${chainBadge("wormhole")}<span>wormhole</span><span class="leg-kind">· relayed</span></div>
+              <div class="leg-title">${chainBadge(
+                "wormhole"
+              )}<span>wormhole</span><span class="leg-kind">· relayed</span></div>
               <span class="check">✓</span>
             </div>
             <div class="leg-body">${link}</div>
@@ -660,7 +703,9 @@
         root.innerHTML = `
           <section class="card">
             <h1 style="margin:0 0 0.5rem;font-size:1.2rem">404</h1>
-            <p style="margin:0;color:var(--muted)">Transfer <code>${esc(ID)}</code> not found. Will appear here once indexed.</p>
+            <p style="margin:0;color:var(--muted)">Transfer <code>${esc(
+              ID
+            )}</code> not found. Will appear here once indexed.</p>
           </section>`;
         document.title = ID + " · bjscan";
       }
@@ -675,7 +720,9 @@
           if (!r.ok) throw new Error("http " + r.status);
           apply(await r.json());
         } catch (err) {
-          root.innerHTML = `<section class="card"><h1 style="margin:0">error</h1><p style="color:var(--muted)">${esc(err.message || String(err))}</p></section>`;
+          root.innerHTML = `<section class="card"><h1 style="margin:0">error</h1><p style="color:var(--muted)">${esc(
+            err.message || String(err)
+          )}</p></section>`;
         }
       }
 

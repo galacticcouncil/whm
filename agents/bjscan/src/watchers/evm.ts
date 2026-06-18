@@ -1,8 +1,12 @@
-import { type PublicClient, type Log, type Chain } from "viem";
+import { type PublicClient, type Log, type Chain, type WebSocketTransport } from "viem";
+import { watchBlockNumber } from "viem/actions";
 
 import log from "../logger";
 import { insertEvent, loadCursor, saveCursor } from "../db";
 import { BoundedQueue } from "../utils";
+import { liveIntervalMs } from "../config";
+
+const HEAD_STALE_MS = 60_000;
 
 export interface EvmChainCfg {
   name: string;
@@ -19,11 +23,15 @@ type Chunk = { endBlock: bigint; logs: Log[] };
 
 export class EvmWatcher {
   private timer?: NodeJS.Timeout;
+  private unwatch?: () => void;
+  private tip?: bigint;
+  private lastHeadAt = 0;
+  private busy = false;
 
   constructor(
     public readonly cfg: EvmChainCfg,
     private readonly client: PublicClient,
-    private readonly onIngest?: () => void,
+    private readonly onIngest?: () => void
   ) {}
 
   async latestSafe(): Promise<bigint> {
@@ -31,24 +39,57 @@ export class EvmWatcher {
     return tip > this.cfg.confirmations ? tip - this.cfg.confirmations : 0n;
   }
 
-  async start(pollIntervalMs: number): Promise<void> {
-    const tick = async () => {
-      try {
-        await this.tick();
-      } catch (e) {
-        log.error(`[${this.cfg.name}] tick: ${(e as Error).stack ?? String(e)}`);
-      }
-    };
-    await tick();
-    this.timer = setInterval(tick, pollIntervalMs);
+  async start(): Promise<void> {
+    this.lastHeadAt = Date.now();
+    this.watch();
+    await this.ingest();
+    this.timer = setInterval(() => void this.ingest(), liveIntervalMs);
+    log.info(`[${this.cfg.name}] live: new-heads subscription (sweep every ${liveIntervalMs}ms)`);
   }
 
   stop(): void {
+    this.unwatch?.();
     if (this.timer) clearInterval(this.timer);
   }
 
-  private async tick(): Promise<void> {
-    const safe = await this.latestSafe();
+  private watch(): void {
+    this.unwatch?.();
+    this.unwatch = watchBlockNumber(this.client as PublicClient<WebSocketTransport>, {
+      poll: false,
+      onBlockNumber: (n) => {
+        this.tip = n;
+        this.lastHeadAt = Date.now();
+      },
+      onError: (e) => {
+        log.error(`[${this.cfg.name}] ws: ${e.message}`);
+        setTimeout(() => this.watch(), 5_000);
+      },
+    });
+  }
+
+  private async ingest(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const stale = Date.now() - this.lastHeadAt > HEAD_STALE_MS;
+      const safe =
+        !stale && this.tip !== undefined && this.tip > this.cfg.confirmations
+          ? this.tip - this.cfg.confirmations
+          : await this.latestSafe();
+      await this.tick(safe);
+      if (stale) {
+        log.warn(`[${this.cfg.name}] heads stale, re-subscribing`);
+        this.watch();
+      }
+    } catch (e) {
+      log.error(`[${this.cfg.name}] ingest: ${(e as Error).stack ?? String(e)}`);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async tick(safeHint?: bigint): Promise<void> {
+    const safe = safeHint ?? (await this.latestSafe());
     const cursor = (await loadCursor(this.cfg.name)) ?? this.cfg.startBlock - 1n;
     if (safe <= cursor) return;
     log.info(`[${this.cfg.name}] indexing ${cursor + 1n}..${safe}`);
@@ -98,7 +139,7 @@ export class EvmWatcher {
             l.logIndex!,
             l.blockNumber!,
             l.topics,
-            l.data,
+            l.data
           );
           if (ok) {
             ingested++;
@@ -111,13 +152,13 @@ export class EvmWatcher {
         if (processedBlocks < Number(total)) {
           const bps = Math.round(processedBlocks / ((Date.now() - start) / 1000));
           log.info(
-            `[${this.cfg.name}] at ${chunk.endBlock} (${processedBlocks} blocks, ${ingested} events, ${bps} blk/s)`,
+            `[${this.cfg.name}] at ${chunk.endBlock} (${processedBlocks} blocks, ${ingested} events, ${bps} blk/s)`
           );
         }
       }
       if (fetchErr.e) throw fetchErr.e;
       log.info(
-        `[${this.cfg.name}] ingested ${ingested} events in ${processedBlocks} blocks, at ${safe}`,
+        `[${this.cfg.name}] ingested ${ingested} events in ${processedBlocks} blocks, at ${safe}`
       );
     };
 

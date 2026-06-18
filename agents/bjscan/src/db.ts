@@ -261,11 +261,13 @@ export async function insertEvent(
   return (r.rowCount ?? 0) > 0;
 }
 
-/** Pick up to `limit` unprocessed events in ingestion order. */
-export async function takePendingEvents(limit: number): Promise<EventRow[]> {
+/** Pick up to `limit` unprocessed events in ingestion order. Events from chains
+ *  absent from the current config stay pending until the chain is configured again. */
+export async function takePendingEvents(limit: number, chains: string[]): Promise<EventRow[]> {
   const r = await pool.query(
-    `SELECT * FROM events WHERE processed_at IS NULL ORDER BY ingested_at ASC LIMIT $1`,
-    [limit],
+    `SELECT * FROM events WHERE processed_at IS NULL AND chain = ANY($2)
+     ORDER BY ingested_at ASC LIMIT $1`,
+    [limit, chains],
   );
   return r.rows;
 }
