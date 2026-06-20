@@ -1,0 +1,57 @@
+version: "3.3"
+services:
+  scan:
+    image: galacticcouncil/whmscan:latest
+    environment:
+      # ── Chains are enabled by presence of their RPC. EVM RPCs MUST be websocket (ws/wss) —
+      #    ingestion is driven by eth_subscribe new-heads; an http(s) url fails at boot. ──
+      # Base (Basejump source)
+      - BASE_RPC_URL=
+      - BASE_START_BLOCK=44386800
+      # Ethereum (Basejump source [optional] + intents IntentReceiver)
+      - ETHEREUM_RPC_URL=
+      - ETHEREUM_START_BLOCK=25300000
+      # Moonbeam (intents Wormhole-core LogMessagePublished)
+      - MOONBEAM_RPC_URL=
+      - MOONBEAM_START_BLOCK=
+      # Hydration (Basejump landing + intents IntentEmitter)
+      - HYDRATION_WSS_URL=
+      - HYDRATION_START_BLOCK=12011000
+      # ── Contract addresses (prod defaults baked into the image; override only to repoint) ──
+      # - BASEJUMP_BASE=
+      # - BASEJUMP_ETHEREUM=            # enables the optional Basejump Ethereum corridor
+      # - BASEJUMP_LANDING_HYDRATION=
+      # - INTENT_EMITTER_HYDRATION=
+      # - INTENT_RECEIVER_ETHEREUM=
+      # - WORMHOLE_CORE_MOONBEAM=
+      # - TOKEN_BRIDGE_MOONBEAM=
+      # Safety-sweep cadence for the live tail (ms); subscriptions drive ingestion, this just backstops gaps.
+      # - LIVE_POLL_INTERVAL_MS=12000
+      - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=scan
+      - POSTGRES_PASSWORD=scan
+      - POSTGRES_DB=scan
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - default
+networks:
+  default:
+    driver: overlay
+volumes:
+  pgdata:
+    driver: local
