@@ -221,6 +221,25 @@ importers:
         specifier: ^3.8.2
         version: 3.19.0
 
+  agents/scan:
+    dependencies:
+      '@fastify/cors':
+        specifier: ^10.0.2
+        version: 10.1.0
+      fastify:
+        specifier: ^5.2.0
+        version: 5.8.5
+      pg:
+        specifier: ^8.13.1
+        version: 8.20.0
+      winston:
+        specifier: ^3.8.2
+        version: 3.19.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+
   chopsticks:
     dependencies:
       '@galacticcouncil/chopsticks':
