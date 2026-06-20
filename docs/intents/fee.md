@@ -1,23 +1,26 @@
 # Intents — Fee Breakdown
 
-Every `swapAndBridge` call passes value across three legs (Hydration swap → Moonbeam bridge → Ethereum delivery) before it funds a OneClick quote on NEAR. Each leg charges on a different surface and is bounded by a different knob. This page is the reference for sizing `amountIn`, `minEthOut`, and `maxFeeIn`, and for understanding where the value goes.
+Every `swapAndBridge` call passes value across three legs (Hydration swap → Moonbeam bridge → Ethereum delivery) before it funds a OneClick quote on NEAR. Each leg charges on a different surface and is bounded by a different knob. This page is the reference for sizing `amountIn`, `minEthOut`, `maxFeeIn`, and `maxRelayFee`, and for understanding where the value goes.
+
+> This page documents the **deployed WTT path** (`IntentEmitterWtt` → `IntentReceiver`): the swapped WETH is bridged straight through the Wormhole TokenBridge (`transferTokensWithPayload`) and a relayer redeems it on Ethereum. The Moonbeam-side charge is a **destination relay fee**, not a pool fee. The Basejump-pooled **BJP** alternative (not deployed for intents) charges `assetFee[WETH]` on a Moonbeam proxy instead — see the [BJP appendix](#bjp-appendix--pooled-fast-path-fee) and [relay-fee.md](relay-fee.md) for that model.
 
 ## The stack
 
 ```
 value(amountIn of A)
-   −  xcmFee            (GLMR x-chain transport)      ← bought from A, bounded by maxFeeIn
-   =  A available to swap → WETH                       ← swap output bounded below by minEthOut  ⇒ ethOut
-   −  assetFee[WETH]    (Basejump fast-path fee)        ← charged on the Moonbeam proxy
-   =  netAmount native ETH delivered to depositAddress  ← must satisfy the OneClick quote
-   −  OneClick spread/fee (NEAR side)                   ← off-chain, in the quote
+   −  xcmFee            (GLMR x-chain transport)         ← bought from A, bounded by maxFeeIn
+   =  A available to swap → WETH                          ← swap output bounded below by minEthOut  ⇒ ethOut
+   ⇒  bridged as-is through the Wormhole TokenBridge (payload-3); arrives as `amount`
+   −  feeRequested      (destination relay fee)           ← claimed by the relayer, bounded by maxRelayFee
+   =  forwardAmount native ETH delivered to depositAddress ← must satisfy the OneClick quote
+   −  OneClick spread/fee (NEAR side)                     ← off-chain, in the quote
    =  destination asset (ZEC/BTC/…) to the user
 ```
 
 So, roughly:
 
 ```
-value(amountIn)  ≳  xcmFee  +  assetFee[WETH]  +  oneClick.requiredDeposit
+value(amountIn)  ≳  xcmFee  +  maxRelayFee  +  oneClick.requiredDeposit
 ```
 
 ## Per-leg detail
@@ -39,35 +42,13 @@ The `A` left after the fee buy is sold for WETH on the Hydration router.
 - Applies on **every** path, including `A == WETH` (there `wethOut = amountIn − WETH spent on the GLMR fee`).
 - Only the caller's own `A` is sold — stray/donated `A` in the contract is left untouched.
 
-### 3. Moonbeam — Basejump fast-path fee (`assetFee[WETH]`)
+### 3. Ethereum — relay fee (`maxRelayFee` / `feeRequested`)
 
-The bridged WETH arrives at the Moonbeam `BasejumpProxy`, which deducts a fixed per-asset fee in [`_fastTrack`](../../contracts/src/basejump/BasejumpCore.sol): `netAmount = amount − quoteFee(WETH)`, where `quoteFee(asset) = assetFee[asset]`.
+The swapped WETH is bridged straight through the Wormhole TokenBridge with a payload (`transferTokensWithPayload`); a relayer calls [`IntentReceiver.redeem(vaa, feeRequested)`](../../contracts/src/intents/IntentReceiver.sol) on Ethereum to unwrap → native ETH → forward to `depositAddress`. There's no pre-funded pool (Moonbeam finalizes in ~seconds, so fronting liquidity buys nothing), so there's no `assetFee[WETH]` — the relay cost is the only destination charge.
 
-- **Not a per-call param** — `assetFee[WETH]` is owner-configured on the proxy via `setAssetFee`. The UI must read it (and the live quote) to size `minEthOut` / `amountIn`.
-- The fee stays in `BasejumpLanding` on the destination; the fast path pays `netAmount`, the slow Wormhole `TokenBridge.transferTokens` replenishes the pool.
-- **It must also absorb Wormhole dust** (below) — `assetFee[WETH]` should be set comfortably above the dust granularity so the pool never decapitalizes.
+**Destination-paid, deducted from delivery.** The relayer is reimbursed on Ethereum out of the redeemed amount — never on the source chain. Native-in, native-out, **no FX**: the redeemed asset is ETH and the relayer's cost is ETH gas, so the fee is just a haircut on `amount` before the forward, paid to `msg.sender`. The relay never costs the user anything on Hydration/Moonbeam, and is only ever charged on a _successful_ redeem.
 
-#### Wormhole 8-decimal normalization dust
-
-The Wormhole Token Bridge carries amounts at **8-decimal precision** ([`wormhole-solidity-sdk/.../TokenBase.sol:164,219-222`](../../contracts/dependencies/wormhole-solidity-sdk-0.1.0/src/TokenBase.sol)): on receipt the amount is re-scaled by `10^(decimals − 8)`, and the sender drops the sub-precision remainder before locking. For 18-decimal WETH that's `10^10` wei of granularity, so **up to ~`1e10` wei (`1e-8` WETH) of dust per transfer** never crosses — it accumulates on the `BasejumpProxy` side (recoverable by its owner).
-
-Per-transfer pool delta = `(amount − dust) − netAmount` = **`assetFee[WETH] − dust`**. The pool stays solvent as long as `assetFee[WETH] ≥ dust`. Since `dust < 1e10` wei (fractions of a cent) and a sane WETH `assetFee` is far larger, this is structurally real but practically negligible — just confirm `assetFee[WETH]` is set well above `1e10` wei.
-
-### 4. Ethereum — delivery (no fee)
-
-`Basejump → BasejumpLanding → IntentRouter` forwards `netAmount` native ETH to the OneClick `depositAddress`. No additional fee on this leg; the landing remaps the source asset to native ETH (`destAssetFor[WETH] = NATIVE`) and `IntentRouter` forwards it.
-
-### 5. NEAR — OneClick quote (off-chain)
-
-The `netAmount` ETH must meet the OneClick quote's required origin deposit (`originAsset = ETH.eth`). OneClick takes its own spread/fee on the destination (B) leg; this is reflected in the quote, not charged on-chain. Size `amountIn` so `netAmount ≥ quote.requiredDeposit`.
-
-## Relay fee — direct TokenBridge variant (`IntentReceiver`, `maxRelayFee`)
-
-The `IntentEmitterWtt` → [`IntentReceiver`](../../contracts/src/intents/IntentReceiver.sol) path replaces legs 3–4 above with a single hop: instead of the Basejump fast-path pool + `assetFee[WETH]`, the swapped WETH is bridged straight through the Wormhole TokenBridge with a payload (`transferTokensWithPayload`), and a relayer calls `redeem(vaa, feeRequested)` on Ethereum to unwrap → native ETH → forward to `depositAddress`. There's no pre-funded pool here (Moonbeam finalizes in ~seconds, so fronting liquidity buys nothing), and so no `assetFee[WETH]`. The relay cost is paid instead.
-
-**Destination-paid, deducted from delivery.** The relayer is reimbursed on Ethereum out of the redeemed amount — never on the source chain. Native-in, native-out, **no FX**: the redeemed asset is ETH and the relayer's cost is ETH gas, so the fee is just a haircut on `amount` before the forward, paid to `msg.sender`. The relay never costs the user anything on Hydration/Moonbeam; it's only ever charged on a _successful_ redeem.
-
-**`maxRelayFee` — committed at source, carried in the payload.** The intent payload is `(bytes32 intentId, address depositAddress, uint256 maxRelayFee)`. `maxRelayFee` is an ETH-denominated **ceiling** the user authorizes at emit time (sized from a gas estimate + headroom, like any other fee knob). Because it rides inside the **guardian-signed VAA**, it's authenticated end-to-end — no separate signed quote, no trusted quoter service, no extra source-chain call. The relayer reads the same bytes the contract will re-decode.
+**`maxRelayFee` — committed at source, carried in the payload.** The intent payload is `(bytes32 intentId, address depositAddress, uint256 maxRelayFee)`. `maxRelayFee` is an ETH-denominated **ceiling** the user authorizes at emit time (sized from a gas estimate + headroom, like any other fee knob). Because it rides inside the **guardian-signed VAA**, it's authenticated end-to-end — no separate signed quote, no trusted signer, no extra source-chain call. The relayer reads the same bytes the contract will re-decode.
 
 **`feeRequested` — relayer names its price, bounded by the ceiling.** `redeem` enforces `feeRequested ≤ maxRelayFee` and computes `forwardAmount = amount − feeRequested` (underflow-reverts if a relayer asks for more than was delivered). The relayer sets `feeRequested` to its own gas cost + margin:
 
@@ -75,26 +56,47 @@ The `IntentEmitterWtt` → [`IntentReceiver`](../../contracts/src/intents/Intent
 - Competition drives the actual fee **below** the ceiling when gas is cheap — relayers undercut on `feeRequested` rather than all grabbing `maxRelayFee`.
 - **A too-low `maxRelayFee` is a liveness issue, never a loss.** If it can't cover gas, no relayer submits → the VAA simply sits unredeemed (still valid, still replay-safe) until gas drops, the operator's backstop relayer eats the cost, or it's retried with a higher ceiling. User funds are never at risk.
 
-**Relayer mechanics.** The relayer watches the Guardians for VAAs addressed to `IntentReceiver`, parses the transfer body (same shape as `redeem`'s `parseTransferWithPayload`), and decides locally. Two gotchas: (1) it's **permissionless and racy** — multiple relayers may decode the same VAA; first `redeem` to land wins (TokenBridge marks the VAA consumed) and the losers' txs revert, so `margin` must cover revert risk; run your own backstop relayer for liveness. (2) The relayer must apply the **8-decimal Wormhole rescale** (`× 10^(decimals−8)` for 18-decimal WETH) when reading `amount`, or its profitability math is off.
+**Relayer mechanics.** The relayer (`mrelayer`, app-intent) watches the Guardians for VAAs addressed to `IntentReceiver`, parses the transfer body (same shape as `redeem`'s `parseTransferWithPayload`), pulls a `feeRequested` from the `quoter` service, and decides locally. Two gotchas: (1) it's **permissionless and racy** — multiple relayers may decode the same VAA; first `redeem` to land wins (TokenBridge marks the VAA consumed) and the losers' txs revert, so `margin` must cover revert risk; the operator runs a backstop relayer for liveness. (2) The relayer must apply the **8-decimal Wormhole rescale** (`× 10^(decimals−8)` for 18-decimal WETH) when reading `amount`, or its profitability math is off.
 
-> Sizing invariant (UI's job — same as `assetFee[WETH]`): the contract can't see `requiredDeposit`, so size `amountIn` such that `amount − maxRelayFee ≥ requiredDeposit`. Unlike Basejump there's no pool to decapitalize, so the 8-decimal dust just lands in `amount` and is forwarded/fee'd normally — no buffer needed.
+> An optional `authorizedRelayer` allowlist on `IntentReceiver` grants a 5-minute exclusivity window per VAA before redemption opens to anyone; while the allowlist is empty, redemption is fully permissionless. This is a liveness/MEV control, not a fee surface — see [relay-fee.md](relay-fee.md).
+
+### 4. NEAR — OneClick quote (off-chain)
+
+The `forwardAmount` ETH must meet the OneClick quote's required origin deposit (`originAsset = ETH.eth`). OneClick takes its own spread/fee on the destination (B) leg; this is reflected in the quote, not charged on-chain. Size `amountIn` so `forwardAmount ≥ quote.requiredDeposit`.
 
 ## Sizing checklist (UI)
 
 1. Get a live OneClick quote → `requiredDeposit` (ETH).
-2. Read `assetFee[WETH]` from the proxy.
-3. Target `ethOut ≥ requiredDeposit + assetFee[WETH]`; set `minEthOut` to that (with slippage tolerance).
+2. Estimate the destination relay cost (Ethereum `redeem` gas × gas price) + margin → set `maxRelayFee` to that, with headroom.
+3. Target `ethOut ≥ requiredDeposit + maxRelayFee`; set `minEthOut` to that (with swap slippage tolerance).
 4. Read the `A/GLMR` price; set `maxFeeIn` to cover `xcmFee` worth of `A` plus slippage headroom.
-5. Choose `amountIn` so the post-fee-buy `A` swaps to `≥ minEthOut`, i.e. `value(amountIn) ≳ xcmFee + assetFee[WETH] + requiredDeposit`.
+5. Choose `amountIn` so the post-fee-buy `A` swaps to `≥ minEthOut`, i.e. `value(amountIn) ≳ xcmFee + maxRelayFee + requiredDeposit`.
+
+There's no pool to decapitalize, so the Wormhole 8-decimal dust just lands in `amount` and is forwarded/fee'd normally — no extra buffer needed beyond the relay-fee headroom.
 
 ## Knobs at a glance
 
-| Knob                         | Where                   | Set by        | Guards                                           |
-| ---------------------------- | ----------------------- | ------------- | ------------------------------------------------ |
-| `maxFeeIn`                   | `swapAndBridge` arg     | caller        | A spent buying the `xcmFee` GLMR (transport leg) |
-| `minEthOut`                  | `swapAndBridge` arg     | caller        | WETH out of the Hydration swap (swap leg)        |
-| `xcmFee` / `xcmExecutionFee` | `IntentEmitter` storage | `xcmOperator` | size of the GLMR transport reserve               |
-| `assetFee[WETH]`             | `BasejumpProxy` storage | proxy owner   | Basejump fast-path fee + Wormhole dust buffer    |
-| `maxRelayFee`                | intent payload (VAA)    | caller        | ceiling on the dest relay fee                    |
-| `feeRequested`               | `redeem` arg            | relayer       | actual fee claimed, bounded by `maxRelayFee`     |
-| `requiredDeposit`            | OneClick quote          | OneClick API  | minimum ETH the intent needs                     |
+| Knob                         | Where                       | Set by        | Guards                                           |
+| ---------------------------- | --------------------------- | ------------- | ------------------------------------------------ |
+| `maxFeeIn`                   | `swapAndBridge` arg         | caller        | A spent buying the `xcmFee` GLMR (transport leg) |
+| `minEthOut`                  | `swapAndBridge` arg         | caller        | WETH out of the Hydration swap (swap leg)        |
+| `maxRelayFee`                | `swapAndBridge` arg → payload (VAA) | caller | ceiling on the destination relay fee             |
+| `feeRequested`               | `redeem` arg                | relayer       | actual fee claimed, bounded by `maxRelayFee`     |
+| `xcmFee` / `xcmExecutionFee` | `IntentEmitter` storage     | `xcmOperator` | size of the GLMR transport reserve               |
+| `requiredDeposit`            | OneClick quote              | OneClick API  | minimum ETH the intent needs                     |
+
+---
+
+## BJP appendix — pooled fast-path fee (`assetFee[WETH]`)
+
+> This section applies only to the **BJP** variant (`IntentEmitterBjp` → Basejump fast-path + `BasejumpLandingNative` → `IntentRouter`), which is **not the deployed intents path**. It replaces leg 3 above (the relay fee) with a Moonbeam-proxy pool fee. Kept for reference; see [basejump/spec.md](../basejump/spec.md).
+
+In BJP, the bridged WETH arrives at the Moonbeam `BasejumpProxy`, which deducts a fixed per-asset fee in [`_fastTrack`](../../contracts/src/basejump/BasejumpCore.sol): `netAmount = amount − quoteFee(WETH)`, where `quoteFee(asset) = assetFee[asset]`.
+
+- **Not a per-call param** — `assetFee[WETH]` is owner-configured on the proxy via `setAssetFee`. The UI reads it (and the live quote) to size `minEthOut` / `amountIn`. The sizing target becomes `value(amountIn) ≳ xcmFee + assetFee[WETH] + requiredDeposit`.
+- The fee stays in `BasejumpLanding` on the destination; the fast path pays `netAmount`, the slow Wormhole `TokenBridge.transferTokens` replenishes the pool.
+- **It must also absorb Wormhole dust** (below) — `assetFee[WETH]` should be set comfortably above the dust granularity so the pool never decapitalizes.
+
+### Wormhole 8-decimal normalization dust
+
+The Wormhole Token Bridge carries amounts at **8-decimal precision** ([`wormhole-solidity-sdk/.../TokenBase.sol:164,219-222`](../../contracts/dependencies/wormhole-solidity-sdk-0.1.0/src/TokenBase.sol)): on receipt the amount is re-scaled by `10^(decimals − 8)`, and the sender drops the sub-precision remainder before locking. For 18-decimal WETH that's `10^10` wei of granularity, so **up to ~`1e10` wei (`1e-8` WETH) of dust per transfer** never crosses — it accumulates on the source side (recoverable by the contract owner). This rescale applies to **both** variants when reading the delivered `amount`; only the BJP pool has a decapitalization concern (`assetFee[WETH] ≥ dust`). For WTT there's no pool, so the dust simply lands in `amount`.

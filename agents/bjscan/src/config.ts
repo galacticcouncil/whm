@@ -51,6 +51,7 @@ if (process.env.ETHEREUM_RPC_URL) {
 } else if (process.env.ETHEREUM_CONTRACT) {
   throw new Error("Partial ethereum config: set ETHEREUM_RPC_URL or unset ETHEREUM_CONTRACT.");
 }
+
 export const destination = {
   name: "hydration",
   chainId: 222222,
