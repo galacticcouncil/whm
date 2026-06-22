@@ -7,6 +7,8 @@ Wormhole VAA relayer for cross-chain token transfers.
 ### Mrl Relayer (default)
 
 Relays token transfers **to Moonbeam** from ETH, Base, Acala, Solana, and SUI using GMP precompile.
+Also runs the Basejump fast-path watchers (Base + Ethereum → the corridor's `BasejumpProxy.completeTransfer`)
+and the Solana oracle relay.
 
 ### Base Relayer
 
@@ -49,6 +51,7 @@ service and skipping when it exceeds the payload's `maxRelayFee`. Uses its own *
 | `SOLANA_FROM_SEQ`        | Start sequence for Solana token VAAs              | `1211243`                            |
 | `SUI_FROM_SEQ`           | Start sequence for SUI VAAs                       | `217370`                             |
 | `BASEJUMP_BASE_FROM_SEQ` | Start sequence for Basejump (Base) fast-path VAAs | `0`                                  |
+| `BASEJUMP_ETH_FROM_SEQ`  | Start sequence for Basejump (Ethereum) fast-path VAAs | `0`                              |
 | `ORACLE_SOLANA_FROM_SEQ` | Start sequence for Solana oracle VAAs             | `0`                                  |
 
 ### Base relayer — `start:base` (Moonbeam → Base)

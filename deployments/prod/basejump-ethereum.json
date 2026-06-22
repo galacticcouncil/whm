@@ -1,0 +1,141 @@
+{
+  "migration": "basejump-ethereum",
+  "environment": "prod",
+  "startedAt": "2026-06-22T12:00:55.837Z",
+  "completedAt": null,
+  "steps": [
+    {
+      "name": "001-deploy-basejump",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x9c007310c2972f656bc4903a16f936fc0cfbc4d2",
+        "proxyAddress": "0xba3eadd48274d9ff08c685e1206100e04833f94f",
+        "ownerAddress": "0x20b588a194d9a3D788985c0C86A1160836a0Aaaa",
+        "wormholeId": "2"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:00:55.838Z",
+      "completedAt": "2026-06-22T12:02:01.987Z"
+    },
+    {
+      "name": "002-deploy-proxy",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x608de423361381c92cfa0658fec07aa08a48daa8",
+        "proxyAddress": "0xbe999b97a5217e9814c69688bad7e248d3b6f50a",
+        "ownerAddress": "0x03F067F5174DF6E4E49285D32d9Ce1615711BCe9"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:03:37.511Z",
+      "completedAt": "2026-06-22T12:03:50.137Z"
+    },
+    {
+      "name": "003-deploy-transactor",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x27e75817bfd7d3d2ceba44d1c7155e1d02312345",
+        "proxyAddress": "0xe130a0646e71d142e30e3e220fc7b60005acbac0",
+        "ownerAddress": "0x03F067F5174DF6E4E49285D32d9Ce1615711BCe9",
+        "mda": "5Fg9DAdbbjJUKoBCHEoZAqoRq3iw1krVS9rZj1FGGcpdQF7L",
+        "mdaH160": "0x9fbba2ffe461aa3aa93fb85305191e531e115e14"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:03:50.139Z",
+      "completedAt": "2026-06-22T12:04:19.848Z"
+    },
+    {
+      "name": "004-authorize-proxy@transactor",
+      "status": "completed",
+      "output": {
+        "txHash": "0x9599511795af6c1d1b83eec303b2e79b40440480f93eadb187215c92809d8770",
+        "operator": "0xbe999b97a5217e9814c69688bad7e248d3b6f50a",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:04:19.849Z",
+      "completedAt": "2026-06-22T12:04:25.292Z"
+    },
+    {
+      "name": "005-set-transactor@proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x883410eed0b6592c8ba60b31f88fc1338ef0ad33afd83946f27a2caaeb4c49c4",
+        "xcmTransactor": "0xe130a0646e71d142e30e3e220fc7b60005acbac0"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:04:25.293Z",
+      "completedAt": "2026-06-22T12:04:35.376Z"
+    },
+    {
+      "name": "006-set-emitter@proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x44f23544c8505c8611a2e9f40912c9680d14b10c715a7d175a50288231e7414e",
+        "emitterChain": "2",
+        "emitter": "0x000000000000000000000000ba3eadd48274d9ff08c685e1206100e04833f94f"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:04:35.378Z",
+      "completedAt": "2026-06-22T12:04:36.829Z"
+    },
+    {
+      "name": "007-set-landing@proxy",
+      "status": "completed",
+      "output": {
+        "txHash": "0x52a3ba7a73b94bc4be3561c79774ad34d7c676c1f0f6664251a2ebf91111aa28",
+        "fromWhChain": "2",
+        "landing": "0x00000000000000000000000070e9b12c3b19cb5f0e59984a5866278ab69df976"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:04:36.830Z",
+      "completedAt": "2026-06-22T12:04:46.588Z"
+    },
+    {
+      "name": "008-set-emitter@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x56ac0a831da04a5bc68e053021cf596fd4c243adbfe7e2ed34608da6cff9b97e",
+        "emitterChain": "16",
+        "emitter": "0x000000000000000000000000be999b97a5217e9814c69688bad7e248d3b6f50a"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:04:46.589Z",
+      "completedAt": "2026-06-22T12:05:05.002Z"
+    },
+    {
+      "name": "009-set-landing-dest@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x4ff0fc0de6d4bd7840b684e726c12aad9b4f55122603af3d8577fb54e41d69ea",
+        "landingDest": "0x00000000000000000000000070e9b12c3b19cb5f0e59984a5866278ab69df976"
+      },
+      "error": null,
+      "startedAt": "2026-06-22T12:05:05.004Z",
+      "completedAt": "2026-06-22T12:05:14.606Z"
+    },
+    {
+      "name": "010-set-usdc-fee@basejump",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "011-transfer-ownership@proxy",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "012-transfer-ownership@basejump",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    }
+  ]
+}
