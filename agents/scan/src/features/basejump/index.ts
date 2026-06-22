@@ -7,29 +7,36 @@ import { routes } from "./api";
 import { initSchema, stateCounts } from "./db";
 
 /**
- * Basejump transfer indexer: source `BridgeInitiated` on EVM chains (Base / optional Ethereum)
- * correlated against the three Hydration landing events. Returns null if no Basejump contract
- * is configured on any enabled chain.
+ * Basejump transfer indexer: source `BridgeInitiated` on EVM chains correlated against the landing
+ * delivery events. Supports one or more landing deployments (the single shared landing, or several
+ * separate-harness landings each with its own address) — all merged into one unified transfers
+ * view. Returns null if no Basejump contract is configured on any enabled chain.
  *
  * @param enrich shared per-chain enrichment passed to the handlers
  */
 export function createBasejump(enrich: Enrich): Feature | null {
-  const hydration = chains["hydration"];
-  const destChainId = hydration?.kind === "substrate" ? hydration.chainId : 0;
-  const h = basejumpHandlers(enrich, destChainId);
-
+  const h = basejumpHandlers(enrich);
   const contracts: Feature["contracts"] = [];
-  if (chains["base"] && basejumpConfig.base) {
-    contracts.push({ chain: "base", address: basejumpConfig.base, events: [h.initiated] });
+
+  // Source bridges (BridgeInitiated → `initiated`): one entry per address, per enabled source chain.
+  for (const [chain, addresses] of Object.entries(basejumpConfig.sources)) {
+    if (!chains[chain]) continue;
+    for (const address of addresses) {
+      contracts.push({ chain, address, events: [h.initiated] });
+    }
   }
-  if (chains["ethereum"] && basejumpConfig.ethereum) {
-    contracts.push({ chain: "ethereum", address: basejumpConfig.ethereum, events: [h.initiated] });
-  }
-  if (chains["hydration"] && basejumpConfig.hydrationLanding) {
+
+  // Landings (delivery events). Each landing gets a dest chain id resolved from its chain; distinct
+  // landing addresses route independently via (chain,address,topic0).
+  for (const l of basejumpConfig.landings) {
+    const chainCfg = chains[l.chain];
+    if (!chainCfg) continue;
+    const destChainId = chainCfg.kind === "substrate" ? chainCfg.chainId : chainCfg.chain.id;
+    const lh = h.landing(destChainId);
     contracts.push({
-      chain: "hydration",
-      address: basejumpConfig.hydrationLanding,
-      events: [h.executed, h.queued, h.fulfilled],
+      chain: l.chain,
+      address: l.address,
+      events: [lh.executed, lh.queued, lh.fulfilled],
     });
   }
 

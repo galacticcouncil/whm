@@ -3,11 +3,7 @@ import type { EventHandler, LogEvent } from "../../types";
 import { broadcast } from "../../subscribers";
 import { normalizeRecipient } from "../../utils";
 
-import {
-  upsertTransfer,
-  type TransferRow,
-  type TransferState,
-} from "./db";
+import { upsertTransfer, type TransferRow, type TransferState } from "./db";
 import { findByPendingId, findInitiated } from "./db";
 import {
   BridgeInitiatedEvt,
@@ -22,6 +18,13 @@ type DeliveryArgs = {
   recipient: `0x${string}`;
   amount: bigint;
 };
+
+/** The three delivery handlers for one landing deployment. */
+export interface LandingHandlers {
+  executed: EventHandler;
+  queued: EventHandler;
+  fulfilled: EventHandler;
+}
 
 function emit(created: boolean, row: TransferRow, previousState: TransferState | null): void {
   broadcast(
@@ -41,20 +44,17 @@ function orphanId(ev: LogEvent, kind: string): string {
 }
 
 /**
- * Build the Basejump event handlers.
+ * Build the Basejump handlers. The source `initiated` handler is shared across all source chains;
+ * landing handlers are produced per landing via `landing(destChainId)`, so multiple
+ * independent deployments (separate Moonbeam/Hydration harnesses, each with its own landing) stay
+ * correctly correlated while merging into one unified transfers view.
  *
- * @param enrich      shared per-chain block-time / sender enrichment
- * @param destChainId chain id recorded on landing rows (the Hydration delivery chain)
- * @returns named handlers — `initiated` (EVM source) and the three Hydration landing handlers
+ * @param enrich shared per-chain block-time / sender enrichment
+ * @returns the shared `initiated` source handler and a per-landing handler factory
  */
-export function basejumpHandlers(
-  enrich: Enrich,
-  destChainId: number,
-): {
+export function basejumpHandlers(enrich: Enrich): {
   initiated: EventHandler;
-  executed: EventHandler;
-  queued: EventHandler;
-  fulfilled: EventHandler;
+  landing: (destChainId: number) => LandingHandlers;
 } {
   async function initiated(ev: LogEvent): Promise<void> {
     const a = ev.args as {
@@ -90,34 +90,9 @@ export function basejumpHandlers(
     emit(created, row, previousState);
   }
 
-  // Both corridors share one landing, so the emitting address can't pin the source chain.
-  // findInitiated keys on source asset (USDC vs EURC), which already separates the corridors.
-  async function executed(ev: LogEvent): Promise<void> {
-    const a = ev.args as DeliveryArgs;
-    const recipient = normalizeRecipient(a.recipient);
-    const netAmount = a.amount.toString();
-    const matchId = await findInitiated(a.sourceAsset, recipient, netAmount);
-    const id = matchId ?? orphanId(ev, "exec");
-    await apply(id, "completed", ev, a, recipient, netAmount);
-  }
-
-  async function queued(ev: LogEvent): Promise<void> {
-    const a = ev.args as DeliveryArgs & { id: bigint };
-    const recipient = normalizeRecipient(a.recipient);
-    const netAmount = a.amount.toString();
-    const matchId = await findInitiated(a.sourceAsset, recipient, netAmount);
-    const id = matchId ?? orphanId(ev, "queue");
-    await apply(id, "queued", ev, a, recipient, netAmount, { pending_id: a.id.toString() });
-  }
-
-  async function fulfilled(ev: LogEvent): Promise<void> {
-    const a = ev.args as DeliveryArgs & { id: bigint };
-    const matchId = await findByPendingId(a.id.toString());
-    const id = matchId ?? orphanId(ev, "fulfill");
-    await apply(id, "fulfilled", ev, a, normalizeRecipient(a.recipient), a.amount.toString(), {
-      pending_id: a.id.toString(),
-    });
-  }
+  // Namespace the landing's pending-queue id by the landing address: two independent landings each
+  // run their own id counter, so the address keeps their pending ids from colliding.
+  const pendingKey = (ev: LogEvent, id: bigint): string => `${ev.address.toLowerCase()}:${id}`;
 
   async function apply(
     id: string,
@@ -126,6 +101,7 @@ export function basejumpHandlers(
     a: DeliveryArgs,
     recipient: string,
     netAmount: string,
+    destChainId: number,
     extra: { pending_id?: string } = {},
   ): Promise<void> {
     const ref = await enrich.withBlockTime(ev.chain, ev.ref);
@@ -153,10 +129,54 @@ export function basejumpHandlers(
     emit(created, row, previousState);
   }
 
-  return {
-    initiated: { abi: BridgeInitiatedEvt, handle: initiated },
-    executed: { abi: TransferExecutedEvt, handle: executed },
-    queued: { abi: TransferQueuedEvt, handle: queued },
-    fulfilled: { abi: PendingTransferFulfilledEvt, handle: fulfilled },
-  };
+  /**
+   * Delivery handlers for a single landing.
+   *
+   * @param destChainId chain id recorded on rows delivered to this landing
+   */
+  function landing(destChainId: number): LandingHandlers {
+    // Deliveries match the oldest un-delivered source by (source asset, recipient, net amount);
+    // distinct source assets keep separate corridors apart.
+    async function executed(ev: LogEvent): Promise<void> {
+      const a = ev.args as DeliveryArgs;
+      const recipient = normalizeRecipient(a.recipient);
+      const netAmount = a.amount.toString();
+      const matchId = await findInitiated(a.sourceAsset, recipient, netAmount);
+      await apply(matchId ?? orphanId(ev, "exec"), "completed", ev, a, recipient, netAmount, destChainId);
+    }
+
+    async function queued(ev: LogEvent): Promise<void> {
+      const a = ev.args as DeliveryArgs & { id: bigint };
+      const recipient = normalizeRecipient(a.recipient);
+      const netAmount = a.amount.toString();
+      const matchId = await findInitiated(a.sourceAsset, recipient, netAmount);
+      await apply(matchId ?? orphanId(ev, "queue"), "queued", ev, a, recipient, netAmount, destChainId, {
+        pending_id: pendingKey(ev, a.id),
+      });
+    }
+
+    async function fulfilled(ev: LogEvent): Promise<void> {
+      const a = ev.args as DeliveryArgs & { id: bigint };
+      const key = pendingKey(ev, a.id);
+      const matchId = await findByPendingId(key);
+      await apply(
+        matchId ?? orphanId(ev, "fulfill"),
+        "fulfilled",
+        ev,
+        a,
+        normalizeRecipient(a.recipient),
+        a.amount.toString(),
+        destChainId,
+        { pending_id: key },
+      );
+    }
+
+    return {
+      executed: { abi: TransferExecutedEvt, handle: executed },
+      queued: { abi: TransferQueuedEvt, handle: queued },
+      fulfilled: { abi: PendingTransferFulfilledEvt, handle: fulfilled },
+    };
+  }
+
+  return { initiated: { abi: BridgeInitiatedEvt, handle: initiated }, landing };
 }

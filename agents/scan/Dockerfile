@@ -1,8 +1,9 @@
-FROM node:23-slim
+FROM node:25-slim
 
 WORKDIR /app
 
 COPY dist/index.js .
+COPY public ./public
 
 EXPOSE 8080
 

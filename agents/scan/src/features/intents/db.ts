@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS intents (
   forwarded_amount NUMERIC,
   relay_fee NUMERIC,
   relayer TEXT,
+  settlement_status TEXT,
   emitted JSONB,
   published JSONB,
   forwarded JSONB,
@@ -31,6 +32,9 @@ CREATE OR REPLACE FUNCTION intent_state_rank(s TEXT) RETURNS INT AS $$
     WHEN 'emitted' THEN 0
     WHEN 'published' THEN 1
     WHEN 'forwarded' THEN 2
+    WHEN 'succeeded' THEN 3
+    WHEN 'refunded' THEN 3
+    WHEN 'failed' THEN 3
     ELSE -1
   END;
 $$ LANGUAGE SQL IMMUTABLE;
@@ -40,7 +44,13 @@ export async function initSchema(): Promise<void> {
   await pool.query(SCHEMA);
 }
 
-export type IntentState = "emitted" | "published" | "forwarded";
+export type IntentState =
+  | "emitted"
+  | "published"
+  | "forwarded"
+  | "succeeded"
+  | "refunded"
+  | "failed";
 
 export interface IntentRow {
   intent_id: string;
@@ -56,6 +66,7 @@ export interface IntentRow {
   forwarded_amount: string | null;
   relay_fee: string | null;
   relayer: string | null;
+  settlement_status: string | null;
   emitted: EventRef | null;
   published: EventRef | null;
   forwarded: EventRef | null;
@@ -74,6 +85,7 @@ export interface IntentPatch {
   forwarded_amount?: string;
   relay_fee?: string;
   relayer?: string;
+  settlement_status?: string;
   emitted?: EventRef;
   published?: EventRef;
   forwarded?: EventRef;
@@ -91,6 +103,7 @@ const PATCH_COLS = [
   "forwarded_amount",
   "relay_fee",
   "relayer",
+  "settlement_status",
   "emitted",
   "published",
   "forwarded",
@@ -163,6 +176,17 @@ export async function listIntents(filter: {
 export async function getIntent(id: string): Promise<IntentRow | null> {
   const r = await pool.query(`SELECT * FROM intents WHERE lower(intent_id) = lower($1)`, [id]);
   return r.rows[0] ?? null;
+}
+
+/** Forwarded intents still awaiting OneClick settlement — the settlement poller's work set. */
+export async function forwardedPendingSettlement(): Promise<
+  { intent_id: string; deposit_address: string; settlement_status: string | null }[]
+> {
+  const r = await pool.query(
+    `SELECT intent_id, deposit_address, settlement_status FROM intents
+       WHERE state = 'forwarded' AND deposit_address IS NOT NULL`,
+  );
+  return r.rows;
 }
 
 export async function stateCounts(): Promise<Record<string, number>> {

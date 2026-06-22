@@ -9,10 +9,11 @@
     "dev": "node ./esbuild.dev.mjs",
     "dev:db": "docker compose -f docker-compose.dev.yml up -d",
     "docker:build": "docker build -t galacticcouncil/whmscan:latest .",
-    "docker:deploy": "docker buildx build --platform linux/amd64,linux/arm64 -t galacticcouncil/whmscan:latest --push .",
-    "docker:up": "docker stack deploy -c docker-compose.yml whm"
+    "docker:deploy": "docker buildx build --platform linux/amd64 -t galacticcouncil/whmscan:latest --push .",
+    "docker:up": "docker stack deploy -c docker-compose.yml scan"
   },
   "dependencies": {
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.17",
     "@fastify/cors": "^10.0.2",
     "fastify": "^5.2.0",
     "pg": "^8.13.1",

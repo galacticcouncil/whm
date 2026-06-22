@@ -82,4 +82,6 @@ export interface Feature {
   routes(app: FastifyInstance): void;
   /** per-state record counts for /api/status */
   counts(): Promise<Record<string, number>>;
+  /** optional background worker, started after watchers (e.g. the intents settlement poller) */
+  start?(): void;
 }

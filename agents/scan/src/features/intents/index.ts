@@ -2,9 +2,10 @@ import { pad, toEventSelector } from "viem";
 
 import type { Feature } from "../../types";
 import type { Enrich } from "../../enrich";
-import { chains, intentsConfig } from "../../config";
+import { chains, intentsConfig, intentsSettlementPollMs } from "../../config";
 
 import { intentsHandlers } from "./handlers";
+import { SettlementPoller } from "./settlement";
 import { LogMessagePublishedEvt } from "./abi";
 import { routes } from "./api";
 import { initSchema, stateCounts } from "./db";
@@ -21,17 +22,19 @@ export function createIntents(enrich: Enrich): Feature | null {
   const { emitterHydration, receiverEthereum, wormholeCoreMoonbeam, tokenBridgeMoonbeam } =
     intentsConfig;
 
-  // The receiver address is needed to filter/decode both the published and forwarded legs.
-  if (!receiverEthereum) return null;
+  // At least one receiver gates/decodes both the published and forwarded legs.
+  if (receiverEthereum.length === 0) return null;
   const h = intentsHandlers(enrich, receiverEthereum);
 
   const contracts: Feature["contracts"] = [];
 
-  if (chains["hydration"] && emitterHydration) {
-    contracts.push({ chain: "hydration", address: emitterHydration, events: [h.emitted] });
+  if (chains["hydration"]) {
+    for (const address of emitterHydration) {
+      contracts.push({ chain: "hydration", address, events: [h.emitted] });
+    }
   }
 
-  if (chains["moonbeam"] && wormholeCoreMoonbeam && tokenBridgeMoonbeam) {
+  if (chains["moonbeam"]) {
     contracts.push({
       chain: "moonbeam",
       address: wormholeCoreMoonbeam,
@@ -42,14 +45,14 @@ export function createIntents(enrich: Enrich): Feature | null {
   }
 
   if (chains["ethereum"]) {
-    contracts.push({
-      chain: "ethereum",
-      address: receiverEthereum,
-      events: [h.forwarded, h.relayFee],
-    });
+    for (const address of receiverEthereum) {
+      contracts.push({ chain: "ethereum", address, events: [h.forwarded, h.relayFee] });
+    }
   }
 
   if (contracts.length === 0) return null;
+
+  const poller = new SettlementPoller(intentsSettlementPollMs);
 
   return {
     name: "intents",
@@ -57,5 +60,6 @@ export function createIntents(enrich: Enrich): Feature | null {
     initSchema,
     routes,
     counts: stateCounts,
+    start: () => poller.start(),
   };
 }

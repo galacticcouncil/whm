@@ -29,20 +29,20 @@ function emit(created: boolean, row: IntentRow, previousState: IntentState | nul
  * Build the intents (WTT) event handlers. Correlation is by `intentId` end-to-end; the Moonbeam
  * leg recovers the intentId by parsing the TokenBridge payload-3 message.
  *
- * @param enrich           shared per-chain block-time enrichment
- * @param receiverEthereum the Ethereum IntentReceiver — the published leg only counts transfers addressed to it
+ * @param enrich    shared per-chain block-time enrichment
+ * @param receivers the Ethereum IntentReceiver address(es) — the published leg only counts transfers addressed to one
  * @returns named handlers: `emitted` (Hydration), `published` (Moonbeam), `forwarded` + `relayFee` (Ethereum)
  */
 export function intentsHandlers(
   enrich: Enrich,
-  receiverEthereum: string,
+  receivers: string[],
 ): {
   emitted: EventHandler;
   published: EventHandler;
   forwarded: EventHandler;
   relayFee: EventHandler;
 } {
-  const receiver = receiverEthereum.toLowerCase();
+  const receiverSet = new Set(receivers.map((r) => r.toLowerCase()));
 
   async function emitted(ev: LogEvent): Promise<void> {
     const a = ev.args as {
@@ -54,14 +54,18 @@ export function intentsHandlers(
       intentDepositAddress: `0x${string}`;
     };
     const ref = await enrich.withBlockTime(ev.chain, ev.ref);
-    const { row, created, previousState } = await upsertIntent(a.intentId.toLowerCase(), "emitted", {
-      caller: a.caller.toLowerCase(),
-      asset_in: Number(a.assetIn),
-      amount_in: a.amountIn.toString(),
-      eth_out: a.ethOut.toString(),
-      deposit_address: a.intentDepositAddress.toLowerCase(),
-      emitted: ref,
-    });
+    const { row, created, previousState } = await upsertIntent(
+      a.intentId.toLowerCase(),
+      "emitted",
+      {
+        caller: a.caller.toLowerCase(),
+        asset_in: Number(a.assetIn),
+        amount_in: a.amountIn.toString(),
+        eth_out: a.ethOut.toString(),
+        deposit_address: a.intentDepositAddress.toLowerCase(),
+        emitted: ref,
+      },
+    );
     emit(created, row, previousState);
   }
 
@@ -75,7 +79,7 @@ export function intentsHandlers(
     };
     const transfer = parseTransferWithPayload(a.payload);
     if (!transfer) return; // not a payload-3 TokenBridge transfer
-    if (bytes32ToAddress(transfer.to).toLowerCase() !== receiver) return; // not addressed to our receiver
+    if (!receiverSet.has(bytes32ToAddress(transfer.to).toLowerCase())) return; // not addressed to a known receiver
     const intent = decodeIntentPayload(transfer.inner);
     if (!intent) return; // not the 96-byte intent payload
 

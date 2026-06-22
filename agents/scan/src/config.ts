@@ -10,7 +10,12 @@ function required(name: string): string {
 }
 
 /** Build an EVM chain config when its RPC env is present, else null (chain disabled). */
-function evmChain(name: string, chain: Chain, prefix: string, confirmations: string): EvmChain | null {
+function evmChain(
+  name: string,
+  chain: Chain,
+  prefix: string,
+  confirmations: string,
+): EvmChain | null {
   const rpcUrl = process.env[`${prefix}_RPC_URL`];
   if (!rpcUrl) return null;
   if (!rpcUrl.startsWith("ws")) {
@@ -61,26 +66,59 @@ for (const c of [
 export const databaseUrl = required("DATABASE_URL");
 export const pollIntervalMs = Number(process.env.POLL_INTERVAL_MS ?? 5_000);
 export const liveIntervalMs = Number(process.env.LIVE_POLL_INTERVAL_MS ?? 12_000);
+export const intentsSettlementPollMs = Number(process.env.INTENTS_SETTLEMENT_POLL_MS ?? 15_000);
+// 1Click API JWT for the intents settlement poller (getExecutionStatus); required when intents is enabled.
+export const oneClickJwt = process.env.ONECLICK_JWT;
 export const port = Number(process.env.PORT ?? 8080);
 
-/** Lowercased address from env (with optional prod default), or undefined if unset. */
-function addr(name: string, def?: string): `0x${string}` | undefined {
-  const v = process.env[name] ?? def;
-  return v ? (v.toLowerCase() as `0x${string}`) : undefined;
+/**
+ * Lowercased address list from a comma-separated env var; `[]` if unset. No code fallbacks — every
+ * contract address is configured via env, so nothing is baked into the build.
+ */
+function addrs(name: string): `0x${string}`[] {
+  const raw = process.env[name];
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean) as `0x${string}`[];
 }
 
-/** Basejump watched contracts (per chain). */
+/** A Basejump landing deployment — one row per watched landing contract. */
+export interface BasejumpLanding {
+  chain: string;
+  address: `0x${string}`;
+}
+
+function basejumpLandings(): BasejumpLanding[] {
+  // Comma-separated list, one entry per landing contract on Hydration. Multiple landings (independent
+  // Basejump deployments) merge into one unified transfers view.
+  return addrs("BASEJUMP_LANDING_HYDRATION").map((address) => ({ chain: "hydration", address }));
+}
+
+// Canonical Wormhole deployments on Moonbeam — fixed infra (never change), so hardcoded, not env-driven.
+const MOONBEAM_WORMHOLE_CORE = "0xc8e2b0cd52cf01b0ce87d389daa3d414d4ce29f3" as `0x${string}`;
+const MOONBEAM_WORMHOLE_TOKEN_BRIDGE =
+  "0xb1731c586ca89a23809861c6103f0b96b3f57d92" as `0x${string}`;
+
+/**
+ * Watched contracts. Each project-contract role is a COMMA-SEPARATED ADDRESS LIST configured purely
+ * via env (no code fallbacks) — multiple deployments of a role merge into one unified view
+ * (e.g. BASEJUMP_LANDING_HYDRATION=0xA,0xB). The Moonbeam Wormhole core / token bridge are the only
+ * hardcoded addresses (fixed infra, above).
+ */
 export const basejumpConfig = {
-  base: addr("BASEJUMP_BASE", "0xf5b9334e44f800382cb47fc19669401d694e529b"),
-  ethereum: addr("BASEJUMP_ETHEREUM"),
-  hydrationLanding: addr("BASEJUMP_LANDING_HYDRATION", "0x70e9b12c3b19cb5f0e59984a5866278ab69df976"),
+  sources: {
+    base: addrs("BASEJUMP_BASE"),
+    ethereum: addrs("BASEJUMP_ETHEREUM"),
+  } as Record<string, `0x${string}`[]>,
+  landings: basejumpLandings(),
 };
 
-/** Intents (WTT) watched contracts. Defaults are the prod `nintent-ethereum` deployment. */
 export const intentsConfig = {
-  emitterHydration: addr("INTENT_EMITTER_HYDRATION", "0x059ed5658c988976e73adb6597418970414f3dd0"),
-  receiverEthereum: addr("INTENT_RECEIVER_ETHEREUM", "0xf1a5fe4252d9a1c39b0fb9de1f19049ee57ed188"),
-  wormholeCoreMoonbeam: addr("WORMHOLE_CORE_MOONBEAM", "0xc8e2b0cd52cf01b0ce87d389daa3d414d4ce29f3"),
-  // sender filter for Moonbeam LogMessagePublished — only the TokenBridge's publishes are intent-relevant
-  tokenBridgeMoonbeam: addr("TOKEN_BRIDGE_MOONBEAM", "0xb1731c586ca89a23809861c6103f0b96b3f57d92"),
+  emitterHydration: addrs("INTENT_EMITTER_HYDRATION"),
+  receiverEthereum: addrs("INTENT_RECEIVER_ETHEREUM"),
+  // sender filter narrows the Moonbeam Wormhole-core firehose to the TokenBridge's publishes
+  wormholeCoreMoonbeam: MOONBEAM_WORMHOLE_CORE,
+  tokenBridgeMoonbeam: MOONBEAM_WORMHOLE_TOKEN_BRIDGE,
 };

@@ -9,6 +9,7 @@ import { EvmWatcher, SubstrateWatcher, type WatchedAddress } from "./watchers";
 import { Processor, routeKey, type HandlerRegistry } from "./processor";
 import { buildFeatures } from "./features";
 import { app, coreRoutes, start as startApi } from "./api/server";
+import { uiRoutes } from "./api/ui";
 import { subscribe } from "./subscribers";
 
 const BANNER = String.raw`
@@ -74,20 +75,26 @@ async function main(): Promise<void> {
 
   for (const f of features) f.routes(app);
   coreRoutes(features, watchers);
+  uiRoutes(app, features);
 
   subscribe((u) => {
     const id = (u.record.id ?? u.record.intent_id) as string;
     const state = u.record.state as string;
     if (u.kind === "created") log.info(`+ [${u.feature}] ${id} [${state}]`);
-    else if (u.previousState !== state) log.info(`~ [${u.feature}] ${id} [${u.previousState} -> ${state}]`);
+    else if (u.previousState !== state)
+      log.info(`~ [${u.feature}] ${id} [${u.previousState} -> ${state}]`);
   });
 
   for (const f of features) {
-    log.info(`  feature: ${f.name} — ${f.contracts.map((c) => `${c.chain}:${c.address}`).join(", ")}`);
+    log.info(
+      `  feature: ${f.name} — ${f.contracts.map((c) => `${c.chain}:${c.address}`).join(", ")}`,
+    );
   }
 
   await startApi();
   await Promise.all([...watchers.map((w) => w.start()), processor.start(pollIntervalMs)]);
+
+  for (const f of features) f.start?.();
 
   log.info("scan ready.");
 }

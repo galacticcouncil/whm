@@ -88,7 +88,11 @@ export async function takePendingEvents(limit: number, chains: string[]): Promis
   return r.rows;
 }
 
-export async function markProcessed(chain: string, txHash: string, logIndex: number): Promise<void> {
+export async function markProcessed(
+  chain: string,
+  txHash: string,
+  logIndex: number,
+): Promise<void> {
   await pool.query(
     `UPDATE events SET processed_at = NOW() WHERE chain = $1 AND tx_hash = $2 AND log_index = $3`,
     [chain, txHash, logIndex],
