@@ -32,6 +32,10 @@ const SOLANA_ORACLE_EMITTER = "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz";
 // OracleDispatcher proxy on Moonbeam (oracle relay)
 const DISPATCHER_PROXY = "0x32d53dc510a4cdbb4634207e0e1e64b552a1c24c";
 
+// Ethereum-source oracle: emitter on Ethereum (Wormhole chain 2) + its own Moonbeam dispatcher
+const ETH_ORACLE_EMITTER = "0xbf937cb0abd3d179a15d77492eb3c13b455c2d62";
+const ETH_DISPATCHER_PROXY = "0x3513cee1ecc972604d2ac8ee50d3eefb1a69eeb3";
+
 const moonbeam = new ethers.providers.JsonRpcProvider(process.env.MOONBEAM_RPC || 'https://moonbeam-rpc.n.dwellir.com');
 const signer = new ethers.Wallet(process.env.PRIVKEY, moonbeam);
 const gmp = new Contract('0x0000000000000000000000000000000000000816', ['function wormholeTransferERC20(bytes) external'], signer);
@@ -45,6 +49,11 @@ const dispatcher = new Contract(
   ['function receiveMessage(bytes memory vaa) external'],
   signer
 );
+const ethDispatcher = new Contract(
+  ETH_DISPATCHER_PROXY,
+  ['function receiveMessage(bytes memory vaa) external'],
+  signer
+);
 
 (async function main() {
   const queue = createTransferQueue(moonbeam, signer, async (task: TransferTask, nonce: number) => {
@@ -53,6 +62,13 @@ const dispatcher = new Contract(
       await dispatcher.callStatic.receiveMessage(task.vaa.bytes, {nonce});
       task.logger.info(`Completing oracle relay`);
       const tx = await dispatcher.receiveMessage(task.vaa.bytes, {nonce});
+      await tx.wait();
+      return tx.hash;
+    } else if (task.type === 'oracle-eth') {
+      task.logger.info(`Submitting Ethereum oracle VAA to dispatcher`);
+      await ethDispatcher.callStatic.receiveMessage(task.vaa.bytes, {nonce});
+      task.logger.info(`Completing Ethereum oracle relay`);
+      const tx = await ethDispatcher.receiveMessage(task.vaa.bytes, {nonce});
       await tx.wait();
       return tx.hash;
     } else if (task.type === 'insta') {
@@ -79,6 +95,8 @@ const dispatcher = new Contract(
   logger.info(`Submitting to BasejumpProxy on Moonbeam: ${BASEJUMP_MOONBEAM}`);
   logger.info(`Watching Solana oracle emitter: ${SOLANA_ORACLE_EMITTER}`);
   logger.info(`Submitting to Dispatcher on Moonbeam: ${DISPATCHER_PROXY}`);
+  logger.info(`Watching Ethereum oracle emitter: ${ETH_ORACLE_EMITTER}`);
+  logger.info(`Submitting to ETH Dispatcher on Moonbeam: ${ETH_DISPATCHER_PROXY}`);
 
   const spyEndpoint = process.env.SPY_ENDPOINT || "localhost:7073";
   const redis = {host: process.env.REDIS_HOST || "localhost", port: Number(process.env.REDIS_PORT) || 6379};
@@ -178,6 +196,7 @@ const dispatcher = new Contract(
       missedVaaOptions: {
         startingSequenceConfig: {
           [CHAIN_ID_SOLANA as ChainId]: BigInt(process.env.ORACLE_SOLANA_FROM_SEQ || 0),
+          [CHAIN_ID_ETH as ChainId]: BigInt(process.env.ORACLE_ETH_FROM_SEQ || 0),
         }
       }
     },
@@ -194,6 +213,20 @@ const dispatcher = new Contract(
 
       ctxLogger.info(`Received oracle message from Solana`);
       queue.addToQueue({vaa, type: 'oracle', logger: ctxLogger, next});
+    },
+  );
+
+  oracleApp.chain(CHAIN_ID_ETH as ChainId).address(
+    ETH_ORACLE_EMITTER,
+    async (ctx, next) => {
+      const {vaa} = ctx;
+      const ctxLogger = logger.child({
+        emitterChain: vaa.emitterChain,
+        sequence: vaa.sequence.toString(),
+      });
+
+      ctxLogger.info(`Received oracle message from Ethereum`);
+      queue.addToQueue({vaa, type: 'oracle-eth', logger: ctxLogger, next});
     },
   );
 

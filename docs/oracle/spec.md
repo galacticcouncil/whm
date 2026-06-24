@@ -10,10 +10,10 @@ A source-chain emitter reads oracle data, ABI-encodes it, and publishes through 
 
 Two source chains are supported in V1:
 
-| Source   | Emitter                            | Data                                                  | Action(s)                                            |
-| -------- | ---------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
-| Solana   | `oracle-emitter` Anchor program    | Kamino Scope prices + SPL Stake Pool rates            | `ACTION_ORACLE_PRICE` (1), `ACTION_STAKE_RATE` (2)   |
-| Ethereum | `OracleEmitter` Solidity (UUPS)    | View-readable 18-dec rates (wstETH, apyUSD, …)        | `ACTION_RATE_UPDATE` (2) — rate-only                 |
+| Source   | Emitter                         | Data                                           | Action(s)                                          |
+| -------- | ------------------------------- | ---------------------------------------------- | -------------------------------------------------- |
+| Solana   | `oracle-emitter` Anchor program | Kamino Scope prices + SPL Stake Pool rates     | `ACTION_ORACLE_PRICE` (1), `ACTION_STAKE_RATE` (2) |
+| Ethereum | `OracleEmitter` Solidity (UUPS) | View-readable 18-dec rates (wstETH, apyUSD, …) | `ACTION_RATE_UPDATE` (2) — rate-only               |
 
 The Moonbeam dispatcher stack is per-source — each source chain gets its own deployed `OracleDispatcher` + `XcmTransactor` proxy pair. The contracts themselves are shared Solidity sources; only the per-deployment mappings (authorized emitters, handlers, oracles) differ. Renounced ownership means adding a new source requires a fresh parallel stack rather than reconfiguring an existing one.
 
@@ -64,10 +64,10 @@ Action is hard-coded to `ACTION_RATE_UPDATE = 2`. Price feeds (action 1) on Ethe
 
 #### Initial Ethereum feeds
 
-| Asset    | source                                       | call                                | Published value           |
-| -------- | -------------------------------------------- | ----------------------------------- | ------------------------- |
-| `wstETH` | `0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0` | `stEthPerToken()`                   | stETH per 1 wstETH        |
-| `apyUSD` | `0x38EEb52F0771140d10c4E9A9a72349A329Fe8a6A` | `convertToAssets(uint256)` w/ 1e18  | apxUSD per 1 apyUSD share |
+| Asset    | source                                       | call                               | Published value           |
+| -------- | -------------------------------------------- | ---------------------------------- | ------------------------- |
+| `wstETH` | `0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0` | `stEthPerToken()`                  | stETH per 1 wstETH        |
+| `apyUSD` | `0x38EEb52F0771140d10c4E9A9a72349A329Fe8a6A` | `convertToAssets(uint256)` w/ 1e18 | apxUSD per 1 apyUSD share |
 
 Both sources return 18-decimal `uint256` natively. Values are published in the source's **native rate units** — not converted to USD. USD denomination is a consumer-side concern.
 
@@ -116,7 +116,7 @@ Config: `DESTINATION_PARA_ID` (Hydration = 2034), `SOURCE_PARA_ID` (Moonbeam = 2
 
 ### Hydration — MDA authorization
 
-Each Moonbeam `XcmTransactor` proxy executes on Hydration as a distinct MDA derived from its proxy address. Each Hydration oracle contract whitelists a single MDA as the authorized `setPrice` caller.
+Each Moonbeam `XcmTransactor` proxy executes on Hydration as a distinct MDA derived from its proxy address. The target `ManagedOracle` is deployed with `owner = MDA`, which authorizes that MDA (and only it) as the `setPrice` caller. Each source's transactor has a different MDA, so a new source needs a new oracle owner — a Hydration-side deploy, not in this repo.
 
 Consequence: each source's transactor has a different MDA, so each target oracle must additionally authorize the MDA of every active source. This is a Hydration parachain governance / runtime task — not in this repo.
 
@@ -162,10 +162,10 @@ Decoded on Moonbeam by `abi.decode(payload, (uint8, bytes32, uint256, uint64))`.
 
 Two merged migrations cover the two sources. Each is fully self-contained — deploys source emitter + Moonbeam dispatcher + transactor + wiring + ownership renunciation in one ordered run. State files live at `deployments/<context>/<migration>.json`.
 
-| Migration                  | Steps | Source emitter                      | Moonbeam stack                      |
-| -------------------------- | ----- | ----------------------------------- | ----------------------------------- |
-| `oracle-relay-solana`      | 15    | `oracle-emitter` (Anchor) on Solana | Fresh dispatcher + transactor pair  |
-| `oracle-relay-ethereum`    | 12    | `OracleEmitter` (UUPS) on Ethereum  | Fresh dispatcher + transactor pair  |
+| Migration               | Steps | Source emitter                      | Moonbeam stack                     |
+| ----------------------- | ----- | ----------------------------------- | ---------------------------------- |
+| `oracle-relay-solana`   | 15    | `oracle-emitter` (Anchor) on Solana | Fresh dispatcher + transactor pair |
+| `oracle-relay-ethereum` | 12    | `OracleEmitter` (UUPS) on Ethereum  | Fresh dispatcher + transactor pair |
 
 **Required PK env vars:**
 
@@ -194,12 +194,12 @@ See [migrations/README.md](../../migrations/README.md) for the migration model.
 
 ## Contract reference
 
-| Contract              | Role                                                                   | Location                                                                |
-| --------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `MessageReceiver`     | VAA verification, replay protection, authorized emitter check          | `contracts/src/MessageReceiver.sol`                                     |
-| `OracleDispatcher`    | Extends receiver — action routing, stale-check, 1e10 scaling, dispatch | `contracts/src/oracles/OracleDispatcher.sol`                            |
-| `XcmTransactor`       | Moonbeam → Hydration EVM call dispatcher                               | `contracts/src/XcmTransactor.sol`                                       |
-| `OracleEmitter`       | Ethereum-side emitter (UUPS) — staticcall + Wormhole publish           | `contracts/src/oracles/OracleEmitter.sol`                               |
-| `oracle-emitter`      | Solana-side emitter (Anchor) — Scope + Stake Pool + Wormhole           | `crates/solana/programs/oracle-emitter/`                                |
+| Contract           | Role                                                                   | Location                                     |
+| ------------------ | ---------------------------------------------------------------------- | -------------------------------------------- |
+| `MessageReceiver`  | VAA verification, replay protection, authorized emitter check          | `contracts/src/MessageReceiver.sol`          |
+| `OracleDispatcher` | Extends receiver — action routing, stale-check, 1e10 scaling, dispatch | `contracts/src/oracles/OracleDispatcher.sol` |
+| `XcmTransactor`    | Moonbeam → Hydration EVM call dispatcher                               | `contracts/src/XcmTransactor.sol`            |
+| `OracleEmitter`    | Ethereum-side emitter (UUPS) — staticcall + Wormhole publish           | `contracts/src/oracles/OracleEmitter.sol`    |
+| `oracle-emitter`   | Solana-side emitter (Anchor) — Scope + Stake Pool + Wormhole           | `crates/solana/programs/oracle-emitter/`     |
 
 Schema diagrams: [schema.md](schema.md).
