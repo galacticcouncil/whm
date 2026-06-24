@@ -197,9 +197,11 @@ export async function listIntents(filter: {
     conds.push(`state = $${params.length}`);
   }
   if (filter.address) {
-    // match either the Ethereum deposit address or the destination-chain recipient address
+    // match the From (caller), the destination recipient, or the Ethereum deposit address
     params.push(filter.address.toLowerCase());
-    conds.push(`(lower(deposit_address) = $${params.length} OR lower(dest_address) = $${params.length})`);
+    conds.push(
+      `(lower(caller) = $${params.length} OR lower(dest_address) = $${params.length} OR lower(deposit_address) = $${params.length})`,
+    );
   }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";

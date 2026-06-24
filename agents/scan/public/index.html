@@ -12,9 +12,6 @@
         --border: #27272a;
         --fg: #e4e4e7;
         --muted: #71717a;
-        --dim: #52525b;
-        --ok: #22c55e;
-        --warn: #eab308;
         --info: #3b82f6;
       }
       * {
@@ -25,234 +22,82 @@
         background: var(--bg);
         color: var(--fg);
         margin: 0;
-        padding: 2rem 1rem;
-        font-size: 14px;
-        line-height: 1.5;
-      }
-      main {
-        max-width: 900px;
-        margin: 0 auto;
-      }
-      header {
+        min-height: 100vh;
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        margin-bottom: 1.5rem;
+        justify-content: center;
+        padding: 2rem 1rem;
       }
-      header .title {
+      main {
+        text-align: center;
+        max-width: 420px;
+        width: 100%;
+      }
+      img.logo {
+        width: 64px;
+        height: 64px;
+        object-fit: contain;
+        margin-bottom: 1rem;
+      }
+      h1 {
         font-size: 1.1rem;
-        color: var(--fg);
+        font-weight: 600;
+        margin: 0 0 0.25rem;
       }
-      a {
-        color: var(--info);
-        text-decoration: none;
+      p {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 2rem;
       }
-      a:hover {
-        text-decoration: underline;
+      .nav {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
       }
-      code {
-        font-family: inherit;
-      }
-      .feature {
+      a.btn {
+        display: block;
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 12px;
-        padding: 1.25rem 1.5rem;
-        margin-bottom: 1rem;
-      }
-      .feature-head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-        margin-bottom: 0.75rem;
-      }
-      .feature-name {
+        color: var(--fg);
+        text-decoration: none;
+        padding: 1.5rem 1rem;
         font-size: 1rem;
-        text-transform: capitalize;
+        transition: border-color 0.15s;
       }
-      .counts {
-        display: flex;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-      }
-      .count {
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .count b {
-        color: var(--fg);
-        font-weight: 600;
-      }
-      form.jump {
-        display: flex;
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
-      }
-      form.jump input {
-        flex: 1;
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        color: var(--fg);
-        font-family: inherit;
-        font-size: 13px;
-        padding: 0.4rem 0.6rem;
-        min-width: 0;
-      }
-      form.jump button {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        color: var(--fg);
-        font-family: inherit;
-        font-size: 13px;
-        padding: 0.4rem 0.9rem;
-        cursor: pointer;
-      }
-      form.jump button:hover {
+      a.btn:hover {
         border-color: var(--info);
+        color: var(--info);
       }
-      .recent {
-        display: grid;
-        gap: 0.35rem;
-      }
-      .row {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        font-size: 13px;
-      }
-      .row .id {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .pill {
-        font-size: 11px;
-        padding: 0.05rem 0.5rem;
-        border-radius: 999px;
+      .btn .sub {
+        display: block;
         color: var(--muted);
-        background: rgba(113, 113, 122, 0.12);
-        flex-shrink: 0;
-      }
-      .empty {
-        color: var(--dim);
-        font-size: 13px;
-      }
-      .meta {
-        color: var(--dim);
         font-size: 12px;
-        margin-top: 1.5rem;
-        display: flex;
-        justify-content: space-between;
+        margin-top: 0.25rem;
       }
-      .meta .heart {
+      a.btn:hover .sub {
+        color: var(--muted);
+      }
+      footer {
+        margin-top: 2rem;
+        color: #52525b;
+        font-size: 12px;
+      }
+      footer .heart {
         color: #ef4444;
       }
     </style>
   </head>
   <body>
     <main>
-      <header>
-        <img src="/logo.png" alt="" width="48" height="48" style="object-fit: contain" />
-        <span class="title">scan — whm event indexer</span>
-      </header>
-      <div id="root"><div class="empty">loading…</div></div>
-      <div class="meta">
-        <span id="chains"></span>
-        <span>Built with <span class="heart">♥</span> by hydration</span>
-      </div>
+      <img class="logo" src="/logo.png" alt="" />
+      <h1>scan</h1>
+      <p>whm cross-chain transfer explorer</p>
+      <nav class="nav">
+        <a class="btn" href="/basejump">basejump<span class="sub">EVM ↔ Hydration</span></a>
+        <a class="btn" href="/intents">intents<span class="sub">NEAR-Intents bridge</span></a>
+      </nav>
+      <footer>Built with <span class="heart">♥</span> by hydration</footer>
     </main>
-
-    <script>
-      const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-      const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"']/g, (c) => ESCAPES[c]));
-      const trunc = (s) => (s && s.length > 18 ? s.slice(0, 10) + "…" + s.slice(-6) : s);
-
-      // Per-feature wiring: list endpoint, the id field on each row, and the detail path.
-      const FEATURES = {
-        basejump: { list: "/api/basejump/transfers", idField: "id", detail: "/basejump/" },
-        intents: { list: "/api/intents", idField: "intent_id", detail: "/intents/" },
-      };
-
-      const root = document.getElementById("root");
-
-      function countsHtml(counts) {
-        const entries = Object.entries(counts || {});
-        if (!entries.length) return "";
-        return (
-          '<div class="counts">' +
-          entries
-            .map(([k, v]) => `<span class="count">${esc(k)} <b>${esc(v)}</b></span>`)
-            .join("") +
-          "</div>"
-        );
-      }
-
-      function rowHtml(cfg, item) {
-        const id = item[cfg.idField];
-        return `<div class="row"><span class="pill">${esc(item.state)}</span><a class="id" href="${esc(
-          cfg.detail
-        )}${encodeURIComponent(id)}"><code>${esc(trunc(id))}</code></a></div>`;
-      }
-
-      async function load() {
-        let status = { features: {}, chains: {} };
-        try {
-          status = await (await fetch("/api/status")).json();
-        } catch {}
-
-        const names = Object.keys(status.features || {}).filter((n) => FEATURES[n]);
-        // also include any locally-known feature even if status lacks counts
-        for (const n of Object.keys(FEATURES)) if (!names.includes(n)) names.push(n);
-
-        const sections = await Promise.all(
-          names.map(async (name) => {
-            const cfg = FEATURES[name];
-            let recent = "";
-            try {
-              const data = await (await fetch(cfg.list + "?limit=8")).json();
-              const items = data.items || [];
-              recent = items.length
-                ? '<div class="recent">' + items.map((it) => rowHtml(cfg, it)).join("") + "</div>"
-                : '<div class="empty">no records yet</div>';
-            } catch {
-              recent = '<div class="empty">unavailable</div>';
-            }
-            return `
-              <section class="feature">
-                <div class="feature-head">
-                  <span class="feature-name">${esc(name)}</span>
-                  ${countsHtml(status.features?.[name])}
-                </div>
-                <form class="jump" onsubmit="return jump(event, '${esc(cfg.detail)}')">
-                  <input name="id" placeholder="open by id (intentId / transfer id)…" autocomplete="off" />
-                  <button type="submit">open</button>
-                </form>
-                ${recent}
-              </section>`;
-          }),
-        );
-
-        root.innerHTML = sections.join("");
-
-        const chains = Object.entries(status.chains || {})
-          .map(([n, c]) => `${esc(n)} @ ${esc(c.cursor ?? "—")}`)
-          .join("  ·  ");
-        document.getElementById("chains").textContent = chains;
-      }
-
-      function jump(ev, base) {
-        ev.preventDefault();
-        const v = ev.target.id.value.trim();
-        if (v) location.href = base + encodeURIComponent(v);
-        return false;
-      }
-
-      load();
-    </script>
   </body>
 </html>
