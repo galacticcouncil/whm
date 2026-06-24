@@ -2,7 +2,7 @@
   "migration": "nintent-ethereum",
   "environment": "prod",
   "startedAt": "2026-06-17T10:13:39.430Z",
-  "completedAt": "2026-06-18T07:16:39.214Z",
+  "completedAt": "2026-06-20T18:53:47.014Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -53,6 +53,22 @@
       "error": null,
       "startedAt": "2026-06-18T07:16:32.701Z",
       "completedAt": "2026-06-18T07:16:39.212Z"
+    },
+    {
+      "name": "005-set-xcm-params@emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0xec576c8034d89caba0f5083e94feefdc9a326e9838042edefc914a1513060565",
+        "emitter": "0x059ed5658c988976e73adb6597418970414f3dd0",
+        "xcmFee": "3000000000000000000",
+        "xcmExecutionFee": "1000000000000000000",
+        "xcmGasLimit": "5000000",
+        "xcmTransactRefTime": "125059217000",
+        "xcmTransactProofSize": "625000"
+      },
+      "error": null,
+      "startedAt": "2026-06-20T18:53:30.661Z",
+      "completedAt": "2026-06-20T18:53:47.013Z"
     }
   ]
 }

@@ -7,8 +7,9 @@ import type { MigrationStep } from "./types";
 import intentEmitterWttJson from "../../../contracts/out/IntentEmitterWtt.sol/IntentEmitterWtt.json";
 
 const step: MigrationStep = {
-  name: "006-set-xcm-params@emitter",
-  description: "Bump xcmFee + xcmExecutionFee on the Hydration IntentEmitter (preserve gas/refTime/proofSize)",
+  name: "005-set-xcm-params@emitter",
+  description:
+    "Bump xcmFee + xcmExecutionFee on the Hydration IntentEmitter (preserve gas/refTime/proofSize)",
   action: async (ctx) => {
     if (!ctx.env.XCM_FEE) throw new Error("Missing XCM_FEE (GLMR, decimal)");
     if (!ctx.env.XCM_EXECUTION_FEE) throw new Error("Missing XCM_EXECUTION_FEE (GLMR, decimal)");
