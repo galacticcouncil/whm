@@ -3,30 +3,24 @@ services:
   scan:
     image: galacticcouncil/whmscan:latest
     environment:
-      # ── Chains are enabled by presence of their RPC. EVM RPCs MUST be websocket (ws/wss) —
-      #    ingestion is driven by eth_subscribe new-heads; an http(s) url fails at boot. ──
-      # Base (Basejump source)
+      # Base
       - BASE_RPC_URL=
       - BASE_START_BLOCK=44386800
-      # Ethereum (Basejump source [optional] + intents IntentReceiver)
+      # Ethereum
       - ETHEREUM_RPC_URL=
       - ETHEREUM_START_BLOCK=25300000
-      # Moonbeam (intents Wormhole-core LogMessagePublished)
+      # Moonbeam
       - MOONBEAM_RPC_URL=
-      - MOONBEAM_START_BLOCK=
-      # Hydration (Basejump landing + intents IntentEmitter)
+      - MOONBEAM_START_BLOCK=15752000
+      # Hydration
       - HYDRATION_WSS_URL=
       - HYDRATION_START_BLOCK=12011000
-      # ── Contract addresses (prod defaults baked into the image; override only to repoint) ──
-      # - BASEJUMP_BASE=
-      # - BASEJUMP_ETHEREUM=            # enables the optional Basejump Ethereum corridor
-      # - BASEJUMP_LANDING_HYDRATION=
-      # - INTENT_EMITTER_HYDRATION=
-      # - INTENT_RECEIVER_ETHEREUM=
-      # - WORMHOLE_CORE_MOONBEAM=
-      # - TOKEN_BRIDGE_MOONBEAM=
-      # Safety-sweep cadence for the live tail (ms); subscriptions drive ingestion, this just backstops gaps.
-      # - LIVE_POLL_INTERVAL_MS=12000
+      # Contract addresses (no code fallbacks — set them here). Comma-separated lists.
+      - BASEJUMP_BASE=0xf5b9334e44f800382cb47fc19669401d694e529b
+      - BASEJUMP_LANDING_HYDRATION=0x70e9b12c3b19cb5f0e59984a5866278ab69df976
+      - INTENT_EMITTER_HYDRATION=0x059ed5658c988976e73adb6597418970414f3dd0
+      - INTENT_RECEIVER_ETHEREUM=0xf1a5fe4252d9a1c39b0fb9de1f19049ee57ed188
+      #
       - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
     ports:
       - "8080:8080"

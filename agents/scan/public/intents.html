@@ -332,6 +332,10 @@
       // The native-ETH sentinel forwarded by IntentReceiver (lowercased).
       const NATIVE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
+      // Asset metadata, fetched once from /api/intents/tokens (Hydration source assets keyed by id,
+      // 1Click destination assets keyed by 1Click asset id). Used to format amounts + show symbols.
+      let TOKENS = { hydration: {}, dest: {} };
+
       const EXPLORER = {
         hydration: (e) => ({
           label: e.blockNumber + "-" + e.logIndex,
@@ -345,6 +349,18 @@
         hydration: (a) => "https://hydration.subscan.io/address/" + a,
         moonbeam: (a) => "https://moonscan.io/address/" + a,
         ethereum: (a) => "https://etherscan.io/address/" + a,
+      };
+
+      // NEAR-Intents explorer keyed by the (Ethereum) deposit address — shows the full 1Click
+      // execution; and NEAR block explorer for the destination settlement tx.
+      const NEAR_INTENTS_TX = (dep) => "https://explorer.near-intents.org/transactions/" + dep;
+      const NEARBLOCKS_TX = (h) => "https://nearblocks.io/txns/" + h;
+
+      // Per-destination-chain address explorer, keyed by the 1Click `blockchain` value (e.g. "near",
+      // "zec"). Chains without an entry render the recipient as plain (uncopiable-but-selectable) code.
+      const DEST_ADDR_EXPLORER = {
+        near: (a) => "https://nearblocks.io/address/" + a,
+        zec: (a) => "https://blockchair.com/zcash/address/" + a,
       };
 
       // Moonbeam Wormhole chain id + TokenBridge emitter — used to build the wormholescan link.
@@ -372,12 +388,49 @@
         }
       }
 
-      // ETH/WETH amounts are 18-decimal.
-      const fmtEth = (raw) => (raw == null || raw === "" ? "—" : fmtAmount(raw, 18) + " ETH");
+      // Round a raw amount to N significant figures for display (4 by default). Browser-side, since
+      // the page is static HTML; mirrors how the Hydration app humanizes amounts. Number precision
+      // is fine here — we only keep a few significant digits anyway.
+      function fmtSig(raw, decimals, sig) {
+        try {
+          const n = Number(BigInt(raw)) / Math.pow(10, decimals);
+          if (!isFinite(n)) return fmtAmount(raw, decimals);
+          return n.toLocaleString("en-US", { maximumSignificantDigits: sig || 4 });
+        } catch {
+          return fmtAmount(raw, decimals);
+        }
+      }
+
+      // ETH/WETH amounts are 18-decimal, shown to 4 significant figures.
+      const fmtEth = (raw) => (raw == null || raw === "" ? "—" : fmtSig(raw, 18, 4) + " ETH");
 
       function assetLabel(a) {
         if (!a) return "—";
         return a.toLowerCase() === NATIVE ? "ETH (native)" : a;
+      }
+
+      // Format a raw amount using on-demand asset metadata (symbol + decimals); falls back to the
+      // raw value + a truncated asset id when the asset isn't in the fetched token lists.
+      function fmtAssetIn(t) {
+        const m = TOKENS.hydration[t.asset_in];
+        if (m) return `${esc(fmtSig(t.amount_in, m.decimals))} <code>${esc(m.symbol)}</code>`;
+        return `#<x-num value="${esc(t.asset_in)}"></x-num> · <x-num value="${esc(
+          t.amount_in
+        )}"></x-num>`;
+      }
+
+      function fmtOut(t) {
+        if (t.dest_amount == null) return "";
+        const m = TOKENS.dest[t.dest_asset];
+        if (m) return `${esc(fmtSig(t.dest_amount, m.decimals))} <code>${esc(m.symbol)}</code>`;
+        return `<x-num value="${esc(t.dest_amount)}"></x-num> <code title="${esc(
+          t.dest_asset || ""
+        )}">${esc(truncMiddle(t.dest_asset || "", 8, 6))}</code>`;
+      }
+
+      // Destination chain name (e.g. "near") from the 1Click token metadata, for the last leg label.
+      function destChain(t) {
+        return (t.dest_asset && TOKENS.dest[t.dest_asset]?.chain) || "destination";
       }
 
       function truncMiddle(s, head = 8, tail = 6) {
@@ -515,6 +568,13 @@
           "https://cdn.jsdelivr.net/gh/sodazone/intergalactic-asset-metadata/v2/wormhole/1/icon.svg",
         hydration:
           "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/polkadot/2034/icon.svg",
+        moonbeam:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/polkadot/2004/icon.svg",
+        ethereum:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/ethereum/1/icon.svg",
+        // destination chains (keyed by 1Click `blockchain` value)
+        near: "https://s2.coinmarketcap.com/static/img/coins/64x64/6535.png",
+        zec: "https://s2.coinmarketcap.com/static/img/coins/64x64/1437.png",
       };
 
       function chainBadge(chain) {
@@ -557,21 +617,34 @@
               : ""
           }</div>`,
         ]);
-        rows.push([
-          "Deposit",
-          `<div class="party"><span class="party-head">${chainBadge("ethereum")}ethereum</span>${
-            t.deposit_address
-              ? '<x-addr value="' + esc(t.deposit_address) + '" chain="ethereum"></x-addr>'
-              : ""
-          }</div>`,
-        ]);
-        rows.push([
-          "Asset in",
-          `#<x-num value="${esc(t.asset_in)}"></x-num> · <x-num value="${esc(
-            t.amount_in
-          )}"></x-num>`,
-        ]);
+        // "To" is the recipient on the destination chain (the end user) — the Ethereum deposit
+        // address is internal plumbing and intentionally not shown.
+        if (t.dest_address) {
+          const chain = destChain(t);
+          const url = DEST_ADDR_EXPLORER[chain]?.(t.dest_address);
+          const addr = url
+            ? `<a href="${esc(url)}" target="_blank" rel="noopener"><code class="hash">${esc(
+                t.dest_address
+              )}</code></a>`
+            : `<code class="hash">${esc(t.dest_address)}</code>`;
+          rows.push([
+            "To",
+            `<div class="party"><span class="party-head">${chainBadge(chain)}${esc(
+              chain
+            )}</span>${addr}</div>`,
+          ]);
+        }
+        rows.push(["Asset in", fmtAssetIn(t)]);
+        // Value flow, in order: bridged (WETH out) → relay fee taken → forwarded to the receiver.
         rows.push(["Bridged", esc(fmtEth(t.eth_out)) + " <span class=\"delta\">(WETH out)</span>"]);
+        if (t.relay_fee != null) {
+          const r = t.relayer
+            ? ` <span class="delta">by <x-addr value="${esc(
+                t.relayer
+              )}" chain="ethereum"></x-addr></span>`
+            : "";
+          rows.push(["Relay fee", esc(fmtEth(t.relay_fee)) + r]);
+        }
         if (t.forwarded_amount != null) {
           const a = assetLabel(t.forwarded_asset);
           const amt =
@@ -582,17 +655,8 @@
                 )}</code>`;
           rows.push(["Forwarded", amt]);
         }
-        if (t.relay_fee != null) {
-          const r = t.relayer
-            ? ` <span class="delta">by <x-addr value="${esc(
-                t.relayer
-              )}" chain="ethereum"></x-addr></span>`
-            : "";
-          rows.push(["Relay fee", esc(fmtEth(t.relay_fee)) + r]);
-        }
-        if (t.max_relay_fee != null) {
-          rows.push(["Max relay", esc(fmtEth(t.max_relay_fee))]);
-        }
+        const out = fmtOut(t);
+        if (out) rows.push(["Asset out", out]);
         return rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
       }
 
@@ -671,6 +735,50 @@
           </div>`;
       }
 
+      // The final leg: the destination chain (e.g. NEAR), where the user's asset is RECEIVED. Built
+      // from the 1Click settlement — labelled by the destination chain + terminal status, linking
+      // the destination-chain (e.g. NEAR) tx.
+      function destCard(t) {
+        if (!t.dest_address && !t.dest_tx && !t.deposit_address) return ""; // nothing to show yet
+        const chain = destChain(t);
+        const done = t.state === "succeeded" || !!t.dest_tx;
+        const kind =
+          t.state === "succeeded"
+            ? "received"
+            : t.state === "refunded"
+              ? "refunded"
+              : t.state === "failed"
+                ? "failed"
+                : "pending";
+        // destination-chain settlement tx: prefer 1Click's explorer url, else fall back to NEARBlocks
+        const txUrl = t.dest_tx ? t.dest_tx_url || NEARBLOCKS_TX(t.dest_tx) : null;
+        const txLine = t.dest_tx
+          ? `<div>Tx: <span class="hash"><a href="${esc(
+              txUrl
+            )}" target="_blank" rel="noopener"><code>${esc(
+              truncMiddle(t.dest_tx, 10, 8)
+            )}</code></a></span></div>`
+          : `<div class="leg-kind pending">awaiting settlement</div>`;
+        // the full 1Click execution on the NEAR-Intents explorer, keyed by the deposit address
+        const intentsLine = t.deposit_address
+          ? `<div>Intents: <span class="hash"><a href="${esc(
+              NEAR_INTENTS_TX(t.deposit_address)
+            )}" target="_blank" rel="noopener"><code>explorer ↗</code></a></span></div>`
+          : "";
+        const out = fmtOut(t);
+        const outLine = out ? `<div>${out}</div>` : "";
+        return `
+          <div class="leg${done ? "" : " pending"}">
+            <div class="leg-head">
+              <div class="leg-title">${chainBadge(chain)}<span>${esc(
+          chain
+        )}</span><span class="leg-kind${done ? "" : " pending"}">· ${esc(kind)}</span></div>
+              ${done ? '<span class="check">✓</span>' : ""}
+            </div>
+            <div class="leg-body">${outLine}${txLine}${intentsLine}</div>
+          </div>`;
+      }
+
       function render(t) {
         const cards = [];
         for (const k of LEG_ORDER) {
@@ -678,6 +786,7 @@
           // the wormhole VAA card sits between the Moonbeam publish and the Ethereum forward
           if (k === "published") cards.push(wormholeCard(t));
         }
+        cards.push(destCard(t)); // destination chain (NEAR/…) received — the final leg
         return `
           <section class="card">
             <dl class="details">${detailsRows(t)}</dl>
@@ -689,7 +798,9 @@
       }
 
       let loaded = false;
+      let lastIntent = null;
       function apply(t) {
+        lastIntent = t;
         root.innerHTML = render(t);
         document.title = t.intent_id + " · " + t.state;
         if (!loaded) {
@@ -715,7 +826,21 @@
         document.title = ID + " · scan";
       }
 
+      async function loadTokens() {
+        try {
+          const r = await fetch("/api/intents/tokens");
+          if (r.ok) TOKENS = await r.json();
+        } catch {
+          // non-fatal — amounts just render raw without symbols
+        }
+      }
+
       async function load() {
+        // Tokens load in the background and re-render once ready, so the intent renders immediately
+        // (amounts gain symbols a beat later) instead of blocking on the metadata fetch.
+        loadTokens().then(() => {
+          if (lastIntent) apply(lastIntent);
+        });
         try {
           const r = await fetch("/api/intents/" + encodeURIComponent(ID));
           if (r.status === 404) {

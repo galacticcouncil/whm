@@ -9,6 +9,8 @@ import { SettlementPoller } from "./settlement";
 import { LogMessagePublishedEvt } from "./abi";
 import { routes } from "./api";
 import { initSchema, stateCounts } from "./db";
+import { tokenMetadata } from "./metadata";
+import { deriveEmitterMda } from "./mda";
 
 /**
  * NEAR-Intents (WTT) indexer: Hydration `BridgeInitiated` (emitted) → Moonbeam Wormhole-core
@@ -24,7 +26,10 @@ export function createIntents(enrich: Enrich): Feature | null {
 
   // At least one receiver gates/decodes both the published and forwarded legs.
   if (receiverEthereum.length === 0) return null;
-  const h = intentsHandlers(enrich, receiverEthereum);
+  // Derive each emitter's Moonbeam MDA so the published leg can drop non-Hydration TokenBridge
+  // traffic to the receiver (no extra config — new emitters are covered automatically).
+  const emitterMdas = emitterHydration.map(deriveEmitterMda);
+  const h = intentsHandlers(enrich, receiverEthereum, emitterMdas);
 
   const contracts: Feature["contracts"] = [];
 
@@ -60,6 +65,9 @@ export function createIntents(enrich: Enrich): Feature | null {
     initSchema,
     routes,
     counts: stateCounts,
-    start: () => poller.start(),
+    start: () => {
+      void tokenMetadata(); // warm the asset-metadata cache so /api/intents/tokens is instant
+      poller.start();
+    },
   };
 }

@@ -204,6 +204,14 @@ export function addressFilter(input: string): AddressCandidates {
   return { sender: null, recipient: [] };
 }
 
+/**
+ * A valid transfer has a contiguous prefix of the leg flow `initiated → {completed | queued →
+ * fulfilled}`: every present leg requires its predecessor. Landing-only orphans (a delivery with no
+ * matching source `initiated`, or a `fulfilled` with no `queued`) are excluded from list + counts.
+ */
+const VALID_LEGS =
+  "(completed IS NULL OR initiated IS NOT NULL) AND (queued IS NULL OR initiated IS NOT NULL) AND (fulfilled IS NULL OR queued IS NOT NULL)";
+
 export async function listTransfers(filter: {
   state?: TransferState;
   address?: AddressCandidates;
@@ -211,7 +219,7 @@ export async function listTransfers(filter: {
   limit: number;
   offset: number;
 }): Promise<{ items: TransferRow[]; total: number }> {
-  const conds: string[] = [];
+  const conds: string[] = [VALID_LEGS];
   const params: unknown[] = [];
 
   if (filter.state) {
@@ -254,7 +262,10 @@ export async function getTransfer(id: string): Promise<TransferRow | null> {
 }
 
 export async function stateCounts(): Promise<Record<string, number>> {
-  const r = await pool.query(`SELECT state, COUNT(*)::int AS n FROM transfers GROUP BY state`);
+  // Count only valid transfers (contiguous leg prefix) — see VALID_LEGS / listTransfers.
+  const r = await pool.query(
+    `SELECT state, COUNT(*)::int AS n FROM transfers WHERE ${VALID_LEGS} GROUP BY state`,
+  );
   const out: Record<string, number> = { initiated: 0, completed: 0, queued: 0, fulfilled: 0 };
   for (const row of r.rows) out[row.state] = row.n;
   return out;

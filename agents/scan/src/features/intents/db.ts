@@ -15,16 +15,30 @@ CREATE TABLE IF NOT EXISTS intents (
   forwarded_asset TEXT,
   forwarded_amount NUMERIC,
   relay_fee NUMERIC,
-  relayer TEXT,
   settlement_status TEXT,
+  relayer TEXT,
+  dest_address TEXT,
+  dest_asset TEXT,
+  dest_amount NUMERIC,
+  dest_tx TEXT,
+  dest_tx_url TEXT,
   emitted JSONB,
   published JSONB,
   forwarded JSONB,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Destination leg (where the user's asset actually lands), backfilled from 1Click. Added after the
+-- initial release, so ALTER for existing tables — deposit_address (Ethereum) != dest_address.
+ALTER TABLE intents ADD COLUMN IF NOT EXISTS dest_address TEXT;
+ALTER TABLE intents ADD COLUMN IF NOT EXISTS dest_asset TEXT;
+ALTER TABLE intents ADD COLUMN IF NOT EXISTS dest_amount NUMERIC;
+ALTER TABLE intents ADD COLUMN IF NOT EXISTS dest_tx TEXT;
+ALTER TABLE intents ADD COLUMN IF NOT EXISTS dest_tx_url TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_intents_state ON intents (state);
 CREATE INDEX IF NOT EXISTS idx_intents_deposit ON intents (deposit_address);
+CREATE INDEX IF NOT EXISTS idx_intents_dest ON intents (dest_address);
 CREATE INDEX IF NOT EXISTS idx_intents_updated_at ON intents (updated_at DESC);
 
 CREATE OR REPLACE FUNCTION intent_state_rank(s TEXT) RETURNS INT AS $$
@@ -67,6 +81,12 @@ export interface IntentRow {
   relay_fee: string | null;
   relayer: string | null;
   settlement_status: string | null;
+  /** destination leg (from 1Click): the user's recipient address on the destination chain */
+  dest_address: string | null;
+  dest_asset: string | null;
+  dest_amount: string | null;
+  dest_tx: string | null;
+  dest_tx_url: string | null;
   emitted: EventRef | null;
   published: EventRef | null;
   forwarded: EventRef | null;
@@ -86,6 +106,11 @@ export interface IntentPatch {
   relay_fee?: string;
   relayer?: string;
   settlement_status?: string;
+  dest_address?: string;
+  dest_asset?: string;
+  dest_amount?: string;
+  dest_tx?: string;
+  dest_tx_url?: string;
   emitted?: EventRef;
   published?: EventRef;
   forwarded?: EventRef;
@@ -104,6 +129,11 @@ const PATCH_COLS = [
   "relay_fee",
   "relayer",
   "settlement_status",
+  "dest_address",
+  "dest_asset",
+  "dest_amount",
+  "dest_tx",
+  "dest_tx_url",
   "emitted",
   "published",
   "forwarded",
@@ -144,22 +174,32 @@ export async function upsertIntent(
   return { row, created: row.previous_state === null, previousState: row.previous_state };
 }
 
+/**
+ * A valid intent has a contiguous prefix of the leg chain `emitted → published → forwarded`: every
+ * present leg requires its immediate predecessor. Rows carrying a downstream leg without its prereqs
+ * — a forwarded VAA or Moonbeam publish that never had the Hydration `emitted` origin — are orphans,
+ * excluded from the list and the counts.
+ */
+const VALID_LEGS =
+  "(published IS NULL OR emitted IS NOT NULL) AND (forwarded IS NULL OR published IS NOT NULL)";
+
 export async function listIntents(filter: {
   state?: IntentState;
-  depositAddress?: string;
+  address?: string;
   limit: number;
   offset: number;
 }): Promise<{ items: IntentRow[]; total: number }> {
-  const conds: string[] = [];
+  const conds: string[] = [VALID_LEGS];
   const params: unknown[] = [];
 
   if (filter.state) {
     params.push(filter.state);
     conds.push(`state = $${params.length}`);
   }
-  if (filter.depositAddress) {
-    params.push(filter.depositAddress.toLowerCase());
-    conds.push(`lower(deposit_address) = $${params.length}`);
+  if (filter.address) {
+    // match either the Ethereum deposit address or the destination-chain recipient address
+    params.push(filter.address.toLowerCase());
+    conds.push(`(lower(deposit_address) = $${params.length} OR lower(dest_address) = $${params.length})`);
   }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
@@ -190,7 +230,10 @@ export async function forwardedPendingSettlement(): Promise<
 }
 
 export async function stateCounts(): Promise<Record<string, number>> {
-  const r = await pool.query(`SELECT state, COUNT(*)::int AS n FROM intents GROUP BY state`);
+  // Count only valid intents (contiguous leg prefix) — see VALID_LEGS / listIntents.
+  const r = await pool.query(
+    `SELECT state, COUNT(*)::int AS n FROM intents WHERE ${VALID_LEGS} GROUP BY state`,
+  );
   const out: Record<string, number> = { emitted: 0, published: 0, forwarded: 0 };
   for (const row of r.rows) out[row.state] = row.n;
   return out;

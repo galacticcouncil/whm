@@ -512,8 +512,6 @@
       }
       customElements.define("x-num", XNum);
 
-      const LEG_ORDER = ["initiated", "queued", "completed", "fulfilled"];
-
       const CHAIN_ICON = {
         wormhole:
           "https://cdn.jsdelivr.net/gh/sodazone/intergalactic-asset-metadata/v2/wormhole/1/icon.svg",
@@ -669,9 +667,19 @@
 
       function render(t) {
         const cards = [];
-        for (const k of LEG_ORDER) {
-          if (t[k] || k === "completed") cards.push(legCard(k, t[k]));
-          if (k === "initiated" && t.initiated) cards.push(wormholeCard(t));
+        // origin + the wormhole relay that follows it
+        cards.push(legCard("initiated", t.initiated));
+        if (t.initiated) cards.push(wormholeCard(t));
+        // Delivery on Hydration: fast path (completed) XOR slow path (queued → fulfilled). Only show a
+        // PENDING leg whose predecessors are present — never the fast-path `completed` slot once the
+        // transfer has gone slow (queued/fulfilled), nor `fulfilled` before it has been `queued`.
+        if (t.completed) {
+          cards.push(legCard("completed", t.completed));
+        } else if (t.queued) {
+          cards.push(legCard("queued", t.queued));
+          cards.push(legCard("fulfilled", t.fulfilled)); // present, or PENDING (queued is present)
+        } else if (t.initiated) {
+          cards.push(legCard("completed", null)); // in-flight: awaiting delivery
         }
         const legs = cards.join("");
         return `

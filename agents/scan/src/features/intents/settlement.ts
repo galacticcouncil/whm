@@ -2,7 +2,7 @@ import log from "../../logger";
 import { broadcast } from "../../subscribers";
 
 import { forwardedPendingSettlement, upsertIntent, type IntentState } from "./db";
-import { getExecutionStatus, jwtConfigured, TERMINAL_STATE } from "./oneclick";
+import { getExecution, jwtConfigured, TERMINAL_STATE } from "./oneclick";
 
 const CONCURRENCY = 5;
 
@@ -52,16 +52,23 @@ export class SettlementPoller {
     deposit_address: string;
     settlement_status: string | null;
   }): Promise<void> {
-    const status = await getExecutionStatus(r.deposit_address);
-    if (!status) return; // transient error — retry next round
+    const exec = await getExecution(r.deposit_address);
+    if (!exec) return; // transient error — retry next round
+    const { status } = exec;
     const terminal = TERMINAL_STATE[status];
     // No-op if a non-terminal status is unchanged — avoids churn / redundant SSE broadcasts.
     if (!terminal && status === r.settlement_status) return;
 
     const state: IntentState = terminal ?? "forwarded";
     // The intent already exists (it's in `forwarded`), so this is always an update — never "created".
+    // Also (back)fill the destination leg + capture the destination-chain tx once settled.
     const { row, previousState } = await upsertIntent(r.intent_id, state, {
       settlement_status: status,
+      dest_address: exec.destAddress,
+      dest_asset: exec.destAsset,
+      dest_amount: exec.destAmount,
+      dest_tx: exec.destTx,
+      dest_tx_url: exec.destTxUrl,
     });
     broadcast({
       feature: "intents",
