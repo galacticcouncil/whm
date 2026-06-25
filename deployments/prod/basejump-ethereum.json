@@ -115,11 +115,15 @@
     },
     {
       "name": "010-set-usdc-fee@basejump",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "txHash": "0x7184f86cbc00a526fdbb0cd1ca6e347476f057b80aa048f479c8da05a13f95b2",
+        "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "fee": "100000"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-06-25T12:00:52.820Z",
+      "completedAt": "2026-06-25T12:01:02.992Z"
     },
     {
       "name": "011-transfer-ownership@proxy",
