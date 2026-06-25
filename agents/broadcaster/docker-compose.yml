@@ -7,6 +7,12 @@ services:
       - PRIVATE_KEY=
       - REFRESH_INTERVAL=
       - CHANGE_THRESHOLD=
+      - ETH_RPC_URL=
+      - ETH_PRIVATE_KEY=
+      - ETH_EMITTER=
+      - ETH_CHAIN_ID=
+      - ETH_EMITTER_BLOCK=
+      - ETH_SYMBOLS=
     volumes:
       - db:/app/.db
     configs:

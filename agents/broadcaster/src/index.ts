@@ -1,15 +1,9 @@
-import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-
 import { HumanizeDuration, HumanizeDurationLanguage } from "humanize-duration-ts";
 
-import idl from "./emitter/idl.json";
-import type { OracleEmitter } from "./emitter/types.js";
-
 import { hasChangedBeyondThreshold } from "./big.js";
-import { loadAllFeeds, assetIdStr, type FeedEntry } from "./feeds.js";
-import { readCurrentValue } from "./reader.js";
-import { sendUpdate } from "./sender.js";
+import { createSolanaAdapter } from "./adapters/solana.js";
+import { createEthereumAdapter } from "./adapters/ethereum.js";
+import type { ChainAdapter, Feed } from "./adapters/types.js";
 import {
   loadState,
   loadThresholds,
@@ -17,7 +11,7 @@ import {
   type BroadcasterState,
   type ThresholdMap,
 } from "./state.js";
-import { loadKeypair, requiredEnv } from "./utils";
+import { requiredEnv } from "./utils.js";
 
 import log from "./logger.js";
 
@@ -25,8 +19,6 @@ const langService = new HumanizeDurationLanguage();
 const humanizer = new HumanizeDuration(langService);
 
 const config = {
-  rpcUrl: requiredEnv("RPC_URL"),
-  privateKey: requiredEnv("PRIVATE_KEY"),
   checkIntervalMs: 60 * 1_000,
   changeThreshold: (Number(process.env.CHANGE_THRESHOLD) || 0.1) / 100,
   fullRefreshMs: (Number(process.env.REFRESH_INTERVAL) || 24) * 60 * 60 * 1_000,
@@ -34,83 +26,119 @@ const config = {
   thresholdsFile: "thresholds.json",
 };
 
-function buildProgram(): Program<OracleEmitter> {
-  const keypair = loadKeypair(config.privateKey);
-  const connection = new anchor.web3.Connection(config.rpcUrl, "confirmed");
-  const wallet = new anchor.Wallet(keypair);
-  const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
-  return new Program<OracleEmitter>(idl as OracleEmitter, provider);
+interface FeedRef {
+  adapter: ChainAdapter;
+  feed: Feed;
 }
 
-async function broadcastAll(
-  program: Program<OracleEmitter>,
-  feeds: FeedEntry[],
-  state: BroadcasterState,
-): Promise<void> {
+function buildAdapters(): ChainAdapter[] {
+  const adapters: ChainAdapter[] = [];
+
+  // Each chain is opt-in via its env: Solana on RPC_URL, Ethereum on ETH_EMITTER.
+  if (process.env.RPC_URL) {
+    adapters.push(
+      createSolanaAdapter({
+        rpcUrl: requiredEnv("RPC_URL"),
+        privateKey: requiredEnv("PRIVATE_KEY"),
+      }),
+    );
+  }
+
+  if (process.env.ETH_EMITTER) {
+    adapters.push(
+      createEthereumAdapter({
+        rpcUrl: requiredEnv("ETH_RPC_URL"),
+        chainId: Number(process.env.ETH_CHAIN_ID) || 1,
+        privateKey: requiredEnv("ETH_PRIVATE_KEY") as `0x${string}`,
+        emitter: requiredEnv("ETH_EMITTER") as `0x${string}`,
+        fromBlock: BigInt(process.env.ETH_EMITTER_BLOCK || "0"),
+        symbols: (process.env.ETH_SYMBOLS || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      }),
+    );
+  }
+
+  if (adapters.length === 0) {
+    throw new Error("No adapters configured. Set RPC_URL (Solana) and/or ETH_EMITTER (Ethereum).");
+  }
+
+  return adapters;
+}
+
+async function broadcastAll(refs: FeedRef[], state: BroadcasterState): Promise<void> {
   const now = Date.now();
-  for (const feed of feeds) {
-    const key = assetIdStr(feed.assetId);
+  for (const { adapter, feed } of refs) {
+    const key = feed.key;
     const last = state[key];
     if (last && now - last.sentAt < config.fullRefreshMs) {
       const ago = humanizer.humanize(now - last.sentAt, {
         round: true,
         largest: 1,
       });
-      log.info(`[full-refresh] Skipping ${key} (synced ${ago} ago)`);
+      log.info(`[full-refresh] Skipping ${adapter.name}:${feed.label} (synced ${ago} ago)`);
       continue;
     }
-    log.info(`[full-refresh] Broadcasting ${key}`);
+    log.info(`[full-refresh] Broadcasting ${adapter.name}:${feed.label}`);
     try {
-      const value = await readCurrentValue(config.rpcUrl, feed);
-      await sendUpdate(program, feed);
+      const value = await adapter.read(feed);
+      await adapter.send(feed);
       state[key] = { value: value.toString(), sentAt: now };
       saveState(config.stateFile, state);
     } catch (err) {
-      log.error(`[full-refresh] Failed for ${key}:`, err);
+      log.error(`[full-refresh] Failed for ${adapter.name}:${feed.label}:`, err);
     }
   }
 }
 
 async function checkAndBroadcast(
-  program: Program<OracleEmitter>,
-  feeds: FeedEntry[],
+  refs: FeedRef[],
   state: BroadcasterState,
   thresholds: ThresholdMap,
 ): Promise<void> {
-  for (const feed of feeds) {
-    const key = assetIdStr(feed.assetId);
+  for (const { adapter, feed } of refs) {
+    const key = feed.key;
     const threshold = thresholds[key] ?? config.changeThreshold;
     try {
-      const current = await readCurrentValue(config.rpcUrl, feed);
+      const current = await adapter.read(feed);
       const last = BigInt(state[key]?.value ?? "0");
 
       if (!hasChangedBeyondThreshold(current, last, threshold)) {
         continue;
       }
 
-      log.info(`[check] ${key.slice(0, 10)}... changed: ${last} -> ${current}`);
-      await sendUpdate(program, feed);
+      log.info(`[check] ${adapter.name}:${feed.label} changed: ${last} -> ${current}`);
+      await adapter.send(feed);
       state[key] = { value: current.toString(), sentAt: Date.now() };
       saveState(config.stateFile, state);
     } catch (err) {
-      log.error(`[check] Failed for ${key}:`, err);
+      log.error(`[check] Failed for ${adapter.name}:${feed.label}:`, err);
     }
   }
 }
 
 async function main(): Promise<void> {
   log.info("Broadcaster starting");
-  log.info(`  RPC: ${config.rpcUrl}`);
-  log.info(`  Program: ${idl.address}`);
   log.info(`  Check interval: ${config.checkIntervalMs / 1_000 / 60}m`);
   log.info(`  Full refresh: ${config.fullRefreshMs / 1_000 / 60 / 60}h`);
   log.info(`  Change threshold: ${config.changeThreshold * 100}%`);
   log.info(`  State file: ${config.stateFile}`);
 
-  const program = buildProgram();
-  const feeds = await loadAllFeeds(program);
+  const adapters = buildAdapters();
 
-  if (feeds.length === 0) {
+  const refs: FeedRef[] = [];
+  for (const adapter of adapters) {
+    // Isolate adapters: one chain's startup failure must not take down the others.
+    try {
+      const feeds = await adapter.loadFeeds();
+      for (const feed of feeds) refs.push({ adapter, feed });
+    } catch (err) {
+      log.error(`[${adapter.name}] loadFeeds failed:`, err);
+    }
+  }
+
+  if (refs.length === 0) {
     log.info("No feeds registered, nothing to do");
     process.exit(0);
   }
@@ -122,7 +150,7 @@ async function main(): Promise<void> {
   }
 
   // Initial full refresh on startup
-  await broadcastAll(program, feeds, state);
+  await broadcastAll(refs, state);
   let lastFullRefresh = Date.now();
 
   // Periodic check loop
@@ -130,10 +158,10 @@ async function main(): Promise<void> {
     const now = Date.now();
 
     if (now - lastFullRefresh >= config.fullRefreshMs) {
-      await broadcastAll(program, feeds, state);
+      await broadcastAll(refs, state);
       lastFullRefresh = now;
     } else {
-      await checkAndBroadcast(program, feeds, state, thresholds);
+      await checkAndBroadcast(refs, state, thresholds);
     }
   };
 

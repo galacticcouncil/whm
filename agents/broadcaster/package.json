@@ -16,7 +16,9 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
+    "@whm/common": "workspace:*",
     "humanize-duration-ts": "~2.1.1",
+    "viem": "^2.38.3",
     "winston": "^3.8.2"
   }
 }
