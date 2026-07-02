@@ -25,9 +25,17 @@ const INTENT_RECEIVER = (process.env.INTENT_RECEIVER || "").toLowerCase();
 const QUOTER_URL = process.env.QUOTER_URL || "http://localhost:8080";
 
 // Re-quote + retry an unprofitable intent before dropping it — gas can fall within minutes, so a fee
-// currently above the user's maxRelayFee may become payable shortly. Default: 3 attempts, 2 min apart.
-const INTENT_MAX_ATTEMPTS = Number(process.env.INTENT_MAX_ATTEMPTS || 3);
-const INTENT_RETRY_DELAY_MS = Number(process.env.INTENT_RETRY_DELAY_MS || 120_000);
+// currently above the user's maxRelayFee may become payable shortly. Retries are driven by the
+// relayer engine's own Redis-backed delayed queue (exponential backoff), not an in-process timer, so
+// they survive restarts and don't hold worker slots. The engine's default strategy is
+// `min(2^attemptsMade * baseDelayMs, maxDelayMs)`, so baseDelayMs=60_000 yields 2, 4, 8, 16, 32, 64
+// min between attempts. INTENT_RETRIES caps the attempt count, but the terminal condition is the VAA
+// age check below — we stop bothering once a VAA is older than INTENT_MAX_VAA_AGE_MS (default 1h),
+// since by then gas is unlikely to recover meaningfully and the OneClick quote has expired.
+const INTENT_RETRIES = Number(process.env.INTENT_RETRIES || 8);
+const INTENT_RETRY_BASE_MS = Number(process.env.INTENT_RETRY_BASE_MS || 60_000);
+const INTENT_RETRY_MAX_MS = Number(process.env.INTENT_RETRY_MAX_MS || 70 * 60_000);
+const INTENT_MAX_VAA_AGE_MS = Number(process.env.INTENT_MAX_VAA_AGE_MS || 60 * 60_000);
 
 const eth = new ethers.providers.JsonRpcProvider(process.env.ETH_RPC || "https://eth.llamarpc.com");
 // Dedicated, reimbursed wallet — separate from the generic app-eth relayer (PRIVKEY).
@@ -135,6 +143,15 @@ async function quoteRelayFee(feeAsset: string): Promise<bigint> {
       host: process.env.REDIS_HOST || "localhost",
       port: Number(process.env.REDIS_PORT) || 6379,
     },
+    // Total attempts per VAA. A handler that throws (unprofitable / quoter down) is rescheduled with
+    // exponential backoff (see retryBackoffOptions). The VAA age cap in the handler is the real
+    // terminator; this is just a hard ceiling so a permanently-stuck VAA eventually stops.
+    workflows: { retries: INTENT_RETRIES },
+    // Backoff between retries: min(2^attemptsMade * baseDelayMs, maxDelayMs) → 2, 4, 8, 16, 32, 64 min.
+    retryBackoffOptions: {
+      baseDelayMs: INTENT_RETRY_BASE_MS,
+      maxDelayMs: INTENT_RETRY_MAX_MS,
+    },
     missedVaaOptions: {
       startingSequenceConfig: {
         [CHAIN_ID_MOONBEAM as ChainId]: BigInt(process.env.MOONBEAM_FROM_SEQ || 0),
@@ -162,60 +179,55 @@ async function quoteRelayFee(feeAsset: string): Promise<bigint> {
       return next();
     }
 
+    // Decode failures are permanent (malformed payload), so drop the VAA rather than retry it.
+    let decoded;
     try {
-      const { tokenAddress, tokenChain, intentId, depositAddress, maxRelayFee } = decodeIntent(
-        vaa.payload,
-      );
-      const feeAsset = await deliveredToken(tokenAddress, tokenChain);
-
-      // Re-quote and queue once the fee is within the user's maxRelayFee. If still unprofitable,
-      // retry up to INTENT_MAX_ATTEMPTS (spaced INTENT_RETRY_DELAY_MS apart) before dropping it —
-      // gas may fall in the meantime. Retries run out-of-band so the engine's queue isn't blocked.
-      const attempt = async (n: number) => {
-        let feeRequested: bigint;
-        try {
-          feeRequested = await quoteRelayFee(feeAsset);
-        } catch (e) {
-          ctxLogger.error(`quote failed (attempt ${n}/${INTENT_MAX_ATTEMPTS}): ${e.message || e}`);
-          feeRequested = maxRelayFee + 1n; // treat as unprofitable → retry/skip
-        }
-
-        if (feeRequested <= maxRelayFee) {
-          ctxLogger.info(
-            `Intent → ${depositAddress}: feeRequested ${feeRequested} ≤ maxRelayFee ${maxRelayFee} (attempt ${n})`,
-          );
-          queue.addToQueue({
-            vaa,
-            type: "intent",
-            feeRequested: feeRequested.toString(),
-            logger: ctxLogger,
-            next,
-          });
-          return;
-        }
-
-        if (n >= INTENT_MAX_ATTEMPTS) {
-          ctxLogger.info(
-            `Skip after ${n} attempts: feeRequested ${feeRequested} > maxRelayFee ${maxRelayFee}`,
-          );
-          return next();
-        }
-
-        ctxLogger.info(
-          `Unprofitable (attempt ${n}/${INTENT_MAX_ATTEMPTS}): ${feeRequested} > ${maxRelayFee}; retry in ${INTENT_RETRY_DELAY_MS}ms`,
-        );
-        setTimeout(() => {
-          attempt(n + 1).catch((e) =>
-            ctxLogger.error(`intent retry ${n + 1} failed: ${e.message || e}`),
-          );
-        }, INTENT_RETRY_DELAY_MS);
-      };
-
-      await attempt(1);
+      decoded = decodeIntent(vaa.payload);
     } catch (e) {
-      ctxLogger.error(`intent decode/quote failed: ${e.message || e}`);
+      ctxLogger.error(`intent decode failed, dropping: ${e.message || e}`);
       return next();
     }
+    const { tokenAddress, tokenChain, intentId, depositAddress, maxRelayFee } = decoded;
+
+    // Terminal condition: stop retrying once the VAA is older than the cap — gas is unlikely to
+    // recover meaningfully past this point and the OneClick quote has expired. Ack (return, don't
+    // throw) so the engine marks the job complete instead of scheduling another backoff retry.
+    const ageMs = Date.now() - vaa.timestamp * 1000;
+    if (ageMs > INTENT_MAX_VAA_AGE_MS) {
+      ctxLogger.info(
+        `Drop stale intent ${intentId}: VAA age ${Math.round(ageMs / 60_000)}m > ` +
+          `${Math.round(INTENT_MAX_VAA_AGE_MS / 60_000)}m`,
+      );
+      return next();
+    }
+
+    const attempt = ctx.storage?.job?.attempts ?? 0;
+
+    // Re-quote on every delivery. deliveredToken / quoteRelayFee hit external services, so transient
+    // failures throw → the engine reschedules with exponential backoff (same as unprofitable).
+    const feeAsset = await deliveredToken(tokenAddress, tokenChain);
+    const feeRequested = await quoteRelayFee(feeAsset);
+
+    // Still above the user's ceiling: throw so the engine retries with backoff (2, 4, 8, 16, 32,
+    // 64 min). Gas often settles within minutes of a spike; the age cap above stops us eventually.
+    if (feeRequested > maxRelayFee) {
+      throw new Error(
+        `intent ${intentId} unprofitable (attempt ${attempt}/${INTENT_RETRIES}): ` +
+          `feeRequested ${feeRequested} > maxRelayFee ${maxRelayFee}; retrying with backoff`,
+      );
+    }
+
+    ctxLogger.info(
+      `Intent → ${depositAddress}: feeRequested ${feeRequested} ≤ maxRelayFee ${maxRelayFee} ` +
+        `(attempt ${attempt}/${INTENT_RETRIES})`,
+    );
+    queue.addToQueue({
+      vaa,
+      type: "intent",
+      feeRequested: feeRequested.toString(),
+      logger: ctxLogger,
+      next,
+    });
   });
 
   await app.listen();
