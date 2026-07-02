@@ -14,15 +14,15 @@ The core design goal is simple:
 - refunds should return to the user's **Ethereum H160** by default
 - failed quotes should be recoverable and reprocessable
 - protocol custody should be avoided in V1
-- refund accounting should stay separate from Basejump liquidity accounting
+- refund accounting should stay separate from the bridge contracts (`IntentReceiver`; or the Basejump landing pool on the BJP variant)
 
 ## Key Assumption
 
-In the current NIR design, the 1Click origin chain is **Ethereum** and the origin asset is **native ETH**. The user pays in any Hydration asset (swapped to WETH on Hydration); the WETH is bridged Hydration → Moonbeam (XCM) → Ethereum (Wormhole TokenBridge), and `BasejumpLandingNative` pays out **native ETH** (via the `destAssetFor` WETH→`NATIVE` remap) which `IntentRouter` forwards to the quote's `depositAddress`.
+In the current NIR design, the 1Click origin chain is **Ethereum** and the origin asset is **native ETH**. The user pays in any Hydration asset (swapped to WETH on Hydration); the WETH is bridged Hydration → Moonbeam (XCM) → Ethereum (Wormhole TokenBridge, payload-3), and on redemption `IntentReceiver` unwraps the delivered WETH to **native ETH** and forwards it to the quote's `depositAddress`.
 
 That means:
 
-- `IntentRouter` forwards native ETH on Ethereum to the quote's `depositAddress`
+- `IntentReceiver` forwards native ETH on Ethereum to the quote's `depositAddress`
 - `refundType = ORIGIN_CHAIN` means the refund comes back on **Ethereum** as native ETH (1Click's standard origin-asset refund behavior)
 - `refundTo` should therefore be an **Ethereum** address capable of receiving native ETH
 
@@ -33,16 +33,16 @@ If the user starts from a Hydration-side `H160` identity, the clean default is:
 
 The address value is the same, but the refunded funds exist on **Ethereum**, not on Hydration.
 
-## Do Not Refund To `BasejumpLanding`
+## Do Not Refund To the Bridge Contracts
 
-`BasejumpLanding` should not be used as `refundTo`.
+`IntentReceiver` (and, on the BJP variant, `BasejumpLanding`) should not be used as `refundTo`.
 
 Why:
 
-- it is a shared Basejump liquidity component
-- it is not intent-aware
-- it is not a refund vault
-- mixing quote refunds into Landing would couple refund accounting with bridge liquidity accounting
+- they are bridge components, not refund vaults
+- they are not intent-aware — a stray inbound transfer has no `redeem`/payload to act on
+- `IntentReceiver` holds no liquidity in the happy path; `BasejumpLanding` is shared Basejump liquidity
+- mixing quote refunds into a bridge contract would couple refund accounting with bridge accounting
 
 Those concerns should remain separate.
 
@@ -113,7 +113,7 @@ Recommended handling:
 2. Quote is requested with:
    - `refundType = ORIGIN_CHAIN`
    - `refundTo = userH160`
-3. `IntentEmitter.swapAndBridge` swaps to WETH and dispatches the bridge on Hydration; the fast-path completes and `IntentRouter` forwards native ETH to the quote's `depositAddress`.
+3. `IntentEmitterWtt.swapAndBridge` swaps to WETH and dispatches the bridge on Hydration; `mrelayer` redeems the payload-3 VAA and `IntentReceiver` forwards native ETH to the quote's `depositAddress`.
 4. 1Click processes the deposit.
 5. If the swap cannot complete, 1Click returns funds to `userH160` on Ethereum.
 6. Operator or automation checks status using `depositAddress` and `depositMemo`.

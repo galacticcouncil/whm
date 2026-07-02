@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/basejump.png" />
+    <title>basejump · scan</title>
+    <style>
+      :root {
+        --bg: #0a0a0b;
+        --surface: #131316;
+        --border: #27272a;
+        --fg: #e4e4e7;
+        --muted: #71717a;
+        --dim: #52525b;
+        --ok: #22c55e;
+        --warn: #eab308;
+        --info: #3b82f6;
+        --bad: #ef4444;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: var(--bg);
+        color: var(--fg);
+        margin: 0;
+        padding: 2rem 1rem;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      header .title {
+        font-size: 1.1rem;
+      }
+      header .conn {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--dim);
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--dim);
+      }
+      .dot.live {
+        background: var(--ok);
+      }
+      a {
+        color: var(--info);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      code {
+        font-family: inherit;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+        min-height: 1.4rem;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .bar .filter {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.25);
+        border-radius: 999px;
+        padding: 0.1rem 0.6rem;
+      }
+      .bar .clear {
+        cursor: pointer;
+        color: var(--info);
+        font-weight: 600;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th {
+        text-align: left;
+        font-weight: 600;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0.6rem 0.9rem;
+        border-bottom: 1px solid var(--border);
+      }
+      td {
+        padding: 0.6rem 0.9rem;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      tbody tr {
+        cursor: pointer;
+      }
+      tbody tr:hover {
+        background: rgba(255, 255, 255, 0.025);
+      }
+      .chain-badge {
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        object-fit: contain;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .party {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        line-height: 1.35;
+      }
+      .party .phead {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        color: var(--muted);
+      }
+      .addrlink {
+        color: var(--fg);
+        cursor: pointer;
+      }
+      .addrlink:hover {
+        color: var(--info);
+        text-decoration: underline;
+      }
+      .assets b {
+        font-weight: 600;
+      }
+      .pill {
+        font-size: 11px;
+        padding: 0.05rem 0.5rem;
+        border-radius: 999px;
+        color: var(--muted);
+        background: rgba(113, 113, 122, 0.14);
+      }
+      .pill.completed,
+      .pill.fulfilled {
+        color: var(--ok);
+        background: rgba(34, 197, 94, 0.13);
+      }
+      .pill.queued {
+        color: var(--warn);
+        background: rgba(234, 179, 8, 0.13);
+      }
+      .pill.initiated {
+        color: var(--info);
+        background: rgba(59, 130, 246, 0.13);
+      }
+      .empty {
+        color: var(--dim);
+        padding: 1.25rem 0.9rem;
+      }
+      .pager {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .pager button {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--fg);
+        font-family: inherit;
+        font-size: 13px;
+        padding: 0.3rem 0.8rem;
+        cursor: pointer;
+      }
+      .pager button:hover:not(:disabled) {
+        border-color: var(--info);
+      }
+      .pager button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .meta {
+        color: var(--dim);
+        font-size: 12px;
+        margin-top: 1.25rem;
+        display: flex;
+        justify-content: space-between;
+      }
+      .meta .heart {
+        color: #ef4444;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="/basejump.png" alt="" width="40" height="40" style="object-fit: contain" />
+        <span class="title">basejump</span>
+        <span class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></span>
+      </header>
+      <div class="bar" id="bar"></div>
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>From</th>
+              <th>To</th>
+              <th>Assets</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr>
+              <td class="empty" colspan="5">loading…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pager" id="pager"></div>
+      <div class="meta">
+        <span></span>
+        <span>Built with <span class="heart">♥</span> by hydration</span>
+      </div>
+    </main>
+
+    <script>
+      const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+      const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"']/g, (c) => ESCAPES[c]));
+      const trunc = (s) => (s && s.length > 15 ? s.slice(0, 8) + "…" + s.slice(-5) : s || "—");
+
+      const LIMIT = 15;
+      let offset = 0;
+      let addr = "";
+      let total = 0;
+
+      // Bridged-asset metadata (keyed by source/dest asset address) — mirrors basejump.html.
+      const ASSETS = {
+        "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42": { symbol: "EURC", decimals: 6 },
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": { symbol: "USDC", decimals: 6 },
+      };
+
+      const CHAIN_ICON = {
+        hydration:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/polkadot/2034/icon.svg",
+        ethereum:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/ethereum/1/icon.svg",
+        base: "https://s2.coinmarketcap.com/static/img/coins/64x64/27716.png",
+      };
+
+      function chainBadge(chain) {
+        const icon = CHAIN_ICON[chain];
+        return icon ? `<img class="chain-badge" src="${esc(icon)}" alt="${esc(chain)}"/>` : "";
+      }
+
+      function fmtAmount(raw, decimals) {
+        try {
+          const n = BigInt(raw);
+          const base = BigInt(10) ** BigInt(decimals);
+          const whole = n / base;
+          const frac = n % base;
+          if (frac === 0n) return whole.toLocaleString("en-US");
+          const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
+          return whole.toLocaleString("en-US") + "." + fracStr;
+        } catch {
+          return String(raw);
+        }
+      }
+
+      // Assets column: formatted amount + symbol (e.g. "1 EURC"), like the detail page.
+      function assetCell(t) {
+        const meta = ASSETS[(t.source_asset || t.dest_asset || "").toLowerCase()];
+        if (meta) return `${esc(fmtAmount(t.net_amount, meta.decimals))} <b>${esc(meta.symbol)}</b>`;
+        return t.net_amount != null ? esc(t.net_amount) : '<span class="muted">—</span>';
+      }
+
+      function ago(ms) {
+        if (!ms) return "—";
+        const s = Math.floor((Date.now() - ms) / 1000);
+        if (s < 60) return s + "s ago";
+        const m = Math.floor(s / 60);
+        if (m < 60) return m + "m ago";
+        const h = Math.floor(m / 60);
+        if (h < 24) return h + "h ago";
+        return Math.floor(h / 24) + "d ago";
+      }
+      const absTime = (ms) => (ms ? new Date(ms).toISOString().replace("T", " ").slice(0, 19) : "");
+
+      // From/To cell: chain icon + name stacked over the (filterable) address — mirrors the detail
+      // page's party layout. Clicking the address filters the list by it (not the detail page).
+      function addrCell(address, chain) {
+        const head = chain
+          ? `<span class="phead">${chainBadge(chain)}<span>${esc(chain)}</span></span>`
+          : "";
+        const addr = address
+          ? `<span class="addrlink" data-addr="${esc(address)}"><code>${esc(trunc(address))}</code></span>`
+          : '<span class="muted">—</span>';
+        return `<div class="party">${head}${addr}</div>`;
+      }
+
+      function rowHtml(t) {
+        const time = (t.initiated && t.initiated.blockTimestamp) || Date.parse(t.updated_at);
+        return `<tr data-id="${esc(t.id)}">
+          <td><span title="${esc(absTime(time))}">${esc(ago(time))}</span></td>
+          <td>${addrCell(t.sender, t.source_chain)}</td>
+          <td>${addrCell(t.recipient, t.dest_chain || "hydration")}</td>
+          <td class="assets">${assetCell(t)}</td>
+          <td><span class="pill ${esc(t.state)}">${esc(t.state)}</span></td>
+        </tr>`;
+      }
+
+      const rowsEl = document.getElementById("rows");
+      const barEl = document.getElementById("bar");
+      const pagerEl = document.getElementById("pager");
+      const connEl = document.getElementById("conn");
+      const dotEl = document.getElementById("dot");
+
+      async function load() {
+        const qs = new URLSearchParams({ limit: LIMIT, offset });
+        if (addr) qs.set("address", addr);
+        try {
+          const data = await (await fetch("/api/basejump/transfers?" + qs)).json();
+          const items = data.items || [];
+          total = data.total || 0;
+          rowsEl.innerHTML = items.length
+            ? items.map(rowHtml).join("")
+            : '<tr><td class="empty" colspan="5">no transfers</td></tr>';
+        } catch (e) {
+          rowsEl.innerHTML = `<tr><td class="empty" colspan="5">error: ${esc(e.message || e)}</td></tr>`;
+        }
+        renderBar();
+        renderPager();
+      }
+
+      function renderBar() {
+        barEl.innerHTML = addr
+          ? `<span>filtering by</span><span class="filter"><code>${esc(
+              trunc(addr),
+            )}</code><span class="clear" id="clear">✕</span></span>`
+          : "";
+      }
+
+      function renderPager() {
+        const from = total ? offset + 1 : 0;
+        const to = Math.min(offset + LIMIT, total);
+        pagerEl.innerHTML = `
+          <span>${from}–${to} of ${total}</span>
+          <button id="prev" ${offset === 0 ? "disabled" : ""}>← prev</button>
+          <button id="next" ${offset + LIMIT >= total ? "disabled" : ""}>next →</button>`;
+      }
+
+      function filterBy(a) {
+        addr = a;
+        offset = 0;
+        load();
+      }
+
+      rowsEl.addEventListener("click", (e) => {
+        const link = e.target.closest("[data-addr]");
+        if (link) {
+          filterBy(link.dataset.addr);
+          return;
+        }
+        const tr = e.target.closest("tr[data-id]");
+        if (tr) location.href = "/basejump/" + encodeURIComponent(tr.dataset.id);
+      });
+      barEl.addEventListener("click", (e) => {
+        if (e.target.id === "clear") {
+          addr = "";
+          offset = 0;
+          load();
+        }
+      });
+      pagerEl.addEventListener("click", (e) => {
+        if (e.target.id === "prev" && offset > 0) {
+          offset = Math.max(0, offset - LIMIT);
+          load();
+        } else if (e.target.id === "next" && offset + LIMIT < total) {
+          offset += LIMIT;
+          load();
+        }
+      });
+
+      (async () => {
+        await load();
+        let t;
+        const refresh = () => {
+          clearTimeout(t);
+          t = setTimeout(load, 400);
+        };
+        const es = new EventSource("/api/events?feature=basejump");
+        es.onopen = () => {
+          connEl.textContent = "live";
+          dotEl.classList.add("live");
+        };
+        es.onerror = () => {
+          connEl.textContent = "reconnecting…";
+          dotEl.classList.remove("live");
+        };
+        es.addEventListener("created", refresh);
+        es.addEventListener("updated", refresh);
+      })();
+    </script>
+  </body>
+</html>

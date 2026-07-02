@@ -110,10 +110,16 @@ importers:
     dependencies:
       '@coral-xyz/anchor':
         specifier: ^0.32.1
-        version: 0.32.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+        version: 0.32.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)
+      '@whm/common':
+        specifier: workspace:*
+        version: link:../../common
       humanize-duration-ts:
         specifier: ~2.1.1
         version: 2.1.1
+      viem:
+        specifier: ^2.38.3
+        version: 2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76)
       winston:
         specifier: ^3.8.2
         version: 3.19.0
@@ -220,6 +226,46 @@ importers:
       winston:
         specifier: ^3.8.2
         version: 3.19.0
+
+  agents/scan:
+    dependencies:
+      '@defuse-protocol/one-click-sdk-typescript':
+        specifier: ^0.1.17
+        version: 0.1.17
+      '@fastify/cors':
+        specifier: ^10.0.2
+        version: 10.1.0
+      '@galacticcouncil/common':
+        specifier: ^1.0.0
+        version: 1.0.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))
+      '@galacticcouncil/descriptors':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@galacticcouncil/sdk-next':
+        specifier: ^1.3.0
+        version: 1.3.0(@galacticcouncil/common@1.0.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3)))(@galacticcouncil/descriptors@2.4.0)(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(viem@2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76))
+      '@noble/hashes':
+        specifier: ^1.3.0
+        version: 1.8.0
+      fastify:
+        specifier: ^5.2.0
+        version: 5.8.5
+      pg:
+        specifier: ^8.13.1
+        version: 8.20.0
+      polkadot-api:
+        specifier: ^2.1.0
+        version: 2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3)
+      viem:
+        specifier: ^2.38.3
+        version: 2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76)
+      winston:
+        specifier: ^3.8.2
+        version: 3.19.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
 
   chopsticks:
     dependencies:
@@ -5903,6 +5949,27 @@ snapshots:
       '@coral-xyz/borsh': 0.31.1(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))
       '@noble/hashes': 1.8.0
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      bn.js: 5.2.2
+      bs58: 4.0.1
+      buffer-layout: 1.2.2
+      camelcase: 6.3.0
+      cross-fetch: 3.2.0
+      eventemitter3: 4.0.7
+      pako: 2.1.0
+      superstruct: 0.15.5
+      toml: 3.0.0
+    transitivePeerDependencies:
+      - bufferutil
+      - encoding
+      - typescript
+      - utf-8-validate
+
+  '@coral-xyz/anchor@0.32.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)':
+    dependencies:
+      '@coral-xyz/anchor-errors': 0.31.1
+      '@coral-xyz/borsh': 0.31.1(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))
+      '@noble/hashes': 1.8.0
+      '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)
       bn.js: 5.2.2
       bs58: 4.0.1
       buffer-layout: 1.2.2

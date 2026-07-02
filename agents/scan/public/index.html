@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <title>scan</title>
+    <style>
+      :root {
+        --bg: #0a0a0b;
+        --surface: #131316;
+        --border: #27272a;
+        --fg: #e4e4e7;
+        --muted: #71717a;
+        --info: #3b82f6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: var(--bg);
+        color: var(--fg);
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+      }
+      main {
+        text-align: center;
+        max-width: 420px;
+        width: 100%;
+      }
+      img.logo {
+        width: 64px;
+        height: 64px;
+        object-fit: contain;
+        margin-bottom: 1rem;
+      }
+      h1 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0 0 0.25rem;
+      }
+      p {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 2rem;
+      }
+      .nav {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+      }
+      a.btn {
+        display: block;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        color: var(--fg);
+        text-decoration: none;
+        padding: 1.5rem 1rem;
+        font-size: 1rem;
+        transition: border-color 0.15s;
+      }
+      a.btn:hover {
+        border-color: var(--info);
+        color: var(--info);
+      }
+      .btn .sub {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 0.25rem;
+      }
+      a.btn:hover .sub {
+        color: var(--muted);
+      }
+      footer {
+        margin-top: 2rem;
+        color: #52525b;
+        font-size: 12px;
+      }
+      footer .heart {
+        color: #ef4444;
+      }
+      .indexers {
+        display: none;
+        margin-bottom: 1.25rem;
+      }
+      .ix-title {
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        font-size: 11px;
+        margin-bottom: 0.5rem;
+      }
+      .ix-chains {
+        display: inline-grid;
+        grid-template-columns: auto auto;
+        gap: 0.3rem 1.25rem;
+        text-align: left;
+      }
+      .ix-chain {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        color: var(--fg);
+      }
+      .ix-chain img {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        object-fit: contain;
+      }
+      .ix-block {
+        color: var(--muted);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img class="logo" src="/logo.png" alt="" />
+      <h1>scan</h1>
+      <p>transfer explorer</p>
+      <nav class="nav">
+        <a class="btn" href="/basejump"
+          >basejump<span class="sub">Hydration express delivery</span></a
+        >
+        <a class="btn" href="/intents">intents<span class="sub">NEAR-Intents bridge</span></a>
+      </nav>
+      <footer>
+        <div class="indexers" id="indexers">
+          <div class="ix-title">indexers</div>
+          <div class="ix-chains" id="chains"></div>
+        </div>
+        <div class="credit">Built with <span class="heart">♥</span> by hydration</div>
+      </footer>
+    </main>
+
+    <script>
+      const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+      const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"']/g, (c) => ESCAPES[c]));
+
+      // Per-chain icons for the indexer status — same sources the feature pages use.
+      const CHAIN_ICON = {
+        hydration:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/polkadot/2034/icon.svg",
+        moonbeam:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/polkadot/2004/icon.svg",
+        ethereum:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/ethereum/1/icon.svg",
+        base: "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/ethereum/8453/icon.png",
+      };
+      // Display order; any chain not listed sorts last (then alphabetically).
+      const ORDER = ["hydration", "moonbeam", "ethereum", "base"];
+      const rank = (n) => {
+        const i = ORDER.indexOf(n);
+        return i === -1 ? ORDER.length : i;
+      };
+
+      const indexersEl = document.getElementById("indexers");
+      const chainsEl = document.getElementById("chains");
+
+      // Render each enabled chain + its last-indexed block (`cursor`, falling back to the safe head).
+      async function loadStatus() {
+        try {
+          const s = await (await fetch("/api/status")).json();
+          const chains = s.chains || {};
+          const names = Object.keys(chains).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+          if (!names.length) return;
+          chainsEl.innerHTML = names
+            .map((name) => {
+              const c = chains[name];
+              const raw = c.cursor ?? c.safe;
+              const block = raw != null ? "#" + Number(raw).toLocaleString("en-US") : "—";
+              const icon = CHAIN_ICON[name];
+              const badge = icon ? `<img src="${esc(icon)}" alt="" />` : "";
+              return `<span class="ix-chain">${badge}${esc(name)}</span><span class="ix-block">${esc(
+                block,
+              )}</span>`;
+            })
+            .join("");
+          indexersEl.style.display = "block";
+        } catch {
+          // status unavailable — leave the indexers block hidden
+        }
+      }
+
+      loadStatus();
+      setInterval(loadStatus, 12000);
+    </script>
+  </body>
+</html>
