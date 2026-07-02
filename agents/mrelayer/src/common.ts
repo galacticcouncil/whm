@@ -95,7 +95,7 @@ export async function getPayloadWithFallback(ctx: any, ctxLogger: any) {
 
 export type TransferTask = {
   vaa: any;
-  type?: "mrl" | "insta" | "oracle" | "intent";
+  type?: "mrl" | "insta" | "insta-eth" | "oracle" | "intent";
   payloadType?: number;
   feeRequested?: string;
   logger: any;

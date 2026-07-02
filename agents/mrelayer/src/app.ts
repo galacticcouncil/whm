@@ -26,6 +26,12 @@ const BASEJUMP_BASE = "0xf5b9334e44f800382cb47fc19669401d694e529b";
 // BasejumpProxy on Moonbeam (receives fast-path VAAs, dispatches via XCM to Hydration)
 const BASEJUMP_MOONBEAM = "0xf5b9334e44f800382cb47fc19669401d694e529b";
 
+// Basejump on Ethereum (emits fast-path Wormhole messages)
+const BASEJUMP_ETH = "0xba3eadd48274d9ff08c685e1206100e04833f94f";
+
+// BasejumpProxy on Moonbeam for the Ethereum corridor (receives fast-path VAAs)
+const BASEJUMP_ETH_MOONBEAM = "0xbe999b97a5217e9814c69688bad7e248d3b6f50a";
+
 // Solana oracle emitter program ID (base58 — SDK derives the emitter PDA internally)
 const SOLANA_ORACLE_EMITTER = "8j68bb2BLUSgEW6rdF3LnkxZFGieokLfJMBVd8bjATiz";
 
@@ -41,6 +47,11 @@ const signer = new ethers.Wallet(process.env.PRIVKEY, moonbeam);
 const gmp = new Contract('0x0000000000000000000000000000000000000816', ['function wormholeTransferERC20(bytes) external'], signer);
 const basejumpProxy = new Contract(
   BASEJUMP_MOONBEAM,
+  ['function completeTransfer(bytes memory vaa) external'],
+  signer
+);
+const basejumpProxyEth = new Contract(
+  BASEJUMP_ETH_MOONBEAM,
   ['function completeTransfer(bytes memory vaa) external'],
   signer
 );
@@ -78,6 +89,13 @@ const ethDispatcher = new Contract(
       const tx = await basejumpProxy.completeTransfer(task.vaa.bytes, {nonce});
       await tx.wait();
       return tx.hash;
+    } else if (task.type === 'insta-eth') {
+      task.logger.info(`Found instant VAA, completing transfer on Moonbeam (eth corridor)`);
+      await basejumpProxyEth.callStatic.completeTransfer(task.vaa.bytes, {nonce});
+      task.logger.info(`Completing insta transfer (eth)`);
+      const tx = await basejumpProxyEth.completeTransfer(task.vaa.bytes, {nonce});
+      await tx.wait();
+      return tx.hash;
     } else {
       task.logger.info(`Found VAA`);
       await gmp.callStatic.wormholeTransferERC20(task.vaa.bytes, {nonce});
@@ -93,6 +111,8 @@ const ethDispatcher = new Contract(
   logger.info(`nonce ${currentNonce}`);
   logger.info(`Watching Basejump on Base: ${BASEJUMP_BASE}`);
   logger.info(`Submitting to BasejumpProxy on Moonbeam: ${BASEJUMP_MOONBEAM}`);
+  logger.info(`Watching Basejump on Ethereum: ${BASEJUMP_ETH}`);
+  logger.info(`Submitting to BasejumpProxy (eth) on Moonbeam: ${BASEJUMP_ETH_MOONBEAM}`);
   logger.info(`Watching Solana oracle emitter: ${SOLANA_ORACLE_EMITTER}`);
   logger.info(`Submitting to Dispatcher on Moonbeam: ${DISPATCHER_PROXY}`);
   logger.info(`Watching Ethereum oracle emitter: ${ETH_ORACLE_EMITTER}`);
@@ -185,6 +205,37 @@ const ethDispatcher = new Contract(
     },
   );
 
+  // Basejump (Ethereum) relayer app
+  const basejumpEthApp = new StandardRelayerApp<StandardRelayerContext>(
+    Environment.MAINNET,
+    {
+      name: process.env.BASEJUMP_ETH_APP_NAME || `basejump-eth-relayer`,
+      logger,
+      spyEndpoint,
+      redis,
+      missedVaaOptions: {
+        startingSequenceConfig: {
+          [CHAIN_ID_ETH as ChainId]: BigInt(process.env.BASEJUMP_ETH_FROM_SEQ || 0),
+        }
+      }
+    },
+  );
+
+  basejumpEthApp.chain(CHAIN_ID_ETH as ChainId).address(
+    BASEJUMP_ETH,
+    async (ctx, next) => {
+      const {vaa} = ctx;
+      const ctxLogger = logger.child({
+        emitterChain: vaa.emitterChain,
+        sequence: vaa.sequence.toString(),
+      });
+
+      ctxLogger.info(`Received fast-path message from Basejump on Ethereum`);
+
+      queue.addToQueue({vaa, type: 'insta-eth', logger: ctxLogger, next});
+    },
+  );
+
   // Oracle relay app
   const oracleApp = new StandardRelayerApp<StandardRelayerContext>(
     Environment.MAINNET,
@@ -230,5 +281,5 @@ const ethDispatcher = new Contract(
     },
   );
 
-  await Promise.all([mrlApp.listen(), basejumpApp.listen(), oracleApp.listen()]);
+  await Promise.all([mrlApp.listen(), basejumpApp.listen(), basejumpEthApp.listen(), oracleApp.listen()]);
 })();

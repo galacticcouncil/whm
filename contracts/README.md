@@ -175,3 +175,31 @@ npx tsx scripts/basejump/completeTransfer.ts \
   --address basejump_address \
   --vaa hex_encoded_vaa
 ```
+
+### Basejump Landing
+
+#### Add route
+
+Authorize a corridor bridge (XcmTransactor MDA) and map a source-chain asset to its Hydration destination asset on the landing. Both calls are `onlyOwner` (Hydration TC); reads current state and prints the owner calldata for governance by default, or submits directly with `--send` if you hold the owner key (e.g. on a fork). Idempotent — skips whatever is already set.
+
+| Env variable | Description        |
+| ------------ | ------------------ |
+| `RPC`        | Chain RPC endpoint |
+| `CHAIN_ID`   | Chain ID (EVM)     |
+
+| Flag        | Description                                                      |
+| ----------- | --------------------------------------------------------------- |
+| `--landing` | BasejumpLanding address (or `HYDRATION_LANDING` env)            |
+| `--bridge`  | Authorized bridge = XcmTransactor MDA (or `BRIDGE_MDA` env)     |
+| `--source`  | Source-chain asset address (or `USDC_SOURCE_ASSET` env)         |
+| `--dest`    | Hydration destination asset (or `USDC_DEST_ASSET` env)          |
+| `--send`    | Submit directly (requires `PK_LANDING` / `PK` / `--pk` = owner) |
+
+```bash
+RPC=https://rpc.hydradx.cloud CHAIN_ID=222222 \
+npx tsx scripts/basejump-landing/addRoute.ts \
+  --landing 0x70e9b12c3b19cb5f0e59984a5866278ab69df976 \
+  --bridge 0x9fbba2ffe461aa3aa93fb85305191e531e115e14 \
+  --source 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
+  --dest 0x0000000000000000000000000000000100000015
+```

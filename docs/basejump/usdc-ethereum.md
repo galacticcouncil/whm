@@ -9,7 +9,7 @@ Add USDC as a Basejump asset, sourced from Ethereum mainnet via Wormhole.
 - **Source chain:** Ethereum mainnet.
 - **Hydration landing:** reuse the existing `basejump-base` landing (`0x70e9…df976`) — it is
   multi-asset, so it serves USDC alongside EURC.
-- **Environment:** fork e2e only; prod is a later pass.
+- **Environment:** fork e2e validated; prod source-side stack (Ethereum + Moonbeam) deployed & wired — go-live pending (landing route, `usdc_mwh` pool, ownership handoff, relayer).
 
 ## Architecture
 
@@ -57,7 +57,17 @@ after deploy:
 1. `setAuthorizedBridge(<step-003 mdaH160>, true)` — authorize the new XcmTransactor's MDA.
 2. `setDestAsset(USDC_SOURCE_ASSET, USDC_DEST_ASSET)` — map Ethereum USDC → `usdc_mwh` (currency 21).
 
+Use `contracts/scripts/basejump-landing/addRoute.ts` to build these — it reads current state and prints
+the owner calldata for governance (`--send` submits directly when you hold the owner key, e.g. on a fork).
+
 The landing must also hold a pre-funded `usdc_mwh` pool before go-live.
+
+## Relayer
+
+The fast-path VAA (Ethereum `Basejump` emitter → Moonbeam `BasejumpProxy.completeTransfer`) is carried by
+`mrelayer`'s default app (`agents/mrelayer/src/app.ts`): a `basejumpEthApp` watcher mirroring the Base one
+(`CHAIN_ID_ETH` → the corridor's Proxy, task type `'insta-eth'`). The slow TokenBridge/MRL leg is already
+covered by the same app's `mrlApp` (it watches `CHAIN_ID_ETH`). Set the start sequence via `BASEJUMP_ETH_FROM_SEQ`.
 
 ## Env — `migrations/envs/{fork,prod}/basejump-ethereum.env`
 
@@ -97,8 +107,9 @@ real custodian exists (step 012 fails fast otherwise).
    unaffected by the reuse decision.)
 2. **Fork migration** — `pnpm fork:ethereum && fork:moonbeam && fork:hydration`, then
    `pnpm migrate:basejump-ethereum:fork`. Deploys + wires + renounces the Eth/Moonbeam stack against
-   the forked landing. The two TC governance calls are **not** applied (nor a live guardian VAA relay —
-   that needs testnet + `mrelayer`).
+   the forked landing. The two TC governance calls are **not** applied by the migration — apply them with
+   `contracts/scripts/basejump-landing/addRoute.ts` (`--send`, impersonating the landing owner on the fork).
+   The fast-path relay is carried by `mrelayer` (its default app now includes the Ethereum corridor).
 
 Post-run checks: `quoteFee(USDC) == USDC_FEE_AMOUNT` on the Ethereum Basejump; the proxy's `landings(2)`
 and the Basejump's `landingDest` both equal `HYDRATION_LANDING`.
