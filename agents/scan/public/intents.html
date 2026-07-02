@@ -309,7 +309,6 @@
   <body>
     <main>
       <header>
-        <img class="logo" src="/logo.png" alt="" width="48" height="48" />
         <span class="title">Intents</span>
       </header>
       <div id="root"><div class="loading">loading…</div></div>
@@ -361,6 +360,13 @@
       const DEST_ADDR_EXPLORER = {
         near: (a) => "https://nearblocks.io/address/" + a,
         zec: (a) => "https://blockchair.com/zcash/address/" + a,
+      };
+
+      // Per-destination-chain settlement-tx explorer, keyed by the 1Click `blockchain` value. Used
+      // when 1Click doesn't supply its own `dest_tx_url`; falls back to NEARBlocks for other chains.
+      const DEST_TX_EXPLORER = {
+        near: (h) => NEARBLOCKS_TX(h),
+        zec: (h) => "https://3xpl.com/zcash/transaction/" + h,
       };
 
       // Moonbeam Wormhole chain id + TokenBridge emitter — used to build the wormholescan link.
@@ -750,8 +756,11 @@
               : t.state === "failed"
                 ? "failed"
                 : "pending";
-        // destination-chain settlement tx: prefer 1Click's explorer url, else fall back to NEARBlocks
-        const txUrl = t.dest_tx ? t.dest_tx_url || NEARBLOCKS_TX(t.dest_tx) : null;
+        // destination-chain settlement tx: prefer 1Click's explorer url, else the per-chain explorer
+        // (e.g. 3xpl for Zcash), else NEARBlocks.
+        const txUrl = t.dest_tx
+          ? t.dest_tx_url || DEST_TX_EXPLORER[chain]?.(t.dest_tx) || NEARBLOCKS_TX(t.dest_tx)
+          : null;
         const txLine = t.dest_tx
           ? `<div>Tx: <span class="hash"><a href="${esc(
               txUrl

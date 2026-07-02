@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import type { FastifyInstance } from "fastify";
@@ -25,13 +25,16 @@ function asset(file: string): string | null {
  * @param features enabled features — each contributes `/<name>` (list) and `/<name>/:id` (detail)
  */
 export function uiRoutes(app: FastifyInstance, features: Feature[]): void {
-  const logoPath = resolve(PUBLIC, "logo.png");
-  const logo = existsSync(logoPath) ? readFileSync(logoPath) : null;
-  if (logo) {
-    app.get("/logo.png", async (_req, reply) => {
+  // Serve every PNG in public/ at its own path — the shared `logo.png` plus per-feature icons
+  // (e.g. `basejump.png`). Read once at startup, like the HTML pages.
+  for (const file of existsSync(PUBLIC) ? readdirSync(PUBLIC) : []) {
+    if (!file.endsWith(".png")) continue;
+    const bytes = readFileSync(resolve(PUBLIC, file));
+    app.get(`/${file}`, async (_req, reply) => {
       reply.type("image/png");
-      return logo;
+      return bytes;
     });
+    log.info(`[ui] /${file}`);
   }
 
   const html = (page: string) => async (_req: unknown, reply: { type(t: string): void }) => {

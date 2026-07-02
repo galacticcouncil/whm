@@ -132,11 +132,21 @@
         width: 15px;
         height: 15px;
         border-radius: 50%;
-        vertical-align: -3px;
-        margin-right: 0.3rem;
         object-fit: contain;
       }
       .muted {
+        color: var(--muted);
+      }
+      .party {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        line-height: 1.35;
+      }
+      .party .phead {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
         color: var(--muted);
       }
       .addrlink {
@@ -220,7 +230,6 @@
   <body>
     <main>
       <header>
-        <img src="/logo.png" alt="" width="40" height="40" style="object-fit: contain" />
         <span class="title">intents</span>
         <span class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></span>
       </header>
@@ -287,16 +296,44 @@
       }
       const absTime = (ms) => (ms ? new Date(ms).toISOString().replace("T", " ").slice(0, 19) : "");
 
-      // Address cell: clicking it filters the list by that address (does not open the detail page).
+      // From/To cell: chain icon + name stacked over the (filterable) address — mirrors the detail
+      // page's party layout. Clicking the address filters the list by it (not the detail page).
       function addrCell(address, chain) {
-        if (!address) return '<span class="muted">—</span>';
-        return `${chainBadge(chain)}<span class="addrlink" data-addr="${esc(address)}"><code>${esc(
-          trunc(address),
-        )}</code></span>`;
+        const head = chain
+          ? `<span class="phead">${chainBadge(chain)}<span>${esc(chain)}</span></span>`
+          : "";
+        const addr = address
+          ? `<span class="addrlink" data-addr="${esc(address)}"><code>${esc(trunc(address))}</code></span>`
+          : '<span class="muted">—</span>';
+        return `<div class="party">${head}${addr}</div>`;
       }
 
-      const symIn = (t) => TOKENS.hydration[t.asset_in]?.symbol || (t.asset_in != null ? "#" + t.asset_in : "?");
-      const symOut = (t) => TOKENS.dest[t.dest_asset]?.symbol || (t.dest_asset ? trunc(t.dest_asset) : "?");
+      // Round a raw amount to N significant figures (4) for compact display — mirrors the detail page.
+      function fmtSig(raw, decimals, sig) {
+        try {
+          const n = Number(BigInt(raw)) / Math.pow(10, decimals);
+          if (!isFinite(n)) return String(raw);
+          return n.toLocaleString("en-US", { maximumSignificantDigits: sig || 4 });
+        } catch {
+          return String(raw);
+        }
+      }
+
+      // Assets cell halves: amount + symbol for the source (Hydration `asset_in`) and destination
+      // (1Click `dest_asset`) legs. The amount is shown only when the asset's decimals are known;
+      // otherwise just the symbol / id, so an early-state intent (no dest_amount yet) still renders.
+      function assetIn(t) {
+        const m = TOKENS.hydration[t.asset_in];
+        const sym = m?.symbol || (t.asset_in != null ? "#" + t.asset_in : "?");
+        const amt = m && t.amount_in != null ? fmtSig(t.amount_in, m.decimals) + " " : "";
+        return `${esc(amt)}<b>${esc(sym)}</b>`;
+      }
+      function assetOut(t) {
+        const m = TOKENS.dest[t.dest_asset];
+        const sym = m?.symbol || (t.dest_asset ? trunc(t.dest_asset) : "?");
+        const amt = m && t.dest_amount != null ? fmtSig(t.dest_amount, m.decimals) + " " : "";
+        return `${esc(amt)}<b>${esc(sym)}</b>`;
+      }
       const destChain = (t) => (t.dest_asset && TOKENS.dest[t.dest_asset]?.chain) || "";
 
       function rowHtml(t) {
@@ -305,7 +342,7 @@
           <td><span title="${esc(absTime(time))}">${esc(ago(time))}</span></td>
           <td>${addrCell(t.caller, "hydration")}</td>
           <td>${addrCell(t.dest_address, destChain(t))}</td>
-          <td class="assets"><b>${esc(symIn(t))}</b><span class="arrow">→</span><b>${esc(symOut(t))}</b></td>
+          <td class="assets">${assetIn(t)}<span class="arrow">→</span>${assetOut(t)}</td>
           <td><span class="pill ${esc(t.state)}">${esc(t.state)}</span></td>
         </tr>`;
       }

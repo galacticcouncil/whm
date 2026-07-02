@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -86,18 +86,113 @@
       footer .heart {
         color: #ef4444;
       }
+      .indexers {
+        display: none;
+        margin-bottom: 1.25rem;
+      }
+      .ix-title {
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        font-size: 11px;
+        margin-bottom: 0.5rem;
+      }
+      .ix-chains {
+        display: inline-grid;
+        grid-template-columns: auto auto;
+        gap: 0.3rem 1.25rem;
+        text-align: left;
+      }
+      .ix-chain {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        color: var(--fg);
+      }
+      .ix-chain img {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        object-fit: contain;
+      }
+      .ix-block {
+        color: var(--muted);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
     </style>
   </head>
   <body>
     <main>
       <img class="logo" src="/logo.png" alt="" />
       <h1>scan</h1>
-      <p>whm cross-chain transfer explorer</p>
+      <p>transfer explorer</p>
       <nav class="nav">
-        <a class="btn" href="/basejump">basejump<span class="sub">EVM ↔ Hydration</span></a>
+        <a class="btn" href="/basejump"
+          >basejump<span class="sub">Hydration express delivery</span></a
+        >
         <a class="btn" href="/intents">intents<span class="sub">NEAR-Intents bridge</span></a>
       </nav>
-      <footer>Built with <span class="heart">♥</span> by hydration</footer>
+      <footer>
+        <div class="indexers" id="indexers">
+          <div class="ix-title">indexers</div>
+          <div class="ix-chains" id="chains"></div>
+        </div>
+        <div class="credit">Built with <span class="heart">♥</span> by hydration</div>
+      </footer>
     </main>
+
+    <script>
+      const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+      const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"']/g, (c) => ESCAPES[c]));
+
+      // Per-chain icons for the indexer status — same sources the feature pages use.
+      const CHAIN_ICON = {
+        hydration:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/polkadot/2034/icon.svg",
+        moonbeam:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/polkadot/2004/icon.svg",
+        ethereum:
+          "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/ethereum/1/icon.svg",
+        base: "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2/ethereum/8453/icon.png",
+      };
+      // Display order; any chain not listed sorts last (then alphabetically).
+      const ORDER = ["hydration", "moonbeam", "ethereum", "base"];
+      const rank = (n) => {
+        const i = ORDER.indexOf(n);
+        return i === -1 ? ORDER.length : i;
+      };
+
+      const indexersEl = document.getElementById("indexers");
+      const chainsEl = document.getElementById("chains");
+
+      // Render each enabled chain + its last-indexed block (`cursor`, falling back to the safe head).
+      async function loadStatus() {
+        try {
+          const s = await (await fetch("/api/status")).json();
+          const chains = s.chains || {};
+          const names = Object.keys(chains).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+          if (!names.length) return;
+          chainsEl.innerHTML = names
+            .map((name) => {
+              const c = chains[name];
+              const raw = c.cursor ?? c.safe;
+              const block = raw != null ? "#" + Number(raw).toLocaleString("en-US") : "—";
+              const icon = CHAIN_ICON[name];
+              const badge = icon ? `<img src="${esc(icon)}" alt="" />` : "";
+              return `<span class="ix-chain">${badge}${esc(name)}</span><span class="ix-block">${esc(
+                block,
+              )}</span>`;
+            })
+            .join("");
+          indexersEl.style.display = "block";
+        } catch {
+          // status unavailable — leave the indexers block hidden
+        }
+      }
+
+      loadStatus();
+      setInterval(loadStatus, 12000);
+    </script>
   </body>
 </html>

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="icon" type="image/png" href="/basejump.png" />
     <title>basejump · scan</title>
     <style>
       :root {
@@ -132,11 +132,21 @@
         width: 15px;
         height: 15px;
         border-radius: 50%;
-        vertical-align: -3px;
-        margin-right: 0.3rem;
         object-fit: contain;
       }
       .muted {
+        color: var(--muted);
+      }
+      .party {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        line-height: 1.35;
+      }
+      .party .phead {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
         color: var(--muted);
       }
       .addrlink {
@@ -215,7 +225,7 @@
   <body>
     <main>
       <header>
-        <img src="/logo.png" alt="" width="40" height="40" style="object-fit: contain" />
+        <img src="/basejump.png" alt="" width="40" height="40" style="object-fit: contain" />
         <span class="title">basejump</span>
         <span class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></span>
       </header>
@@ -307,12 +317,16 @@
       }
       const absTime = (ms) => (ms ? new Date(ms).toISOString().replace("T", " ").slice(0, 19) : "");
 
-      // Address cell: clicking it filters the list by that address (does not open the detail page).
+      // From/To cell: chain icon + name stacked over the (filterable) address — mirrors the detail
+      // page's party layout. Clicking the address filters the list by it (not the detail page).
       function addrCell(address, chain) {
-        if (!address) return '<span class="muted">—</span>';
-        return `${chainBadge(chain)}<span class="addrlink" data-addr="${esc(address)}"><code>${esc(
-          trunc(address),
-        )}</code></span>`;
+        const head = chain
+          ? `<span class="phead">${chainBadge(chain)}<span>${esc(chain)}</span></span>`
+          : "";
+        const addr = address
+          ? `<span class="addrlink" data-addr="${esc(address)}"><code>${esc(trunc(address))}</code></span>`
+          : '<span class="muted">—</span>';
+        return `<div class="party">${head}${addr}</div>`;
       }
 
       function rowHtml(t) {
