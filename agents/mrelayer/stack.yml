@@ -7,6 +7,7 @@ services:
       BASE_FROM_SEQ: '249354'
       ETH_FROM_SEQ: '625934'
       MOONBEAM_RPC: https://rpc.api.moonbeam.network
+      ORACLE_ETH_FROM_SEQ: '23'
       PRIVKEY: FILL THIS KEY ALWAYS
       REDIS_HOST: redis
       SOLANA_FROM_SEQ: '1379804'

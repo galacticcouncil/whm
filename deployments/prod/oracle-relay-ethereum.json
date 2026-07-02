@@ -1,0 +1,149 @@
+{
+  "migration": "oracle-relay-ethereum",
+  "environment": "prod",
+  "startedAt": "2026-06-23T10:59:06.127Z",
+  "completedAt": null,
+  "steps": [
+    {
+      "name": "001-deploy-emitter",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x8a21c9df6526ee0468ccc019aaa25c9de0aeef97",
+        "proxyAddress": "0xbf937cb0abd3d179a15d77492eb3c13b455c2d62",
+        "ownerAddress": "0x20b588a194d9a3D788985c0C86A1160836a0Aaaa",
+        "wormholeCore": "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T10:59:06.132Z",
+      "completedAt": "2026-06-23T10:59:26.170Z"
+    },
+    {
+      "name": "002-deploy-dispatcher",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xf2a3deb75e2cc35932c9f6a07845ec0b1e853d1d",
+        "proxyAddress": "0x3513cee1ecc972604d2ac8ee50d3eefb1a69eeb3",
+        "ownerAddress": "0x03F067F5174DF6E4E49285D32d9Ce1615711BCe9"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T10:59:26.181Z",
+      "completedAt": "2026-06-23T10:59:38.613Z"
+    },
+    {
+      "name": "003-deploy-transactor",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x88e196f961bf38562680a0cedebf30c7f9330258",
+        "proxyAddress": "0x7247ca6247707191db2f1f41de7caf75cc22f539",
+        "ownerAddress": "0x03F067F5174DF6E4E49285D32d9Ce1615711BCe9",
+        "mda": "5DyzDru3t3iGkk1dUwG5wJKcbpspU9FcwPAkEaKMoaaone6C",
+        "mdaH160": "0x54df54a7a32bd5e24d0415cf468b9ff622c626e3"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T10:59:38.614Z",
+      "completedAt": "2026-06-23T11:00:04.074Z"
+    },
+    {
+      "name": "004-authorize-dispatcher@transactor",
+      "status": "completed",
+      "output": {
+        "txHash": "0x6532ce38a833b98ff6d79bc30b91c998c492f8cd197d896ccb9d7cbb415c87d5",
+        "operator": "0x3513cee1ecc972604d2ac8ee50d3eefb1a69eeb3",
+        "enabled": "true"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T11:00:04.075Z",
+      "completedAt": "2026-06-23T11:00:14.122Z"
+    },
+    {
+      "name": "005-authorize-emitter@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x1d27490d1d487420979fc9ee27a37ef479dfa718eab24bd1f6d09c7e76036874",
+        "emitterBytes32": "0x000000000000000000000000bf937cb0abd3d179a15d77492eb3c13b455c2d62",
+        "sourceChain": "2"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T11:00:14.124Z",
+      "completedAt": "2026-06-23T11:00:19.823Z"
+    },
+    {
+      "name": "006-register-wsteth@emitter",
+      "status": "completed",
+      "output": {
+        "assetId": "0x3725f7650a1fc235623c67881a5755db6c97d7575eddd7351396f0b26fe79334",
+        "source": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0",
+        "call": "0x035faf82",
+        "txHash": "0x82642bd0d2ff3970b89023a890b16e4d7119142c19d1040e1242f00f51ea4718"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T11:00:19.823Z",
+      "completedAt": "2026-06-23T11:00:25.440Z"
+    },
+    {
+      "name": "007-register-apyusd@emitter",
+      "status": "completed",
+      "output": {
+        "assetId": "0xde11c6e5fbb09ebf287fceb58deeb4a0e34ccb69e2deeb25dfe46ad04e35a5a8",
+        "source": "0x38EEb52F0771140d10c4E9A9a72349A329Fe8a6A",
+        "call": "0x07a2d13a0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+        "txHash": "0x26adf75f1f3c0edf0fad7594daae28d0caba85a44c0ec41ec94e484742fcaade"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T11:00:25.444Z",
+      "completedAt": "2026-06-23T11:00:39.468Z"
+    },
+    {
+      "name": "008-set-handler-rate@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x25dc9841a1a9b1803c4619a7e10eac4423d0c6359c6d77aaca6cfba4cd2d7537",
+        "actionId": "2",
+        "handler": "0x7247ca6247707191db2f1f41de7caf75cc22f539"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T11:00:39.469Z",
+      "completedAt": "2026-06-23T11:00:45.973Z"
+    },
+    {
+      "name": "009-set-wsteth@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0xcf6cbbfeba02bec23317d7ec1d5fc65d17c81ec8850fe6f061913287550df86d",
+        "assetId": "0x3725f7650a1fc235623c67881a5755db6c97d7575eddd7351396f0b26fe79334",
+        "oracle": "0xF303e011e02a21aD6de6D846546D14b2B6A0b21d"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T17:13:45.968Z",
+      "completedAt": "2026-06-23T17:13:52.383Z"
+    },
+    {
+      "name": "010-set-apyusd@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x44cc9f5988dcdd6914a5375cedf8aee50186444705debd308a0e139a9ec958c0",
+        "assetId": "0xde11c6e5fbb09ebf287fceb58deeb4a0e34ccb69e2deeb25dfe46ad04e35a5a8",
+        "oracle": "0x41f3173D3B49b1AE1452a5d2cCFeF7dcfE2b773A"
+      },
+      "error": null,
+      "startedAt": "2026-06-23T17:13:52.384Z",
+      "completedAt": "2026-06-23T17:14:02.501Z"
+    },
+    {
+      "name": "011-renounce@transactor",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "012-renounce@dispatcher",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    }
+  ]
+}
