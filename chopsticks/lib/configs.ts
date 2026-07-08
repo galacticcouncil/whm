@@ -17,11 +17,7 @@ export interface ChainSpec {
 export const hydration: ChainSpec = {
   key: "hydration",
   name: "Hydration",
-  endpoint: [
-    "wss://hydration.dotters.network",
-    "wss://hydration-rpc.n.dwellir.com",
-    "wss://rpc.helikon.io/hydradx",
-  ],
+  endpoint: ["wss://rpc-catfish-1.catfish.hydration.cloud", "wss://hydration-rpc.n.dwellir.com"],
   port: 8061,
   paraId: 2034,
 };
