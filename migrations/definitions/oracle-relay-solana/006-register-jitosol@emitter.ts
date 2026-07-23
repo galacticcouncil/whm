@@ -2,7 +2,7 @@ import type { MigrationStep } from "./types";
 import { registerPoolFeed } from "../../actions/oracle-emitter-solana/registerPoolFeed";
 
 const step: MigrationStep = {
-  name: "008-register-jitosol@emitter",
+  name: "006-register-jitosol@emitter",
   description: "Register JitoSOL pool feed on Solana oracle emitter",
   action: async (ctx) => {
     const required = (k: string) => {

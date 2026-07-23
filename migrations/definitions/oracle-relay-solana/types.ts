@@ -19,7 +19,7 @@ export interface SolanaWallet {
 
 /** Multi-platform wallet context for oracle-relay-solana */
 export interface WalletContext {
-  moonbeam: EvmWallet;
+  hydration: EvmWallet;
   solana: SolanaWallet;
 }
 
