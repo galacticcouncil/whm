@@ -5,12 +5,12 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {MessageEmitter} from "../src/MessageEmitter.sol";
-import {OracleDispatcher} from "../src/oracles/OracleDispatcher.sol";
+import {OracleReceiver} from "../src/oracles/OracleReceiver.sol";
 import {MockWormhole} from "./mocks/MockWormhole.sol";
 
 contract MessagingTest is Test, MockWormhole {
     MessageEmitter public emitterContract;
-    OracleDispatcher public receiverContract;
+    OracleReceiver public receiverContract;
     address public wormhole = address(this);
 
     function setUp() public {
@@ -21,12 +21,12 @@ contract MessagingTest is Test, MockWormhole {
         );
         emitterContract = MessageEmitter(address(emitterProxy));
 
-        OracleDispatcher receiverImpl = new OracleDispatcher();
+        OracleReceiver receiverImpl = new OracleReceiver();
         ERC1967Proxy receiverProxy = new ERC1967Proxy(
             address(receiverImpl),
-            abi.encodeCall(OracleDispatcher.initialize, (wormhole))
+            abi.encodeCall(OracleReceiver.initialize, (wormhole))
         );
-        receiverContract = OracleDispatcher(address(receiverProxy));
+        receiverContract = OracleReceiver(address(receiverProxy));
     }
 
     function testDeployment() public view {
