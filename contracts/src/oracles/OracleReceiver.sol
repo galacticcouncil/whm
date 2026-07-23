@@ -3,9 +3,12 @@ pragma solidity ^0.8.22;
 
 import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 import {MessageReceiver} from "../MessageReceiver.sol";
-import {XcmTransactor} from "../XcmTransactor.sol";
 
-contract OracleDispatcher is MessageReceiver {
+interface IManagedOracle {
+    function setPrice(int256 price) external;
+}
+
+contract OracleReceiver is MessageReceiver {
     struct PriceData {
         uint256 price;
         uint64 timestamp;
@@ -19,13 +22,9 @@ contract OracleDispatcher is MessageReceiver {
 
     uint64 public maxPriceAge;
 
-    /// @notice action -> handler contract (e.g. ACTION_PRICE_UPDATE -> XcmTransactor)
-    mapping(uint8 => address) public handlers;
-
-    /// @notice assetId -> oracle contract address on Hydration (dest for evm.call)
+    /// @notice assetId -> oracle contract address on Hydration
     mapping(bytes32 => address) public oracles;
 
-    error HandlerNotSet(uint8 action);
     error OracleNotSet(bytes32 assetId);
     error StalePriceUpdate(bytes32 assetId, uint64 incomingTimestamp, uint64 latestTimestamp);
 
@@ -42,23 +41,20 @@ contract OracleDispatcher is MessageReceiver {
         uint8 action = uint8(vm.payload[31]);
 
         if (action == ACTION_PRICE_UPDATE || action == ACTION_RATE_UPDATE) {
-            _handleOracleUpdate(action, vm);
+            _handleOracleUpdate(vm);
         } else {
             super._processMessage(vm);
         }
     }
 
-    function _handleOracleUpdate(uint8 action, IWormhole.VM memory vm) internal virtual {
+    function _handleOracleUpdate(IWormhole.VM memory vm) internal virtual {
         (, bytes32 assetId, uint256 price,) = abi.decode(vm.payload, (uint8, bytes32, uint256, uint64));
         uint64 vaaTimestamp = uint64(vm.timestamp);
         uint64 latestTimestamp = latestPrices[assetId].timestamp;
         if (vaaTimestamp <= latestTimestamp) revert StalePriceUpdate(assetId, vaaTimestamp, latestTimestamp);
         require(block.timestamp - vaaTimestamp <= maxPriceAge, "Price too stale");
 
-        address handler = handlers[action];
         address oracle = oracles[assetId];
-
-        if (handler == address(0)) revert HandlerNotSet(action);
         if (oracle == address(0)) revert OracleNotSet(assetId);
 
         latestPrices[assetId] = PriceData({price: price, timestamp: vaaTimestamp, receivedAt: uint64(block.timestamp)});
@@ -66,15 +62,10 @@ contract OracleDispatcher is MessageReceiver {
 
         uint256 scaledPrice = price / PRICE_SCALE_DIVISOR;
         require(scaledPrice > 0, "Price too low to scale");
-        bytes memory input = abi.encodeWithSignature("setPrice(int256)", int256(scaledPrice));
-        XcmTransactor(handler).transact(oracle, input);
+        IManagedOracle(oracle).setPrice(int256(scaledPrice));
     }
 
     // ─── Admin ─────────────────────────────────────────────────
-
-    function setHandler(uint8 action, address handler) external onlyOwner {
-        handlers[action] = handler;
-    }
 
     function setOracle(bytes32 assetId, address oracle) external onlyOwner {
         oracles[assetId] = oracle;
