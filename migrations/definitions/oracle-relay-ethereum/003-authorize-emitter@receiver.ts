@@ -4,15 +4,15 @@ import { setAuthorizedEmitter } from "../../actions/message-receiver/setAuthoriz
 const ETHEREUM_WORMHOLE_CHAIN_ID = 2;
 
 const step: MigrationStep = {
-  name: "005-authorize-emitter@dispatcher",
-  description: "Register Ethereum OracleEmitter as authorized source on OracleDispatcher",
+  name: "003-authorize-emitter@receiver",
+  description: "Register Ethereum OracleEmitter as authorized source on OracleReceiver",
   action: async (ctx) => {
-    const dispatcherAddress = ctx.outputs["002-deploy-dispatcher"].proxyAddress;
+    const receiverAddress = ctx.outputs["002-deploy-receiver"].proxyAddress;
     const emitter = ctx.outputs["001-deploy-emitter"].proxyAddress;
 
     return await setAuthorizedEmitter({
-      ...ctx.wallet.moonbeam,
-      receiverAddress: dispatcherAddress as `0x${string}`,
+      ...ctx.wallet.hydration,
+      receiverAddress: receiverAddress as `0x${string}`,
       emitter: emitter as `0x${string}`,
       sourceChain: String(ETHEREUM_WORMHOLE_CHAIN_ID),
     });

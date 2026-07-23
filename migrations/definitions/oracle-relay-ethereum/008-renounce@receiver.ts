@@ -4,13 +4,13 @@ import { setOwner } from "../../actions/setOwner";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
 const step: MigrationStep = {
-  name: "012-renounce@dispatcher",
-  description: "Renounce OracleDispatcher ownership (set owner to zero address)",
+  name: "008-renounce@receiver",
+  description: "Renounce OracleReceiver ownership (set owner to zero address)",
   action: async (ctx) => {
-    const contract = ctx.outputs["002-deploy-dispatcher"].proxyAddress;
+    const contract = ctx.outputs["002-deploy-receiver"].proxyAddress;
 
     return await setOwner({
-      ...ctx.wallet.moonbeam,
+      ...ctx.wallet.hydration,
       contract: contract as `0x${string}`,
       newOwner: ZERO_ADDRESS,
     });

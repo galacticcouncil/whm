@@ -3,15 +3,15 @@ set -euo pipefail
 
 # Usage: migrate-oracle-relay-ethereum.sh <env>
 #
-# Run the oracle-relay-ethereum merged migration (Ethereum OracleEmitter + Moonbeam dispatcher
-# + transactor + wiring + ownership renunciations) in one shot.
+# Run the oracle-relay-ethereum merged migration (Ethereum OracleEmitter + Hydration OracleReceiver
+# + wiring + ownership renunciation) in one shot.
 #
 # Arguments:
 #   <env>   Environment context: prod | fork
 #
 # Required env vars:
-#   PK_EMITTER  Ethereum deployer (0x...)
-#   PK_RELAY    Moonbeam deployer (0x...)
+#   PK_EMITTER   Ethereum deployer (0x...)
+#   PK_RECEIVER  Hydration deployer (0x...)
 
 ENV=${1:?Usage: migrate-oracle-relay-ethereum.sh <env (prod|fork)>}
 
@@ -28,12 +28,12 @@ fi
 if [ "$ENV" = "fork" ]; then
   PK=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
   PK_EMITTER=$PK
-  PK_RELAY=$PK
+  PK_RECEIVER=$PK
 fi
 
 PK_EMITTER=${PK_EMITTER:?Missing PK_EMITTER (Ethereum EVM private key)}
-PK_RELAY=${PK_RELAY:?Missing PK_RELAY (Moonbeam EVM private key)}
+PK_RECEIVER=${PK_RECEIVER:?Missing PK_RECEIVER (Hydration EVM private key)}
 
-export PK_EMITTER PK_RELAY
+export PK_EMITTER PK_RECEIVER
 
 "$TSX" "$RUNNER" --migration oracle-relay-ethereum --env "$ENV"
