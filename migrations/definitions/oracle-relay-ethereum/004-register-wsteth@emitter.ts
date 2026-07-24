@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { registerFeed } from "../../actions/oracle-emitter-ethereum/registerFeed";
 
 const step: MigrationStep = {
-  name: "006-register-wsteth@emitter",
+  name: "004-register-wsteth@emitter",
   description: "Register WSTETH feed (stEthPerToken) on Ethereum OracleEmitter",
   action: async (ctx) => {
     const source = ctx.env.WSTETH_TOKEN;
