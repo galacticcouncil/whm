@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import type { Hex } from "viem";
 import { spawnForks, teardownForks } from "../lib/network";
 import { configs } from "../lib/configs";
-import { ASSETS, tenDollarRaw, placeholderRecipient, buildExitPayload } from "./exitAssets";
+import { ASSETS, tenDollarRaw, resolveRecipient, buildExitPayload } from "./exitAssets";
 
 const compact = (n: number): string => {
   if (n < 64) return (n << 2).toString(16).padStart(2, "0");
@@ -13,7 +13,7 @@ const compact = (n: number): string => {
 };
 
 async function main() {
-  const sends = ASSETS.map((a) => buildExitPayload(a, tenDollarRaw(a), placeholderRecipient(a)).slice(2));
+  const sends = ASSETS.map((a) => buildExitPayload(a, tenDollarRaw(a), resolveRecipient(a)).slice(2));
   const nets = await spawnForks([configs.hydration]);
   try {
     const api = nets.hydration.client.getUnsafeApi();
@@ -35,7 +35,7 @@ async function main() {
     console.log(`whitelisted proposal call: ${(proposal.length - 2) / 2} bytes`);
     writeFileSync("probes/moxit-proposal.json", JSON.stringify({
       note: "moxit test — $10 of each of 11 MRL assets, SA→origin via Wormhole TokenBridge. DRY-RUN recipients are placeholders.",
-      assets: ASSETS.map((a) => ({ sym: a.sym, id: a.id, token: a.token, originChain: a.originChain, amountRaw: tenDollarRaw(a).toString(), recipient: placeholderRecipient(a) })),
+      assets: ASSETS.map((a) => ({ sym: a.sym, id: a.id, token: a.token, originChain: a.originChain, amountRaw: tenDollarRaw(a).toString(), recipient: resolveRecipient(a) })),
       innerBatchAll: inner, innerHash, whitelistedProposal: proposal,
     }, null, 2));
     console.log("\nwrote probes/moxit-proposal.json");

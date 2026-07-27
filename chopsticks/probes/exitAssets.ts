@@ -56,10 +56,11 @@ export function tenDollarRaw(a: ExitAsset): bigint {
  * labelled dry-run placeholder.
  */
 export const COUNCIL: Record<number, string> = {
-  2: "",  // Ethereum Safe (bytes32-encoded, left-padded 20-byte) — DAI/WBTC/WETH/USDC/USDT/sUSDS
-  30: "", // Base Safe (left-padded 20-byte) — EURC
+  2: "0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7",  // ⚠️ Safe 4-of-6 — DEPLOYED ON BASE, **NOT on Ethereum yet**. Deploy same address on ETH (Safe cross-chain deterministic) BEFORE redeeming or funds strand. DAI/WBTC/WETH/USDC/USDT/sUSDS
+  30: "0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7", // Base Safe 4-of-6 (live) — EURC
   1: "",  // Solana Squads vault / ATA (32-byte, base58-decoded) — SOL/jitoSOL/PRIME (see note re: ATA)
-  21: "", // Sui multisig (32-byte)
+  21: "0x9fed34580e448224db25a7ea654460d105d9c6f961d3f6861af1362cfe23c86b", // ⚠️ PROVISIONAL Sui multisig (interim 6 real members + 1 placeholder). Rebuilt w/ new address once cl0w's key lands — re-point before real submission.
+
 };
 
 /** Left-pad a 20-byte EVM address to a bytes32 recipient. */
@@ -70,10 +71,33 @@ export function placeholderRecipient(a: ExitAsset): string {
   return pad("0xe217" + a.originChain.toString(16).padStart(4, "0") + a.id.toString(16).padStart(8, "0"));
 }
 
-/** Real recipient if COUNCIL is configured for the asset's origin chain, else the dry-run placeholder. */
+/**
+ * Solana (chain 1) needs PER-ASSET recipients: the Wormhole SPL redemption credits the vault's
+ * associated token account (ATA) for each mint, not the bare vault. Derived
+ * ATA = PDA([vault, TOKEN_PROGRAM, mint], ASSOCIATED_TOKEN_PROGRAM) for vault EJADf… (Squads).
+ * (32-byte base58 → stored as hex-less base58; encoded to bytes32 at build time via b58→32.)
+ */
+export const SOLANA_ATA: Record<string, string> = {
+  SOL:     "6H6Y1zwJ8xFFmN7MxQVwnHXHFT4v41VwdhYWDiwF9s24", // wSOL ATA
+  jitoSOL: "9Wvdk6JpARzTV869YEkLenJUeCULfEox4PmpRT9i9NiE",
+  PRIME:   "EsmJrr2f9oufzJKGDeCbCgYTx6Nv7evpz24L12So2KU6",
+};
+
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function b58ToHex32(s: string): string {
+  let n = 0n;
+  for (const c of s) n = n * 58n + BigInt(B58.indexOf(c));
+  return n.toString(16).padStart(64, "0"); // 32-byte solana pubkey → hex (no 0x)
+}
+
+/** Real recipient (bytes32 hex, no 0x) if configured, else the dry-run placeholder. */
 export function resolveRecipient(a: ExitAsset): string {
+  if (a.originChain === 1) {
+    const ata = SOLANA_ATA[a.sym];
+    return ata ? b58ToHex32(ata) : placeholderRecipient(a); // solana: 32-byte pubkey, no left-pad
+  }
   const c = COUNCIL[a.originChain];
-  return c ? pad(c) : placeholderRecipient(a);
+  return c ? pad(c) : placeholderRecipient(a); // evm: left-pad 20→32; sui: already 32
 }
 
 /** Template a full PolkadotXcm.send RuntimeCall hex for one asset from the PRIME base. */

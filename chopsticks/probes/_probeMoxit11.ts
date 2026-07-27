@@ -4,7 +4,7 @@ import { Binary } from "polkadot-api";
 import { configs } from "../lib/configs";
 import { checkIfXcmSent, findEvent, logEvents, type EventRecord } from "../lib/events";
 import { spawnForks, teardownForks, type Network } from "../lib/network";
-import { ASSETS, tenDollarRaw, placeholderRecipient, buildExitPayload } from "./exitAssets";
+import { ASSETS, tenDollarRaw, resolveRecipient, buildExitPayload } from "./exitAssets";
 import { acc } from "@galacticcouncil/common";
 
 const HYDRATION_PARA_ID = 2034;
@@ -54,7 +54,7 @@ async function main() {
     console.log(`SA ${SA} seeded 5000 GLMR\n`);
     for (const a of ASSETS) {
       const amt = tenDollarRaw(a);
-      const payload = buildExitPayload(a, amt, placeholderRecipient(a));
+      const payload = buildExitPayload(a, amt, resolveRecipient(a));
       const { events: hydEv } = await dispatchAsRoot(hydration, payload);
       const dispatched = !!findEvent(hydEv, "Scheduler", "Dispatched");
       const sent = checkIfXcmSent(hydEv);
