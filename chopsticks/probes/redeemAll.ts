@@ -9,9 +9,12 @@
  *     pnpm tsx chopsticks/probes/redeemAll.ts
  */
 import { wormhole, signSendWait, deserialize, Wormhole, encoding } from "@wormhole-foundation/sdk";
-import evm, { getEvmSigner } from "@wormhole-foundation/sdk/evm";
-import solana, { getSolanaSignAndSendSigner } from "@wormhole-foundation/sdk/solana";
-import sui, { getSuiSigner } from "@wormhole-foundation/sdk/sui";
+import evm from "@wormhole-foundation/sdk/evm";
+import solana from "@wormhole-foundation/sdk/solana";
+import sui from "@wormhole-foundation/sdk/sui";
+import { getEvmSignerForKey } from "@wormhole-foundation/sdk-evm";
+import { getSolanaSignAndSendSigner } from "@wormhole-foundation/sdk-solana";
+import { getSuiSigner } from "@wormhole-foundation/sdk-sui";
 import { fetchVaaHex } from "../../common/wormhole/scan";
 
 const EMITTER = "000000000000000000000000b1731c586ca89a23809861c6103f0b96b3f57d92";
@@ -45,9 +48,9 @@ async function main() {
     if (signerCache[c]) return signerCache[c];
     const chain = wh.getChain(c); const rpc = await chain.getRpc();
     let s;
-    if (c === "Ethereum" || c === "Base") s = await getEvmSigner(rpc, KEY[c]!, { chain: c });
-    else if (c === "Solana") s = await getSolanaSignAndSendSigner(rpc, KEY.Solana!);
-    else s = await getSuiSigner(rpc, KEY.Sui!);
+    if (c === "Ethereum" || c === "Base") s = await getEvmSignerForKey(rpc as any, KEY[c]!);
+    else if (c === "Solana") s = await getSolanaSignAndSendSigner(rpc as any, KEY.Solana!);
+    else s = await getSuiSigner(rpc as any, KEY.Sui!);
     signerCache[c] = s; return s;
   }
 
