@@ -79,8 +79,8 @@ async function main() {
       if (await tb.isTransferCompleted(vaa)) { console.log(`  ${j.sym.padEnd(8)} already redeemed`); continue; }
       const signer = await signerFor(j.chain);
       const sender = Wormhole.chainAddress(chain.chain, signer.address());
-      const isEvm = j.chain === "Ethereum" || j.chain === "Base";
-      const xfer = isEvm ? tb.redeem(sender.address, vaa, false) : tb.redeem(sender.address, vaa); // unwrapNative=false → WETH as ERC20
+      const noUnwrap = j.chain !== "Sui"; // don't unwrap native: WETH → ERC20, wSOL → the vault ATA (else closeAccount owner-mismatch)
+      const xfer = noUnwrap ? tb.redeem(sender.address, vaa, false) : tb.redeem(sender.address, vaa);
       const txids = await signSendWait(chain, xfer, signer);
       console.log(`  ${j.sym.padEnd(8)} ✅ redeemed on ${j.chain}: ${txids.at(-1)?.txid}`);
     } catch (e: any) {
