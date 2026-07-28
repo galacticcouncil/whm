@@ -4,7 +4,7 @@
  * signer only pays gas. Only legs whose key is provided are attempted, so you can start EVM-only.
  *
  *   pnpm add @wormhole-foundation/sdk       # (already added)
- *   EVM_KEY=0x…  SOLANA_KEY=<base58 secret>  SUI_KEY=suiprivkey…  \
+ *   EVM_KEY=0x…  SOLANA_KEYPAIR=~/key.json (or SOLANA_KEY=<base58>)  SUI_KEY=suiprivkey…  \
  *   [ETH_RPC=… BASE_RPC=… SOLANA_RPC=… SUI_RPC=…] [ONLY=96893] \
  *     pnpm tsx chopsticks/probes/redeemAll.ts
  */
@@ -15,7 +15,21 @@ import sui from "@wormhole-foundation/sdk/sui";
 import { getEvmSignerForKey } from "@wormhole-foundation/sdk-evm";
 import { getSolanaSignAndSendSigner } from "@wormhole-foundation/sdk-solana";
 import { getSuiSigner } from "@wormhole-foundation/sdk-sui";
+import { Keypair } from "@solana/web3.js";
+import { readFileSync } from "node:fs";
 import { fetchVaaHex } from "../../common/wormhole/scan";
+
+/** Solana secret from SOLANA_KEYPAIR (path to [n,n,…] json or a base58 string in a file) or SOLANA_KEY (base58). */
+function solanaSecret(): string | Keypair | undefined {
+  const path = process.env.SOLANA_KEYPAIR;
+  if (path) {
+    const raw = readFileSync(path, "utf8").trim();
+    if (raw.startsWith("[")) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+    return raw; // base58 string in a file
+  }
+  return process.env.SOLANA_KEY;
+}
+const SOL_SECRET = solanaSecret();
 
 const EMITTER = "000000000000000000000000b1731c586ca89a23809861c6103f0b96b3f57d92";
 type Chain = "Ethereum" | "Base" | "Solana" | "Sui";
@@ -33,9 +47,9 @@ const RPC: Partial<Record<Chain, string>> = {
   Ethereum: process.env.ETH_RPC, Base: process.env.BASE_RPC,
   Solana: process.env.SOLANA_RPC, Sui: process.env.SUI_RPC,
 };
-const KEY: Record<Chain, string | undefined> = {
+const KEY: Record<Chain, unknown> = {
   Ethereum: process.env.EVM_KEY, Base: process.env.EVM_KEY,
-  Solana: process.env.SOLANA_KEY, Sui: process.env.SUI_KEY,
+  Solana: SOL_SECRET, Sui: process.env.SUI_KEY,
 };
 
 async function main() {
@@ -48,9 +62,9 @@ async function main() {
     if (signerCache[c]) return signerCache[c];
     const chain = wh.getChain(c); const rpc = await chain.getRpc();
     let s;
-    if (c === "Ethereum" || c === "Base") s = await getEvmSignerForKey(rpc as any, KEY[c]!);
-    else if (c === "Solana") s = await getSolanaSignAndSendSigner(rpc as any, KEY.Solana!);
-    else s = await getSuiSigner(rpc as any, KEY.Sui!);
+    if (c === "Ethereum" || c === "Base") s = await getEvmSignerForKey(rpc as any, KEY[c] as string);
+    else if (c === "Solana") s = await getSolanaSignAndSendSigner(rpc as any, SOL_SECRET as any);
+    else s = await getSuiSigner(rpc as any, KEY.Sui as string);
     signerCache[c] = s; return s;
   }
 
