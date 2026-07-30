@@ -43,7 +43,7 @@ async function main() {
     for (const a of ASSETS) before[a.sym] = await allowance(getAddress(a.token));
 
     // 3. Root-dispatch the approve XCM (Preimage + Scheduler.Agenda, Root origin)
-    const call = buildApproveCall();
+    const call = buildApproveCall(SWEEPER);
     const bytes = Binary.fromHex(call); const len = bytes.length;
     const hash = registry.hash(bytes as any).toHex() as Hex;
     const when = hydration.chain.head.number + 1;

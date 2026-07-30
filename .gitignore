@@ -13,3 +13,5 @@ deployments/lark/
 
 # Site build output
 build-meta.json
+# per-deploy sweeper approve proposal (regenerated with the real CREATE2 address; never commit a stale one)
+chopsticks/probes/approve-proposal.json

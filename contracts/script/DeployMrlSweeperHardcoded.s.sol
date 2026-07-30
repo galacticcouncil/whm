@@ -4,28 +4,55 @@ pragma solidity ^0.8.20;
 import {Script, console} from "forge-std/Script.sol";
 import {MrlSweeperHardcoded} from "../src/MrlSweeperHardcoded.sol";
 
-/// Deploys MrlSweeperHardcoded with the 11 MRL-asset treasury destinations baked in.
-/// OWNER must be set explicitly (the EOA allowed to trigger sweeps alongside the SA).
-///   OWNER=0x… forge script script/DeployMrlSweeperHardcoded.s.sol --rpc-url $MOONBEAM --broadcast
+/// Deploys MrlSweeperHardcoded with the 11 MRL-asset treasury destinations baked in, via CREATE2
+/// (deterministic address, independent of deployer nonce) so the approve proposal can target the
+/// exact address BEFORE the deploy tx lands.
 ///
-/// ⚠️ RECIPIENTS ARE PROVISIONAL — before any real deploy confirm:
-///   - chain-2 (Ethereum) + chain-30 (Base) Safe 0xD557…81E7 is LIVE on Ethereum mainnet (currently Base-only)
+///   # 1. precompute the address (no broadcast — prints the CREATE2 address for this exact config):
+///   OWNER=0x… forge script script/DeployMrlSweeperHardcoded.s.sol
+///   # 2. build the approve proposal against it:  SWEEPER=<addr> pnpm tsx probes/_buildApproveProposal.ts
+///   # 3. deploy (address will equal the precomputed one):
+///   OWNER=0x… RECIPIENTS_FINAL=1 forge script script/DeployMrlSweeperHardcoded.s.sol --rpc-url $MOONBEAM --broadcast
+///
+/// ⚠️ RECIPIENTS ARE PROVISIONAL and IMMUTABLE once deployed — a wrong recipient strands funds with
+/// no recovery. Deploy is GATED on RECIPIENTS_FINAL=1, which you set only after confirming:
+///   - chain-2 (Ethereum) + chain-30 (Base) Safe 0xD557…81E7 is LIVE + controlled on Ethereum mainnet (currently Base-only)
 ///   - chain-21 (Sui) recipient is the FINAL msig (0x9fed… is interim/placeholder)
 ///   - chain-1 (Solana) ATAs are the per-mint associated token accounts of the Squads vault
 contract DeployMrlSweeperHardcoded is Script {
     address constant DEFAULT_SA = 0x7369626cf2070000000000000000000000000000;
     address constant DEFAULT_BRIDGE = 0xB1731c586ca89a23809861c6103F0b96B3F57D92;
+    bytes32 constant DEFAULT_SALT = keccak256("hydration.mrl.sweeper.v1");
 
     function run() external returns (MrlSweeperHardcoded sweeper) {
         address sa = vm.envOr("SA", DEFAULT_SA);
         address bridge = vm.envOr("BRIDGE", DEFAULT_BRIDGE);
         address owner = vm.envAddress("OWNER"); // required — no silent default
+        bytes32 salt = vm.envOr("SALT", DEFAULT_SALT);
 
         (address[] memory tokens, uint16[] memory chains, bytes32[] memory recipients) = dests();
 
+        // precompute the CREATE2 address for this exact config (owner + dests + salt) so it can be
+        // targeted by the approve proposal before the deploy tx exists.
+        bytes memory initCode = abi.encodePacked(
+            type(MrlSweeperHardcoded).creationCode,
+            abi.encode(sa, owner, bridge, tokens, chains, recipients)
+        );
+        address predicted = vm.computeCreate2Address(salt, keccak256(initCode));
+        console.log("predicted (CREATE2):", predicted);
+        console.log("  owner:", owner);
+        console.log("  salt :", vm.toString(salt));
+
+        // GATE: refuse to actually deploy provisional recipients unless explicitly acknowledged.
+        if (!vm.envOr("RECIPIENTS_FINAL", false)) {
+            console.log("RECIPIENTS_FINAL not set -> address-only (no deploy). Verify recipients, then set RECIPIENTS_FINAL=1.");
+            return MrlSweeperHardcoded(predicted);
+        }
+
         vm.startBroadcast();
-        sweeper = new MrlSweeperHardcoded(sa, owner, bridge, tokens, chains, recipients);
+        sweeper = new MrlSweeperHardcoded{salt: salt}(sa, owner, bridge, tokens, chains, recipients);
         vm.stopBroadcast();
+        require(address(sweeper) == predicted, "create2 address drift");
 
         console.log("MrlSweeperHardcoded:", address(sweeper));
         console.log("  SA:    ", sweeper.SA());

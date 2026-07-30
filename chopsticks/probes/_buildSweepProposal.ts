@@ -1,4 +1,13 @@
 /**
+ * ⚠️ SUPERSEDED (kept for reference / envelope helpers). This builder's SWEEP calls target the OLD
+ * MrlSweeper ABI `sweep(address,uint16,bytes32)` (caller-supplied chain+recipient). The live design is
+ * the EOA flow: MrlSweeperHardcoded (`sweep(address)` / `sweepAmount(address,uint256)`, hardcoded dests)
+ * + the approve-only proposal in _buildApproveProposal.ts. DO NOT submit sweep-proposal.json against a
+ * MrlSweeperHardcoded deployment — the Moonbeam sweep would revert (no such selector) while the Hydration
+ * batch's disconnect/withdraw-limit calls still execute. Those disconnect+withdraw calls now live in the
+ * approve proposal instead. Only wrapBatchInputInSend / buildLocationUpdate / buildWithdrawLimit / batchAllCall
+ * / wrapWhitelist are reused downstream.
+ *
  * Build the two-sweep MRL-drain whitelisted governance proposal.
  *
  *   whitelist.dispatch_whitelisted_call_with_preimage(   ← enacts as Root
@@ -162,12 +171,14 @@ export function buildWithdrawLimit(limit: bigint = WITHDRAW_LIMIT_RAW, windowMs:
   return ("0x4106" + u128le(limit) + u64le(windowMs)) as Hex;
 }
 
+// ── generic Utility(13).batch_all(2)(calls) ──
+export function batchAllCall(calls: Hex[]): Hex {
+  return ("0x0d02" + compactEncode(calls.length) + calls.map((c) => c.slice(2)).join("")) as Hex;
+}
 // ── inner Utility(13).batch_all([ SWEEP1, SCHEDULE_SWEEP2, update(id)×N, set_global_withdraw_limit ]) ──
 //    N=11 + withdraw ⇒ 14 calls ⇒ compact(14)=0x38. updates=[]/withdraw=undefined reproduces the original 2-call batch.
 export function buildInner(sweepCall: Hex, scheduleNamed: Hex, updates: Hex[] = [], withdraw?: Hex): Hex {
-  const tail = [...updates, ...(withdraw ? [withdraw] : [])];
-  const n = 2 + tail.length;
-  return ("0x0d02" + compactEncode(n) + sweepCall.slice(2) + scheduleNamed.slice(2) + tail.map((u) => u.slice(2)).join("")) as Hex;
+  return batchAllCall([sweepCall, scheduleNamed, ...updates, ...(withdraw ? [withdraw] : [])]);
 }
 // ── whitelist wrapper: Whitelist(39).dispatch_whitelisted_call_with_preimage(3)(inner) ──
 export const wrapWhitelist = (inner: Hex): Hex => ("0x2703" + inner.slice(2)) as Hex;
@@ -232,7 +243,10 @@ async function main() {
 
     const OUT = "probes/sweep-proposal.json";
     writeFileSync(OUT, JSON.stringify({
-      note: "two-sweep MRL-drain + XCM-disconnect + withdraw-limit cut (single enactment). Batch_all has 14 calls: SWEEP1, "
+      note: "⚠️ SUPERSEDED — targets the OLD MrlSweeper sweep(address,uint16,bytes32); DO NOT submit against a "
+        + "MrlSweeperHardcoded deploy (Moonbeam sweep would revert while the Hydration disconnect/withdraw still runs). "
+        + "Use _buildApproveProposal.ts + the EOA sweeper instead; disconnect+withdraw now live in that proposal. --- "
+        + "two-sweep MRL-drain + XCM-disconnect + withdraw-limit cut (single enactment). Batch_all has 14 calls: SWEEP1, "
         + "Scheduler.schedule_named(SWEEP2@BLOCK_N), then 11× AssetRegistry.update(id, location=WH-origin), then "
         + "CircuitBreaker.set_global_withdraw_limit_params(200M HDX / 6h = 1/5 of live). "
         + "The 11 updates repoint each MRL asset at its CANONICAL Wormhole provenance parents:0 X3[GeneralKey('wh'), "
