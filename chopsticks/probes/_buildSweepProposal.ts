@@ -64,8 +64,9 @@ export function buildBatchInput(assets: ExitAsset[] = ASSETS): Hex {
   return encodeFunctionData({ abi: BATCH_ABI, functionName: "batchAll", args: [to, value, callData, []] });
 }
 
-// ── SWEEP1: rebuild the PolkadotXcm.send envelope by swapping PRIME_TEST_EXIT's inner batchAll input ──
-export function buildSweepCall(assets: ExitAsset[] = ASSETS): Hex {
+// ── wrap ANY batch-precompile input in the validated PolkadotXcm.send → Moonbeam Transact(EthereumXcm) envelope ──
+//    by swapping PRIME_TEST_EXIT's inner batchAll `input` and recomputing the two dependent SCALE length prefixes.
+export function wrapBatchInputInSend(newInputHex: Hex): Hex {
   const full = PRIME_TEST_EXIT.slice(2).toLowerCase();
   const INNER_START = "6d0000404b4c";      // EthereumXcm(6d).transact(00) V1(00) gas_limit lo bytes (5,000,000)
   const TAIL_MARK = "140d01020400010300";  // RefundSurplus(14) + DepositAsset(0d…) beneficiary=SA
@@ -83,10 +84,15 @@ export function buildSweepCall(assets: ExitAsset[] = ASSETS): Hex {
   const IHEAD = full.slice(posInner * 2, posInputCompact * 2); // 6d0000 gaslimit fee action to value — unchanged
   const TAIL = full.slice(posTail * 2);
 
-  const newInput = buildBatchInput(assets).slice(2);
+  const newInput = newInputHex.slice(2);
   const newInnerCall = IHEAD + compactEncode(newInput.length / 2) + newInput + "00"; // + access_list None
   const rebuilt = HEAD + compactEncode(newInnerCall.length / 2) + newInnerCall + TAIL;
   return ("0x" + rebuilt) as Hex;
+}
+
+// ── SWEEP1: rebuild the PolkadotXcm.send envelope around the 22-subcall drain batch ──
+export function buildSweepCall(assets: ExitAsset[] = ASSETS): Hex {
+  return wrapBatchInputInSend(buildBatchInput(assets));
 }
 
 // ── SCHEDULE_SWEEP2: Scheduler(5).schedule_named(2)(id[32], when u32LE, None, priority u8, call=RuntimeCall inline) ──
