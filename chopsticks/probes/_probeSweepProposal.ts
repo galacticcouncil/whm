@@ -22,8 +22,9 @@ import { Binary } from "polkadot-api";
 import { acc } from "@galacticcouncil/common";
 import { configs } from "../lib/configs";
 import { spawnForks, teardownForks, type Network } from "../lib/network";
+import type { SS58String } from "polkadot-api";
 import { ASSETS, resolveRecipient, type ExitAsset } from "./exitAssets";
-import { SWEEPER, SWEEP2_ID, buildSweepCall, buildScheduleNamed, buildInner } from "./_buildSweepProposal";
+import { SWEEPER, SWEEP2_ID, buildSweepCall, buildScheduleNamed, buildInner, buildLocationUpdate, buildWithdrawLimit, WH_GENERALKEY_DATA, WH_ORIGIN } from "./_buildSweepProposal";
 
 const SA = getAddress(acc.getSovereignAccounts(2034).moonbeam as Hex);
 const BRIDGE = getAddress("0xb1731c586ca89a23809861c6103f0b96b3f57d92");
@@ -140,6 +141,83 @@ async function collectVaas(moonbeam: Network, n = 8): Promise<Transfer[]> {
   return logs.map((l) => decodeTransfer((decodeEventLog({ abi: CORE_ABI, data: l.data, topics: l.topics as [Hex, ...Hex[]] }).args as any).payload as Hex));
 }
 
+// ── XCM-disconnect verification helpers ──────────────────────────────────────
+const USER = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY" as SS58String; // Alice (stale-UI sender)
+const J = (v: any) => JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x?.asHex ? x.asHex() : x));
+
+// AssetRegistry.AssetLocations(id) must equal the WH origin: parents0 X3[GeneralKey("wh"), GeneralIndex(tokenChain), GeneralKey(tokenAddress)]
+function isWhOrigin(loc: any, id: number): boolean {
+  try {
+    const [chain, addr] = WH_ORIGIN[id];
+    const iv = loc?.interior;
+    if (loc?.parents !== 0 || iv?.type !== "X3") return false;
+    const [gk1, gi, gk2] = iv.value;
+    return gk1?.type === "GeneralKey" && gk1.value?.length === 2
+      && hx(gk1.value?.data) === ("0x" + WH_GENERALKEY_DATA)
+      && gi?.type === "GeneralIndex" && String(gi.value) === String(chain)
+      && gk2?.type === "GeneralKey" && gk2.value?.length === 32
+      && hx(gk2.value?.data).toLowerCase() === addr.toLowerCase();
+  } catch { return false; }
+}
+// scan AssetRegistry.LocationAssets → assetId ⇒ [reverse-key JSON] for the ids we track
+async function reverseFor(api: any, ids: Set<number>): Promise<Map<number, string[]>> {
+  const out = new Map<number, string[]>();
+  const entries: any[] = await api.query.AssetRegistry.LocationAssets.getEntries();
+  for (const e of entries) {
+    const v = Number(e.value);
+    if (!ids.has(v)) continue;
+    if (!out.has(v)) out.set(v, []);
+    out.get(v)!.push(J(e.keyArgs));
+  }
+  return out;
+}
+// stale-UI send: user XTokens.transfer(id, amount → Moonbeam AccountKey20). Hand-encoded (papi can't build
+// the v-Location codec), signFake'd, mock-signed. Post-disconnect this MUST atomic-reject (AssetHasNoReserve).
+async function staleSend(hydration: Network, api: any, registry: any, a: ExitAsset) {
+  const START = 10_000n * 10n ** BigInt(a.decimals);
+  const SEND = 1_000n * 10n ** BigInt(a.decimals);
+  const ti0 = BigInt(String(await api.query.Tokens.TotalIssuance.getValue(a.id)));
+  await hydration.setStorage({
+    Tokens: { Accounts: [[[USER, a.id], { free: START, reserved: 0n, frozen: 0n }]], TotalIssuance: [[[a.id], ti0 + START]] },
+  });
+  const balOf = async (at?: string) => BigInt(((at
+    ? await api.query.Tokens.Accounts.getValue(USER, a.id, { at })
+    : await api.query.Tokens.Accounts.getValue(USER, a.id))?.free) ?? 0n);
+  const before = await balOf();
+
+  const hx2 = (u: Uint8Array) => Buffer.from(u).toString("hex");
+  const vl = registry.createType("XcmVersionedLocation", {
+    V4: { parents: 1, interior: { X2: [{ Parachain: 2004 }, { AccountKey20: { network: null, key: "0x1111111111111111111111111111111111111111" } }] } },
+  });
+  const cid = registry.createType("u32", a.id);
+  const amt = registry.createType("u128", SEND.toString());
+  const wl = registry.createType("XcmV3WeightLimit", { Unlimited: null });
+  const callHex = "0x8900" + hx2(cid.toU8a()) + hx2(amt.toU8a()) + hx2(vl.toU8a()) + hx2(wl.toU8a());
+  const callCheck = registry.createType("Call", callHex);
+  const genesisHash = await hydration.client._request<string>("chain_getBlockHash", [0]);
+  const rv = await hydration.client._request<any>("state_getRuntimeVersion", []);
+  const nonce = Number(BigInt(String((await api.query.System.Account.getValue(USER))?.nonce ?? 0)));
+  const ext = registry.createType("Extrinsic", callCheck);
+  ext.signFake(USER, { nonce, tip: 0, era: 0, genesisHash, blockHash: genesisHash, runtimeVersion: rv });
+  const mock = new Uint8Array(64); mock.fill(0xcd); mock.set([0xde, 0xad, 0xbe, 0xef]);
+  ext.signature.set(mock);
+  let submitErr: any = null;
+  try { await hydration.client._request("author_submitExtrinsic", [ext.toHex()]); }
+  catch (e: any) { submitErr = e?.message ?? JSON.stringify(e); }
+  const hb = await hydration.chain.newBlock();
+  const events: any[] = await evAt(hydration, hb.hash);
+  const after = await balOf(hb.hash);
+  const failed = events.find((e) => e.event?.type === "System" && e.event?.value?.type === "ExtrinsicFailed");
+  const errName = failed ? J(failed.event.value.value.dispatch_error ?? failed.event.value.value) : null;
+  const withdrawn = events.some((e) => ["Tokens", "Currencies"].includes(e.event?.type) && e.event?.value?.type === "Withdrawn"
+    && Number(e.event.value.value?.currency_id) === a.id);
+  const xcmSent = events.some((e) => (e.event?.type === "XTokens" && String(e.event?.value?.type).startsWith("Transferred"))
+    || (e.event?.type === "PolkadotXcm" && ["Sent", "Attempted"].includes(e.event?.value?.type))
+    || (e.event?.type === "XcmpQueue" && e.event?.value?.type === "XcmpMessageSent"));
+  return { before, after, delta: after - before, failed: !!failed || !!submitErr,
+    errName, withdrawn, xcmSent, noReserve: !!errName && errName.includes("AssetHasNoReserve") };
+}
+
 async function main() {
   const nets = await spawnForks([configs.hydration, configs.moonbeam]);
   const { hydration, moonbeam } = nets;
@@ -178,11 +256,23 @@ async function main() {
     }
     const backed = ASSETS.filter((a) => before[a.sym] > 0n);
 
-    // 3. build + Root-dispatch inner batch_all([SWEEP1, SCHEDULE_SWEEP2@BLOCK_N])
+    // 2b. capture BEFORE state for the 11 XCM-disconnect location updates (AssetLocations + reverse LocationAssets)
+    const api0 = hydration.client.getUnsafeApi();
+    const idSet = new Set(ASSETS.map((a) => a.id));
+    const locBefore: Record<number, any> = {};
+    for (const a of ASSETS) locBefore[a.id] = await api0.query.AssetRegistry.AssetLocations.getValue(a.id);
+    const revBefore = await reverseFor(api0, idSet);
+    console.log(`\n── AssetLocations BEFORE (11 MRL assets) ──`);
+    for (const a of ASSETS)
+      console.log(`  ${a.sym.padEnd(8)} id=${String(a.id).padEnd(8)} loc=${J(locBefore[a.id]).slice(0, 110)}  rev-keys=${(revBefore.get(a.id) ?? []).length}`);
+
+    // 3. build + Root-dispatch inner batch_all([SWEEP1, SCHEDULE_SWEEP2@BLOCK_N, update(id)×11, set_global_withdraw_limit])
     const BLOCK_N = process.env.BLOCK_N ? Number(process.env.BLOCK_N) : hydration.chain.head.number + 20;
     const sweepCall = buildSweepCall();
-    const inner = buildInner(sweepCall, buildScheduleNamed(sweepCall, BLOCK_N));
-    console.log(`\n── Root-dispatch inner batch_all  (BLOCK_N=${BLOCK_N}, inner=${(inner.length - 2) / 2} bytes) ──`);
+    const updates = ASSETS.map((a) => buildLocationUpdate(a.id));
+    const withdraw = buildWithdrawLimit();
+    const inner = buildInner(sweepCall, buildScheduleNamed(sweepCall, BLOCK_N), updates, withdraw);
+    console.log(`\n── Root-dispatch inner batch_all  (BLOCK_N=${BLOCK_N}, ${2 + updates.length + 1} calls, inner=${(inner.length - 2) / 2} bytes) ──`);
     {
       const bytes = Binary.fromHex(inner); const len = bytes.length;
       const hash = registry.hash(bytes as any).toHex() as Hex;
@@ -225,6 +315,37 @@ async function main() {
     rec("SWEEP1 drains all backed tokens to 0", drainAll);
     rec(`SWEEP1 emits ${backed.length} correct VAAs`, t1.length === backed.length && vaaAll);
     console.log(`  VAAs: ${t1.length} / ${backed.length} expected`);
+
+    // 4b. verify XCM-disconnect: every asset's AssetLocations swapped to the WH origin + old Moonbeam reverse key gone
+    console.log(`\n── XCM-disconnect: AssetLocations AFTER (11 MRL assets) ──`);
+    const revAfter = await reverseFor(api0, idSet);
+    let locAll = true, revGoneAll = true;
+    for (const a of ASSETS) {
+      const loc = await api0.query.AssetRegistry.AssetLocations.getValue(a.id);
+      const swapped = isWhOrigin(loc, a.id);
+      const oldKeys = revBefore.get(a.id) ?? [];
+      const nowKeys = revAfter.get(a.id) ?? [];
+      const oldGone = oldKeys.every((k) => !nowKeys.includes(k)); // every pre-enactment Moonbeam reverse key dropped
+      locAll &&= swapped; revGoneAll &&= oldGone;
+      console.log(`  ${a.sym.padEnd(8)} id=${String(a.id).padEnd(8)} loc→WH ${swapped ? "✅" : "❌"}  old-rev-gone ${oldGone ? "✅" : "❌"} (was ${oldKeys.length}, now ${nowKeys.length})`);
+    }
+    rec("all 11 AssetLocations swapped to WH origin", locAll);
+    rec("all 11 old Moonbeam reverse LocationAssets keys dropped", revGoneAll);
+
+    // 4c. XCM severed: stale-UI XTokens.transfer(id → Moonbeam) now atomic-rejects AssetHasNoReserve (funds safe)
+    console.log(`\n── XCM severed: stale-UI send spot-check (DAI 18, USDC 21, SUI 1000753) ──`);
+    const reg: any = await hydration.chain.head.registry;
+    await hydration.setStorage({ System: { Account: [[[USER], { providers: 1, sufficients: 1, data: { free: 10_000n * 10n ** 18n, reserved: 0n, frozen: 0n, flags: 0n } }]] } });
+    const spotIds = [18, 21, 1000753];
+    let severAll = true;
+    for (const id of spotIds) {
+      const a = ASSETS.find((x) => x.id === id)!;
+      const r = await staleSend(hydration, api0, reg, a);
+      const ok = r.failed && r.noReserve && !r.withdrawn && !r.xcmSent && r.delta === 0n;
+      severAll &&= ok;
+      console.log(`  ${a.sym.padEnd(8)} id=${String(id).padEnd(8)} rejected=${r.failed} err=${r.errName} Δbal=${r.delta} withdrawn=${r.withdrawn} xcmSent=${r.xcmSent}  ${ok ? "✅" : "❌"}`);
+    }
+    rec("stale-UI sends atomic-reject (AssetHasNoReserve, funds unmoved, no XCM)", severAll);
 
     // 5. verify SWEEP2 is scheduled at BLOCK_N. NB: schedule_named takes an inline Box<RuntimeCall>,
     //    but pallet_scheduler internally bounds a >128-byte call as a preimage ⇒ the stored Agenda
@@ -290,12 +411,17 @@ async function main() {
     try {
       const dc: any = (await api.txFromCallData(Binary.fromHex(inner))).decodedCall;
       const calls = dc.value.value.calls;
-      decodeOk = dc.type === "Utility" && dc.value.type === "batch_all" && calls.length === 2
+      const upd = calls.slice(2, 2 + ASSETS.length);
+      const cb = calls[2 + ASSETS.length];
+      const updOk = upd.length === ASSETS.length && upd.every((c: any, i: number) =>
+        c.type === "AssetRegistry" && c.value.type === "update" && Number(c.value.value.asset_id) === ASSETS[i].id);
+      const cbOk = cb?.type === "CircuitBreaker" && cb?.value?.type === "set_global_withdraw_limit_params";
+      decodeOk = dc.type === "Utility" && dc.value.type === "batch_all" && calls.length === 2 + ASSETS.length + 1
         && calls[0].value.type === "send" && calls[1].value.type === "schedule_named"
-        && calls[1].value.value.call.value.type === "send";
-      decodeInfo = `${dc.type}.${dc.value.type}[${calls.map((c: any) => c.type + "." + c.value.type).join(", ")}]`;
+        && calls[1].value.value.call.value.type === "send" && updOk && cbOk;
+      decodeInfo = `${dc.type}.${dc.value.type}[${calls.length} calls: ${calls[0].value.type}, ${calls[1].value.type}, update×${upd.length}, ${cb?.value?.type ?? "—"}]`;
     } catch (e: any) { decodeInfo = "decode failed: " + (e?.message ?? e); }
-    rec("inner self-decodes as batch_all[send, schedule_named(send)]", decodeOk);
+    rec(`inner self-decodes as batch_all[send, schedule_named(send), update×${ASSETS.length}, set_global_withdraw_limit]`, decodeOk);
     console.log(`\n── inner self-decode ──  ${decodeInfo}  ${decodeOk ? "✅" : "❌"}`);
 
     // verdict

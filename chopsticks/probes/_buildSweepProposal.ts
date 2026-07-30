@@ -94,9 +94,74 @@ export function buildScheduleNamed(sweepCall: Hex, blockN: number, id: Hex = SWE
   return ("0x0502" + id.slice(2) + u32le(blockN) + "00" + priority.toString(16).padStart(2, "0") + sweepCall.slice(2)) as Hex;
 }
 
-// ── inner Utility(13).batch_all(2)([ SWEEP1, SCHEDULE_SWEEP2 ]) ──
-export function buildInner(sweepCall: Hex, scheduleNamed: Hex): Hex {
-  return ("0x0d02" + compactEncode(2) + sweepCall.slice(2) + scheduleNamed.slice(2)) as Hex;
+// ── WH-origin disconnect: repoint each MRL asset at its CANONICAL Wormhole provenance location —
+//    parents:0, X3[ GeneralKey("wh"), GeneralIndex(tokenChain), GeneralKey(tokenAddress) ] — where
+//    (tokenChain, tokenAddress) is the wrapped token's origin identity read live off the Moonbeam
+//    wrapper (chainId()/nativeContract()). This location has NO Moonbeam reserve, so after enactment
+//    any stale-UI XTokens.transfer(id → Moonbeam) rejects atomically (XTokens::AssetHasNoReserve)
+//    instead of proceeding-and-trapping. papi rejects the AssetNativeLocation codec ⇒ hand-SCALE'd.
+export const WH_GENERALKEY_DATA = "7768" + "0".repeat(60); // b"wh" right-padded to 32 bytes
+export const whGeneralKey = (): Hex => ("0x" + WH_GENERALKEY_DATA) as Hex;
+
+/** Canonical Wormhole origin per MRL asset id: [tokenChain, tokenAddress32]. Sourced live from the
+ *  Moonbeam wrapper — chainId()(uint16) + nativeContract()(bytes32) — cross-checked per token. */
+export const WH_ORIGIN: Record<number, [number, string]> = {
+  18:      [2,  "0x0000000000000000000000006b175474e89094c44da98b954eedeac495271d0f"], // DAI  → eth DAI
+  19:      [2,  "0x0000000000000000000000002260fac5e5542a773aa44fbcfedf7c193bc2c599"], // WBTC → eth WBTC
+  20:      [2,  "0x000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"], // WETH → eth WETH
+  21:      [2,  "0x000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"], // USDC → eth USDC
+  23:      [2,  "0x000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7"], // USDT → eth USDT
+  40:      [1,  "0xfcd141e9832caf10ad917495ca0f271b5b293cd47027ea737007ed40eb39a0bd"], // jitoSOL → sol
+  43:      [1,  "0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da"], // PRIME → sol
+  44:      [30, "0x00000000000000000000000060a3e35cc302bfa44cb288bc5a4f316fdb1adb42"], // EURC → base
+  1000745: [2,  "0x000000000000000000000000a3931d71877c0e7a3148cb7eb4463524fec27fbd"], // sUSDS → eth
+  1000752: [1,  "0x069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001"], // SOL → sol
+  1000753: [21, "0x9258181f5ceac8dbffb7030890243caed69a9599d2886d957a9cb7656af3bdb3"], // SUI → sui
+};
+
+/** WH-origin v-Location SCALE: parents=0, X3[ GeneralKey(len2 "wh"), GeneralIndex(tokenChain), GeneralKey(len32 addr) ]. */
+export function whLocationScale(tokenChain: number, tokenAddress: string): string {
+  const addr32 = tokenAddress.replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  //  00 parents=0 | 03 interior=X3 | 06 GeneralKey 02 len=2 <data32> | 05 GeneralIndex compact(chain) | 06 GeneralKey 20 len=32 <addr32>
+  return "00" + "03" + "06" + "02" + WH_GENERALKEY_DATA + "05" + compactEncode(tokenChain) + "06" + "20" + addr32;
+}
+/** papi-shaped WH-origin location (for JSON / assertions) — mirrors AssetRegistry.AssetLocations(id) after update. */
+export function whOriginShape(assetId: number) {
+  const [chain, addr] = WH_ORIGIN[assetId];
+  return {
+    parents: 0,
+    interior: { type: "X3", value: [
+      { type: "GeneralKey", value: { length: 2, data: whGeneralKey() } },
+      { type: "GeneralIndex", value: String(chain) },
+      { type: "GeneralKey", value: { length: 32, data: addr } },
+    ] },
+  };
+}
+// ── one AssetRegistry(51/0x33).update(1): id u32LE, 7×None, location Some(WH origin), rest None ──
+export function buildLocationUpdate(assetId: number): Hex {
+  const [chain, addr] = WH_ORIGIN[assetId];
+  //  33 01 | id u32LE | 7×00 (name/asset_type/existential_deposit/xcm_rate_limit/is_sufficient/symbol/decimals None)
+  //        | 01 (location Some) | WH-origin location SCALE
+  return ("0x3301" + u32le(assetId) + "00000000000000" + "01" + whLocationScale(chain, addr)) as Hex;
+}
+
+// ── CircuitBreaker(65/0x41).set_global_withdraw_limit_params(6)({ limit u128, window Moment(u64) }) ──
+//    tightens the GLOBAL withdraw limit to 1/5 of live (1B → 200M HDX / 6h). Applies to every asset
+//    counted toward the global limit (DAI et al. via GlobalAssetOverrides=External), not just MRL.
+export const WITHDRAW_LIMIT_RAW = 200_000_000n * 10n ** 12n; // 200M HDX (HDX = 12 decimals)
+export const WITHDRAW_WINDOW_MS = 21_600_000;                // 6h
+const u128le = (n: bigint): string => n.toString(16).padStart(32, "0").match(/../g)!.reverse().join("");
+const u64le = (n: number): string => BigInt(n).toString(16).padStart(16, "0").match(/../g)!.reverse().join("");
+export function buildWithdrawLimit(limit: bigint = WITHDRAW_LIMIT_RAW, windowMs: number = WITHDRAW_WINDOW_MS): Hex {
+  return ("0x4106" + u128le(limit) + u64le(windowMs)) as Hex;
+}
+
+// ── inner Utility(13).batch_all([ SWEEP1, SCHEDULE_SWEEP2, update(id)×N, set_global_withdraw_limit ]) ──
+//    N=11 + withdraw ⇒ 14 calls ⇒ compact(14)=0x38. updates=[]/withdraw=undefined reproduces the original 2-call batch.
+export function buildInner(sweepCall: Hex, scheduleNamed: Hex, updates: Hex[] = [], withdraw?: Hex): Hex {
+  const tail = [...updates, ...(withdraw ? [withdraw] : [])];
+  const n = 2 + tail.length;
+  return ("0x0d02" + compactEncode(n) + sweepCall.slice(2) + scheduleNamed.slice(2) + tail.map((u) => u.slice(2)).join("")) as Hex;
 }
 // ── whitelist wrapper: Whitelist(39).dispatch_whitelisted_call_with_preimage(3)(inner) ──
 export const wrapWhitelist = (inner: Hex): Hex => ("0x2703" + inner.slice(2)) as Hex;
@@ -111,7 +176,9 @@ async function main() {
 
     const sweepCall = buildSweepCall();
     const scheduleNamed = buildScheduleNamed(sweepCall, blockN);
-    const inner = buildInner(sweepCall, scheduleNamed);
+    const updates = ASSETS.map((a) => buildLocationUpdate(a.id)); // 11 WH-origin XCM-disconnect location swaps
+    const withdraw = buildWithdrawLimit();                        // tighten global withdraw limit to 1/5
+    const inner = buildInner(sweepCall, scheduleNamed, updates, withdraw);
     const proposal = wrapWhitelist(inner);
 
     const innerBin = Binary.fromHex(inner);
@@ -128,13 +195,20 @@ async function main() {
       const sweepDc = c0.value.value; // PolkadotXcm.send
       const instrs = sweepDc.message.value.map((i: any) => i.type).join("/");
       const schedInner = c1.value.value.call; // scheduled RuntimeCall
-      decodeInfo = `${dc.type}.${dc.value.type}[${calls.map((c: any) => c.type + "." + c.value.type).join(", ")}]`
-        + ` | SWEEP1 instrs=${instrs} | SWEEP2.when=${c1.value.value.when} call=${schedInner.type}.${schedInner.value.type}`;
+      const updCount = calls.filter((c: any) => c.type === "AssetRegistry" && c.value.type === "update").length;
+      const updIds = calls.filter((c: any) => c.type === "AssetRegistry").map((c: any) => c.value?.value?.asset_id).join(",");
+      const cbCall = calls.find((c: any) => c.type === "CircuitBreaker");
+      decodeInfo = `${dc.type}.${dc.value.type}[${calls.length} calls: send, schedule_named, update×${updCount}, ${cbCall ? cbCall.value.type : "—"}]`
+        + ` | SWEEP1 instrs=${instrs} | SWEEP2.when=${c1.value.value.when} call=${schedInner.type}.${schedInner.value.type}`
+        + ` | update.asset_ids=[${updIds}]`;
     } catch (e: any) { decodeInfo = "DECODE FAILED: " + (e?.message ?? e); }
 
     const tokens = ASSETS.map((a) => ({
       sym: a.sym, id: a.id, token: getAddress(a.token), decimals: a.decimals,
       recipientChain: a.originChain, recipient: "0x" + resolveRecipient(a),
+      wormholeOrigin: { tokenChain: WH_ORIGIN[a.id][0], tokenAddress: WH_ORIGIN[a.id][1] },
+      whOrigin: whOriginShape(a.id),          // AssetLocations(id) after enactment
+      locationUpdate: buildLocationUpdate(a.id), // AssetRegistry.update SCALE (hand-encoded)
     }));
 
     console.log(`\n════════ two-sweep MRL-drain proposal ════════`);
@@ -143,14 +217,23 @@ async function main() {
     console.log(`BLOCK_N           : ${blockN}${blockNIsPlaceholder ? "  (placeholder = forkHead+20; set BLOCK_N env for real)" : ""}`);
     console.log(`SWEEP1 send call  : ${(sweepCall.length - 2) / 2} bytes  (blake2: ${sweepHash})`);
     console.log(`schedule_named    : ${(scheduleNamed.length - 2) / 2} bytes`);
-    console.log(`inner batch_all   : ${innerBin.length} bytes`);
+    console.log(`location updates  : ${updates.length} × AssetRegistry.update WH-origin (${updates.map((u) => (u.length - 2) / 2).join("/")} bytes)`);
+    console.log(`withdraw limit    : set_global_withdraw_limit_params(${WITHDRAW_LIMIT_RAW / 10n ** 12n} HDX / ${WITHDRAW_WINDOW_MS / 3_600_000}h)  ${(withdraw.length - 2) / 2} bytes`);
+    console.log(`inner batch_all   : ${innerBin.length} bytes  (${2 + updates.length + 1} calls, compact prefix 0x${compactEncode(2 + updates.length + 1)})`);
     console.log(`inner blake2-256  : ${innerHash}   ← TC whitelists this`);
     console.log(`whitelisted call  : ${(proposal.length - 2) / 2} bytes`);
     console.log(`self-decode       : ${decodeInfo}`);
 
     const OUT = "probes/sweep-proposal.json";
     writeFileSync(OUT, JSON.stringify({
-      note: "two-sweep MRL-drain (dynamic full-balance drain of the para-2034 Moonbeam SA via MrlSweeper + Wormhole TokenBridge). "
+      note: "two-sweep MRL-drain + XCM-disconnect + withdraw-limit cut (single enactment). Batch_all has 14 calls: SWEEP1, "
+        + "Scheduler.schedule_named(SWEEP2@BLOCK_N), then 11× AssetRegistry.update(id, location=WH-origin), then "
+        + "CircuitBreaker.set_global_withdraw_limit_params(200M HDX / 6h = 1/5 of live). "
+        + "The 11 updates repoint each MRL asset at its CANONICAL Wormhole provenance parents:0 X3[GeneralKey('wh'), "
+        + "GeneralIndex(tokenChain), GeneralKey(tokenAddress)] read live off the Moonbeam wrapper (chainId()/nativeContract()). "
+        + "This location has NO Moonbeam reserve, so after enactment any stale-UI XTokens.transfer(id → Moonbeam) rejects "
+        + "atomically with XTokens::AssetHasNoReserve (funds never leave the wallet), while the old Moonbeam reverse "
+        + "LocationAssets key is dropped. Order after the two sweep calls is irrelevant. --- "
         + "SWEEP1 fires immediately; SWEEP2 re-dispatches the identical sweep at BLOCK_N to catch stragglers (sweeper is bal==0-safe). "
         + "The scheduled call is passed INLINE (this runtime's pallet_scheduler.schedule_named takes call: Box<RuntimeCall>, so the "
         + "proposal needs no manual note_preimage — batch_all has exactly two calls). pallet_scheduler then internally bounds the "
@@ -165,6 +248,16 @@ async function main() {
       tokens,
       sweepCall, sweepHash,
       scheduleNamed,
+      whGeneralKeyData: whGeneralKey(),
+      locationUpdates: ASSETS.map((a) => ({
+        id: a.id, sym: a.sym, tokenChain: WH_ORIGIN[a.id][0], tokenAddress: WH_ORIGIN[a.id][1],
+        whOrigin: whOriginShape(a.id), updateCall: buildLocationUpdate(a.id),
+      })),
+      withdrawLimit: {
+        call: withdraw, limitRaw: WITHDRAW_LIMIT_RAW.toString(),
+        limitHDX: (WITHDRAW_LIMIT_RAW / 10n ** 12n).toLocaleString("en-US") + " HDX",
+        windowMs: WITHDRAW_WINDOW_MS, note: "1/5 of live 1,000,000,000 HDX / 6h",
+      },
       innerBatchAll: inner,
       innerHash,
       whitelistedProposal: proposal,
