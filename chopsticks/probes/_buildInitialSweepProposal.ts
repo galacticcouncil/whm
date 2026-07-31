@@ -22,7 +22,7 @@ import { Binary } from "polkadot-api";
 import { spawnForks, teardownForks } from "../lib/network";
 import { configs } from "../lib/configs";
 import { ASSETS } from "./exitAssets";
-import { wrapSingleCallInSend, wrapWhitelist, batchAllCall, buildScheduleNamed, buildLocationUpdate } from "./_buildSweepProposal";
+import { wrapSingleCallInSend, wrapWhitelist, batchAllCall, buildScheduleAfter, buildLocationUpdate } from "./_buildSweepProposal";
 
 const MAX_UINT = (1n << 256n) - 1n;
 const SWEEP_ABI = parseAbi(["function sweep(address token) returns (uint64)"]);
@@ -46,14 +46,15 @@ export function buildSweepSend(sweeper: Hex, token: Hex): Hex {
   return wrapSingleCallInSend(sweeper, input);
 }
 
-// inner = batch_all([ approveSend×11, schedule_named(now+N, batch_all([ sweepSend×11, disconnect×11 ])) ])
-//   the scheduled batch drains (sweep sends → Moonbeam) AND severs each token from XCM (local AssetRegistry.update
-//   → WH-origin location, no Moonbeam reserve) at BLOCK_N — the cutover moment.
-export function buildInitialSweepInner(sweeper: Hex, blockN: number): Hex {
+// inner = batch_all([ approveSend×11, schedule_after(delay, batch_all([ sweepSend×11, disconnect×11 ])) ])
+//   RELATIVE delay (no absolute block to guess): `delay` blocks after enactment the scheduled batch drains
+//   (sweep sends → Moonbeam) AND severs each token from XCM (local AssetRegistry.update → WH-origin location).
+//   The delay lets the approves land on Moonbeam first; the final pre-sunset sweep is done by the OWNER EOA.
+export function buildInitialSweepInner(sweeper: Hex, delay: number): Hex {
   const approveSends = ASSETS.map((a) => buildApproveSend(sweeper, getAddress(a.token)));
   const sweepSends = ASSETS.map((a) => buildSweepSend(sweeper, getAddress(a.token)));
   const disconnects = ASSETS.map((a) => buildLocationUpdate(a.id)); // sever from XCM (WH-origin location)
-  const schedule = buildScheduleNamed(batchAllCall([...sweepSends, ...disconnects]), blockN, SWEEPS_ID);
+  const schedule = buildScheduleAfter(batchAllCall([...sweepSends, ...disconnects]), delay);
   return batchAllCall([...approveSends, schedule]);
 }
 
@@ -62,8 +63,8 @@ async function main() {
   const nets = await spawnForks([configs.hydration]);
   try {
     const api = nets.hydration.client.getUnsafeApi();
-    const blockN = process.env.BLOCK_N ? Number(process.env.BLOCK_N) : nets.hydration.chain.head.number + 10;
-    const inner = buildInitialSweepInner(sweeper, blockN);
+    const delay = process.env.DELAY ? Number(process.env.DELAY) : 20;
+    const inner = buildInitialSweepInner(sweeper, delay);
     const proposal = wrapWhitelist(inner);
 
     const innerBin = Binary.fromHex(inner);
@@ -79,13 +80,13 @@ async function main() {
       const sched = calls[calls.length - 1];
       const schedInner = sched.value.value.call;
       decodeInfo = `${dc.type}.${dc.value.type}[${calls.length}: send×${calls.length - 1} + ${sched.value.type}]`
-        + ` | send0 instrs=${instrs} | scheduled=${schedInner?.type}.${schedInner?.value?.type}[${schedInner?.value?.value?.calls?.length} sweep sends]@${sched.value.value.when}`;
+        + ` | send0 instrs=${instrs} | scheduled=${schedInner?.type}.${schedInner?.value?.type}[${schedInner?.value?.value?.calls?.length} sweep+sever] after +${sched.value.value.after}`;
     } catch (e: any) { decodeInfo = "DECODE FAILED: " + (e?.message ?? e); }
 
     console.log(`\n════════ initial-sweep proposal (no batchAll) ════════`);
     console.log(`sweeper           : ${sweeper}`);
-    console.log(`BLOCK_N (sweeps)  : ${blockN}${process.env.BLOCK_N ? "" : "  (placeholder head+10)"}`);
-    console.log(`structure         : 11 approve sends (now) + schedule_named(11 full-sweep sends @ BLOCK_N)`);
+    console.log(`schedule delay    : +${delay} blocks after enactment${process.env.DELAY ? "" : "  (default 20)"}`);
+    console.log(`structure         : 11 approve sends (now) + schedule_after(+${delay}: 11 sweep sends + 11 sever)`);
     console.log(`inner batch_all   : ${innerBin.length} bytes  (${ASSETS.length + 1} calls)`);
     console.log(`inner blake2-256  : ${innerHash}   ← TC whitelists this`);
     console.log(`whitelisted call  : ${(proposal.length - 2) / 2} bytes`);
@@ -94,12 +95,13 @@ async function main() {
     const OUT = "probes/initial-sweep-proposal.json";
     writeFileSync(OUT, JSON.stringify({
       note: "INITIAL-SWEEP (no batchAll precompile). batch_all([ PolkadotXcm.send(Transact{SA, token.approve(sweeper,MAX)})×11, "
-        + "Scheduler.schedule_named(@BLOCK_N, batch_all([ PolkadotXcm.send(Transact{SA, sweeper.sweep(token)})×11 ])) ]). Each "
-        + "approve/sweep is its own single-call Moonbeam Transact (msg.sender=SA) — no batchAll precompile (the 22-subcall batchAll "
-        + "reverted: one Transact couldn't fit it). Sweeps scheduled a few blocks after the approves so allowances are live first. "
-        + "Full balance per token via the sweeper's hardcoded dests. The OWNER EOA backstops stragglers afterward. SWEEPER = deployed "
-        + "MrlSweeperHardcoded. BEFORE SUBMIT: set real BLOCK_N + real SWEEPER; confirm the 11 tokens are registered on the Moonbeam bridge.",
-      sweeper, blockN,
+        + "Scheduler.schedule_after(delay, batch_all([ PolkadotXcm.send(Transact{SA, sweeper.sweep(token)})×11, AssetRegistry.update(id, WH-origin)×11 ])) ]). "
+        + "Each approve/sweep is its own single-call Moonbeam Transact (msg.sender=SA) — no batchAll precompile (the 22-subcall batchAll "
+        + "reverted: one Transact couldn't fit it). RELATIVE delay (schedule_after, not an absolute block) so the approves land on Moonbeam "
+        + "first; then the scheduled batch drains full balance to the sweeper's hardcoded dests AND severs each token from XCM. The final "
+        + "pre-sunset sweep is done by the OWNER EOA. SWEEPER = deployed MrlSweeperHardcoded. BEFORE SUBMIT: confirm the 11 tokens are "
+        + "registered on the Moonbeam bridge (tune DELAY if needed).",
+      sweeper, delay,
       tokens: ASSETS.map((a) => ({ sym: a.sym, id: a.id, token: getAddress(a.token) })),
       innerBatchAll: inner, innerHash, whitelistedProposal: proposal,
     }, null, 2));

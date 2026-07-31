@@ -139,6 +139,11 @@ export function buildSweepCall(assets: ExitAsset[] = ASSETS): Hex {
 export function buildScheduleNamed(sweepCall: Hex, blockN: number, id: Hex = SWEEP2_ID, priority = 0): Hex {
   return ("0x0502" + id.slice(2) + u32le(blockN) + "00" + priority.toString(16).padStart(2, "0") + sweepCall.slice(2)) as Hex;
 }
+// ── Scheduler(5).schedule_after(4)(after u32LE, None, priority u8, call inline) — RELATIVE delay from enactment ──
+//    (no absolute block to guess: fires `after` blocks after the proposal enacts, so approves land on Moonbeam first).
+export function buildScheduleAfter(call: Hex, after: number, priority = 0): Hex {
+  return ("0x0504" + u32le(after) + "00" + priority.toString(16).padStart(2, "0") + call.slice(2)) as Hex;
+}
 
 // ── WH-origin disconnect: repoint each MRL asset at its CANONICAL Wormhole provenance location —
 //    parents:0, X3[ GeneralKey("wh"), GeneralIndex(tokenChain), GeneralKey(tokenAddress) ] — where

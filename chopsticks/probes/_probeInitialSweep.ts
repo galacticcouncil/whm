@@ -176,13 +176,14 @@ async function main() {
       dest[a.sym] = { chain: Number(c), recipient: r.toLowerCase() };
     }
 
-    // build inner: 11 approve sends (now) + schedule_named(11 full-sweep sends @ BLOCK_N) — no batchAll precompile
+    // build inner: 11 approve sends (now) + schedule_after(delay, 11 sweep sends + 11 sever) — no batchAll precompile
     const head0 = hydration.chain.head.number;
-    const BLOCK_N = head0 + 6;
-    const inner = buildInitialSweepInner(SWEEPER, BLOCK_N);
+    const delay = 6;                         // relative: sweeps fire `delay` blocks after the inner dispatches
+    const fireAt = head0 + 1 + delay;        // inner dispatches at head0+1, schedule_after adds `delay`
+    const inner = buildInitialSweepInner(SWEEPER, delay);
     const bytes = Binary.fromHex(inner); const len = bytes.length;
     const hash = registry.hash(bytes as any).toHex() as Hex;
-    console.log(`\n── Root-dispatch inner (${len} bytes, ${ASSETS.length} approve sends + sweeps @ ${BLOCK_N}) ──`);
+    console.log(`\n── Root-dispatch inner (${len} bytes, ${ASSETS.length} approve sends + sweeps after +${delay}) ──`);
     await hydration.setStorage({
       Preimage: { PreimageFor: [[[[hash, len]], Array.from(bytes)]] },
       Scheduler: { Agenda: [[[head0 + 1], [{ maybeId: null, priority: 0, call: { Lookup: { hash, len } }, maybePeriodic: null, origin: { system: "Root" } }]]] },
@@ -202,8 +203,8 @@ async function main() {
     rec("all 11 approves landed (SA→sweeper allowance == MAX)", approveAll);
 
     // advance Hydration to BLOCK_N → scheduled sweeps fire → collect VAAs on Moonbeam
-    console.log(`\n── advance Hydration to BLOCK_N=${BLOCK_N} → sweeps fire ──`);
-    while (hydration.chain.head.number < BLOCK_N) await hydration.chain.newBlock();
+    console.log(`\n── advance Hydration +${delay} (to ${fireAt}) → sweeps fire ──`);
+    while (hydration.chain.head.number < fireAt) await hydration.chain.newBlock();
     await hydration.newBlock(); // flush HRMP (sweep sends)
     const vlogs: { topics: Hex[]; data: Hex }[] = [];
     for (let i = 0; i < 8; i++) {
