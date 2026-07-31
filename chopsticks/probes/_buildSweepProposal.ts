@@ -196,6 +196,11 @@ export function buildLocationUpdate(assetId: number): Hex {
   return ("0x3301" + u32le(assetId) + "00000000000000" + "01" + whLocationScale(chain, addr)) as Hex;
 }
 
+// ── EVMAccounts(93/0x5d).set_ntt_minter(7)(asset_id u32 LE, minter H160) — binds the NTT spoke manager as minter ──
+export function buildSetNttMinter(assetId: number, manager: Hex): Hex {
+  return ("0x5d07" + u32le(assetId) + manager.replace(/^0x/, "").toLowerCase()) as Hex;
+}
+
 // ── CircuitBreaker(65/0x41).set_global_withdraw_limit_params(6)({ limit u128, window Moment(u64) }) ──
 //    tightens the GLOBAL withdraw limit to 1/5 of live (1B → 200M HDX / 6h). Applies to every asset
 //    counted toward the global limit (DAI et al. via GlobalAssetOverrides=External), not just MRL.
