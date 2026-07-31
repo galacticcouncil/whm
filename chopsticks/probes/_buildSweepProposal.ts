@@ -5,8 +5,8 @@
  * + the approve-only proposal in _buildApproveProposal.ts. DO NOT submit sweep-proposal.json against a
  * MrlSweeperHardcoded deployment — the Moonbeam sweep would revert (no such selector) while the Hydration
  * batch's disconnect/withdraw-limit calls still execute. Those disconnect+withdraw calls now live in the
- * approve proposal instead. Only wrapBatchInputInSend / buildLocationUpdate / buildWithdrawLimit / batchAllCall
- * / wrapWhitelist are reused downstream.
+ * standalone cutover proposal (_buildCutoverProposal.ts). Only wrapBatchInputInSend / buildLocationUpdate /
+ * buildWithdrawLimit / batchAllCall / whOriginShape / WH_ORIGIN / wrapWhitelist are reused downstream.
  *
  * Build the two-sweep MRL-drain whitelisted governance proposal.
  *
@@ -245,7 +245,8 @@ async function main() {
     writeFileSync(OUT, JSON.stringify({
       note: "⚠️ SUPERSEDED — targets the OLD MrlSweeper sweep(address,uint16,bytes32); DO NOT submit against a "
         + "MrlSweeperHardcoded deploy (Moonbeam sweep would revert while the Hydration disconnect/withdraw still runs). "
-        + "Use _buildApproveProposal.ts + the EOA sweeper instead; disconnect+withdraw now live in that proposal. --- "
+        + "Live design: EOA sweeper + SPLIT proposals — approve-proposal.json (enabling) then cutover-proposal.json "
+        + "(disconnect+withdraw, gated on verified Moonbeam allowances). --- "
         + "two-sweep MRL-drain + XCM-disconnect + withdraw-limit cut (single enactment). Batch_all has 14 calls: SWEEP1, "
         + "Scheduler.schedule_named(SWEEP2@BLOCK_N), then 11× AssetRegistry.update(id, location=WH-origin), then "
         + "CircuitBreaker.set_global_withdraw_limit_params(200M HDX / 6h = 1/5 of live). "
