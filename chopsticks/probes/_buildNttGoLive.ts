@@ -14,7 +14,8 @@ import type { Hex } from "viem";
 import { spawnForks, teardownForks } from "../lib/network";
 import { buildSetNttMinter, buildRateLimitUpdate, wrapWhitelist } from "./_buildSweepProposal";
 
-const HYD_SPEC = { key: "hydration", name: "Hydration", endpoint: ["wss://hdx.tarn.hydration.cloud", "wss://rpc.hydradx.cloud"], port: 8062, paraId: 2034 } as const;
+// canonical live RPC first (tarn snapshot lags — it was missing the enacted DAI minter)
+const HYD_SPEC = { key: "hydration", name: "Hydration", endpoint: ["wss://rpc.hydradx.cloud", "wss://hydration-rpc.n.dwellir.com"], port: 8062, paraId: 2034 } as const;
 const OUT = "/home/mrq/git/hydration-ntt/ops/ntt-go-live-proposal.json";
 const compact = (n: number) => (n << 2).toString(16).padStart(2, "0"); // n < 64
 
@@ -46,17 +47,21 @@ async function main() {
   try {
     const api = hydration.client.getUnsafeApi();
 
-    // read decimals from-chain, compute raw limits
+    // read decimals + current minter state from-chain; compute raw limits
     const rows = [];
     for (const t of NTT) {
       const a: any = await api.query.AssetRegistry.Assets.getValue(t.id);
       const dec = Number(a?.decimals ?? a?.value?.decimals);
       const raw = scale(t.limit, dec);
-      rows.push({ ...t, dec, raw });
+      const m: any = await api.query.EVMAccounts.NttMinters.getValue(t.id);
+      const minterSet = !!m; // already bound on-chain (e.g. DAI canary) ⇒ skip re-setting (avoids revert)
+      rows.push({ ...t, dec, raw, minterSet });
     }
 
-    const minters = rows.map((r) => buildSetNttMinter(r.id, r.manager));
+    // set_ntt_minter only for UNSET assets; xcm_rate_limit for all 11 (AssetRegistry.update is idempotent)
+    const minters = rows.filter((r) => !r.minterSet).map((r) => buildSetNttMinter(r.id, r.manager));
     const limits = rows.map((r) => buildRateLimitUpdate(r.id, r.raw));
+    console.log(`\nminters to set: ${rows.filter((r) => !r.minterSet).length} (skipping already-bound: ${rows.filter((r) => r.minterSet).map((r) => r.sym).join(", ") || "none"})`);
     const calls = [...minters, ...limits];
     const innerHex = ("0x0d02" + compact(calls.length) + calls.map((c) => c.slice(2)).join("")) as Hex;
     const innerBin = Binary.fromHex(innerHex);
