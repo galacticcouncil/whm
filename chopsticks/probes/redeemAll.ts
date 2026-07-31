@@ -17,7 +17,7 @@ import { getSolanaSignAndSendSigner } from "@wormhole-foundation/sdk-solana";
 import { getSuiSigner } from "@wormhole-foundation/sdk-sui";
 import { Keypair } from "@solana/web3.js";
 import { readFileSync } from "node:fs";
-import { fetchVaaHex } from "../../common/wormhole/scan";
+import { fetchVaaHexOnce } from "../../common/wormhole/scan";
 
 /** Solana secret from SOLANA_KEYPAIR (path to [n,n,…] json or a base58 string in a file) or SOLANA_KEY (base58). */
 function solanaSecret(): string | Keypair | undefined {
@@ -76,7 +76,9 @@ async function main() {
     try {
       const chain = wh.getChain(j.chain);
       const tb = await chain.getTokenBridge();
-      const vaa = deserialize("TokenBridge:Transfer", encoding.hex.decode(await fetchVaaHex(16, EMITTER, j.seq)));
+      const hex = await fetchVaaHexOnce(16, EMITTER, j.seq); // single-shot: don't wait on Governor-held VAAs
+      if (!hex) { console.log(`  ${j.sym.padEnd(8)} skip — VAA not available yet (seq ${j.seq})`); continue; }
+      const vaa = deserialize("TokenBridge:Transfer", encoding.hex.decode(hex));
       if (await tb.isTransferCompleted(vaa)) { console.log(`  ${j.sym.padEnd(8)} already redeemed`); continue; }
       const signer = await signerFor(j.chain);
       const sender = Wormhole.chainAddress(chain.chain, signer.address());

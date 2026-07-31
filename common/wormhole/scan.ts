@@ -17,21 +17,29 @@ export async function fetchVaaHex(
   opts: { timeoutMs?: number; intervalMs?: number } = {},
 ): Promise<`0x${string}`> {
   const { timeoutMs = 5 * 60 * 1000, intervalMs = 5000 } = opts;
-  const url = `https://api.wormholescan.io/api/v1/vaas/${emitterChain}/${emitterAddr}/${sequence}`;
-  const headers = apiKey ? { "X-API-KEY": apiKey } : undefined;
   const deadline = Date.now() + timeoutMs;
   let attempt = 0;
   while (Date.now() < deadline) {
     attempt++;
-    const res = await fetch(url, { headers });
-    if (res.ok) {
-      const json = (await res.json()) as { data?: { vaa?: string } };
-      if (json?.data?.vaa) {
-        return `0x${Buffer.from(json.data.vaa, "base64").toString("hex")}` as `0x${string}`;
-      }
-    }
+    const hex = await fetchVaaHexOnce(emitterChain, emitterAddr, sequence, apiKey);
+    if (hex) return hex;
     console.log(`  …waiting for VAA (attempt ${attempt})`);
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error(`Timed out waiting for VAA ${emitterChain}/${emitterAddr}/${sequence}`);
+}
+
+/** Single-shot: the signed VAA as `0x`-hex, or `null` if the Guardians haven't signed it yet (no polling). */
+export async function fetchVaaHexOnce(
+  emitterChain: number,
+  emitterAddr: string,
+  sequence: bigint,
+  apiKey?: string,
+): Promise<`0x${string}` | null> {
+  const url = `https://api.wormholescan.io/api/v1/vaas/${emitterChain}/${emitterAddr}/${sequence}`;
+  const headers = apiKey ? { "X-API-KEY": apiKey } : undefined;
+  const res = await fetch(url, { headers });
+  if (!res.ok) return null;
+  const json = (await res.json()) as { data?: { vaa?: string } };
+  return json?.data?.vaa ? (`0x${Buffer.from(json.data.vaa, "base64").toString("hex")}` as `0x${string}`) : null;
 }
