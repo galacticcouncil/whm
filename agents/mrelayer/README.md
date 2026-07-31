@@ -18,6 +18,12 @@ Relays token transfers **from Moonbeam to Base** using standard Wormhole Token B
 
 Relays token transfers **from Moonbeam to Ethereum** using standard Wormhole Token Bridge.
 
+### Hydration NTT Relayer (`start:hydration`)
+
+Redeems Wormhole NTT transfers **to Hydration** from Ethereum, Base, Solana, and Sui. It watches
+the eleven deployed origin transceivers and submits each transfer VAA to its corresponding
+Hydration transceiver.
+
 ### Intent Relayer (`start:intent`)
 
 Relays the WTT intent path **from Moonbeam to Ethereum** — payload-3 transfers addressed to the
@@ -78,6 +84,16 @@ service and skipping when it exceeds the payload's `maxRelayFee`. Uses its own *
 | `ETH_RPC`           | Ethereum RPC endpoint                               | `https://eth.llamarpc.com` |
 | `MOONBEAM_FROM_SEQ` | Start sequence for Moonbeam VAAs                    | `0`                        |
 
+### Hydration NTT relayer — `start:hydration` (NTT origins → Hydration)
+
+| Variable              | Description                                 | Default                               |
+| --------------------- | ------------------------------------------- | ------------------------------------- |
+| `HYDRATION_RPC`       | Hydration EVM RPC endpoint (chain `222222`) | `https://hydration-rpc.n.dwellir.com` |
+| `NTT_ETH_FROM_SEQ`    | Start sequence for Ethereum NTT VAAs        | `0`                                   |
+| `NTT_BASE_FROM_SEQ`   | Start sequence for Base NTT VAAs            | `0`                                   |
+| `NTT_SOLANA_FROM_SEQ` | Start sequence for Solana NTT VAAs          | `0`                                   |
+| `NTT_SUI_FROM_SEQ`    | Start sequence for Sui NTT VAAs             | `0`                                   |
+
 ## Development
 
 ```bash
@@ -89,6 +105,9 @@ npm run dev
 
 # Run Base relayer (dev)
 npm run dev:base
+
+# Run Hydration NTT relayer (dev)
+npm run dev:hydration
 
 
 # Start Redis locally
@@ -109,6 +128,9 @@ npm run start
 
 # Run Base relayer
 npm run start:base
+
+# Run Hydration NTT relayer
+npm run start:hydration
 ```
 
 ## Docker
@@ -122,6 +144,9 @@ docker run -e PRIVKEY=<key> mrelayer
 
 # Run Base relayer
 docker run -e PRIVKEY=<key> -e BASE_RPC=<rpc> mrelayer start:base
+
+# Run Hydration NTT relayer
+docker run -e PRIVKEY=<key> -e HYDRATION_RPC=<rpc> mrelayer start:hydration
 ```
 
 ## Docker Stack
