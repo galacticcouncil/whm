@@ -21,7 +21,7 @@ import { Binary } from "polkadot-api";
 import { configs } from "../lib/configs";
 import { spawnForks, teardownForks, type Network } from "../lib/network";
 import { ASSETS } from "./exitAssets";
-import { buildInitialSweepInner, NTT_MINTERS } from "./_buildInitialSweepProposal";
+import { buildInitialSweepInner } from "./_buildInitialSweepProposal";
 import { WH_ORIGIN, WH_GENERALKEY_DATA } from "./_buildSweepProposal";
 
 const SA = getAddress(acc.getSovereignAccounts(2034).moonbeam as Hex);
@@ -249,18 +249,6 @@ async function main() {
       console.log(`  ${a.sym.padEnd(8)} id=${String(a.id).padEnd(8)} X3 WH-origin ${ok ? "✅" : "❌"}`);
     }
     rec("all 11 tokens severed from XCM (AssetLocations = WH-origin)", severAll);
-
-    // NTT minter verification: NttMinters(id) bound to the spoke manager for the 10 NTT assets
-    console.log(`\n── NTT minters bound? (10) ──`);
-    let minterAll = true;
-    for (const [id, mgr] of NTT_MINTERS) {
-      const m: any = await api0.query.EVMAccounts.NttMinters.getValue(id);
-      const got = m ? (typeof m.asHex === "function" ? m.asHex() : String(m)) : "None";
-      const ok = got.toLowerCase().includes(mgr.toLowerCase().replace("0x", ""));
-      minterAll &&= ok;
-      console.log(`  id=${String(id).padEnd(8)} NttMinters ${ok ? "✅" : "❌"} ${got}`);
-    }
-    rec("all 10 NTT minters bound (NttMinters(id) == manager)", minterAll);
 
     // standing approval survives for the EOA backstop
     const allowLeft = await allowance(getAddress(backed[0].token));

@@ -22,22 +22,7 @@ import { Binary } from "polkadot-api";
 import { spawnForks, teardownForks } from "../lib/network";
 import { configs } from "../lib/configs";
 import { ASSETS } from "./exitAssets";
-import { wrapSingleCallInSend, wrapWhitelist, batchAllCall, buildScheduleAfter, buildLocationUpdate, buildSetNttMinter } from "./_buildSweepProposal";
-
-// 10 NTT assets (assetId → Hydration spoke NttManager) — source: hydration-ntt/ops/tokens/<sym>/deployment.json.
-// SUI (id 1000753) has no NTT deployment ⇒ no minter. Setting the minter enables NTT minting for that asset id.
-export const NTT_MINTERS: [number, Hex][] = [
-  [18, "0xcFd576F88C90844AEBF45378Fd09931281D8b14d"],      // DAI
-  [19, "0x6BFca089916c045b0Ca4A09B655aF9F926189993"],      // WBTC
-  [20, "0xB5cEf790D52A57fa619eD96eDd64c5328F3DCFb7"],      // WETH
-  [21, "0xEcEab64542A875C4472671D9Ed1E690cdD4e28fC"],      // USDC
-  [23, "0x5E6C488103b47F804824AE15861638af4C436795"],      // USDT
-  [40, "0xcE73C15B9ED02413066DE5B904A36F8e8f9B5331"],      // jitoSOL
-  [43, "0xFCaF4aA069C565d25539028970703F01e47D3E0B"],      // PRIME
-  [44, "0x8dd1286A29dF5a2785FB638d6fB1598144Cfbc4C"],      // EURC
-  [1000745, "0x1973E7044d9A7C7bB2d6ea1693A296a9e4B7E448"], // sUSDS
-  [1000752, "0x9e200C0f28D92D296b201D96C8269d3CAFFfA9FF"], // SOL
-];
+import { wrapSingleCallInSend, wrapWhitelist, batchAllCall, buildScheduleAfter, buildLocationUpdate } from "./_buildSweepProposal";
 
 const MAX_UINT = (1n << 256n) - 1n;
 const SWEEP_ABI = parseAbi(["function sweep(address token) returns (uint64)"]);
@@ -68,10 +53,8 @@ export function buildSweepSend(sweeper: Hex, token: Hex): Hex {
 export function buildInitialSweepInner(sweeper: Hex, delay: number): Hex {
   const approveSends = ASSETS.map((a) => buildApproveSend(sweeper, getAddress(a.token)));
   const sweepSends = ASSETS.map((a) => buildSweepSend(sweeper, getAddress(a.token)));
-  const disconnects = ASSETS.map((a) => buildLocationUpdate(a.id)); // sever MRL from XCM (WH-origin location)
-  const minters = NTT_MINTERS.map(([id, mgr]) => buildSetNttMinter(id, mgr)); // enable NTT (bind spoke manager)
-  // scheduled batch = atomic MRL→NTT cutover: drain + disable MRL (sever) + enable NTT (set_ntt_minter)
-  const schedule = buildScheduleAfter(batchAllCall([...sweepSends, ...disconnects, ...minters]), delay);
+  const disconnects = ASSETS.map((a) => buildLocationUpdate(a.id)); // sever from XCM (WH-origin location)
+  const schedule = buildScheduleAfter(batchAllCall([...sweepSends, ...disconnects]), delay);
   return batchAllCall([...approveSends, schedule]);
 }
 
@@ -97,13 +80,13 @@ async function main() {
       const sched = calls[calls.length - 1];
       const schedInner = sched.value.value.call;
       decodeInfo = `${dc.type}.${dc.value.type}[${calls.length}: send×${calls.length - 1} + ${sched.value.type}]`
-        + ` | send0 instrs=${instrs} | scheduled=${schedInner?.type}.${schedInner?.value?.type}[${schedInner?.value?.value?.calls?.length} sweep+sever+minter] after +${sched.value.value.after}`;
+        + ` | send0 instrs=${instrs} | scheduled=${schedInner?.type}.${schedInner?.value?.type}[${schedInner?.value?.value?.calls?.length} sweep+sever] after +${sched.value.value.after}`;
     } catch (e: any) { decodeInfo = "DECODE FAILED: " + (e?.message ?? e); }
 
     console.log(`\n════════ initial-sweep proposal (no batchAll) ════════`);
     console.log(`sweeper           : ${sweeper}`);
     console.log(`schedule delay    : +${delay} blocks after enactment${process.env.DELAY ? "" : "  (default 20)"}`);
-    console.log(`structure         : 11 approve sends (now) + schedule_after(+${delay}: 11 sweep + 11 sever + 10 NTT minters)`);
+    console.log(`structure         : 11 approve sends (now) + schedule_after(+${delay}: 11 sweep sends + 11 sever)`);
     console.log(`inner batch_all   : ${innerBin.length} bytes  (${ASSETS.length + 1} calls)`);
     console.log(`inner blake2-256  : ${innerHash}   ← TC whitelists this`);
     console.log(`whitelisted call  : ${(proposal.length - 2) / 2} bytes`);
@@ -117,7 +100,7 @@ async function main() {
         + "reverted: one Transact couldn't fit it). RELATIVE delay (schedule_after, not an absolute block) so the approves land on Moonbeam "
         + "first; then the scheduled batch drains full balance to the sweeper's hardcoded dests AND severs each token from XCM. The final "
         + "pre-sunset sweep is done by the OWNER EOA. SWEEPER = deployed MrlSweeperHardcoded. BEFORE SUBMIT: confirm the 11 tokens are "
-        + "registered on the Moonbeam bridge (tune DELAY if needed). The scheduled batch is the atomic MRL->NTT cutover: drain + sever MRL (AssetRegistry.update WH-origin) + enable NTT (EVMAccounts.set_ntt_minter for the 10 NTT assets; SUI has no NTT deployment).",
+        + "registered on the Moonbeam bridge (tune DELAY if needed).",
       sweeper, delay,
       tokens: ASSETS.map((a) => ({ sym: a.sym, id: a.id, token: getAddress(a.token) })),
       innerBatchAll: inner, innerHash, whitelistedProposal: proposal,
