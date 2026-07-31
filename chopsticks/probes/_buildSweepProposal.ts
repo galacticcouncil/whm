@@ -201,6 +201,13 @@ export function buildSetNttMinter(assetId: number, manager: Hex): Hex {
   return ("0x5d07" + u32le(assetId) + manager.replace(/^0x/, "").toLowerCase()) as Hex;
 }
 
+// ── AssetRegistry(51/0x33).update(1)(id, …, xcm_rate_limit=Some(raw), …) — set only the per-asset xcm_rate_limit ──
+//    33 01 | id u32LE | 3×00 (name/asset_type/existential None) | 01 + u128 LE | 4×00 (is_sufficient/symbol/decimals/location None)
+export function buildRateLimitUpdate(assetId: number, raw: bigint): Hex {
+  const u128le = (n: bigint): string => n.toString(16).padStart(32, "0").match(/../g)!.reverse().join("");
+  return ("0x3301" + u32le(assetId) + "000000" + "01" + u128le(raw) + "00000000") as Hex;
+}
+
 // ── CircuitBreaker(65/0x41).set_global_withdraw_limit_params(6)({ limit u128, window Moment(u64) }) ──
 //    tightens the GLOBAL withdraw limit to 1/5 of live (1B → 200M HDX / 6h). Applies to every asset
 //    counted toward the global limit (DAI et al. via GlobalAssetOverrides=External), not just MRL.
