@@ -99,6 +99,37 @@ export function wrapBatchInputInSend(newInputHex: Hex): Hex {
   return ("0x" + rebuilt) as Hex;
 }
 
+// ── wrap ONE EVM call (to, input) in the same PolkadotXcm.send → Moonbeam Transact envelope — a SINGLE
+//    call (not the batchAll precompile): swap the action `to` (batch precompile → target) AND the input. ──
+export function wrapSingleCallInSend(to: Hex, callInput: Hex): Hex {
+  const full = PRIME_TEST_EXIT.slice(2).toLowerCase();
+  const INNER_START = "6d0000404b4c";
+  const TAIL_MARK = "140d01020400010300";
+  const SEL = "96e292b8"; // batchAll selector marks the input start in the template
+  const iInner = full.indexOf(INNER_START), iTail = full.indexOf(TAIL_MARK), iSel = full.indexOf(SEL);
+  if (iInner < 0 || iTail < 0 || iSel < 0) throw new Error("marker not found in PRIME template");
+  const posInner = iInner / 2, posTail = iTail / 2, posSel = iSel / 2;
+  const oldInnerLen = posTail - posInner;
+  const bpreLen = compactByteLen(oldInnerLen);
+  const oldInputLen = (posTail - 1) - posSel;
+  const inCompactLen = compactByteLen(oldInputLen);
+  const posInputCompact = posSel - inCompactLen;
+
+  const HEAD = full.slice(0, (posInner - bpreLen) * 2);
+  let IHEAD = full.slice(posInner * 2, posInputCompact * 2); // 6d0000 gaslimit fee action to value
+  const TAIL = full.slice(posTail * 2);
+
+  const BATCH = "0000000000000000000000000000000000000808";
+  const toHex = to.replace(/^0x/, "").toLowerCase().padStart(40, "0");
+  if (!IHEAD.includes(BATCH)) throw new Error("batch precompile `to` not found in template IHEAD");
+  IHEAD = IHEAD.replace(BATCH, toHex); // swap action target: batch precompile → the token/sweeper
+
+  const newInput = callInput.slice(2);
+  const newInnerCall = IHEAD + compactEncode(newInput.length / 2) + newInput + "00"; // + access_list None
+  const rebuilt = HEAD + compactEncode(newInnerCall.length / 2) + newInnerCall + TAIL;
+  return ("0x" + rebuilt) as Hex;
+}
+
 // ── SWEEP1: rebuild the PolkadotXcm.send envelope around the 22-subcall drain batch ──
 export function buildSweepCall(assets: ExitAsset[] = ASSETS): Hex {
   return wrapBatchInputInSend(buildBatchInput(assets));
