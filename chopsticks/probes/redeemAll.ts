@@ -5,7 +5,7 @@
  *
  *   pnpm add @wormhole-foundation/sdk       # (already added)
  *   EVM_KEY=0x…  SOLANA_KEYPAIR=~/key.json (or SOLANA_KEY=<base58>)  SUI_KEY=suiprivkey…  \
- *   [ETH_RPC=… BASE_RPC=… SOLANA_RPC=… SUI_RPC=…] [ONLY=96893] \
+ *   [ETH_RPC=… BASE_RPC=… SOLANA_RPC=… SUI_RPC=…] [ONLY=96981] \
  *     pnpm tsx chopsticks/probes/redeemAll.ts
  */
 import { wormhole, signSendWait, deserialize, Wormhole, encoding } from "@wormhole-foundation/sdk";
@@ -33,14 +33,15 @@ const SOL_SECRET = solanaSecret();
 
 const EMITTER = "000000000000000000000000b1731c586ca89a23809861c6103f0b96b3f57d92";
 type Chain = "Ethereum" | "Base" | "Solana" | "Sui";
+// enacted initial-sweep (2026-07-31): Moonbeam token-bridge sequences per swept asset
 const JOBS: { seq: bigint; sym: string; chain: Chain }[] = [
-  { seq: 96893n, sym: "DAI",     chain: "Ethereum" }, { seq: 96894n, sym: "WBTC", chain: "Ethereum" },
-  { seq: 96895n, sym: "WETH",    chain: "Ethereum" }, { seq: 96896n, sym: "USDC", chain: "Ethereum" },
-  { seq: 96897n, sym: "USDT",    chain: "Ethereum" }, { seq: 96901n, sym: "sUSDS", chain: "Ethereum" },
-  { seq: 96900n, sym: "EURC",    chain: "Base" },
-  { seq: 96898n, sym: "jitoSOL", chain: "Solana" },   { seq: 96899n, sym: "PRIME", chain: "Solana" },
-  { seq: 96902n, sym: "SOL",     chain: "Solana" },
-  { seq: 96903n, sym: "SUI",     chain: "Sui" },
+  { seq: 96981n, sym: "DAI",     chain: "Ethereum" }, { seq: 96982n, sym: "WBTC", chain: "Ethereum" },
+  { seq: 96983n, sym: "WETH",    chain: "Ethereum" }, { seq: 96984n, sym: "USDC", chain: "Ethereum" },
+  { seq: 96985n, sym: "USDT",    chain: "Ethereum" }, { seq: 96989n, sym: "sUSDS", chain: "Ethereum" },
+  { seq: 96988n, sym: "EURC",    chain: "Base" },
+  { seq: 96986n, sym: "jitoSOL", chain: "Solana" },   { seq: 96987n, sym: "PRIME", chain: "Solana" },
+  { seq: 96990n, sym: "SOL",     chain: "Solana" },
+  { seq: 96991n, sym: "SUI",     chain: "Sui" },
 ];
 
 const RPC: Partial<Record<Chain, string>> = {
