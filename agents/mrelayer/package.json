@@ -14,6 +14,7 @@
     "dev:hydration": "ts-node src/app-hydration.ts",
     "dev:intent": "ts-node src/app-intent.ts",
     "build": "tsc",
+    "test:hydration-fees": "npm run build && node test/hydration-fees.test.js",
     "watch": "tsc --watch",
     "redis": "docker run --rm -p 6379:6379 --name redis-docker -d redis",
     "mainnet-spy": "docker run --platform=linux/amd64 -p 7073:7073 -p 8999:8999/udp --entrypoint /guardiand ghcr.io/wormhole-foundation/guardiand:latest spy --nodeKey /node.key --spyRPC \"[::]:7073\" --network /wormhole/mainnet/2 --bootstrap '/dns4/wormhole-v2-mainnet-bootstrap.xlabs.xyz/udp/8999/quic/p2p/12D3KooWNQ9tVrcb64tw6bNs2CaNrUGPM7yRrKvBBheQ5yCyPHKC,/dns4/wormhole.mcf.rocks/udp/8999/quic/p2p/12D3KooWDZVv7BhZ8yFLkarNdaSWaB43D6UbQwExJ8nnGAEmfHcU,/dns4/wormhole-v2-mainnet-bootstrap.staking.fund/udp/8999/quic/p2p/12D3KooWG8obDX9DNi1KUwZNu9xkGwfKqTp2GFwuuHpWZ3nQruS1'",
