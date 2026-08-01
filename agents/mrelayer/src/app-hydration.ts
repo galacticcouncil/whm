@@ -13,6 +13,7 @@ import {
 } from "@certusone/wormhole-sdk";
 import { Contract, ethers } from "ethers";
 
+import { getHydrationFeeOverrides } from "./hydration-fees";
 import logger from "./logger";
 
 const HYDRATION_EVM_CHAIN_ID = 222222;
@@ -214,8 +215,10 @@ function createRedeemQueue(
         nonce: currentNonce,
       });
 
+      const feeOverrides = await getHydrationFeeOverrides(provider);
       const tx = await transceiver.receiveMessage(task.vaa.bytes, {
         nonce: currentNonce,
+        ...feeOverrides,
       });
       task.logger.info(
         `Submitted ${task.route.token} redemption in ${tx.hash}`
