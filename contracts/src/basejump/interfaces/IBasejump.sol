@@ -4,6 +4,10 @@ pragma solidity ^0.8.22;
 import {IBasejumpCore} from "./IBasejumpCore.sol";
 
 interface IBasejump is IBasejumpCore {
+    // ─── Errors ──────────────────────────────────────────────────
+
+    error SettlementRouteNotSet(address asset);
+
     // ─── Functions ───────────────────────────────────────────────
 
     function bridgeViaWormhole(
