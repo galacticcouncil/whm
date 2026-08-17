@@ -2,7 +2,7 @@ import type { MigrationStep } from "./types";
 import { registerPriceFeed } from "../../actions/oracle-emitter-solana/registerPriceFeed";
 
 const step: MigrationStep = {
-  name: "007-register-sol@emitter",
+  name: "005-register-sol@emitter",
   description: "Register SOL price feed on Solana oracle emitter",
   action: async (ctx) => {
     const required = (k: string) => {

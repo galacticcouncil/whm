@@ -8,21 +8,22 @@ import type { OracleEmitter } from "../../../crates/solana/target/types/oracle_e
 import type { MigrationConfig } from "./types";
 
 /**
- * Oracle relay with Solana as source.
+ * Oracle relay with Solana as source (direct integration).
  *
- * Solana emitter publishes Scope oracle prices via Wormhole. Moonbeam dispatcher
- * receives VAAs and forwards to Hydration oracle pallets via XCM transactor.
+ * Solana emitter publishes Scope oracle prices + stake-pool rates via Wormhole.
+ * An OracleReceiver on Hydration's EVM verifies the VAA and writes the price
+ * straight to the Hydration oracle — no Moonbeam dispatcher / XCM hop.
  *
  * Required PK env vars:
- *   PK_EMITTER — Solana deployer (BS58-encoded keypair)
- *   PK_RELAY   — Moonbeam deployer
+ *   PK_EMITTER  — Solana deployer (BS58-encoded keypair)
+ *   PK_RECEIVER — Hydration deployer
  *
  * Env file: migrations/envs/<context>/oracle-relay-solana.env
  */
 const config: MigrationConfig = {
   name: "oracle-relay-solana",
-  description: "Deploy Solana oracle emitter + Moonbeam relay (dispatcher + transactor)",
-  pks: ["PK_EMITTER", "PK_RELAY"],
+  description: "Deploy Solana oracle emitter + Hydration OracleReceiver (direct)",
+  pks: ["PK_EMITTER", "PK_RECEIVER"],
 
   setup(env) {
     const required = (k: string) => {
@@ -31,11 +32,11 @@ const config: MigrationConfig = {
       return v;
     };
 
-    // Moonbeam EVM wallet
-    const moonbeam = wallet.getWallet(
-      required("RPC_MOONBEAM"),
-      Number(required("CHAIN_ID_MOONBEAM")),
-      env.PK_RELAY as `0x${string}`,
+    // Hydration EVM wallet
+    const hydration = wallet.getWallet(
+      required("RPC_HYDRATION"),
+      Number(required("CHAIN_ID_HYDRATION")),
+      env.PK_RECEIVER as `0x${string}`,
     );
 
     // Solana Anchor wallet
@@ -50,7 +51,7 @@ const config: MigrationConfig = {
     const program = new Program<OracleEmitter>(oracleEmitterIdl as OracleEmitter, provider);
 
     return {
-      moonbeam,
+      hydration,
       solana: {
         connection,
         keypair,
