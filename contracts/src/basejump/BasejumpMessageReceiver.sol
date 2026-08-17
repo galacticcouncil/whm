@@ -7,13 +7,10 @@ import {IBasejumpLanding} from "./interfaces/IBasejumpLanding.sol";
 
 /// @title BasejumpMessageReceiver — Hydration end of the direct corridor
 /// @notice Verifies the fast-path VAA published by a source Basejump and delivers it through
-///         BasejumpLanding on the same chain. Successor to BasejumpProxy: same role, minus the
-///         Moonbeam hop — no XcmTransactor, no XCM, and no outbound path to leave inert.
-/// @dev Initialized through the inherited MessageReceiver.initialize(wormhole). `tokenBridge`
-///      is deliberately never set — the receiver only receives.
-///      BasejumpProxy.resetProcessedVaa has no counterpart here: it existed because XCM could
-///      fail on Hydration after the VAA was already marked processed. With no hop, a landing
-///      revert rolls back receiveMessage in the same transaction and the relayer simply retries.
+///         BasejumpLanding on the same chain
+/// @dev Initialized through the inherited MessageReceiver.initialize(wormhole). `tokenBridge` is
+///      never set — the receiver only receives. Delivery is same-chain, so a landing revert
+///      unwinds receiveMessage and processedVaas is never written; no replay power is needed.
 contract BasejumpMessageReceiver is BasejumpCore {
     /// @notice Landing pool on this chain
     bytes32 public landing;
