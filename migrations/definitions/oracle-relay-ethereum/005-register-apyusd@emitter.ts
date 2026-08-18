@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { registerFeed } from "../../actions/oracle-emitter-ethereum/registerFeed";
 
 const step: MigrationStep = {
-  name: "007-register-apyusd@emitter",
+  name: "005-register-apyusd@emitter",
   description: "Register APYUSD feed (convertToAssets(1e18)) on Ethereum OracleEmitter",
   action: async (ctx) => {
     const source = ctx.env.APYUSD_VAULT;

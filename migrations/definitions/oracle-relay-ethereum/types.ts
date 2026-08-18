@@ -9,7 +9,7 @@ type EvmWallet = ReturnType<typeof wallet.getWallet>;
 
 export interface WalletContext {
   ethereum: EvmWallet;
-  moonbeam: EvmWallet;
+  hydration: EvmWallet;
 }
 
 export type MigrationStep = BS<WalletContext>;
