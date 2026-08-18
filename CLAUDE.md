@@ -144,10 +144,10 @@ Cross-platform glue lives at the **migration** layer and the **IDL/ABI sync** la
 
 ## Key patterns
 
-- **Merged migrations.** Each deployable feature lives in a single migration folder under `migrations/definitions/<name>/`. Step files are linear `NNN-<verb>-<subject>[@<contract>].ts`, ordered: deploys → authorize → wire → config → ownership-transfer/renounce. Multi-chain migrations (basejump-base touches Hydration + Moonbeam + Base) declare a `WalletContext` map; each step picks its wallet (`ctx.wallet.moonbeam`, `ctx.wallet.base`, etc.).
+- **Merged migrations.** Each deployable feature lives in a single migration folder under `migrations/definitions/<name>/`. Step files are linear `NNN-<verb>-<subject>[@<contract>].ts`, ordered: deploys → authorize → wire → config → ownership-transfer/renounce. Multi-chain migrations (basejump-base touches Base + Hydration) declare a `WalletContext` map; each step picks its wallet (`ctx.wallet.base`, `ctx.wallet.hydration`, etc.).
 - **Env-driven dependencies (no `ctx.ref`).** If migration B needs an address from A's deployment, the operator copies it from `deployments/<env>/A.json` into `envs/<env>/B.env` as a config variable. B's step reads it as `ctx.env.SOME_ADDRESS`. State files are write-once audit records; never queried at runtime by other migrations.
 - **PKs from env, not CLI.** Each migration declares `pks: ["PK_X", "PK_Y", …]` in its `index.ts`. Runner validates `process.env` has them before invoking `setup()`. `--pk` is NOT a flag.
-- **Env contexts, not chain envs.** Env files are keyed by deployment context (`prod`, `fork`) — not by chain. A single `prod/basejump-base.env` holds all chain configs (RPC_BASE, RPC_MOONBEAM, RPC_HYDRATION). Variables are chain-prefixed where applicable.
+- **Env contexts, not chain envs.** Env files are keyed by deployment context (`prod`, `fork`) — not by chain. A single `prod/basejump-base.env` holds all chain configs (RPC_BASE, RPC_HYDRATION). Variables are chain-prefixed where applicable.
 - **State paths**: `deployments/<context>/<migration>.json`. One file per (env-context, migration) pair.
 - **Renounced ownership is the prod end-state.** Every prod-ready migration ends in `transfer-ownership@*` (to a real custodian) or `renounce@*` (to `0x0`). After the migration completes, the state file is the immutable audit record.
 - **Crash-safe.** State is persisted after each step. Resume by re-running the same command; reset a stage with `--from <step-name>`; pause early with `--pause-at <step-name>`.

@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { setLanding } from "../../actions/basejump-message-receiver/setLanding";
 
 const step: MigrationStep = {
-  name: "003-set-landing@message-receiver",
+  name: "007-set-landing@message-receiver",
   description: "Point the Hydration receiver at the existing landing pool",
   action: async (ctx) => {
     const required = (k: string) => {
@@ -15,7 +15,7 @@ const step: MigrationStep = {
     // Same constant the source reads for setLandingDest — invariant 1 holds by construction.
     const landingAddress = required("HYDRATION_LANDING");
 
-    const receiverAddress = ctx.outputs["001-deploy-message-receiver"].proxyAddress;
+    const receiverAddress = ctx.outputs["005-deploy-message-receiver"].proxyAddress;
 
     return await setLanding({
       ...ctx.wallet.hydration,

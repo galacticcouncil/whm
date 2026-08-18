@@ -2,7 +2,7 @@ import type { MigrationStep } from "./types";
 import { deploy } from "../../actions/basejump-message-receiver/deploy";
 
 const step: MigrationStep = {
-  name: "001-deploy-message-receiver",
+  name: "005-deploy-message-receiver",
   description: "Deploy BasejumpMessageReceiver UUPS proxy on Hydration",
   action: async (ctx) => {
     const required = (k: string) => {

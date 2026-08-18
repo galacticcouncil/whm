@@ -285,7 +285,7 @@ async function main(): Promise<void> {
       throw new Error("receiver deploy did not succeed");
     }
 
-    // ── wire, exactly as migrations/definitions/basejump-hydration does ──
+    // ── wire, exactly as migrations/definitions/basejump-base does ──
     const wire = async (to: Hex, abi: unknown[], functionName: string, args: unknown[]) => {
       const res = await client.call(to, encodeFunctionData({ abi, functionName, args }) as Hex);
       const evs = await eventsAt(hydration, res.blockHash);

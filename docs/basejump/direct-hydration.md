@@ -109,10 +109,10 @@ references) but is initialised to `0x0` and never read on this path.
 ## Invariants
 
 1. **Pool binding.** Base `landingDest` must equal `pad(receiver.landing())`. Two slots on two
-   chains, written by two migrations, and *nothing on-chain checks they agree*. If they diverge the
-   payout pool drains while the other address silently accumulates gross. Both are now written from
-   the same `HYDRATION_LANDING` constant, so the risk is a typo across two env files rather than a
-   copied deployment address — still verify on chain before the TC authorizes the receiver.
+   chains, and *nothing on-chain checks they agree*. If they diverge the payout pool drains while
+   the other address silently accumulates gross. Steps 002 and 007 both write it from the single
+   `HYDRATION_LANDING` value in one env file, so divergence needs a mid-migration edit rather than
+   a mis-copied address — still verify on chain before the TC authorizes the receiver.
 2. **Fail-closed settlement.** A settlement failure reverts the entire call before publication.
 3. **No outbound on the receiver.** `BasejumpMessageReceiver` declares no `bridgeViaWormhole`,
    `landingDest` or `nttManagerFor`. Enforced by the compiler, not by configuration.
@@ -150,41 +150,43 @@ manager; read `getInboundLimitParams(30)` instead, which returns packed `Trimmed
 
 ## Deployment
 
-Two migrations, run in sequence. The landing is the existing pool `0x70e9b12c…df976`, so only one
-address is discovered at run time and the dependency runs one way.
+One migration, [`basejump-base`](../../migrations/definitions/basejump-base/), covering both ends —
+it replaces the MRL definition of the same name, whose record is archived as
+`deployments/prod/basejump-base-mrl.json`. The landing is the existing pool `0x70e9b12c…df976`, so
+nothing is discovered across chains and no address is copied by hand.
 
-| Migration | Steps |
-| --- | --- |
-| [`basejump-base-ntt`](../../migrations/definitions/basejump-base-ntt/) | deploy → `setLandingDest` → `setNttManager` → `setAssetFee` → transfer ownership |
-| [`basejump-hydration`](../../migrations/definitions/basejump-hydration/) | deploy receiver → `setAuthorizedEmitter` → `setLanding` → transfer ownership |
+| Steps | Chain | Wallet |
+| --- | --- | --- |
+| `001-deploy-basejump` → `002-set-landing-dest` → `003-set-eurc-ntt-manager` → `004-set-eurc-fee` | Base | `ctx.wallet.base` (`PK`) |
+| `005-deploy-message-receiver` → `006-set-emitter` → `007-set-landing` | Hydration | `ctx.wallet.hydration` (`PK_HYDRATION`) |
+| `008-transfer-ownership@message-receiver` → `009-transfer-ownership@basejump` | both | — |
 
 ```
-1. basejump-base-ntt                                 # start to finish, ends Safe-owned
-2. copy proxyAddress  → basejump-hydration.env BASEJUMP_BASE
-3. basejump-hydration                                # ends TC-owned
-4. verify invariant 1 across both chains
-5. TC: landing.setAuthorizedBridge(<receiver>, true) # ← go-live switch
-6. relayer on  →  canary
+1. pnpm migrate:basejump-base                        # start to finish, ends TC/Safe-owned
+2. verify invariant 1 across both chains
+3. TC: landing.setAuthorizedBridge(<receiver>, true) # ← go-live switch
+4. TC: landing.setAuthorizedBridge(<legacy MDA>, false)
+5. relayer on  →  canary
 ```
 
-Neither migration touches the landing: it is already TC-owned, already mapped `EURC -> asset 44`
-(prod `basejump-base` step 013), and already funded. That has three consequences.
+Step 006 reads the source address straight from `ctx.outputs["001-deploy-basejump"]`, so the two
+ends cannot be wired to different deployments — a fresh source deploy is a new Wormhole emitter,
+and an env-copied address would silently authorize a stale one.
 
-**The TC call in step 5 is the go-live switch.** Until it lands, a delivered VAA reverts at
-`onlyAuthorizedBridge`, `processedVaas[hash]` rolls back, and the relayer retries — so steps 1–4
+The migration does not touch the landing: it is already TC-owned, already mapped `EURC -> asset 44`
+(MRL migration step 013), and already funded. That has three consequences.
+
+**The TC call in step 3 is the go-live switch.** Until it lands, a delivered VAA reverts at
+`onlyAuthorizedBridge`, `processedVaas[hash]` rolls back, and the relayer retries — so steps 1–2
 are safe to run early and the corridor simply stays dark. Nothing is at risk in between.
 
 **The legacy bridge stays authorized on that pool.** `0x10c06f41…925b51`, the MRL-era
-`XcmTransactor`, is still an authorized bridge from prod step 006. Disarming the source with
-`setLandingDest(0)` stops new VAAs but does not revoke it. Pair step 5 with
-`landing.setAuthorizedBridge(0x10c06f41…, false)` in the same TC batch.
+`XcmTransactor`'s Moonbeam MDA, is still an authorized bridge from the MRL migration's step 006.
+Disarming the old source with `setLandingDest(0)` stops new VAAs but does not revoke it — hence
+step 4 in the same TC batch.
 
 **Liquidity is continuous.** Reusing the pool means no funding step and no drain-and-refill window
 — the balance that serves the MRL path serves the direct path unchanged.
-
-The one cross-migration handoff uses env config rather than `ctx.ref`, and hard-stops while
-`BASEJUMP_BASE` is still the zero placeholder, so a half-wired receiver cannot reach ownership
-transfer.
 
 The Hydration deployer key needs an `EVMAccounts.ContractDeployer` slot; a chopsticks fork does not
 enforce this, so a fork run does not validate it.
@@ -212,7 +214,7 @@ every corridor. Ethereum → Hydration needs:
 
 1. Hydration TC: `receiver.setAuthorizedEmitter(2, pad(<eth Basejump>))` and
    `landing.setDestAsset(<eth USDC>, <hydration asset>)`.
-2. A `basejump-ethereum-ntt` migration mirroring `basejump-base-ntt` — only constants differ
+2. A `basejump-ethereum-ntt` migration mirroring `basejump-base`'s steps 001–004 — only constants differ
    (manager `0x447b2c7485A3d6813F8197E605b10BcCD8dd8398`, USDC `0xA0b86991…eB48`, Hydration
    asset 21 `0x…0100000015`). A new source deployment is required: the Base contract is a
    Base-specific emitter wired to the Base EURC manager.
@@ -220,8 +222,8 @@ every corridor. Ethereum → Hydration needs:
 4. Fund the pool.
 
 No `setAuthorizedBridge`, so a new corridor adds no trust surface on the pool. To wire a second
-corridor before the ownership handover, pause `basejump-hydration` and append the extra emitter
-step — the runner permits appending steps, not editing or reordering.
+corridor before the ownership handover, pause `basejump-base` before step 008 and append the extra
+emitter step — the runner permits appending steps, not editing or reordering.
 
 ## Adding a token
 

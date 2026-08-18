@@ -2,8 +2,8 @@ import type { MigrationStep } from "./types";
 import { setOwner } from "../../actions/setOwner";
 
 const step: MigrationStep = {
-  name: "005-transfer-ownership@basejump",
-  description: "Transfer ownership to the Base Technical Committee Safe",
+  name: "008-transfer-ownership@message-receiver",
+  description: "Transfer Hydration receiver ownership to the Technical Committee",
   action: async (ctx) => {
     const required = (k: string) => {
       if (!ctx.env[k]) throw new Error(`Missing ${k}`);
@@ -11,9 +11,9 @@ const step: MigrationStep = {
     };
 
     return await setOwner({
-      ...ctx.wallet.base,
-      contract: ctx.outputs["001-deploy-basejump"].proxyAddress as `0x${string}`,
-      newOwner: required("BASE_TC_SAFE") as `0x${string}`,
+      ...ctx.wallet.hydration,
+      contract: ctx.outputs["005-deploy-message-receiver"].proxyAddress as `0x${string}`,
+      newOwner: required("MESSAGE_RECEIVER_NEW_OWNER") as `0x${string}`,
     });
   },
 };
