@@ -5,16 +5,16 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {Basejump} from "../../src/basejump/Basejump.sol";
-import {BasejumpProxy} from "../../src/basejump/BasejumpProxy.sol";
+import {BasejumpMessageReceiver} from "../../src/basejump/BasejumpMessageReceiver.sol";
 import {BasejumpLanding} from "../../src/basejump/BasejumpLanding.sol";
-import {XcmTransactor, Multilocation, Weight} from "../../src/XcmTransactor.sol";
+import {MessageReceiver} from "../../src/MessageReceiver.sol";
 
+import {IBasejump} from "../../src/basejump/interfaces/IBasejump.sol";
 import {IBasejumpCore} from "../../src/basejump/interfaces/IBasejumpCore.sol";
 import {IBasejumpLanding} from "../../src/basejump/interfaces/IBasejumpLanding.sol";
 
 import {MockWormhole} from "../mocks/MockWormhole.sol";
-import {MockTokenBridge} from "../mocks/MockTokenBridge.sol";
-import {MockXcmPrecompile} from "../mocks/MockXcmPrecompile.sol";
+import {MockNttManager} from "../mocks/MockNttManager.sol";
 import {BasejumpTestHelpers} from "../helpers/BasejumpTestHelpers.sol";
 
 /// @dev Minimal ERC20 with mint
@@ -49,634 +49,381 @@ contract MockERC20 {
 }
 
 /// @title BasejumpIntegrationTest
-/// @notice Comprehensive cross-chain integration test for Basejump → BasejumpProxy → BasejumpLanding
+/// @notice The direct Base → Hydration corridor, end to end:
+///
+///   Base      Basejump.bridgeViaWormhole → NTT settlement (gross) + fast-path VAA (net)
+///   Hydration Basejump.completeTransfer  → _executeTransfer → BasejumpLanding.transfer
+///
+/// Both deployments are the SAME contract; only configuration separates the roles. No Moonbeam,
+/// no BasejumpProxy, no XcmTransactor, no TokenBridge — see BasejumpProxyTest for the proxy hop
+/// that the intents BJP variant still uses.
 contract BasejumpIntegrationTest is Test, MockWormhole {
     using BasejumpTestHelpers for *;
 
-    // ─── Wormhole mock functions ────────────────────────────────────
-    function chainId() external pure returns (uint16) {
-        return MOONBEAM_CHAIN_ID;
-    }
-
-    function messageFee() external pure returns (uint256) {
-        return 0; // No fee for testing
-    }
+    // ─── Message core mock ──────────────────────────────────────────
 
     uint64 private _nextSequence;
 
-    function publishMessage(uint32, bytes memory, uint8) external payable returns (uint64 sequence) {
-        sequence = _nextSequence;
-        _nextSequence++;
-        return sequence;
+    // Captured so tests can assert what the contract ACTUALLY published, rather than
+    // asserting against a payload the test itself constructed.
+    bytes[] public publishedPayloads;
+    uint8[] public publishedConsistency;
+
+    function chainId() external pure returns (uint16) {
+        return HYDRATION_CHAIN_ID;
     }
 
-    // ─── Chain IDs (Wormhole chain IDs) ────────────────────────────
+    function messageFee() external pure returns (uint256) {
+        return 0;
+    }
+
+    function publishMessage(uint32, bytes memory payload, uint8 consistencyLevel)
+        external
+        payable
+        returns (uint64 sequence)
+    {
+        sequence = _nextSequence;
+        _nextSequence++;
+        publishedPayloads.push(payload);
+        publishedConsistency.push(consistencyLevel);
+    }
+
+    function lastPublishedPayload() public view returns (bytes memory) {
+        return publishedPayloads[publishedPayloads.length - 1];
+    }
+
+    function lastPublishedConsistency() public view returns (uint8) {
+        return publishedConsistency[publishedConsistency.length - 1];
+    }
+
+    // ─── Chain ids ──────────────────────────────────────────────────
+
     uint16 constant BASE_CHAIN_ID = 30;
-    uint16 constant MOONBEAM_CHAIN_ID = 16;
-    uint16 constant HYDRATION_PARA_ID = 2034;
+    uint16 constant HYDRATION_CHAIN_ID = 73;
 
-    // ─── Deployments per chain ──────────────────────────────────────
+    // ─── Deployments ────────────────────────────────────────────────
+
+    /// @dev Source — publishes the fast-path VAA, settles via NTT.
     Basejump public basejumpBase;
-    BasejumpProxy public basejumpMoonbeam;
-    BasejumpLanding public basejumpHydration;
-    XcmTransactor public xcmTransactor;
+    /// @dev Hydration — verifies the VAA and calls the landing. No outbound path.
+    BasejumpMessageReceiver public basejumpHydration;
+    BasejumpLanding public landing;
 
-    // ─── Infrastructure ─────────────────────────────────────────────
-    MockTokenBridge public tokenBridge;
-    MockXcmPrecompile public xcmPrecompile;
+    MockNttManager public nttManager;
 
-    // ─── Test tokens ────────────────────────────────────────────────
     MockERC20 public usdcBase;
     MockERC20 public usdcHydration;
 
-    // ─── Test accounts ──────────────────────────────────────────────
     address public user = makeAddr("user");
     bytes32 public hydrationRecipient;
 
-    // ─── Constants ──────────────────────────────────────────────────
     uint256 constant LIQUIDITY_POOL_SIZE = 1_000_000e6;
     uint256 constant TRANSFER_AMOUNT = 10_000e6;
     uint256 constant BASEJUMP_FEE = 1e6;
 
     address constant DISPATCH_PRECOMPILE = 0x0000000000000000000000000000000000000401;
-    address constant XCM_PRECOMPILE_ADDR = 0x0000000000000000000000000000000000000817;
 
     function setUp() public {
-        // 1. Deploy infrastructure mocks
-        tokenBridge = new MockTokenBridge();
-
-        // Deploy XCM precompile mock and etch it at the expected address
-        MockXcmPrecompile xcmMock = new MockXcmPrecompile();
-        vm.etch(XCM_PRECOMPILE_ADDR, address(xcmMock).code);
-        xcmPrecompile = MockXcmPrecompile(XCM_PRECOMPILE_ADDR);
-
-        // 2. Deploy Basejump (Base chain)
-        Basejump basejumpImpl = new Basejump();
-        ERC1967Proxy basejumpProxy = new ERC1967Proxy(
-            address(basejumpImpl),
-            abi.encodeCall(Basejump.initialize, (address(this), address(tokenBridge)))
-        );
-        basejumpBase = Basejump(address(basejumpProxy));
-
-        // 3. Deploy XcmTransactor (Moonbeam)
-        XcmTransactor xcmImpl = new XcmTransactor(
-            HYDRATION_PARA_ID,      // destination parachain
-            MOONBEAM_CHAIN_ID,      // source parachain (Moonbeam = 2004 on Polkadot)
-            38,                     // EVM pallet index
-            6,                      // EVM call index
-            address(0x0000000000000000000000000000000000000802) // fee location (GLMR)
-        );
-        ERC1967Proxy xcmProxy = new ERC1967Proxy(
-            address(xcmImpl),
-            abi.encodeCall(XcmTransactor.initialize, ())
-        );
-        xcmTransactor = XcmTransactor(address(xcmProxy));
-
-        // 4. Deploy BasejumpProxy (Moonbeam)
-        BasejumpProxy proxyImpl = new BasejumpProxy();
-        ERC1967Proxy proxyProxy = new ERC1967Proxy(
-            address(proxyImpl),
-            abi.encodeCall(BasejumpProxy.initialize, (address(this), address(tokenBridge)))
-        );
-        basejumpMoonbeam = BasejumpProxy(address(proxyProxy));
-
-        // 5. Deploy BasejumpLanding (Hydration)
-        BasejumpLanding landingImpl = new BasejumpLanding();
-        ERC1967Proxy landingProxy = new ERC1967Proxy(
-            address(landingImpl),
-            abi.encodeCall(BasejumpLanding.initialize, ())
-        );
-        basejumpHydration = BasejumpLanding(address(landingProxy));
-
-        // 6. Deploy test tokens
         usdcBase = new MockERC20();
         usdcHydration = new MockERC20();
 
-        // 7. Configure cross-chain relationships
-        // Basejump (Base) config
-        basejumpBase.setLanding(
-            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
+        // Source deployment (Base). tokenBridge = 0x0 — the NTT path never reads it.
+        Basejump sourceImpl = new Basejump();
+        basejumpBase = Basejump(
+            address(
+                new ERC1967Proxy(
+                    address(sourceImpl), abi.encodeCall(Basejump.initialize, (address(this), address(0)))
+                )
+            )
         );
-        basejumpBase.setLandingDest(
-            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
+
+        // Receiver deployment (Hydration). No tokenBridge argument — it only receives.
+        BasejumpMessageReceiver recvImpl = new BasejumpMessageReceiver();
+        basejumpHydration = BasejumpMessageReceiver(
+            address(
+                new ERC1967Proxy(
+                    address(recvImpl), abi.encodeCall(MessageReceiver.initialize, (address(this)))
+                )
+            )
         );
+
+        BasejumpLanding landingImpl = new BasejumpLanding();
+        landing = BasejumpLanding(
+            address(new ERC1967Proxy(address(landingImpl), abi.encodeCall(BasejumpLanding.initialize, ())))
+        );
+
+        // ── Source config: settle via NTT to the landing on chain 73 ──
+        nttManager = new MockNttManager(address(usdcBase));
+        basejumpBase.setNttManager(address(usdcBase), address(nttManager));
+        basejumpBase.setLandingDest(BasejumpTestHelpers.addressToBytes32(address(landing)));
         basejumpBase.setAssetFee(address(usdcBase), BASEJUMP_FEE);
-        basejumpBase.setAuthorizedEmitter(
-            BASE_CHAIN_ID,
-            BasejumpTestHelpers.addressToBytes32(address(basejumpBase))
+
+        // ── Receiver config: trust the source, deliver into the landing ──
+        //    setLandingDest is deliberately NEVER called — outbound stays inert.
+        basejumpHydration.setAuthorizedEmitter(
+            BASE_CHAIN_ID, BasejumpTestHelpers.addressToBytes32(address(basejumpBase))
         );
+        basejumpHydration.setLanding(BasejumpTestHelpers.addressToBytes32(address(landing)));
 
-        // BasejumpProxy (Moonbeam) config
-        basejumpMoonbeam.setLanding(
-            BASE_CHAIN_ID,
-            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
-        );
-        basejumpMoonbeam.setAuthorizedEmitter(
-            BASE_CHAIN_ID,
-            BasejumpTestHelpers.addressToBytes32(address(basejumpBase))
-        );
-        basejumpMoonbeam.setXcmTransactor(address(xcmTransactor));
+        // ── Landing config ──
+        landing.setAuthorizedBridge(address(basejumpHydration), true);
+        landing.setDestAsset(address(usdcBase), address(usdcHydration));
 
-        // XcmTransactor config
-        xcmTransactor.setAuthorized(address(basejumpMoonbeam), true);
-
-        // BasejumpLanding (Hydration) config
-        basejumpHydration.setAuthorizedBridge(address(basejumpMoonbeam), true);
-        basejumpHydration.setDestAsset(address(usdcBase), address(usdcHydration));
-
-        // 8. Fund liquidity pool
-        usdcHydration.mint(address(basejumpHydration), LIQUIDITY_POOL_SIZE);
-
-        // 9. Setup user
+        usdcHydration.mint(address(landing), LIQUIDITY_POOL_SIZE);
         usdcBase.mint(user, 100_000e6);
         hydrationRecipient = BasejumpTestHelpers.addressToBytes32(makeAddr("hydrationRecipient"));
 
-        // 10. Mock precompile calls
         vm.mockCall(DISPATCH_PRECOMPILE, bytes(""), bytes(""));
-
-        // 11. Fund test contract with ETH for Wormhole message fees
         vm.deal(address(this), 100 ether);
         vm.deal(user, 100 ether);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // DEPLOYMENT & CONFIGURATION TESTS
-    // ═══════════════════════════════════════════════════════════════════
+    // ─── Helpers ────────────────────────────────────────────────────
+
+    function _bridge(uint256 amount) internal returns (uint64 transferSeq) {
+        vm.startPrank(user);
+        usdcBase.approve(address(basejumpBase), amount);
+        (transferSeq,) = basejumpBase.bridgeViaWormhole(address(usdcBase), amount, hydrationRecipient, "");
+        vm.stopPrank();
+    }
+
+    function _vaa(uint256 netAmount, uint64 transferSeq) internal view returns (bytes memory) {
+        return BasejumpTestHelpers.buildFastPathVAA(
+            BASE_CHAIN_ID, address(basejumpBase), address(usdcBase), netAmount, hydrationRecipient, transferSeq
+        );
+    }
+
+    // ─── Configuration ──────────────────────────────────────────────
 
     function testDeploymentConfiguration() public view {
-        // Verify all contracts deployed
-        assertGt(address(basejumpBase).code.length, 0, "Basejump not deployed");
-        assertGt(address(basejumpMoonbeam).code.length, 0, "BasejumpProxy not deployed");
-        assertGt(address(basejumpHydration).code.length, 0, "BasejumpLanding not deployed");
-        assertGt(address(xcmTransactor).code.length, 0, "XcmTransactor not deployed");
-
-        // Verify cross-chain mappings
+        assertEq(basejumpBase.HYDRATION_CHAIN_ID(), HYDRATION_CHAIN_ID, "wrong settlement chain");
+        assertEq(basejumpBase.nttManagerFor(address(usdcBase)), address(nttManager), "no NTT route");
         assertEq(
-            basejumpBase.landing(),
-            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration)),
-            "Basejump landing not set on Base"
+            basejumpHydration.authorizedEmitters(BASE_CHAIN_ID),
+            BasejumpTestHelpers.addressToBytes32(address(basejumpBase)),
+            "source not authorized on receiver"
         );
+        assertTrue(landing.authorizedBridges(address(basejumpHydration)), "receiver not a bridge");
         assertEq(
-            basejumpBase.landingDest(),
-            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration)),
-            "Basejump landingDest not set on Base"
+            basejumpHydration.landing(),
+            BasejumpTestHelpers.addressToBytes32(address(landing)),
+            "receiver not pointed at the landing"
         );
-
-        assertEq(
-            basejumpMoonbeam.landings(BASE_CHAIN_ID),
-            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration)),
-            "Basejump landing not set on Moonbeam"
-        );
-
-        // Verify authorization
-        assertTrue(
-            basejumpHydration.authorizedBridges(address(basejumpMoonbeam)),
-            "BasejumpProxy not authorized on Landing"
-        );
-
-        assertTrue(
-            xcmTransactor.authorized(address(basejumpMoonbeam)),
-            "BasejumpProxy not authorized on XcmTransactor"
-        );
-
-        // Verify asset mappings
-        assertEq(
-            basejumpHydration.destAssetFor(address(usdcBase)),
-            address(usdcHydration),
-            "Asset mapping not set"
-        );
-
-        // Verify fee configuration
-        assertEq(basejumpBase.quoteFee(address(usdcBase)), BASEJUMP_FEE, "Fee not set");
     }
 
     function testLiquidityPoolFunded() public view {
+        assertEq(usdcHydration.balanceOf(address(landing)), LIQUIDITY_POOL_SIZE);
+    }
+
+    /// @notice The invariant nothing on-chain enforces: settlement must land in the same contract
+    ///         the fast path pays out of. Two slots on two chains, set by two migrations.
+    function testPoolBinding() public view {
         assertEq(
-            usdcHydration.balanceOf(address(basejumpHydration)),
-            LIQUIDITY_POOL_SIZE,
-            "Liquidity pool not funded"
+            basejumpBase.landingDest(),
+            basejumpHydration.landing(),
+            "settlement recipient and payout pool must be the same contract"
         );
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // HAPPY PATH TESTS
-    // ═══════════════════════════════════════════════════════════════════
+    // ─── Happy path ─────────────────────────────────────────────────
 
-    /// @notice Tests the complete cross-chain flow: Base → Moonbeam → Hydration
     function testCrossChainTransferHappyPath() public {
-        uint256 amount = TRANSFER_AMOUNT;
-        uint256 expectedNetAmount = amount - BASEJUMP_FEE;
+        uint256 expectedNet = TRANSFER_AMOUNT - BASEJUMP_FEE;
+        uint64 transferSeq = _bridge(TRANSFER_AMOUNT);
 
-        // ─── Step 1: User initiates bridge on Base ─────────────────
-        vm.startPrank(user);
-        usdcBase.approve(address(basejumpBase), amount);
+        // Settlement carries GROSS to the landing on the destination chain.
+        MockNttManager.TransferRecord memory settled = nttManager.getTransfer(transferSeq);
+        assertEq(settled.amount, TRANSFER_AMOUNT, "NTT must receive gross");
+        assertEq(settled.recipientChain, HYDRATION_CHAIN_ID, "wrong settlement chain");
 
-        (uint64 transferSeq,) = basejumpBase.bridgeViaWormhole{value: 1 ether}(
-            address(usdcBase),
-            amount,
-            hydrationRecipient,
-            ""
-        );
-        vm.stopPrank();
-
-        // ─── Step 2: Verify TokenBridge slow path initiated ────────
-        MockTokenBridge.TransferRecord memory record = tokenBridge.getTransfer(transferSeq);
-        assertEq(record.token, address(usdcBase), "Wrong token in TokenBridge");
-        assertEq(record.amount, amount, "Wrong amount in TokenBridge");
-        assertEq(record.recipientChain, MOONBEAM_CHAIN_ID, "Wrong recipient chain");
-
-        // ─── Step 3: Build and deliver fast-path VAA ───────────────
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            expectedNetAmount,
-            hydrationRecipient,
-            0
-        );
-
-        // ─── Step 4: Deliver to BasejumpProxy on Moonbeam ──────────
-        vm.expectEmit(true, true, false, true, address(basejumpMoonbeam));
-        emit IBasejumpCore.TransferProcessed(address(usdcBase), expectedNetAmount, hydrationRecipient);
-
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        // ─── Step 5: Verify XCM was dispatched ─────────────────────
-        assertEq(xcmPrecompile.callCount(), 1, "XCM not dispatched");
-        MockXcmPrecompile.XcmCall memory xcmCall = xcmPrecompile.getLastCall();
-        assertEq(xcmCall.dest.parents, 1, "Wrong XCM parents");
-        assertEq(xcmCall.dest.interior.length, 1, "Wrong interior length");
-
-        // Decode parachain junction (should be 0x00 + HYDRATION_PARA_ID)
-        bytes memory junction = xcmCall.dest.interior[0];
-        assertEq(uint8(junction[0]), 0x00, "Wrong junction type");
-        uint32 paraId;
-        assembly {
-            paraId := mload(add(junction, 5)) // Read uint32 after type byte
-        }
-        assertEq(paraId, HYDRATION_PARA_ID, "Wrong parachain ID");
-
-        // ─── Step 6: Simulate XCM execution on Hydration ───────────
-        vm.expectEmit(true, true, true, true, address(basejumpHydration));
+        // The payout leaves via the DISPATCH precompile, which is mocked here — so ERC20 balances
+        // do NOT move in Foundry and asserting on them would be meaningless. The event is the
+        // observable; the real balance movement is pinned by chopsticks/probes/_probeBasejumpDelivery.
+        vm.expectEmit(true, true, false, true, address(landing));
         emit IBasejumpLanding.TransferExecuted(
-            address(usdcBase),
-            address(usdcHydration),
-            hydrationRecipient,
-            expectedNetAmount
+            address(usdcBase), address(usdcHydration), hydrationRecipient, expectedNet
         );
+        basejumpHydration.completeTransfer(_vaa(expectedNet, transferSeq));
 
-        // BasejumpProxy calls BasejumpLanding.transfer via XCM
-        vm.prank(address(basejumpMoonbeam));
-        basejumpHydration.transfer(address(usdcBase), expectedNetAmount, hydrationRecipient, "");
-
-        // ─── Step 7: Verify dispatch precompile was called ─────────
-        // This is verified by the vm.mockCall in setUp not reverting
+        assertEq(landing.pendingTail(), 0, "a funded pool must not queue");
     }
 
     function testFeeDeductedCorrectly() public {
-        uint256 amount = 10_000e6;
-        uint256 fee = BASEJUMP_FEE;
-        uint256 expectedNet = amount - fee;
+        uint64 transferSeq = _bridge(TRANSFER_AMOUNT);
 
-        vm.startPrank(user);
-        usdcBase.approve(address(basejumpBase), amount);
+        MockNttManager.TransferRecord memory settled = nttManager.getTransfer(transferSeq);
+        assertEq(settled.amount, TRANSFER_AMOUNT, "settlement gets gross");
 
-        (uint64 transferSeq,) = basejumpBase.bridgeViaWormhole{value: 1 ether}(
-            address(usdcBase),
-            amount,
-            hydrationRecipient,
-            ""
-        );
-        vm.stopPrank();
-
-        // Verify slow path gets full amount
-        MockTokenBridge.TransferRecord memory slowPath = tokenBridge.getTransfer(transferSeq);
-        assertEq(slowPath.amount, amount, "Slow path should get full amount");
-
-        // Verify fast path message contains net amount
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            expectedNet,
-            hydrationRecipient,
-            0
-        );
-
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        // On Landing, verify net amount is transferred
-        vm.prank(address(basejumpMoonbeam));
-        basejumpHydration.transfer(address(usdcBase), expectedNet, hydrationRecipient, "");
+        IBasejumpCore.TransferPayload memory published =
+            abi.decode(lastPublishedPayload(), (IBasejumpCore.TransferPayload));
+        assertEq(published.amount, TRANSFER_AMOUNT - BASEJUMP_FEE, "fast path carries net");
+        assertEq(settled.amount - published.amount, BASEJUMP_FEE, "fee accrual broken");
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // EDGE CASE TESTS
-    // ═══════════════════════════════════════════════════════════════════
+    /// @notice Pins the emit side against the payload the CONTRACT published — not one the test built.
+    function testPublishedMessageCarriesNetAndRoute() public {
+        uint256 expectedNet = TRANSFER_AMOUNT - BASEJUMP_FEE;
+        uint64 transferSeq = _bridge(TRANSFER_AMOUNT);
 
+        MockNttManager.TransferRecord memory settled = nttManager.getTransfer(transferSeq);
+        assertEq(
+            settled.recipient,
+            BasejumpTestHelpers.addressToBytes32(address(landing)),
+            "settlement recipient must be the payout pool"
+        );
+
+        IBasejumpCore.TransferPayload memory published =
+            abi.decode(lastPublishedPayload(), (IBasejumpCore.TransferPayload));
+        assertEq(published.amount, expectedNet, "published message must carry net");
+        assertEq(published.sourceAsset, address(usdcBase), "wrong sourceAsset published");
+        assertEq(published.recipient, hydrationRecipient, "wrong recipient published");
+        assertEq(published.transferSequence, transferSeq, "settlement sequence not correlated");
+        assertEq(lastPublishedConsistency(), 200, "must publish at instant finality");
+    }
+
+    // ─── Liquidity ──────────────────────────────────────────────────
+
+    /// @notice A shortfall QUEUES and consumes the VAA — it does not revert. Atomicity protects
+    ///         against misconfiguration, not an empty pool.
     function testCrossChainTransferInsufficientLiquidity() public {
-        // Request amount exceeding pool
-        uint256 largeAmount = LIQUIDITY_POOL_SIZE + 1000e6;
+        uint256 huge = LIQUIDITY_POOL_SIZE + 1e6;
 
-        // Generate VAA with amount exceeding pool
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            largeAmount,
-            hydrationRecipient,
-            0
-        );
-
-        // Deliver to BasejumpProxy
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        // Simulate XCM execution - should queue transfer
-        vm.expectEmit(true, true, true, true, address(basejumpHydration));
+        vm.expectEmit(true, true, false, true, address(landing));
         emit IBasejumpLanding.TransferQueued(
-            0, // pending ID
-            address(usdcBase),
-            address(usdcHydration),
-            hydrationRecipient,
-            largeAmount
+            0, address(usdcBase), address(usdcHydration), hydrationRecipient, huge
         );
+        basejumpHydration.completeTransfer(_vaa(huge, 1));
 
-        vm.prank(address(basejumpMoonbeam));
-        basejumpHydration.transfer(address(usdcBase), largeAmount, hydrationRecipient, "");
-
-        // Verify queued
-        assertEq(basejumpHydration.pendingTail(), 1, "Transfer not queued");
-        assertEq(basejumpHydration.pendingHead(), 0, "Wrong pending head");
-
-        (address sourceAsset, uint256 queuedAmount, bytes32 recipient) =
-            basejumpHydration.pendingTransfers(0);
-        assertEq(sourceAsset, address(usdcBase), "Wrong source asset");
-        assertEq(queuedAmount, largeAmount, "Wrong queued amount");
-        assertEq(recipient, hydrationRecipient, "Wrong recipient");
+        assertEq(landing.pendingTail(), 1, "shortfall must queue");
+        assertEq(landing.pendingHead(), 0, "queued transfer must stay unfulfilled");
     }
 
     function testFulfillPendingAfterLiquidityRestored() public {
-        // First create pending transfer
-        uint256 largeAmount = LIQUIDITY_POOL_SIZE + 1000e6;
+        uint256 huge = LIQUIDITY_POOL_SIZE + 1e6;
+        basejumpHydration.completeTransfer(_vaa(huge, 1));
 
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            largeAmount,
-            hydrationRecipient,
-            0
-        );
+        // Top the pool past the queued amount, then drain the queue.
+        usdcHydration.mint(address(landing), 10e6);
 
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        vm.prank(address(basejumpMoonbeam));
-        basejumpHydration.transfer(address(usdcBase), largeAmount, hydrationRecipient, "");
-
-        // Restore liquidity (simulate slow path arrival)
-        usdcHydration.mint(address(basejumpHydration), 2000e6);
-
-        // Fulfill pending
-        vm.expectEmit(true, true, true, true, address(basejumpHydration));
+        vm.expectEmit(true, true, false, true, address(landing));
         emit IBasejumpLanding.PendingTransferFulfilled(
-            0,
-            address(usdcBase),
-            address(usdcHydration),
-            hydrationRecipient,
-            largeAmount
+            0, address(usdcBase), address(usdcHydration), hydrationRecipient, huge
         );
+        landing.fulfillPending();
 
-        basejumpHydration.fulfillPending();
-
-        // Verify pending cleared
-        assertEq(basejumpHydration.pendingHead(), 1, "Pending not cleared");
+        assertEq(landing.pendingHead(), landing.pendingTail(), "queue must be drained");
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // SECURITY TESTS
-    // ═══════════════════════════════════════════════════════════════════
+    // ─── Guards ─────────────────────────────────────────────────────
 
     function testReplayProtection() public {
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            TRANSFER_AMOUNT,
-            hydrationRecipient,
-            0
-        );
+        bytes memory vaa = _vaa(TRANSFER_AMOUNT - BASEJUMP_FEE, 1);
+        basejumpHydration.completeTransfer(vaa);
 
-        // First delivery succeeds
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        // Second delivery with same VAA should fail
         vm.expectRevert("VAA already processed");
-        basejumpMoonbeam.completeTransfer(vaa);
+        basejumpHydration.completeTransfer(vaa);
     }
 
     function testUnauthorizedEmitterRejected() public {
-        bytes32 unauthorizedEmitter = bytes32(uint256(0xDEADBEEF));
-
-        bytes memory payload = abi.encode(address(usdcBase), TRANSFER_AMOUNT, hydrationRecipient);
-        bytes memory vaa = abi.encode(
+        // Well-formed payload from an emitter that is NOT authorized, so the emitter check is the
+        // only thing that can revert. A malformed payload would revert during decode instead and
+        // pass this test even with the check removed.
+        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
             BASE_CHAIN_ID,
-            unauthorizedEmitter,
-            payload
+            makeAddr("unauthorizedEmitter"),
+            address(usdcBase),
+            TRANSFER_AMOUNT,
+            hydrationRecipient,
+            0
         );
 
-        vm.expectRevert();
-        basejumpMoonbeam.completeTransfer(vaa);
+        vm.expectRevert(MessageReceiver.NotAuthorizedEmitter.selector);
+        basejumpHydration.completeTransfer(vaa);
+    }
+
+    /// @notice Atomicity: a landing revert rolls the whole receiveMessage back, leaving the VAA
+    ///         unconsumed so the relayer can retry. The Moonbeam hop could not do this — it marked
+    ///         the VAA processed before knowing whether delivery landed.
+    function testLandingRevertRollsBackProcessedVaa() public {
+        bytes memory vaa = _vaa(TRANSFER_AMOUNT - BASEJUMP_FEE, 1);
+
+        landing.setAuthorizedBridge(address(basejumpHydration), false);
+        vm.expectRevert(IBasejumpLanding.NotAuthorizedBridge.selector);
+        basejumpHydration.completeTransfer(vaa);
+
+        landing.setAuthorizedBridge(address(basejumpHydration), true);
+        basejumpHydration.completeTransfer(vaa); // same VAA — must still be unconsumed
     }
 
     function testAssetNotConfigured() public {
-        address unknownAsset = makeAddr("unknownAsset");
-
+        MockERC20 unknownAsset = new MockERC20();
         bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            unknownAsset,
-            TRANSFER_AMOUNT,
-            hydrationRecipient,
-            0
+            BASE_CHAIN_ID, address(basejumpBase), address(unknownAsset), TRANSFER_AMOUNT, hydrationRecipient, 1
         );
 
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        vm.prank(address(basejumpMoonbeam));
         vm.expectRevert(
-            abi.encodeWithSelector(IBasejumpLanding.AssetNotConfigured.selector, unknownAsset)
+            abi.encodeWithSelector(IBasejumpLanding.AssetNotConfigured.selector, address(unknownAsset))
         );
-        basejumpHydration.transfer(unknownAsset, TRANSFER_AMOUNT, hydrationRecipient, "");
+        basejumpHydration.completeTransfer(vaa);
     }
 
     function testDispatchPrecompileFailure() public {
-        // Make dispatch revert
-        vm.mockCallRevert(DISPATCH_PRECOMPILE, bytes(""), bytes("dispatch failed"));
+        vm.mockCallRevert(DISPATCH_PRECOMPILE, bytes(""), bytes(""));
 
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            TRANSFER_AMOUNT,
-            hydrationRecipient,
-            0
-        );
-
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        // When Landing.transfer is called, it should revert
-        vm.prank(address(basejumpMoonbeam));
         vm.expectRevert(IBasejumpLanding.DispatchFailed.selector);
-        basejumpHydration.transfer(address(usdcBase), TRANSFER_AMOUNT, hydrationRecipient, "");
+        basejumpHydration.completeTransfer(_vaa(TRANSFER_AMOUNT - BASEJUMP_FEE, 1));
     }
 
     function testZeroAmountReverts() public {
-        vm.startPrank(user);
-        usdcBase.approve(address(basejumpBase), 1000e6);
-
+        vm.prank(user);
         vm.expectRevert(IBasejumpCore.ZeroAmount.selector);
-        basejumpBase.bridgeViaWormhole{value: 1 ether}(
-            address(usdcBase),
-            0,
-            hydrationRecipient,
-            ""
-        );
-        vm.stopPrank();
+        basejumpBase.bridgeViaWormhole(address(usdcBase), 0, hydrationRecipient, "");
     }
 
     function testBasejumpLandingNotSet() public {
-        // Deploy a fresh Basejump without landing configured
-        Basejump freshBasejump = new Basejump();
-        ERC1967Proxy freshProxy = new ERC1967Proxy(
-            address(freshBasejump),
-            abi.encodeCall(Basejump.initialize, (address(this), address(tokenBridge)))
+        Basejump impl = new Basejump();
+        Basejump fresh = Basejump(
+            address(
+                new ERC1967Proxy(address(impl), abi.encodeCall(Basejump.initialize, (address(this), address(0))))
+            )
         );
-        Basejump basejump = Basejump(address(freshProxy));
 
         vm.startPrank(user);
-        usdcBase.approve(address(basejump), TRANSFER_AMOUNT);
-
+        usdcBase.approve(address(fresh), TRANSFER_AMOUNT);
         vm.expectRevert(
-            abi.encodeWithSelector(IBasejumpCore.BasejumpLandingNotSet.selector, MOONBEAM_CHAIN_ID)
+            abi.encodeWithSelector(IBasejumpCore.BasejumpLandingNotSet.selector, HYDRATION_CHAIN_ID)
         );
-        basejump.bridgeViaWormhole{value: 1 ether}(
-            address(usdcBase),
-            TRANSFER_AMOUNT,
-            hydrationRecipient,
-            ""
-        );
+        fresh.bridgeViaWormhole{value: 1 ether}(address(usdcBase), TRANSFER_AMOUNT, hydrationRecipient, "");
         vm.stopPrank();
     }
 
-    function testBasejumpProxyBridgeNotSupported() public {
-        vm.expectRevert(abi.encodeWithSelector(IBasejumpCore.BasejumpLandingNotSet.selector, BASE_CHAIN_ID));
-        basejumpMoonbeam.bridgeViaWormhole{value: 1 ether}(
-            address(usdcBase),
-            TRANSFER_AMOUNT,
-            BASE_CHAIN_ID,
-            hydrationRecipient,
-            ""
+    /// @notice The receiver is inbound-only by CODE, not by configuration — there is no
+    ///         outbound entrypoint to leave unarmed. A raw call to the source selector finds
+    ///         no function and no fallback, so it cannot be reached at any configuration.
+    function testReceiverHasNoOutboundEntrypoint() public {
+        vm.prank(user);
+        (bool ok,) = address(basejumpHydration).call(
+            abi.encodeWithSignature(
+                "bridgeViaWormhole(address,uint256,bytes32,bytes)",
+                address(usdcBase),
+                TRANSFER_AMOUNT,
+                hydrationRecipient,
+                ""
+            )
         );
+        assertFalse(ok, "receiver must expose no outbound entrypoint");
     }
 
-    function testLocalSameChainTransfer() public {
-        // Setup: Test local same-chain transfer where Basejump calls BasejumpLanding directly
-        // Since wormhole.chainId() returns MOONBEAM_CHAIN_ID (from our mock),
-        // we simulate receiving a VAA on MOONBEAM and delivering locally
+    function testUnroutedAssetReverts() public {
+        MockERC20 unrouted = new MockERC20();
+        unrouted.mint(user, TRANSFER_AMOUNT);
 
-        // Authorize basejumpBase to call landing directly (simulating local transfer)
-        basejumpHydration.setAuthorizedBridge(address(basejumpBase), true);
-
-        uint256 expectedNetAmount = TRANSFER_AMOUNT - BASEJUMP_FEE;
-
-        // Build VAA from MOONBEAM chain to MOONBEAM chain (same chain transfer)
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            MOONBEAM_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            expectedNetAmount,
-            hydrationRecipient,
-            0
+        vm.startPrank(user);
+        unrouted.approve(address(basejumpBase), TRANSFER_AMOUNT);
+        vm.expectRevert(
+            abi.encodeWithSelector(IBasejump.SettlementRouteNotSet.selector, address(unrouted))
         );
-
-        // Authorize this emitter
-        basejumpBase.setAuthorizedEmitter(
-            MOONBEAM_CHAIN_ID,
-            BasejumpTestHelpers.addressToBytes32(address(basejumpBase))
-        );
-
-        // When completeTransfer is called on same chain, it should call landing directly
-        // via _executeTransfer -> IBasejumpLanding(basejumpLanding).transfer()
-        vm.expectEmit(true, true, false, true, address(basejumpBase));
-        emit IBasejumpCore.TransferProcessed(address(usdcBase), expectedNetAmount, hydrationRecipient);
-
-        // This should trigger _executeTransfer which calls BasejumpLanding.transfer directly
-        basejumpBase.completeTransfer(vaa);
-
-        // The test passes if the transfer executed without reverting
-    }
-
-    function testXcmTransactorNotSet() public {
-        // Deploy a fresh BasejumpProxy without XCM transactor configured
-        BasejumpProxy freshProxy = new BasejumpProxy();
-        ERC1967Proxy freshProxyProxy = new ERC1967Proxy(
-            address(freshProxy),
-            abi.encodeCall(BasejumpProxy.initialize, (address(this), address(tokenBridge)))
-        );
-        BasejumpProxy proxy = BasejumpProxy(address(freshProxyProxy));
-
-        // Configure landing and emitter
-        proxy.setLanding(
-            BASE_CHAIN_ID,
-            BasejumpTestHelpers.addressToBytes32(address(basejumpHydration))
-        );
-        proxy.setAuthorizedEmitter(
-            BASE_CHAIN_ID,
-            BasejumpTestHelpers.addressToBytes32(address(basejumpBase))
-        );
-
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            TRANSFER_AMOUNT,
-            hydrationRecipient,
-            0
-        );
-
-        // Should revert with XcmTransactorNotSet when trying to execute transfer
-        vm.expectRevert(BasejumpProxy.XcmTransactorNotSet.selector);
-        proxy.completeTransfer(vaa);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // RECOVERY TESTS
-    // ═══════════════════════════════════════════════════════════════════
-
-    function testResetProcessedVaa() public {
-        bytes memory vaa = BasejumpTestHelpers.buildFastPathVAA(
-            BASE_CHAIN_ID,
-            address(basejumpBase),
-            address(usdcBase),
-            TRANSFER_AMOUNT - BASEJUMP_FEE,
-            hydrationRecipient,
-            0
-        );
-
-        // Process the VAA
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        // Get the VAA hash by parsing (simulating what admin would do)
-        bytes32 vaaHash = keccak256(vaa);
-
-        // Replay should fail (already processed)
-        vm.expectRevert("VAA already processed");
-        basejumpMoonbeam.completeTransfer(vaa);
-
-        // Reset it (as owner)
-        basejumpMoonbeam.resetProcessedVaa(vaaHash);
-
-        // Now should be able to replay
-        basejumpMoonbeam.completeTransfer(vaa);
+        basejumpBase.bridgeViaWormhole(address(unrouted), TRANSFER_AMOUNT, hydrationRecipient, "");
+        vm.stopPrank();
     }
 }

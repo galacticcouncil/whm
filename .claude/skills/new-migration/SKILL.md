@@ -170,7 +170,7 @@ Read `migrations/definitions/basejump-base/index.ts` and step file listing to ex
 
 - name: `basejump-ethereum`
 - wallets: `hydration:PK_LANDING, moonbeam:PK_PROXY, ethereum:PK`
-- steps (16, mirroring basejump-base, with `base` → `ethereum`):
+- steps (9, mirroring basejump-base, with `base` → `ethereum`):
   ```
   deploy:basejump, deploy:proxy, deploy:transactor, deploy:landing,
   authorize:proxy@transactor, authorize:proxy@landing,

@@ -96,7 +96,7 @@ This makes every dependency explicit + auditable. State files are write-once rec
 5. Create env files `migrations/envs/prod/<your-migration>.env` and `migrations/envs/fork/<your-migration>.env`
 6. Optional: add a sh wrapper at `sh/migrate-<your-migration>.sh` and an npm script in root `package.json`
 
-For a new variant of an existing pattern (e.g. `basejump-ethereum` mirroring `basejump-base`): copy the folder, rename, sed `base` → `ethereum`, sed `BASE` → `ETHEREUM`, adjust chain IDs / addresses in env files. Each migration is its own frozen recipe — no shared definitions to keep in sync.
+For a new variant of an existing pattern (e.g. `basejump-ethereum-ntt` mirroring `basejump-base`): copy the folder, rename, sed `base` → `ethereum`, sed `BASE` → `ETHEREUM`, adjust chain IDs / addresses in env files. Each migration is its own frozen recipe — no shared definitions to keep in sync.
 
 ## State files
 

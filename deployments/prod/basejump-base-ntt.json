@@ -1,0 +1,64 @@
+{
+  "migration": "basejump-base-ntt",
+  "environment": "prod",
+  "startedAt": "2026-08-17T08:14:20.970Z",
+  "completedAt": null,
+  "steps": [
+    {
+      "name": "001-deploy-basejump",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x04fb8e527f82e5047f4496ec7f7037a80e708d77",
+        "proxyAddress": "0x9c007310c2972f656bc4903a16f936fc0cfbc4d2",
+        "ownerAddress": "0x20b588a194d9a3D788985c0C86A1160836a0Aaaa",
+        "wormholeId": "30"
+      },
+      "error": null,
+      "startedAt": "2026-08-17T08:14:20.973Z",
+      "completedAt": "2026-08-17T08:14:29.944Z"
+    },
+    {
+      "name": "002-set-landing-dest@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x73bc2f043149917df2cc33b393597bb490485832e16712d319e1781ab6c26d2f",
+        "landingDest": "0x00000000000000000000000070e9b12c3b19cb5f0e59984a5866278ab69df976"
+      },
+      "error": null,
+      "startedAt": "2026-08-17T09:05:27.325Z",
+      "completedAt": "2026-08-17T09:05:31.467Z"
+    },
+    {
+      "name": "003-set-eurc-ntt-manager@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0xc4f39f1b6929557efacfe1a88debe2e852a780861a0c28c35d2db5ab7f3150e1",
+        "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+        "manager": "0xD1dc3517732c98502b5c1ba2389AcA9E9016d89a"
+      },
+      "error": null,
+      "startedAt": "2026-08-17T09:05:31.469Z",
+      "completedAt": "2026-08-17T09:05:34.612Z"
+    },
+    {
+      "name": "004-set-eurc-fee@basejump",
+      "status": "completed",
+      "output": {
+        "txHash": "0x5c4c276ff3a2f3cc7cc7e66597c252e896718cf7bcb6a87fae29ed982e288f1f",
+        "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+        "fee": "100000"
+      },
+      "error": null,
+      "startedAt": "2026-08-17T09:05:34.613Z",
+      "completedAt": "2026-08-17T09:05:37.762Z"
+    },
+    {
+      "name": "005-transfer-ownership@basejump",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    }
+  ]
+}

@@ -7,11 +7,10 @@ import type {
 
 type EvmWallet = ReturnType<typeof wallet.getWallet>;
 
-/** Multi-chain wallet context for basejump-base deployment */
+/** Two-chain wallet context: Base source + Hydration receiver */
 export interface WalletContext {
-  hydration: EvmWallet;
-  moonbeam: EvmWallet;
   base: EvmWallet;
+  hydration: EvmWallet;
 }
 
 export type MigrationStep = BS<WalletContext>;
