@@ -1,7 +1,6 @@
 import { parseAbi } from "viem";
 
 import { boot } from "../../boot";
-import { hydration } from "../../chains";
 import { alerts, engineConfig, privateKey } from "../../config";
 import { createApp } from "../../engine/app";
 import { hydrationClients, receiveMessage } from "../../engine/hydration";
@@ -9,7 +8,6 @@ import { isForManager, isNttTransfer } from "../../engine/ntt";
 import { createQueue } from "../../engine/queue";
 import logger from "../../logger";
 import type { Next, RelayerCtx } from "../../types";
-import { hydrationFees } from "../../utils/fees";
 
 import { APP_NAME, FROM_SEQUENCE, RETRIES, RPC_HYDRATION } from "./config";
 import { ROUTES, type NttRoute } from "./routes";
@@ -59,18 +57,7 @@ async function start(): Promise<void> {
     await queue.add({
       label: `${route.token} transfer`,
       logger: log,
-      // Hydration wants no priority fee, and some compatible RPCs omit
-      // eth_maxPriorityFeePerGas. See utils/fees.
-      submit: (n) =>
-        receiveMessage(
-          clients,
-          hydration,
-          hydrationFees,
-          transceiverAbi,
-          route.transceiver,
-          vaa.bytes,
-          n,
-        ),
+      submit: (n) => receiveMessage(clients, transceiverAbi, route.transceiver, vaa.bytes, n),
     });
     return next();
   }
