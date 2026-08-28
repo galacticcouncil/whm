@@ -9,6 +9,22 @@ export type FeeOverrides =
   | { kind: "eip1559"; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
 
 /**
+ * How a destination chain wants its fees priced. `undefined` means no override: the caller lets
+ * viem's own gas estimation decide, which is what an ordinary EVM chain wants.
+ *
+ * @param client Public client for the destination chain.
+ */
+export type FeeStrategy = (client: PublicClient) => Promise<FeeOverrides | undefined>;
+
+/**
+ * Fee strategy for an ordinary EVM chain: no override. `apps/intent/app.ts` already submits to
+ * Ethereum this way today, letting `writeContract` estimate fees itself; this just names that
+ * behaviour so other destinations (Base, and beyond) can select it explicitly instead of falling
+ * through Hydration's fee handling.
+ */
+export const defaultFees: FeeStrategy = async () => undefined;
+
+/**
  * Hydration currently wants no priority fee, and some compatible RPCs do not expose
  * `eth_maxPriorityFeePerGas` at all — so fall back to zero rather than to a library default, which
  * would overpay on every submission.
