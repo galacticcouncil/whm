@@ -15,11 +15,26 @@ import { privateKeyToAccount } from "viem/accounts";
 import { hydration, HYDRATION_EVM_CHAIN_ID } from "../chains";
 
 /**
- * Account, clients, and the chain they were built against, returned together so a caller can never
- * assemble the triple wrongly: there is no separate `chain` (or fee-strategy) argument to pass
- * alongside a mismatched set of clients, because the factory that builds the clients is the same
- * factory that names the chain. A destination chain's fee handling lives on `chain` itself (see
+ * STATUS (issue #45): `receiveMessage` below takes its destination chain from `ChainClients`
+ * rather than hardcoding Hydration, so the same function can in principle submit to Base or
+ * another EVM chain. Only Hydration is wired up, built, and exercised in this repo today:
+ * `hydrationClients` is the only factory, `ntt`/`oracle` are its only callers, and
+ * `scripts/verify-hydration-fees.ts` only tests the Hydration path. A Base client/chain and its own
+ * exercise is issue #46; nothing in this file builds or runs against Base.
+ */
+
+/**
+ * Account, clients, and the chain they were built against, returned together by one factory. No
+ * argument here invites mismatching them: there is no separate `chain` (or fee-strategy) parameter
+ * for a caller to pass alongside a different set of clients, because `hydrationClients` below hands
+ * back all three at once. A destination chain's fee handling lives on `chain` itself (see
  * `../chains`), not here.
+ *
+ * This is a convention, not a type-level guarantee: `ChainClients` is a plain exported interface,
+ * so a hand-built value pairing Hydration's clients with a different chain still type-checks and
+ * still runs, since TypeScript's structural typing has no way to see that `publicClient` was
+ * created against `hydration` specifically. Each per-chain factory (Base's, when #46 adds one) has
+ * to uphold the pairing itself; nothing here enforces it once, centrally, for all of them.
  */
 export interface ChainClients {
   account: Account;
