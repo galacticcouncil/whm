@@ -38,8 +38,9 @@ async function priorityFee(client: PublicClient): Promise<bigint> {
  * `baseFeePerGas` absent — there is no runtime state that produces the legacy branch below on
  * Hydration today, short of a runtime upgrade that removes that pallet. The chain also charges
  * whatever tip a caller includes but requires none, so a zero priority fee is both correct and
- * the cheapest submission; some compatible RPCs do not implement `eth_maxPriorityFeePerGas` at
- * all, which is why `priorityFee` above treats a failed read as "no tip" rather than an error.
+ * the cheapest submission. The RPCs probed for this PR implement `eth_maxPriorityFeePerGas` and
+ * return zero; `priorityFee` above keeps master's tolerance of a failed read as "no tip", so an RPC
+ * without the method still gets the same zero-tip transaction.
  *
  * The legacy branch stays in this function for the general contract — any other chain this
  * relayer submits to may not carry a base fee — rather than as a code path Hydration is ever
@@ -68,8 +69,9 @@ async function priorityFee(client: PublicClient): Promise<bigint> {
 export async function chainFees(chain: Chain, client: PublicClient): Promise<FeeOverrides> {
   const block = await client.getBlock();
 
-  // A zero base fee is unreachable on Hydration today (`MinBaseFeePerGas` is strictly positive —
-  // see `chains.ts` and the hydration-runtime skill), but under the general contract a chain
+  // A zero base fee is unreachable on Hydration today (`MinBaseFeePerGas` is `DefaultBaseFeePerGas
+  // / 10`, strictly positive, in `runtime/hydradx/src/evm/mod.rs` of `galacticcouncil/hydration-node`),
+  // but under the general contract a chain
   // reporting `baseFeePerGas: 0n` must not be priced as `maxFeePerGas: 0n`; master treated a falsy
   // base fee as "no base fee" and this keeps that reading.
   if (!block.baseFeePerGas) {

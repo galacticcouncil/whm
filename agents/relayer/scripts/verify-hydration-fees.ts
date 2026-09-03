@@ -47,10 +47,10 @@
  *        - E3: a `Chain` whose hook returns neither the legacy nor the EIP-1559 shape. `chainFees`
  *              must throw its named error and `submit` must send nothing, rather than pass a
  *              half-set `FeeOverrides` through.
- *      E2/E3 use hand-built `ChainClients` (`genericClients`) rather than a factory, on purpose:
- *      `ChainClients` is a plain structural interface, so nothing stops `publicClient` and `wallet`
- *      from being built against different chains, and this file exercises exactly that seam (see
- *      the corrected doc comment on `ChainClients` in `../src/engine/hydration.ts`).
+ *      E/E2/E3 use a hand-built `ChainClients` (`genericClients`) because this repo has no
+ *      non-Hydration factory. It builds both clients from the same chain object, so it does not
+ *      itself construct a mismatched pair; it only shows the type accepts a value no factory made
+ *      (see the doc comment on `ChainClients` in `../src/engine/hydration.ts` for that bound).
  *
  * Run with: npx tsx agents/relayer/scripts/verify-hydration-fees.ts
  * (from the repo root, or from agents/relayer/; either resolves node_modules), or
@@ -258,10 +258,9 @@ async function actualRawTx(scenario: Scenario): Promise<Hex> {
 
 /** Sections E/E2/E3: a non-Hydration `ChainClients`, built the same way `hydrationClients` builds
  * one, just against whichever `chain` is passed in — there is no factory for a non-Hydration chain
- * in `../src/engine/hydration` (Base is issue #46), so these tests build the pair directly. This is
- * also exactly the seam the corrected doc comment on `ChainClients` names: nothing here enforces
- * that `publicClient` and `wallet` were built from the same chain object, which is why this helper
- * can (and does, for E2/E3) hand back a client pair whose behaviour is entirely up to the caller. */
+ * in `../src/engine/hydration` (Base is issue #46), so these tests build the pair directly. Both
+ * clients come from the same `chain` object, so this helper does not construct a mismatched pair;
+ * what it shows is only that `ChainClients` accepts a value no factory produced. */
 async function genericClients(chain: Chain): Promise<ChainClients> {
   const account = privateKeyToAccount(TEST_KEY);
   const publicClient = createPublicClient({ chain, transport: http("http://mock-rpc.invalid") });
