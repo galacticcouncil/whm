@@ -1,8 +1,6 @@
 import { CHAINS, CHAIN_ID_TO_NAME } from "@certusone/wormhole-sdk";
 import { defineChain } from "viem";
 
-import { hydrationFees } from "./utils/fees";
-
 /** Wormhole chain ids. relayer-engine's SDK enum predates Hydration, so these are plain numbers. */
 export const WORMHOLE = {
   solana: 1,
@@ -15,17 +13,11 @@ export const WORMHOLE = {
 /** Hydration's EVM chain id — asserted at startup so a misconfigured RPC fails loudly. */
 export const HYDRATION_EVM_CHAIN_ID = 222222;
 
-/**
- * `fees.estimateFeesPerGas` is viem's own extension point for chain-specific pricing: any client
- * built against this chain object gets `hydrationFees` automatically on every write, with no fee
- * argument for a caller to pass, and so none to mismatch against the wrong chain.
- */
 export const hydration = defineChain({
   id: HYDRATION_EVM_CHAIN_ID,
   name: "Hydration",
   nativeCurrency: { name: "WETH", symbol: "WETH", decimals: 18 },
   rpcUrls: { default: { http: [] } },
-  fees: { estimateFeesPerGas: hydrationFees },
 });
 
 /**
