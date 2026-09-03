@@ -45,16 +45,34 @@ async function priorityFee(client: PublicClient): Promise<bigint> {
  * relayer submits to may not carry a base fee — rather than as a code path Hydration is ever
  * expected to take.
  *
+ * `FeeOverrides` is validated at runtime, not just declared as a TS union: viem's
+ * `estimateFeesPerGas` returns whatever the destination chain's own `fees.estimateFeesPerGas`
+ * hook returns, unvalidated, at the boundary this function reads it from
+ * (`node_modules/viem/actions/public/estimateFeesPerGas.ts`, the `if (fees !== null) return fees`
+ * line) — TypeScript's `EstimateFeesPerGasReturnType<'eip1559'>` on that call is a claim about the
+ * shape, not a check of it. A chain object whose hook returns `{ gasPrice }` would otherwise come
+ * back through here typed as `maxFeePerGas`/`maxPriorityFeePerGas`, both actually `undefined`, and
+ * get handed to `submit` as a well-typed `kind: "eip1559"` `FeeOverrides` carrying no usable fee
+ * fields — signing a zero-fee EIP-1559 transaction. The checks below read the actual runtime shape
+ * instead of trusting the declared one, and throw rather than pass through anything that is
+ * neither.
+ *
  * @param chain Destination chain, for the Hydration-specific pricing branch.
  * @param client Public client for that chain.
  * @returns Legacy `gasPrice` when the latest block carries no base fee. Otherwise, for Hydration,
  *   EIP-1559 fields priced off that block plus a guarded priority-fee read; for any other chain,
- *   viem's own `estimateFeesPerGas`.
+ *   whichever shape viem's own `estimateFeesPerGas` actually returned.
+ * @throws When `chain.id` is not Hydration and neither the returned `gasPrice` nor both
+ *   `maxFeePerGas`/`maxPriorityFeePerGas` are `bigint`.
  */
 export async function chainFees(chain: Chain, client: PublicClient): Promise<FeeOverrides> {
   const block = await client.getBlock();
 
-  if (block.baseFeePerGas === null) {
+  // A zero base fee is unreachable on Hydration today (`MinBaseFeePerGas` is strictly positive —
+  // see `chains.ts` and the hydration-runtime skill), but under the general contract a chain
+  // reporting `baseFeePerGas: 0n` must not be priced as `maxFeePerGas: 0n`; master treated a falsy
+  // base fee as "no base fee" and this keeps that reading.
+  if (!block.baseFeePerGas) {
     return { kind: "legacy", gasPrice: await getGasPrice(client) };
   }
 
@@ -67,10 +85,16 @@ export async function chainFees(chain: Chain, client: PublicClient): Promise<Fee
     };
   }
 
-  const fees = await client.estimateFeesPerGas();
-  return {
-    kind: "eip1559",
-    maxFeePerGas: fees.maxFeePerGas,
-    maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+  const fees = (await client.estimateFeesPerGas()) as {
+    gasPrice?: unknown;
+    maxFeePerGas?: unknown;
+    maxPriorityFeePerGas?: unknown;
   };
+  if (typeof fees.gasPrice === "bigint") {
+    return { kind: "legacy", gasPrice: fees.gasPrice };
+  }
+  if (typeof fees.maxFeePerGas === "bigint" && typeof fees.maxPriorityFeePerGas === "bigint") {
+    return { kind: "eip1559", maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas };
+  }
+  throw new Error(`chainFees: ${chain.name} returned no usable fee fields`);
 }
