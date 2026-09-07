@@ -43,12 +43,12 @@ interface IIntentReceiver {
     /// @dev The instruction names a different settlement — pairing them would let a caller pay for
     ///      any pending delivery and claim whichever instruction carries the highest ceiling.
     error SequenceMismatch(uint64 instructed, uint64 settled);
-    /// @dev The settlement has not landed yet, or an earlier instruction took what had. Reverting
-    ///      leaves this instruction executable, so it waits for the next arrival.
-    error NotFunded(uint256 required, uint256 available);
     /// @dev The settlement was delivered but its funds have not been released — NTT's inbound rate
     ///      limiter holds it queued. Reverting leaves the instruction executable for retry.
     error SettlementNotReleased(uint64 sequence);
+    /// @dev The settlement's amount is not trimmed to the precision the rail has always used, so
+    ///      scaling it to wei would be a guess. Reverting beats forwarding a mis-scaled amount.
+    error UnexpectedTrim(uint8 decimals);
     error FeeExceedsCeiling();
     error AlreadyRedeemed();
     /// @dev Caller is not authorized and the order is still inside its exclusive window. Expires, so

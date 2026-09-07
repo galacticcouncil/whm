@@ -34,7 +34,7 @@ verifiable; nothing is passed as a caller argument.
     └─► [C] forwarding instruction ───────────────────┘            │
              emitter: IntentEmitter                                │  POA watcher
              payload: abi.encode(seq, depositAddress,              │  (not our tx)
-                                 amount, maxRelayFee)              ▼
+                                 maxRelayFee)                      ▼
              carries: where the value goes                    account A credited
                                                               nep141:eth.omft.near
 ```
@@ -415,12 +415,11 @@ Plain `abi.encode`, not packed — the decoder is Solidity, and the bytes are ne
 abi.encode(
     uint64  transferSequence,  // the NTT manager's sequence for the settlement it pairs with
     address depositAddress,    // where the receiver forwards
-    uint256 amount,            // what the settlement delivers, already quantized to TRIM_UNIT
     uint256 maxRelayFee        // ceiling on what the caller may claim
 )
 ```
 
-Fixed 128 bytes, all static — no strings, so no length games:
+Fixed 96 bytes, all static — no strings, so no length games:
 
 ```
  word   0                1                2                3
@@ -442,7 +441,7 @@ sweep of the source receipt — which is how the relayer finds it:
   └──────────────────────────────────────────────────────────┘
         │                                    │
         │ filter topics[1] == emitter        │ decode data → sequence, depositAddress,
-        │                                    │               amount, maxRelayFee
+        │                                    │               maxRelayFee
         ▼                                    ▼
    nothing to do here              match sequence against [B], then processOrder
 ```
@@ -457,9 +456,12 @@ the instruction by the emitter's, and those are three independent counters. `pro
 the manager sequence from the settlement payload and rejects a mismatch, which is what stops a caller
 pairing any pending settlement with whichever instruction carries the richest ceiling.
 
-**Why `amount` is carried rather than read from the settlement.** The receiver would otherwise have
-to parse the NTT transfer payload to learn it. Carrying it costs 32 bytes and makes the instruction
-self-describing; the settlement still has to have actually landed before anything moves.
+**Why `amount` is read from the settlement rather than carried.** The receiver walks into the NTT
+transfer body for it — `NttPayload.settlementOf` returns it off the same pass that yields the
+sequence and the digest preimage. That makes the number it forwards the number the rail released, so
+an instruction has no size to over-state and there is no divergence to check for. It costs ~517 gas
+against carrying it, and saves 32 bytes of instruction. The amount arrives trimmed to 8 decimals;
+any other precision reverts `UnexpectedTrim` rather than being scaled by a guess.
 
 **Delivered is not released.** `processOrder` cannot infer that funds arrived from the settlement
 having been delivered. NTT's inbound rate limiter consumes the VAA and marks the manager message
@@ -477,13 +479,17 @@ nothing while `isVAAConsumed` reads true. The receiver therefore asks the manage
 | true | ≠ 0 | queued — nothing credited |
 | true | 0 | queued, then completed — released |
 
-**Consistency level.** Published instantly (200) rather than finalized. The instruction carries no
-authority of its own — it is inert until a settlement naming the same sequence arrives — so waiting
-on finality would only delay the relayer. The one cost is a reorg window: if the publishing
-transaction were dropped after guardians signed, the manager's counter would rewind and a later,
-different transfer could reuse that sequence. On a GRANDPA chain that needs a block dropped
-pre-finalization, so it is collator-level rather than routine. See the verification table in
-[spec.md](spec.md#7-verification-status) — level 200 is not yet confirmed to work from chain 73.
+**Consistency level.** Published finalized (202), matching the settlement leg. The sequence the
+instruction names is contract storage, so a reorg rewinds it — and a guardian signature is never
+retracted. Signed pre-finality, the instruction would stay valid forever while pointing at whatever
+transfer next took that counter. At 202 the guardian drops a message whose block disappears, in the
+same `pending` loop that already protects the settlement, so the pair can be orphaned together but
+never split.
+
+This costs no latency. Chain 73's watcher does honour 200 — measured across 22 live orders, the
+instruction was signed a median of 38s ahead of its settlement — but a relayer cannot act until the
+settlement arrives, and that is 202 either way. The reorg window was that 38s. See
+[audit-2026-08-23.md](audit-2026-08-23.md), note 8.
 
 ---
 

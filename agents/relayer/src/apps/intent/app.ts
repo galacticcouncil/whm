@@ -7,7 +7,7 @@ import { WORMHOLE } from "../../chains";
 import { alerts, engineConfig, privateKey } from "../../config";
 import { createApp } from "../../engine/app";
 import { onEmitter } from "../../engine/emitter";
-import { isNttTransfer, settlementSequence } from "../../engine/ntt";
+import { isNttTransfer, settlementAmount, settlementSequence } from "../../engine/ntt";
 import { createQueue } from "../../engine/queue";
 import { isDone, revertName } from "../../engine/revert";
 import { fetchVaa, normalizeTxHash } from "../../engine/vaa";
@@ -102,7 +102,7 @@ async function start(): Promise<void> {
   /**
    * Deliver a settlement and forward it, in one call. Simulated first so a revert surfaces as a
    * named error before a nonce is spent — the queue then classifies it (already redeemed, sequence
-   * mismatch, underfunded) rather than burning gas.
+   * mismatch, settlement not released) rather than burning gas.
    */
   async function forward(nttVaa: Buffer, instructionVaa: Buffer, fee: bigint, nonce: number) {
     const args = orderArgs(nttVaa, instructionVaa, fee);
@@ -198,7 +198,7 @@ async function start(): Promise<void> {
     }
 
     log.info(
-      `Order ${sequence}: ${order.amount} wei -> ${order.depositAddress}, ` +
+      `Order ${sequence}: ${settlementAmount(vaa.payload, 18)} wei -> ${order.depositAddress}, ` +
         `fee ${fee} <= ${order.maxRelayFee} (attempt ${attempt}/${RETRIES})`,
     );
 

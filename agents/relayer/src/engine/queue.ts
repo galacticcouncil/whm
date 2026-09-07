@@ -144,7 +144,7 @@ export function createQueue(deps: QueueDeps) {
         nonce = await publicClient.getTransactionCount({ address: account.address });
         pending.unshift(task);
       } else {
-        // Not proven finished — a queued settlement, an underfunded receiver, an RPC blip. Hand it
+        // Not proven finished — a queued settlement, a failing forward, an RPC blip. Hand it
         // back so the engine retries with backoff rather than acking a failure as a success.
         task.logger.warn(`${task.label} failed${name ? ` (${name})` : ""}: ${message}`);
         task.reject(e);

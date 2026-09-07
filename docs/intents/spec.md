@@ -62,23 +62,39 @@ HYDRATION   IntentEmitter.placeOrder(assetIn, amountIn, minEthOut, depositAddres
               3. quantize to TRIM_UNIT (1e10) — NTT trims to 8dp, WETH is 18dp
               4. nttManager.transfer(amount, 2, IntentReceiver)   → transferSequence
               5. wormhole.publishMessage(abi.encode(
-                     transferSequence, depositAddress, amount, maxRelayFee))
+                     transferSequence, depositAddress, maxRelayFee), consistency 202)
               → emits OrderPlaced
 
 ETHEREUM    IntentReceiver.processOrder(nttVaa, instructionVaa, feeRequested)
               1. verify the instruction (guardian quorum, emitter pinned to chain 73 + address)
               2. require instruction.sequence == settlement's NTT manager sequence
-              3. require feeRequested <= maxRelayFee
-              4. deliver the settlement through the transceiver, unless already delivered
-              5. forward (amount - feeRequested) to depositAddress; pay the caller its fee
+              3. read the amount off the settlement, at the rail's own precision
+              4. require feeRequested <= maxRelayFee
+              5. deliver the settlement through the transceiver, unless already delivered
+              6. forward (amount - feeRequested) to depositAddress; pay the caller its fee
               → emits OrderProcessed, RelayFeePaid
 ```
 
 **Why two messages and not one.** The Wormhole TokenBridge's `transferTokensWithPayload` carries a
-payload _and_ restricts redemption to the named recipient. NTT does neither: it has no payload field,
-and `receiveMessage` is permissionless. So the destination rides its own message, and the two are
+payload _and_ restricts redemption to the named recipient. NTT does neither in any way we can reach:
+`receiveMessage` is permissionless, and while `NativeTokenTransfer` does have an `additionalPayload`
+field, nothing populates it from a caller — `_prepareNativeTokenTransfer` hardcodes `""` and both it
+and the inbound `_handleAdditionalPayload` are `internal virtual` hooks, so using it means custom
+manager subclasses on **both** chains. So the destination rides its own message, and the two are
 bound by the **NTT manager's sequence** — not a Wormhole sequence, and not chain-global. Pairing a
 settlement with someone else's instruction fails that check.
+
+**Why the instruction publishes finalized.** That sequence is contract storage, so a reorg rewinds
+it. Published instantly the instruction would be signed before the block was final and stay valid
+forever, pointing at whatever transfer next took that counter — see
+[audit-2026-08-23.md](audit-2026-08-23.md), note 8. Finality costs nothing here: the settlement leg
+is 202 regardless and a relayer cannot act until it arrives, which measurement confirms is ~38s
+after the instruction used to be available.
+
+**Why the amount is not carried.** It rides in the settlement, so the receiver reads what actually
+released rather than what an instruction claimed. There is then no divergence to check for and no
+aggregate-balance test to get wrong — the number the receiver forwards is the number the rail
+delivered.
 
 **Why delivery is atomic with the forward.** Because NTT delivery is permissionless, a generic
 relayer can deliver a settlement before we do — funds would then sit in the receiver with nothing to

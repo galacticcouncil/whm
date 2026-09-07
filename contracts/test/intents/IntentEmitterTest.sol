@@ -264,14 +264,16 @@ contract IntentEmitterTest is Test {
         );
         assertEq(settled.recipientChain, 2, "wrong settlement chain");
 
-        (uint64 instructionSequence, address forwardTo, uint256 amount, uint256 ceiling) =
-            abi.decode(coreBridge.lastPayload(), (uint64, address, uint256, uint256));
+        // The amount is the settlement's to state, so the instruction carries the destination and
+        // the ceiling and nothing else.
+        (uint64 instructionSequence, address forwardTo, uint256 ceiling) =
+            abi.decode(coreBridge.lastPayload(), (uint64, address, uint256));
 
         assertEq(instructionSequence, sequence, "instruction must match the settlement");
         assertEq(forwardTo, depositAddress, "instruction must carry the deposit address");
-        assertEq(amount, settled.amount, "instruction must carry what the settlement delivers");
         assertEq(ceiling, MAX_RELAY_FEE, "instruction must carry the fee ceiling");
-        assertEq(coreBridge.lastConsistency(), 200, "instruction must publish instantly");
+        // The instruction names a rewindable counter, so it must not outlive the block that set it.
+        assertEq(coreBridge.lastConsistency(), 202, "instruction must publish finalized");
     }
 
     /// @notice A ceiling at or above the delivery leaves the receiver nothing to forward, so a

@@ -25,14 +25,20 @@ import {IIntentReceiver} from "./interfaces/IIntentReceiver.sol";
 ///         permissionless unlike the TokenBridge's payload-3 completion, so a settlement may already
 ///         be here; that skips step 2 rather than failing.
 ///
-/// @dev Nothing is caller-supplied. The amount, the destination and the fee ceiling all come from a
-///      guardian-signed instruction whose emitter is pinned, and the amount must actually have
-///      landed here before any of it moves.
+/// @dev Nothing is caller-supplied. The destination and the fee ceiling come from a guardian-signed
+///      instruction whose emitter is pinned; the amount comes from the settlement itself, so an
+///      instruction cannot claim more than its own settlement released.
 contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
     using NttPayload for bytes;
 
     /// @notice Head start for authorized relayers, from the settlement VAA's timestamp.
     uint256 internal constant EXCLUSIVE_WINDOW = 5 minutes;
+
+    /// @notice What NTT trims WETH to — `min(8, srcDp, dstDp)` with 18 decimals on both sides.
+    uint8 internal constant NTT_DECIMALS = 8;
+
+    /// @notice Scales a trimmed amount back to the 18-decimal native ETH the rail delivers.
+    uint256 internal constant TRIM_UNIT = 1e10;
 
     address public owner;
     IWormhole public wormhole;
@@ -81,12 +87,11 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
         (IWormhole.VM memory instruction, bool valid,) = wormhole.parseAndVerifyVM(instructionVaa);
         if (!valid) revert InvalidInstruction();
 
-        (uint64 sequence, address depositAddress, uint256 amount, uint256 maxRelayFee) =
+        (uint64 sequence, address depositAddress, uint256 maxRelayFee) =
             _requireInstruction(instruction);
 
         IWormhole.VM memory settlement = wormhole.parseVM(nttVaa);
-        uint64 settled = settlement.payload.sequenceOf();
-        if (settled != sequence) revert SequenceMismatch(sequence, settled);
+        (bytes memory message, uint64 trimmed) = _requireSettlement(settlement.payload, sequence);
 
         if (feeRequested > maxRelayFee) revert FeeExceedsCeiling();
 
@@ -96,13 +101,12 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
         }
 
         // Delivered is not released.
-        _requireReleased(settlement, sequence);
+        _requireReleased(settlement.emitterChainId, message, sequence);
 
         // Below the proof, not above it: only now is the settlement's timestamp trustworthy.
-        _requireCallerMayProcess(settlement);
+        _requireCallerMayProcess(settlement.timestamp);
 
-        if (address(this).balance < amount) revert NotFunded(amount, address(this).balance);
-
+        uint256 amount = uint256(trimmed) * TRIM_UNIT;
         uint256 forwardAmount = amount - feeRequested;
 
         _pay(depositAddress, forwardAmount);
@@ -119,12 +123,10 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
     /// @dev Authorize the emitter's instruction, consume it, and read its terms.
     /// @return sequence The settlement this instruction was published with
     /// @return depositAddress Where it forwards
-    /// @return amount What the settlement delivers — NTT trims to the precision the emitter already
-    ///         quantized to, so the delivery equals this exactly
     /// @return maxRelayFee Ceiling on the caller's claim
     function _requireInstruction(IWormhole.VM memory instruction)
         private
-        returns (uint64 sequence, address depositAddress, uint256 amount, uint256 maxRelayFee)
+        returns (uint64 sequence, address depositAddress, uint256 maxRelayFee)
     {
         if (
             instruction.emitterChainId != HydrationConsts.WORMHOLE_CHAIN_ID ||
@@ -136,32 +138,51 @@ contract IntentReceiver is Initializable, UUPSUpgradeable, IIntentReceiver {
         if (processed[instruction.hash]) revert AlreadyRedeemed();
         processed[instruction.hash] = true;
 
-        (sequence, depositAddress, amount, maxRelayFee) =
-            abi.decode(instruction.payload, (uint64, address, uint256, uint256));
+        (sequence, depositAddress, maxRelayFee) =
+            abi.decode(instruction.payload, (uint64, address, uint256));
         if (depositAddress == address(0)) revert MalformedInstruction();
+    }
+
+    /// @dev Read the settlement and reject it before anything is delivered.
+    /// @param payload The settlement VAA's payload — parsed, not verified.
+    /// @param sequence The manager sequence the instruction named.
+    /// @return message The manager message, the preimage NTT digests delivery on
+    /// @return trimmed What the transfer releases, still at the rail's precision
+    function _requireSettlement(bytes memory payload, uint64 sequence)
+        private
+        pure
+        returns (bytes memory message, uint64 trimmed)
+    {
+        uint64 settled;
+        uint8 decimals;
+        (settled, message, decimals, trimmed) = payload.settlementOf();
+        if (settled != sequence) revert SequenceMismatch(sequence, settled);
+        if (decimals != NTT_DECIMALS) revert UnexpectedTrim(decimals);
     }
 
     /// @dev The VAAs are public once signed and this pays msg.sender, so anyone can rebuild the call —
     ///      or copy a pending one out of the mempool. The window makes that unprofitable without
     ///      making delivery depend on us: it expires, and an empty allowlist disables it entirely.
     ///
-    ///      Timed from the settlement, not the instruction: the instruction publishes at consistency
-    ///      200 against the settlement's 202, so it can be signed blocks before the leg a relayer
-    ///      actually waits on.
-    /// @param settlement Trustworthy only after the settlement is proven — it is parsed unverified.
-    function _requireCallerMayProcess(IWormhole.VM memory settlement) private view {
+    ///      Both messages leave one transaction, so both VAAs carry that block's timestamp and which
+    ///      one this is timed from makes no difference. It does mean the window opens at the block
+    ///      rather than at signing, so finality spends its first ~40s before anyone can act.
+    /// @param timestamp The settlement's, trustworthy only after the settlement is proven — it is
+    ///        parsed unverified.
+    function _requireCallerMayProcess(uint32 timestamp) private view {
         if (authorizedRelayerCount == 0 || authorizedRelayer[msg.sender]) return;
-        if (block.timestamp < uint256(settlement.timestamp) + EXCLUSIVE_WINDOW) revert Unauthorized();
+        if (block.timestamp < uint256(timestamp) + EXCLUSIVE_WINDOW) revert Unauthorized();
     }
 
     /// @dev Assert the settlement's funds landed here, rather than inferring it from delivery: the
     ///      manager marks a message executed before the inbound rate limiter runs, and a queued
     ///      transfer releases nothing until someone completes it.
-    function _requireReleased(IWormhole.VM memory settlement, uint64 sequence) private view {
+    function _requireReleased(uint16 sourceChain, bytes memory message, uint64 sequence)
+        private
+        view
+    {
         INttManager manager = INttManager(transceiver.nttManager());
-        bytes32 digest = keccak256(
-            abi.encodePacked(settlement.emitterChainId, settlement.payload.managerMessage())
-        );
+        bytes32 digest = keccak256(abi.encodePacked(sourceChain, message));
 
         if (
             !manager.isMessageExecuted(digest) ||

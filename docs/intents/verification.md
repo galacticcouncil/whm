@@ -28,11 +28,6 @@ credential and returns `result: null`), but it is no longer in the critical path
 **`SignRequest` field names on `v1.signer.sign`.** The *view* method takes `domain_id`, but the `sign`
 request struct needs confirming — it was `key_version`.
 
-**Hydration honours a requested consistency level.** Every chain-73 VAA observed so far is level 202,
-which is what the NTT transceivers were deployed with. Nothing has published at 200 from Hydration, so
-`CONSISTENCY_INSTANT` is untested on this chain for both `IntentEmitter` and `IntentQuoteEmitter`. 202
-is the proven-safe fallback.
-
 **MPC signing latency in practice.** Together with the POA crediting delay it sizes `max_quote_age`
 — the window a published price stays usable ([schema.md](schema.md) §3). Neither is measured.
 
@@ -40,6 +35,18 @@ is the proven-safe fallback.
 withdrawal fee.
 
 ## Verified
+
+**Hydration honours a requested consistency level.** Chain 73 runs a plain EVM watcher in `guardiand`
+with no finalizer override, so level 200 skips the pending queue and is signed with zero
+confirmations. Measured across 22 live order pairs: the `IntentEmitter` instruction (200) was signed
+a median of 38s ahead of the WETH transceiver settlement (202) from the same transaction, range
+30-46s. Both emitters now publish at 202 — see [schema.md](schema.md) — so this is recorded as the
+reason rather than as an open question.
+
+**A VAA's `timestamp` is the source block's, not the signing time.** Both legs of all 22 pairs carry
+byte-identical body timestamps despite the ~38s signing gap. The watcher sets
+`Timestamp: time.Unix(int64(blockTime), 0)` from the block holding the log, and the pending queue
+republishes the same object unchanged at finality.
 
 **NEAR / POA addressing.** `deposit_address` is stable and per-account — repeated calls return the
 same value, distinct per account, and it works for implicit hex ids. The same H160 appears across EVM

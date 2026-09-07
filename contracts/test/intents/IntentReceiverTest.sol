@@ -116,7 +116,8 @@ contract MockTransceiver {
     function _digest(bytes memory encodedMessage) internal pure returns (bytes32) {
         (uint16 chainId,,,, bytes memory payload) =
             abi.decode(encodedMessage, (uint16, bytes32, uint32, uint64, bytes));
-        return keccak256(abi.encodePacked(chainId, payload.managerMessage()));
+        (, bytes memory message,,) = payload.settlementOf();
+        return keccak256(abi.encodePacked(chainId, message));
     }
 }
 
@@ -142,6 +143,9 @@ contract IntentReceiverTest is Test {
     uint16 constant HYDRATION_CHAIN = 73;
     uint16 constant ETHEREUM_CHAIN = 2;
     uint256 constant AMOUNT = 1 ether;
+    /// @dev Mirror the contract's own — NTT trims WETH to 8dp, the rail delivers 18dp native ETH.
+    uint8 constant NTT_DECIMALS = 8;
+    uint256 constant TRIM_UNIT = 1e10;
     uint256 constant MAX_RELAY_FEE = 0.01 ether;
     uint64 constant SEQUENCE = 7;
 
@@ -185,46 +189,62 @@ contract IntentReceiverTest is Test {
         return abi.encode(chainId, emitter, uint32(block.timestamp), nonce, payload);
     }
 
-    function _instruction(uint64 sequence, uint256 amount, uint256 maxRelayFee)
+    /// @dev No amount: the receiver reads that off the settlement.
+    function _instruction(uint64 sequence, uint256 maxRelayFee)
         internal
         view
         returns (bytes memory)
     {
         return _vaa(
-            HYDRATION_CHAIN,
-            emitterAddress,
-            sequence,
-            abi.encode(sequence, depositAddress, amount, maxRelayFee)
+            HYDRATION_CHAIN, emitterAddress, sequence, abi.encode(sequence, depositAddress, maxRelayFee)
         );
     }
 
     /// @dev A settlement in the transceiver's wire format:
-    ///      prefix ‖ sourceManager ‖ recipientManager ‖ len ‖ (id ‖ sender ‖ len ‖ transfer) ‖ len.
-    function _settlementWithPrefix(bytes4 prefix, uint64 sequence)
+    ///      prefix ‖ sourceManager ‖ recipientManager ‖ len ‖ (id ‖ sender ‖ len ‖ transfer) ‖ len,
+    ///      where transfer is NTT_PREFIX ‖ decimals ‖ amount ‖ sourceToken ‖ to ‖ toChain. The
+    ///      amount rides trimmed, so a wei value goes on the wire as `amount / TRIM_UNIT`.
+    function _settlementWith(bytes4 prefix, uint64 sequence, uint8 decimals, uint256 amount)
         internal
         view
         returns (bytes memory)
     {
+        bytes memory transfer = abi.encodePacked(
+            NttPayload.NTT_PREFIX,
+            decimals,
+            uint64(amount / TRIM_UNIT),
+            bytes32(uint256(4)), // sourceToken
+            bytes32(uint256(uint160(address(receiver)))), // to
+            uint16(2) // toChain
+        );
+        bytes memory managerMessage = abi.encodePacked(
+            bytes32(uint256(sequence)), // id
+            bytes32(uint256(3)), // sender
+            uint16(transfer.length),
+            transfer
+        );
         bytes memory payload = abi.encodePacked(
             prefix,
             bytes32(uint256(1)), // sourceNttManagerAddress
             bytes32(uint256(2)), // recipientNttManagerAddress
-            uint16(66), // nttManagerPayload length
-            bytes32(uint256(sequence)), // id
-            bytes32(uint256(3)), // sender
-            uint16(0), // transfer payload length
+            uint16(managerMessage.length),
+            managerMessage,
             uint16(0) // transceiverPayload length
         );
         return _vaa(HYDRATION_CHAIN, bytes32(uint256(9)), sequence, payload);
     }
 
     function _settlement(uint64 sequence) internal view returns (bytes memory) {
-        return _settlementWithPrefix(NttPayload.WH_TRANSCEIVER_PAYLOAD_PREFIX, sequence);
+        return _settlementOf(sequence, AMOUNT);
+    }
+
+    function _settlementOf(uint64 sequence, uint256 amount) internal view returns (bytes memory) {
+        return _settlementWith(NttPayload.WH_TRANSCEIVER_PAYLOAD_PREFIX, sequence, NTT_DECIMALS, amount);
     }
 
     function _redeem(uint64 sequence, uint256 feeRequested) internal {
         receiver.processOrder(
-            _settlement(sequence), _instruction(sequence, AMOUNT, MAX_RELAY_FEE), feeRequested
+            _settlement(sequence), _instruction(sequence, MAX_RELAY_FEE), feeRequested
         );
     }
 
@@ -260,7 +280,7 @@ contract IntentReceiverTest is Test {
             abi.encodeWithSelector(IIntentReceiver.SequenceMismatch.selector, SEQUENCE + 1, SEQUENCE)
         );
         receiver.processOrder(
-            _settlement(SEQUENCE), _instruction(SEQUENCE + 1, AMOUNT, MAX_RELAY_FEE), MAX_RELAY_FEE
+            _settlement(SEQUENCE), _instruction(SEQUENCE + 1, MAX_RELAY_FEE), MAX_RELAY_FEE
         );
     }
 
@@ -282,7 +302,7 @@ contract IntentReceiverTest is Test {
             abi.encodeWithSelector(IIntentReceiver.SettlementNotReleased.selector, SEQUENCE)
         );
         receiver.processOrder(
-            settlement, _instruction(SEQUENCE, AMOUNT, MAX_RELAY_FEE), MAX_RELAY_FEE
+            settlement, _instruction(SEQUENCE, MAX_RELAY_FEE), MAX_RELAY_FEE
         );
 
         assertEq(address(receiver).balance, AMOUNT, "the other order's ETH must be untouched");
@@ -303,7 +323,7 @@ contract IntentReceiverTest is Test {
             abi.encodeWithSelector(IIntentReceiver.SettlementNotReleased.selector, SEQUENCE)
         );
         receiver.processOrder(
-            settlement, _instruction(SEQUENCE, AMOUNT, MAX_RELAY_FEE), MAX_RELAY_FEE
+            settlement, _instruction(SEQUENCE, MAX_RELAY_FEE), MAX_RELAY_FEE
         );
 
         assertEq(address(receiver).balance, AMOUNT, "the other order's ETH must be untouched");
@@ -319,17 +339,27 @@ contract IntentReceiverTest is Test {
         assertEq(relayer.balance, MAX_RELAY_FEE, "caller did the op, caller is paid");
     }
 
-    /// @notice The amount is the instruction's, not the balance — a receiver holding an unrelated
+    /// @notice The amount is the settlement's own, not the balance — a receiver holding an unrelated
     ///         settlement or stray ETH must not have it swept into this forward.
-    function testAmountComesFromTheInstruction() public {
+    function testAmountComesFromTheSettlement() public {
         uint256 odd = 3.14159265 ether;
         transceiver.configure(address(receiver), odd);
         vm.deal(address(receiver), 5 ether);
 
-        receiver.processOrder(_settlement(SEQUENCE), _instruction(SEQUENCE, odd, MAX_RELAY_FEE), 0);
+        receiver.processOrder(_settlementOf(SEQUENCE, odd), _instruction(SEQUENCE, MAX_RELAY_FEE), 0);
 
-        assertEq(depositAddress.balance, odd, "forwarded amount must be the instructed one");
+        assertEq(depositAddress.balance, odd, "forwarded amount must be what the settlement carried");
         assertEq(address(receiver).balance, 5 ether, "the rest must be untouched");
+    }
+
+    /// @notice A settlement trimmed to a precision the rail does not use is rejected rather than
+    ///         scaled by a guess.
+    function testUnexpectedTrimReverts() public {
+        bytes memory settlement =
+            _settlementWith(NttPayload.WH_TRANSCEIVER_PAYLOAD_PREFIX, SEQUENCE, 6, AMOUNT);
+
+        vm.expectRevert(abi.encodeWithSelector(IIntentReceiver.UnexpectedTrim.selector, uint8(6)));
+        receiver.processOrder(settlement, _instruction(SEQUENCE, MAX_RELAY_FEE), 0);
     }
 
     function testInstructionCannotBeActedOnTwice() public {
@@ -339,13 +369,12 @@ contract IntentReceiverTest is Test {
         _redeem(SEQUENCE, 0);
     }
 
-    /// @notice A delivery that credits less than the settlement promised must not half-pay.
+    /// @notice A delivery that credits less than the settlement carried must not half-pay. The
+    ///         forward is what fails, so that is what surfaces.
     function testUnderfundedForwardReverts() public {
         transceiver.configure(address(receiver), AMOUNT / 2);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(IIntentReceiver.NotFunded.selector, AMOUNT, AMOUNT / 2)
-        );
+        vm.expectRevert(IIntentReceiver.NativeTransferFailed.selector);
         _redeem(SEQUENCE, 0);
     }
 
@@ -353,7 +382,7 @@ contract IntentReceiverTest is Test {
     ///         Hydration, an address check alone the same address on any chain.
     function testForeignEmitterRejected() public {
         bytes32 attacker = bytes32(uint256(uint160(makeAddr("attacker"))));
-        bytes memory payload = abi.encode(SEQUENCE, depositAddress, AMOUNT, MAX_RELAY_FEE);
+        bytes memory payload = abi.encode(SEQUENCE, depositAddress, MAX_RELAY_FEE);
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -371,7 +400,7 @@ contract IntentReceiverTest is Test {
     }
 
     function testUnverifiedInstructionRejected() public {
-        bytes memory instruction = _instruction(SEQUENCE, AMOUNT, MAX_RELAY_FEE);
+        bytes memory instruction = _instruction(SEQUENCE, MAX_RELAY_FEE);
         wormhole.markInvalid(instruction);
 
         vm.expectRevert(IIntentReceiver.InvalidInstruction.selector);
@@ -383,7 +412,7 @@ contract IntentReceiverTest is Test {
             HYDRATION_CHAIN,
             emitterAddress,
             SEQUENCE,
-            abi.encode(SEQUENCE, address(0), AMOUNT, MAX_RELAY_FEE)
+            abi.encode(SEQUENCE, address(0), MAX_RELAY_FEE)
         );
 
         vm.expectRevert(IIntentReceiver.MalformedInstruction.selector);
@@ -398,7 +427,7 @@ contract IntentReceiverTest is Test {
         _redeem(SEQUENCE, 0);
 
         assertFalse(
-            receiver.processed(keccak256(_instruction(SEQUENCE, AMOUNT, MAX_RELAY_FEE))),
+            receiver.processed(keccak256(_instruction(SEQUENCE, MAX_RELAY_FEE))),
             "instruction must stay executable"
         );
         assertFalse(
@@ -413,6 +442,64 @@ contract IntentReceiverTest is Test {
 
         vm.expectRevert(IIntentReceiver.NotConfigured.selector);
         _redeem(SEQUENCE, 0);
+    }
+
+    // ─── Reorg ──────────────────────────────────────────────────────
+
+    /// @dev Hydration's block interval. The replacement message differs from the orphan only in its
+    ///      timestamp: `emitterNonce` and the core bridge's sequence are both contract storage, so a
+    ///      reorg rewinds them identically and they come back the same.
+    uint256 constant BLOCK_INTERVAL = 12;
+
+    /// @notice The instruction publishes at consistency 200, so guardians sign it with zero
+    ///         confirmations and never retract it. Drop that block and the signed instruction
+    ///         outlives the state it named — the NTT manager's counter rewinds, the next transfer
+    ///         through it takes the same sequence, and two instructions now match one settlement.
+    ///
+    ///         Nothing is forged and nothing is paid out of thin air: every check passes on a true
+    ///         statement. What no check asserts is that each released settlement backs at most one
+    ///         forward, because funding is proven by the contract's whole balance.
+    ///
+    /// @dev Passes against the receiver as written, and is meant to — the receiver cannot tell an
+    ///      orphan from a retry, both being guardian-signed messages from the pinned emitter naming
+    ///      one sequence. Publishing the instruction finalized is what stops the orphan existing, so
+    ///      the enforcing assertion belongs in `IntentEmitterTest`, not here.
+    function testOrphanedInstructionIsPaidTwiceFromOneSettlement() public {
+        address attacker = makeAddr("attacker");
+        address victim = makeAddr("victim");
+
+        // Pre-reorg: the attacker's own order, its instruction signed before the block is dropped.
+        // The reorg refunds them on Hydration, so holding the orphan costs nothing.
+        depositAddress = attacker;
+        bytes memory orphan = _instruction(SEQUENCE, MAX_RELAY_FEE);
+
+        // One interval on, the counter has rewound and somebody else's transfer takes SEQUENCE —
+        // this one reaching finality, so its settlement is signed too.
+        vm.warp(block.timestamp + BLOCK_INTERVAL);
+        depositAddress = victim;
+        bytes memory settlement = _settlement(SEQUENCE);
+        bytes memory replacement = _instruction(SEQUENCE, MAX_RELAY_FEE);
+
+        // These two differ in terms as well as in time. In the narrower case — one order retried on
+        // its own terms — the timestamp is the only field left, and it is still enough: `processed`
+        // is keyed by VAA hash and the emitting block's time sits inside the body.
+        assertTrue(keccak256(orphan) != keccak256(replacement), "the orphan must be its own VAA");
+
+        // A concurrent order's settlement, delivered and waiting on its own instruction.
+        vm.deal(address(receiver), AMOUNT);
+
+        vm.prank(relayer);
+        receiver.processOrder(settlement, replacement, 0);
+
+        // Not a race. `isMessageExecuted` stays true and the queue slot stays empty, so the orphan
+        // keeps until the pool next covers its amount.
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(attacker);
+        receiver.processOrder(settlement, orphan, 0);
+
+        assertEq(victim.balance, AMOUNT, "the real order is paid");
+        assertEq(attacker.balance, AMOUNT, "so is the dropped one, out of the pool");
+        assertEq(address(receiver).balance, 0, "the concurrent order's ETH is what paid it");
     }
 
     // ─── Exclusive window ───────────────────────────────────────────
@@ -448,7 +535,7 @@ contract IntentReceiverTest is Test {
     function testWindowExpiresIntoAPublicFallback() public {
         receiver.setAuthorizedRelayer(relayer, true);
         bytes memory settlement = _settlement(SEQUENCE);
-        bytes memory instruction = _instruction(SEQUENCE, AMOUNT, MAX_RELAY_FEE);
+        bytes memory instruction = _instruction(SEQUENCE, MAX_RELAY_FEE);
 
         address stranger = makeAddr("stranger");
 
@@ -473,7 +560,7 @@ contract IntentReceiverTest is Test {
         receiver.setAuthorizedRelayer(relayer, true);
 
         // Instruction published first, then left to age past the window.
-        bytes memory instruction = _instruction(SEQUENCE, AMOUNT, MAX_RELAY_FEE);
+        bytes memory instruction = _instruction(SEQUENCE, MAX_RELAY_FEE);
         vm.warp(block.timestamp + WINDOW + 1);
 
         // Settlement published only now, so the order is still fresh.

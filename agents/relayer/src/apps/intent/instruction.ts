@@ -16,7 +16,6 @@ export interface Instruction {
   /** The emitter's Wormhole sequence — how the signed instruction VAA is addressed. */
   messageSequence: bigint;
   depositAddress: Address;
-  amount: bigint;
   maxRelayFee: bigint;
 }
 
@@ -54,13 +53,13 @@ export async function findInstruction(
       data: log.data,
     });
 
-    const [instructed, depositAddress, amount, maxRelayFee] = decodeAbiParameters(
+    const [instructed, depositAddress, maxRelayFee] = decodeAbiParameters(
       instructionAbi,
       args.payload,
     );
     if (instructed !== sequence) continue;
 
-    return { messageSequence: args.sequence, depositAddress, amount, maxRelayFee };
+    return { messageSequence: args.sequence, depositAddress, maxRelayFee };
   }
 
   return null;

@@ -10,15 +10,14 @@ import { OrderPlacedEvt, OrderProcessedEvt, QuotePublishedEvt, RelayFeePaidEvt }
 
 /**
  * The forwarding instruction the emitter publishes beside each settlement:
- * `abi.encode(sequence, depositAddress, amount, maxRelayFee)`. NTT carries no payload of its own,
- * so the destination travels separately and names the settlement it belongs to.
+ * `abi.encode(sequence, depositAddress, maxRelayFee)`. NTT's own payload field is an integrator hook
+ * with no caller-facing setter, so the destination travels separately and names the settlement it
+ * belongs to.
+ *
+ * Only the leading sequence is read, so a longer payload still resolves — do not narrow this to an
+ * exact-length decode, or re-indexing loses every instruction whose shape has since changed.
  */
-const INSTRUCTION = [
-  { type: "uint64" },
-  { type: "address" },
-  { type: "uint256" },
-  { type: "uint256" },
-] as const;
+const INSTRUCTION = [{ type: "uint64" }, { type: "address" }, { type: "uint256" }] as const;
 
 interface Published {
   sender: `0x${string}`;

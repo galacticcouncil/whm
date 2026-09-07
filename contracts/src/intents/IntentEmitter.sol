@@ -33,9 +33,7 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
     /// @notice NTT trims to 8 decimals; WETH has 18. The remainder accrues as sweepable dust.
     uint256 public constant TRIM_UNIT = 1e10;
 
-    /// @notice Neither message carries authority of its own — an order is bound by its path, an
-    ///         instruction is inert until its settlement lands — so both publish instantly.
-    uint8 public constant CONSISTENCY_INSTANT = 200;
+    uint8 public constant CONSISTENCY_FINALIZED = 202;
 
     IWormhole public wormhole;
     address public owner;
@@ -147,9 +145,9 @@ contract IntentEmitter is Initializable, UUPSUpgradeable, IIntentEmitter {
             amount, ETHEREUM_WORMHOLE_ID, bytes32(uint256(uint160(intentReceiver)))
         );
 
-        bytes memory instruction = abi.encode(sequence, depositAddress, amount, maxRelayFee);
+        bytes memory instruction = abi.encode(sequence, depositAddress, maxRelayFee);
         wormhole.publishMessage{value: wormhole.messageFee()}(
-            emitterNonce, instruction, CONSISTENCY_INSTANT
+            emitterNonce, instruction, CONSISTENCY_FINALIZED
         );
         emitterNonce++;
     }

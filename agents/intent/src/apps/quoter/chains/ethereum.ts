@@ -36,8 +36,10 @@ const EXECUTION_GAS = 560_000n;
 /** NTT transceiver message: fixed by the payload shape, not by the transfer. */
 const NTT_PAYLOAD_BYTES = 217;
 
-/** `abi.encode(uint64 sequence, address depositAddress, uint256 amount, uint256 maxRelayFee)`. */
-const INSTRUCTION_PAYLOAD_BYTES = 128;
+/**
+ * `abi.encode(uint64 sequence, address depositAddress, uint256 maxRelayFee)`.
+ */
+const INSTRUCTION_PAYLOAD_BYTES = 96;
 
 /** `processOrder(bytes nttVaa, bytes instructionVaa, uint256 feeRequested)`. */
 const STATIC_ARGS = 1;
