@@ -3,6 +3,13 @@ src = "src"
 out = "out"
 libs = ["dependencies"]
 
+[profile.psm]
+src = "src"
+out = "out-psm"
+libs = ["dependencies"]
+optimizer = true
+optimizer_runs = 200
+
 [soldeer]
 remappings_generate = false
 
@@ -14,3 +21,6 @@ wormhole-solidity-sdk = { version = "0.1.0", git = "https://github.com/wormhole-
 
 [rpc_endpoints]
 mainnet = "https://ethereum-rpc.publicnode.com"
+# Resolved lazily: the PSM fork suites skip when these are unset.
+base = "${RPC_BASE}"
+hydration = "${RPC_HYDRATION}"
