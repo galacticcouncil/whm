@@ -8,21 +8,16 @@
  * and nothing is mocked. Each leg runs through the real `pallet_dispatcher` with a Root origin
  * injected into `Scheduler.Agenda`, which is the same dispatch a referendum performs on enactment.
  *
- * It also PRINTS the calldata — the two legs, the `utility.batchAll` wrapping them, and the preimage
+ * It also PRINTS the calldata — every leg, the `utility.batchAll` wrapping them, and the preimage
  * hash to reference it by — built against the fork's own metadata, and ASSERTS the EVM inputs match
- * `scripts/robinhood/weth.sh govref` byte for byte. The printed proposal is EXACTLY those two calls
- * and nothing else, so what is enacted here cannot drift from what is submitted.
- *
- * GAS IS SCAFFOLDING, NOT A LEG. Hydration EVM gas is WETH-denominated and 0xAA7e…AA7E1 holds none
- * (measured on mainnet: `balanceOf` via the asset-20 precompile is 0, nonce is 0 — it has never made
- * an EVM call). This probe credits it by `setStorage` so the two legs can be exercised at all. That
- * is a fork convenience and is deliberately NOT part of the printed proposal — but it means the
- * two-call proposal cannot pay for itself on mainnet. The pre-state check below says so out loud.
+ * `scripts/robinhood/weth.sh govref` byte for byte. So what is enacted here cannot drift from what
+ * is submitted.
  *
  * WHAT THIS IS ACTUALLY TESTING. Five things state-reading cannot answer:
- *   1. Whether `dispatch_as_emergency_admin` → `EVM.call` reaches these two contracts at all, once
- *      the admin can pay — and it must be the ETH\0-DERIVED account that holds the WETH, not the
- *      native AccountId form (see _probeBasejumpGoLive, which measured this the hard way).
+ *   1. Whether `dispatch_as_emergency_admin` → `EVM.call` reaches these two contracts at all.
+ *      0xAA7e…AA7E1 has nonce 0 and zero balance on mainnet and Hydration EVM gas is
+ *      WETH-denominated, so leg 0 funds it — and funds the ETH\0-DERIVED account, which is the one
+ *      pallet_evm debits (see _probeBasejumpGoLive, which measured this the hard way).
  *   2. That `setPeer` lands BOTH halves: the peer address AND the 10,000 WETH inbound limit for 72.
  *      They are one call, and a wrong `decimals` silently rescales the limit rather than reverting.
  *   3. That `setWormholePeer` is genuinely SET-ONCE here. The probe re-dispatches it and requires
@@ -70,6 +65,13 @@ const PEER_DECIMALS = 18;
 const INBOUND_LIMIT = 10_000n * 10n ** 18n;
 
 const EMERGENCY_ADMIN = "0xAA7e0000000000000000000000000000000AA7E1" as Hex;
+/**
+ * Where leg 0's gas MUST go. 0xAA7e…AA7E1 is unbound in `pallet-evm-accounts`, so `pallet_evm`
+ * charges `b"ETH\0" ++ h160 ++ [0u8;8]` — NOT the native AccountId form. Measured in
+ * _probeBasejumpGoLive: funding the native form leaves every EVM leg failing `EVM.BalanceLow`.
+ */
+const EMERGENCY_ADMIN_EVM_ACCOUNT =
+  "0x45544800aa7e0000000000000000000000000000000aa7e10000000000000000" as Hex;
 
 const WETH_ASSET_ID = 20;
 
@@ -313,32 +315,6 @@ async function main(): Promise<void> {
     record("peer(72) starts unset", rhPeerBefore.peerAddress === pad("0x00", { size: 32 }));
     record("whPeer(72) starts unset — SET-ONCE not yet spent", rhWhPeerBefore === pad("0x00", { size: 32 }));
 
-    // ── gas: fork scaffolding, NOT part of the proposal ──
-    //
-    // Hydration EVM gas is WETH-denominated and the admin holds none, so without this both legs are
-    // rejected before execution and the run below would measure nothing. Credited by setStorage
-    // rather than dispatched, so the printed proposal stays exactly the two govref calls.
-    const adminGasAccount = ss58(truncatedEvmAccount(EMERGENCY_ADMIN));
-    const adminWethBefore =
-      ((await retry("Tokens.Accounts", () =>
-        api.query.Tokens.Accounts.getValue(adminGasAccount, WETH_ASSET_ID),
-      )) as { free?: bigint } | undefined)?.free ?? 0n;
-
-    // A FINDING, not a probe detail: while this reads 0 the two-call proposal cannot pay its own
-    // gas, and enacting it as written leaves both peers unset with no error worth reading.
-    record(
-      "admin can pay for its own EVM calls",
-      adminWethBefore > 0n,
-      adminWethBefore > 0n
-        ? weth(adminWethBefore)
-        : `0 WETH — needs a funding leg ahead of it (→ ${adminGasAccount})`,
-    );
-
-    await hydration.setStorage({
-      Tokens: { Accounts: [[[adminGasAccount, WETH_ASSET_ID], { free: GAS_WETH }]] },
-    });
-    console.log(`   [scaffolding] credited ${weth(GAS_WETH)} for fork gas — NOT a proposal leg`);
-
     // ── one Root call per block, so a failure names its own leg ──
     //
     // Scheduled through a PREIMAGE, not Inline. `BoundedInline` caps at 128 bytes and a
@@ -435,8 +411,14 @@ async function main(): Promise<void> {
       setWormholePeerInput === GOVREF_SET_WORMHOLE_PEER ? "" : setWormholePeerInput,
     );
 
-    // Ordering is load-bearing: peer before wormhole peer — a transceiver peer over a manager with
-    // no peer is a half-open route.
+    const gasLeg: Leg = {
+      label: "0 fund gas — treasury → admin's ETH\\0 account, 0.01 WETH",
+      call: meta.tx.dispatcher.dispatchAsTreasury(
+        meta.tx.currencies.transfer(EMERGENCY_ADMIN_EVM_ACCOUNT, WETH_ASSET_ID, GAS_WETH),
+      ),
+    };
+    // Ordering is load-bearing: gas before the EVM legs, and peer before wormhole peer — a
+    // transceiver peer over a manager with no peer is a half-open route.
     const legs: Leg[] = [
       adminLeg(`1 manager.setPeer(${CHAIN_ROBINHOOD}, RH manager, 18dp, 10000 WETH)`, MANAGER, setPeerInput),
       adminLeg(`2 transceiver.setWormholePeer(${CHAIN_ROBINHOOD}, RH transceiver) — SET-ONCE`, TRANSCEIVER, setWormholePeerInput),
@@ -447,13 +429,13 @@ async function main(): Promise<void> {
     // Built against the FORK's own metadata, not @galacticcouncil/descriptors — those are stale
     // against runtime 440 (Currencies/EVM fail checksum there).
     console.log(`\n── Calldata ──`);
-    for (const { label, call, target, evmInput } of legs) {
+    for (const { label, call, target, evmInput } of [gasLeg, ...legs]) {
       console.log(`\n   ${label}`);
       if (target) console.log(`     target    : ${target}`);
       if (evmInput) console.log(`     evm input : ${evmInput}`);
       console.log(`     call      : ${call.toHex()}`);
     }
-    const batch = meta.tx.utility.batchAll(legs.map((l) => l.call));
+    const batch = meta.tx.utility.batchAll([gasLeg, ...legs].map((l) => l.call));
     const batchBytes = batch.toU8a();
     console.log(`\n   batchAll — what governance submits, as ONE atomic Root call`);
     console.log(`     len       : ${batchBytes.length} bytes`);
@@ -463,7 +445,7 @@ async function main(): Promise<void> {
     if (RUN_BATCH) {
       console.log(`\n── Enacting the batchAll — one atomic Root call ──`);
       const { events } = await enact({
-        label: `batchAll (${legs.length} legs, ${batchBytes.length} bytes)`,
+        label: `batchAll (${legs.length + 1} legs, ${batchBytes.length} bytes)`,
         call: batch,
       });
       record("batch completed, not reverted", events.some((e) => evName(e) === "Utility.BatchCompleted"));
@@ -474,6 +456,16 @@ async function main(): Promise<void> {
       );
     } else {
       console.log(`\n── Enacting, one leg per block ──`);
+      await enact(gasLeg);
+      const adminDerived = (await retry("Tokens.Accounts", () =>
+        api.query.Tokens.Accounts.getValue(ss58(truncatedEvmAccount(EMERGENCY_ADMIN)), WETH_ASSET_ID),
+      )) as { free?: bigint } | undefined;
+      record(
+        "gas landed in the account pallet_evm debits",
+        (adminDerived?.free ?? 0n) === GAS_WETH,
+        `${adminDerived?.free ?? 0n}`,
+      );
+
       await enact(legs[0]);
       const p = await peer(CHAIN_ROBINHOOD);
       record("peer(72) address set", p.peerAddress.toLowerCase() === b32(RH_MANAGER).toLowerCase(), p.peerAddress);
