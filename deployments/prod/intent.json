@@ -2,7 +2,7 @@
   "migration": "intent",
   "environment": "prod",
   "startedAt": "2026-08-25T13:56:24.900Z",
-  "completedAt": "2026-09-07T10:11:51.310Z",
+  "completedAt": "2026-09-09T13:02:00.487Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -76,6 +76,30 @@
       "error": null,
       "startedAt": "2026-08-26T13:22:11.366Z",
       "completedAt": "2026-08-26T13:22:28.662Z"
+    },
+    {
+      "name": "007-transfer-ownership@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x29f9a783b8eefda52da456423882be6bfe5bf0e94ba7654cc5123e71499052e0",
+        "contract": "0x2173f6ece25768e7efc5199f70f8783d88ba63c8",
+        "newOwner": "0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7"
+      },
+      "error": null,
+      "startedAt": "2026-09-09T13:00:53.761Z",
+      "completedAt": "2026-09-09T13:01:52.310Z"
+    },
+    {
+      "name": "008-transfer-ownership@emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0xc3301c61f22037151bbd0a766dbb280d35f4abe442b962b260f8830f2a304e59",
+        "contract": "0x98f1ebc9dcc8ab7ba54d83c98500e9e313f793f2",
+        "newOwner": "0xaa7e0000000000000000000000000000000aa7e1"
+      },
+      "error": null,
+      "startedAt": "2026-09-09T13:01:52.313Z",
+      "completedAt": "2026-09-09T13:02:00.486Z"
     }
   ]
 }

@@ -15,9 +15,13 @@ import type { MigrationConfig } from "./types";
  *   004 set the Ethereum IntentReceiver @emitter
  *   005 set the Hydration IntentEmitter @receiver
  *   006 authorize relayer 1 @receiver — exclusive window on processOrder
+ *   007 transfer receiver ownership to the Ethereum Technical Committee Safe
+ *   008 transfer emitter ownership to the Hydration Emergency Admin
  *
- * Both ends stay deployer-owned — ownership transfer lands as a later step, so this is not yet a
- * prod-ready end state.
+ * The handover ends the migration. Neither end is renounced — both are UUPS and _authorizeUpgrade
+ * is onlyOwner, so the custodians keep the upgrade path. Everything owner-gated becomes a 4-of-7
+ * Safe transaction or a TC call from 007 onward: another relayer, a new NttManager, sweep, an
+ * upgrade. Land those before running it.
  *
  * The two ends reference each other, so both deploy before either is wired. Steps 004/005 read the
  * counterpart straight from ctx.outputs rather than an env-copied address, so they cannot diverge.
