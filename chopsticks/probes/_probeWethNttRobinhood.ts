@@ -18,7 +18,7 @@
  *      0xAA7e…AA7E1 has nonce 0 and zero balance on mainnet and Hydration EVM gas is
  *      WETH-denominated, so leg 0 funds it — and funds the ETH\0-DERIVED account, which is the one
  *      pallet_evm debits (see _probeBasejumpGoLive, which measured this the hard way).
- *   2. That `setPeer` lands BOTH halves: the peer address AND the 10,000 WETH inbound limit for 72.
+ *   2. That `setPeer` lands BOTH halves: the peer address AND the 69 WETH inbound limit for 72.
  *      They are one call, and a wrong `decimals` silently rescales the limit rather than reverting.
  *   3. That `setWormholePeer` is genuinely SET-ONCE here. The probe re-dispatches it and requires
  *      the second attempt to FAIL — `PeerAlreadySet`. One shot, so governance gets one shot.
@@ -61,8 +61,12 @@ const CHAIN_ETHEREUM = 2;
 
 /** WETH is 18dp on both hubs; a wrong value here rescales the limit instead of reverting. */
 const PEER_DECIMALS = 18;
-/** 10,000 WETH — mirrors the Ethereum hub leg, and throttles dual-hub custody drift. */
-const INBOUND_LIMIT = 10_000n * 10n ** 18n;
+/**
+ * 69 WETH/24h — deliberately far tighter than the Ethereum hub leg, which keeps its own 10k. Two
+ * locking hubs sit over this one burning leg, so this caps how much custody drift Robinhood can
+ * introduce per day. Mirrors LIMIT_HYD_IN in ops/scripts/robinhood/weth.sh.
+ */
+const INBOUND_LIMIT = 69n * 10n ** 18n;
 
 const EMERGENCY_ADMIN = "0xAA7e0000000000000000000000000000000AA7E1" as Hex;
 /**
@@ -93,7 +97,7 @@ const RUN_BATCH = process.argv.includes("--batch");
  * than a silent divergence.
  */
 const GOVREF_SET_PEER =
-  "0x7c9186340000000000000000000000000000000000000000000000000000000000000048000000000000000000000000b1a2abcbc1fa276212f6ed239645161deea9861a000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000021e19e0c9bab2400000" as Hex;
+  "0x7c9186340000000000000000000000000000000000000000000000000000000000000048000000000000000000000000b1a2abcbc1fa276212f6ed239645161deea9861a0000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000003bd913e6c1df40000" as Hex;
 const GOVREF_SET_WORMHOLE_PEER =
   "0x7ab5640300000000000000000000000000000000000000000000000000000000000000480000000000000000000000001352881a04cb9f9f5fb8442bc925e99ec15d3642" as Hex;
 
@@ -163,7 +167,9 @@ async function eventsAt(net: Network, at: string, tries = 12): Promise<EventReco
   let lastErr: unknown;
   for (let i = 0; i < tries; i++) {
     try {
-      return (await net.client.getUnsafeApi().query.System.Events.getValue({ at })) as EventRecord[];
+      return (await net.client
+        .getUnsafeApi()
+        .query.System.Events.getValue({ at })) as EventRecord[];
     } catch (e) {
       lastErr = e;
       await sleep(300);
@@ -298,7 +304,9 @@ async function main(): Promise<void> {
     const rhWhPeerBefore = await whPeer(CHAIN_ROBINHOOD);
 
     console.log(`   manager owner        ${ownerBefore}`);
-    console.log(`   peer(2)  eth         ${ethPeerBefore.peerAddress} / ${ethPeerBefore.tokenDecimals}dp`);
+    console.log(
+      `   peer(2)  eth         ${ethPeerBefore.peerAddress} / ${ethPeerBefore.tokenDecimals}dp`,
+    );
     console.log(`   whPeer(2) eth        ${ethWhPeerBefore}`);
     console.log(`   inbound(2) capacity  ${weth(ethInboundBefore)}`);
     console.log(`   peer(72) robinhood   ${rhPeerBefore.peerAddress}`);
@@ -313,14 +321,20 @@ async function main(): Promise<void> {
       ownerBefore,
     );
     record("peer(72) starts unset", rhPeerBefore.peerAddress === pad("0x00", { size: 32 }));
-    record("whPeer(72) starts unset — SET-ONCE not yet spent", rhWhPeerBefore === pad("0x00", { size: 32 }));
+    record(
+      "whPeer(72) starts unset — SET-ONCE not yet spent",
+      rhWhPeerBefore === pad("0x00", { size: 32 }),
+    );
 
     // ── one Root call per block, so a failure names its own leg ──
     //
     // Scheduled through a PREIMAGE, not Inline. `BoundedInline` caps at 128 bytes and a
     // dispatchAsEmergencyAdmin(evm.call(..)) encodes well past that — an inline agenda entry is
     // dropped silently, with no Scheduler.Dispatched at all. A referendum enacts via preimage too.
-    const enact = async ({ label, call }: Leg): Promise<{ hash: string; events: EventRecord[] }> => {
+    const enact = async ({
+      label,
+      call,
+    }: Leg): Promise<{ hash: string; events: EventRecord[] }> => {
       const head = (await retry("head", () => api.query.System.Number.getValue())) as number;
       const bytes = call.toU8a();
       const callHash = registry.hash(bytes).toHex();
@@ -383,7 +397,18 @@ async function main(): Promise<void> {
       target,
       evmInput,
       call: meta.tx.dispatcher.dispatchAsEmergencyAdmin(
-        meta.tx.evm.call(EMERGENCY_ADMIN, target, evmInput, 0, GAS_LIMIT, MAX_FEE_PER_GAS, null, null, [], []),
+        meta.tx.evm.call(
+          EMERGENCY_ADMIN,
+          target,
+          evmInput,
+          0,
+          GAS_LIMIT,
+          MAX_FEE_PER_GAS,
+          null,
+          null,
+          [],
+          [],
+        ),
       ),
     });
 
@@ -420,8 +445,16 @@ async function main(): Promise<void> {
     // Ordering is load-bearing: gas before the EVM legs, and peer before wormhole peer — a
     // transceiver peer over a manager with no peer is a half-open route.
     const legs: Leg[] = [
-      adminLeg(`1 manager.setPeer(${CHAIN_ROBINHOOD}, RH manager, 18dp, 10000 WETH)`, MANAGER, setPeerInput),
-      adminLeg(`2 transceiver.setWormholePeer(${CHAIN_ROBINHOOD}, RH transceiver) — SET-ONCE`, TRANSCEIVER, setWormholePeerInput),
+      adminLeg(
+        `1 manager.setPeer(${CHAIN_ROBINHOOD}, RH manager, 18dp, 69 WETH)`,
+        MANAGER,
+        setPeerInput,
+      ),
+      adminLeg(
+        `2 transceiver.setWormholePeer(${CHAIN_ROBINHOOD}, RH transceiver) — SET-ONCE`,
+        TRANSCEIVER,
+        setWormholePeerInput,
+      ),
     ];
 
     // ── the calldata to submit ──
@@ -448,7 +481,10 @@ async function main(): Promise<void> {
         label: `batchAll (${legs.length + 1} legs, ${batchBytes.length} bytes)`,
         call: batch,
       });
-      record("batch completed, not reverted", events.some((e) => evName(e) === "Utility.BatchCompleted"));
+      record(
+        "batch completed, not reverted",
+        events.some((e) => evName(e) === "Utility.BatchCompleted"),
+      );
       record(
         "both EVM legs ran in the one block",
         events.filter((e) => evName(e) === "EVM.Executed").length === 2,
@@ -458,7 +494,10 @@ async function main(): Promise<void> {
       console.log(`\n── Enacting, one leg per block ──`);
       await enact(gasLeg);
       const adminDerived = (await retry("Tokens.Accounts", () =>
-        api.query.Tokens.Accounts.getValue(ss58(truncatedEvmAccount(EMERGENCY_ADMIN)), WETH_ASSET_ID),
+        api.query.Tokens.Accounts.getValue(
+          ss58(truncatedEvmAccount(EMERGENCY_ADMIN)),
+          WETH_ASSET_ID,
+        ),
       )) as { free?: bigint } | undefined;
       record(
         "gas landed in the account pallet_evm debits",
@@ -468,10 +507,14 @@ async function main(): Promise<void> {
 
       await enact(legs[0]);
       const p = await peer(CHAIN_ROBINHOOD);
-      record("peer(72) address set", p.peerAddress.toLowerCase() === b32(RH_MANAGER).toLowerCase(), p.peerAddress);
+      record(
+        "peer(72) address set",
+        p.peerAddress.toLowerCase() === b32(RH_MANAGER).toLowerCase(),
+        p.peerAddress,
+      );
       record("peer(72) decimals are 18", p.tokenDecimals === PEER_DECIMALS, `${p.tokenDecimals}dp`);
       const cap = await inbound(CHAIN_ROBINHOOD);
-      record("inbound(72) limit is 10000 WETH", cap === INBOUND_LIMIT, weth(cap));
+      record("inbound(72) limit is 69 WETH", cap === INBOUND_LIMIT, weth(cap));
 
       const { events: whEvents } = await enact(legs[1]);
       const wp = await whPeer(CHAIN_ROBINHOOD);
@@ -527,7 +570,11 @@ async function main(): Promise<void> {
     });
     record("second setWormholePeer is rejected", evmFailed(again) || !evmSucceeded(again));
     const wpAfter = await whPeer(CHAIN_ROBINHOOD);
-    record("whPeer(72) unchanged by the retry", wpAfter.toLowerCase() === b32(RH_TRANSCEIVER).toLowerCase(), wpAfter);
+    record(
+      "whPeer(72) unchanged by the retry",
+      wpAfter.toLowerCase() === b32(RH_TRANSCEIVER).toLowerCase(),
+      wpAfter,
+    );
     if (!evmFailed(again) && evmSucceeded(again)) logEvents(again);
 
     const failed = results.filter((r) => !r.ok);
