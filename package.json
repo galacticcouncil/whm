@@ -21,6 +21,8 @@
     "migrate:intent:fork": "bash sh/migrate-intent.sh fork",
     "migrate:intent-mpc": "bash sh/migrate-intent-mpc.sh prod",
     "migrate:intent-mpc:fork": "bash sh/migrate-intent-mpc.sh fork",
+    "migrate:psm-base": "bash sh/migrate-psm-base.sh prod",
+    "migrate:psm-base:fork": "bash sh/migrate-psm-base.sh fork",
     "print:oracles": "bash sh/print-oracles.sh"
   },
   "dependencies": {
