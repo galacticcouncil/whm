@@ -11,13 +11,13 @@ interface IBasejumpPayload {
     /// @param recipient Destination account; an AccountId32 on Hydration.
     /// @param transferSequence The NTT manager's message sequence for the settlement leg that
     ///        replenishes this payout — the correlation key between the two rails.
-    /// @param data Opaque bytes forwarded end-to-end to the destination, untouched by both ends.
+    /// @param data Opaque bytes carried on the wire, untouched by the emitter.
     ///        Empty for a plain transfer. Non-empty carries instructions for a `recipient` that is
     ///        a contract — an inbound intent from an L1/L2 that must trigger Hydration-side action
-    ///        once the funds land, rather than just crediting an account. The delivery hook that
-    ///        consumes it is a landing concern: the deployed `BasejumpLanding` takes `data` in its
-    ///        signature but discards it, so an inbound-intent corridor needs that upgraded before
-    ///        anything here reaches a callback.
+    ///        once the funds land, rather than just crediting an account. Carried on the wire only:
+    ///        `BasejumpReceiver` does not forward it, and the Hydration `BasejumpLanding` has no
+    ///        parameter for it, so an inbound-intent corridor needs both upgraded before anything
+    ///        here reaches a callback.
     struct TransferPayload {
         address sourceAsset;
         uint256 amount;

@@ -285,11 +285,10 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
     }
 
     /// @notice `data` is the inbound-intent channel: a recipient that is a Hydration contract needs
-    ///         to know what to do with the funds, not just receive them. Neither end may touch the
-    ///         bytes, so this pins them at both ends — the payload the emitter published, and the
-    ///         argument the receiver hands the landing. Without the second assertion an end that
-    ///         silently dropped `data` would still pass.
-    function testDataForwardedEndToEnd() public {
+    ///         to know what to do with the funds, not just receive them. The emitter must publish
+    ///         it untouched; the receiver must NOT forward it, because the deployed landing takes
+    ///         three arguments and Hydration recipients have no callback. Both ends are pinned.
+    function testDataPublishedNotForwarded() public {
         bytes memory intentData = abi.encode(keccak256("intent-1"), makeAddr("depositAddress"));
         uint64 transferSeq = _bridge(TRANSFER_AMOUNT, intentData);
 
@@ -308,13 +307,10 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
             intentData
         );
 
-        // The deployed landing discards `data`, so the observable is the call it receives.
+        // The observable is the exact call the landing receives: three arguments, no `data`.
         vm.expectCall(
             address(landing),
-            abi.encodeCall(
-                IBasejumpLanding.transfer,
-                (address(usdcBase), expectedNet, hydrationRecipient, intentData)
-            )
+            abi.encodeCall(IBasejumpLanding.transfer, (address(usdcBase), expectedNet, hydrationRecipient))
         );
         basejumpHydration.completeTransfer(vaa);
     }

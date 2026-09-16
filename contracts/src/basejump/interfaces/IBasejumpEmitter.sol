@@ -30,8 +30,8 @@ interface IBasejumpEmitter {
     ///         message carrying the net amount that the pool pays out against.
     /// @dev Settlement precedes publication and cannot queue, so a payout instruction can never
     ///      outrun its replenishment.
-    /// @param data Opaque bytes forwarded end-to-end into the delivery (see IBasejumpPayload).
-    ///        Empty for a plain transfer.
+    /// @param data Opaque bytes published in the payload, untouched (see IBasejumpPayload). Nothing
+    ///        on Hydration reads them yet. Empty for a plain transfer.
     /// @return transferSequence The NTT manager's sequence for the settlement leg.
     /// @return messageSequence The Wormhole core sequence for the fast-path message.
     function bridgeViaWormhole(

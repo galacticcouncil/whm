@@ -13,6 +13,8 @@
     "migrate:basejump-base:fork": "bash sh/migrate-basejump-base.sh fork",
     "migrate:basejump-ethereum": "bash sh/migrate-basejump-ethereum.sh prod",
     "migrate:basejump-ethereum:fork": "bash sh/migrate-basejump-ethereum.sh fork",
+    "migrate:basejump-receiver-upgrade": "bash sh/migrate-basejump-receiver-upgrade.sh prod",
+    "migrate:basejump-receiver-upgrade:fork": "bash sh/migrate-basejump-receiver-upgrade.sh fork",
     "migrate:oracle-relay-solana": "bash sh/migrate-oracle-relay-solana.sh prod",
     "migrate:oracle-relay-solana:fork": "bash sh/migrate-oracle-relay-solana.sh fork",
     "migrate:oracle-relay-ethereum": "bash sh/migrate-oracle-relay-ethereum.sh prod",

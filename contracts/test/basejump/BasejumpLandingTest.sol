@@ -95,7 +95,7 @@ contract BasejumpLandingTest is Test {
         uint256 amount = 1_000e6;
 
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), amount, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), amount, recipient);
 
         // Pool balance reduced (used for balance check)
         assertEq(usdc.balanceOf(address(basejumpLanding)), POOL_AMOUNT);
@@ -108,7 +108,7 @@ contract BasejumpLandingTest is Test {
         emit IBasejumpLanding.TransferExecuted(address(sourceUsdc), address(usdc), recipient, amount);
 
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), amount, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), amount, recipient);
     }
 
     function testTransferCallsDispatch() public {
@@ -118,13 +118,18 @@ contract BasejumpLandingTest is Test {
         vm.expectCall(DISPATCH_PRECOMPILE, bytes(""));
 
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), amount, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), amount, recipient);
+    }
+
+    /// @notice Pinned to the live pool: impl 0x4ea0…e31f dispatches this selector and is not redeployed.
+    function testTransferSelectorMatchesDeployedLanding() public pure {
+        assertEq(uint32(IBasejumpLanding.transfer.selector), 0x57cfeeee);
     }
 
     function testTransferRevertsUnauthorized() public {
         vm.prank(stranger);
         vm.expectRevert(IBasejumpLanding.NotAuthorizedBridge.selector);
-        basejumpLanding.transfer(address(sourceUsdc), 1_000e6, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
     function testTransferRevertsAssetNotConfigured() public {
@@ -132,7 +137,7 @@ contract BasejumpLandingTest is Test {
 
         vm.prank(bridge);
         vm.expectRevert(abi.encodeWithSelector(IBasejumpLanding.AssetNotConfigured.selector, unconfiguredSource));
-        basejumpLanding.transfer(unconfiguredSource, 1_000e6, recipient, "");
+        basejumpLanding.transfer(unconfiguredSource, 1_000e6, recipient);
     }
 
     function testTransferRevertsOnDispatchFailure() public {
@@ -141,7 +146,7 @@ contract BasejumpLandingTest is Test {
 
         vm.prank(bridge);
         vm.expectRevert(IBasejumpLanding.DispatchFailed.selector);
-        basejumpLanding.transfer(address(sourceUsdc), 1_000e6, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
     function testTransferQueuesWhenInsufficientBalance() public {
@@ -151,7 +156,7 @@ contract BasejumpLandingTest is Test {
         emit IBasejumpLanding.TransferQueued(0, address(sourceUsdc), address(usdc), recipient, overAmount);
 
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient);
 
         // Pool untouched
         assertEq(usdc.balanceOf(address(basejumpLanding)), POOL_AMOUNT);
@@ -171,7 +176,7 @@ contract BasejumpLandingTest is Test {
 
         // Queue a transfer
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient);
 
         // Replenish the pool (simulates slow bridge settlement)
         usdc.mint(address(basejumpLanding), 10e6);
@@ -192,7 +197,7 @@ contract BasejumpLandingTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient);
 
         usdc.mint(address(basejumpLanding), 10e6);
 
@@ -211,7 +216,7 @@ contract BasejumpLandingTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient);
 
         // Don't replenish — should revert
         vm.expectRevert(IBasejumpLanding.InsufficientBalance.selector);
@@ -222,7 +227,7 @@ contract BasejumpLandingTest is Test {
         uint256 overAmount = POOL_AMOUNT + 1e6;
 
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), overAmount, recipient);
 
         usdc.mint(address(basejumpLanding), 10e6);
         basejumpLanding.fulfillPending();
@@ -235,9 +240,9 @@ contract BasejumpLandingTest is Test {
     function testMultiplePendingTransfers() public {
         // Queue three transfers that all exceed the pool
         vm.startPrank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), POOL_AMOUNT + 1, recipient, "");
-        basejumpLanding.transfer(address(sourceUsdc), POOL_AMOUNT + 5_000e6, recipient, "");
-        basejumpLanding.transfer(address(sourceUsdc), POOL_AMOUNT + 3_000e6, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), POOL_AMOUNT + 1, recipient);
+        basejumpLanding.transfer(address(sourceUsdc), POOL_AMOUNT + 5_000e6, recipient);
+        basejumpLanding.transfer(address(sourceUsdc), POOL_AMOUNT + 3_000e6, recipient);
         vm.stopPrank();
 
         assertEq(basejumpLanding.pendingTail(), 3);
@@ -341,7 +346,7 @@ contract BasejumpLandingTest is Test {
         // Transfer should now revert
         vm.prank(bridge);
         vm.expectRevert(abi.encodeWithSelector(IBasejumpLanding.AssetNotConfigured.selector, address(sourceUsdc)));
-        basejumpLanding.transfer(address(sourceUsdc), 1_000e6, recipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), 1_000e6, recipient);
     }
 
     // ─── AccountId32 Recipient ────────────────────────────────────
@@ -356,6 +361,6 @@ contract BasejumpLandingTest is Test {
         emit IBasejumpLanding.TransferExecuted(address(sourceUsdc), address(usdc), polkadotRecipient, amount);
 
         vm.prank(bridge);
-        basejumpLanding.transfer(address(sourceUsdc), amount, polkadotRecipient, "");
+        basejumpLanding.transfer(address(sourceUsdc), amount, polkadotRecipient);
     }
 }

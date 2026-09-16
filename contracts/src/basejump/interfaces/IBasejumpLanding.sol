@@ -21,7 +21,7 @@ interface IBasejumpLanding {
 
     // ─── Core ────────────────────────────────────────────────────
 
-    function transfer(address sourceAsset, uint256 amount, bytes32 recipient, bytes memory data) external;
+    function transfer(address sourceAsset, uint256 amount, bytes32 recipient) external;
     function fulfillPending() external;
 
     // ─── Views ───────────────────────────────────────────────────
