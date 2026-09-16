@@ -6,6 +6,7 @@ export const entryPoints = {
   "ntt/app": "src/apps/ntt/app.ts",
   "oracle/app": "src/apps/oracle/app.ts",
   "intent/app": "src/apps/intent/app.ts",
+  "basejump/app": "src/apps/basejump/app.ts",
 };
 
 /**

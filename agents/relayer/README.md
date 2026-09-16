@@ -37,6 +37,18 @@ demand, so there is no pairing state to lose across restarts.
 Its three addresses live in [routes.ts](src/apps/intent/routes.ts); the app validates them at
 startup and refuses to run on a blank or malformed one.
 
+### `basejump`
+
+Relays Basejump fast-path VAAs **into Hydration**. A source `BasejumpEmitter` publishes a net payout
+instruction beside each NTT settlement; this submits it to that corridor's `BasejumpReceiver`
+([routes.ts](src/apps/basejump/routes.ts)), which verifies the emitter and pays the recipient out of
+the shared landing pool in one call. The settlement leg is the `ntt` app's — this one only carries
+the payout.
+
+A landing revert unwinds the VAA, so a retry is always safe; a pool shortfall queues instead of
+reverting, so the only failures are transient and the retry budget is sized in hours. Latency is the
+point, so it does not wait on Wormholescan for the source tx hash.
+
 ## Configuration
 
 Env holds only what changes between deployments. Routes, addresses, retry policy, backoff and age
@@ -58,7 +70,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `APP_NAME`            | Engine namespace override — **see below**         | per-app                               |
 
 `PRIVKEY` is one name across every app, and the services still hold **different keys** — that is what
-keeps the NTT, oracle and intent wallets off each other's nonce.
+keeps the NTT, oracle, intent and basejump wallets off each other's nonce.
 
 ## Development
 
@@ -72,7 +84,7 @@ pnpm --filter @whm/relayer mainnet-spy
 ## Production
 
 ```bash
-pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,intent}/app.js
+pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,intent,basejump}/app.js
 pnpm --filter @whm/relayer start:oracle
 pnpm --filter @whm/relayer docker:up
 ```
@@ -101,7 +113,7 @@ safe sequence  {name}:missedVaasV3:safeSequence:{chain}:{emitter}
 Renaming orphans that state. The missed-VAA worker then falls back to the `FROM_SEQUENCE` floors and
 rescans — replaying a backlog, or silently skipping everything before the floor. Each app's
 `config.ts` carries the name already in Redis (`hydration-ntt-relayer`, `oracle-relayer`,
-`intent-relayer`); `APP_NAME` overrides it, which is only for running a second deployment beside the
+`intent-relayer`, `basejump-relayer`); `APP_NAME` overrides it, which is only for running a second deployment beside the
 live one. Do not rename to tidy up.
 
 The `FROM_SEQUENCE` floors only matter on a cold start. Once a `safeSequence` exists the engine reads

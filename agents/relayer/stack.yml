@@ -68,6 +68,27 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: 'true'
 
+  app-basejump:
+    image: galacticcouncil/relayer:latest
+    command: [node, basejump/app.js]
+    environment:
+      # Pays out of the landing via the receiver; its own key, off the other wallets' nonces.
+      PRIVKEY: FILL THIS KEY ALWAYS
+      RPC_HYDRATION: https://rpc.hydradx.cloud
+      # Optional: alert sink and the multiple of one submission's cost to warn below.
+      DISCORD_WEBHOOK_URL: MAYBE FILL THIS URL OR REMOVE IT
+      GAS_WARN_MULTIPLIER: '50'
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
+
   redis:
     image: redis:latest
     volumes:
