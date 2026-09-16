@@ -2,22 +2,22 @@
   "migration": "oracle-relay-solana",
   "environment": "prod",
   "startedAt": "2026-08-24T18:34:51.681Z",
-  "completedAt": "2026-08-25T09:08:49.273Z",
+  "completedAt": "2026-09-16T02:47:03.593Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
       "status": "completed",
       "output": {
-        "programId": "AN6yxTepWFFjQWbo4448bNHHQR1Je48ppTkgBEpZ1SoJ",
-        "emitterPda": "HrGQvaskoJK7qpZwYNWxj62h3ZqSscZUrHLj3XQ41Fgn",
-        "emitterBytes32": "0xfa59e09e2b179c45f28053beda282efd1bcbe1de2feb9a4daf7fc24f622e3a0b",
-        "configPda": "DBLXTVBme9QrPM3MVyN4ZSP6Us64Z5hQrmmbruYqezqZ",
+        "programId": "2knjvgqZKtU3nV1r9RaLshS9JYWMerZ1ysSFcDyTVsdn",
+        "emitterPda": "3FVzVAw85CaMEN8aLXi1qQN3GDGL45SbFFvb4DMZjwJ2",
+        "emitterBytes32": "0x216e491a592a7d8bf6bf8ff925941d5ecc26bb35b64c3755c88859b225d97d03",
+        "configPda": "FUtKiQQdZNS7Rpx37QspGu5Q2jSCAQPv5NCKPL7yfawe",
         "ownerAddress": "6db8TCH51fK4Pq2LkBdMaMFPfXD17GjfLD8TaMPWNuiq",
-        "initializeTx": "4FRF3xfabiwsFgQqzt5FywdbSc2MNMyYSfXYrgDcHSxgZpdQBiqmVwqFLTHTD9ChPo4gDLykPwvstJTZpGfh73wQ"
+        "initializeTx": "7kuivEJGebP8DKiLVJbXjvkR5T87SrUbNDWnozHP8apfhjroXj6nswf29oMvi1Fsyf8P2XYujyQBaioFy5Fak7U"
       },
       "error": null,
-      "startedAt": "2026-08-24T18:34:51.683Z",
-      "completedAt": "2026-08-24T18:35:34.577Z"
+      "startedAt": "2026-09-16T02:45:52.328Z",
+      "completedAt": "2026-09-16T02:46:47.880Z"
     },
     {
       "name": "002-deploy-receiver",
@@ -35,55 +35,55 @@
       "name": "003-authorize-emitter@receiver",
       "status": "completed",
       "output": {
-        "txHash": "0x01c4f4a825699080e75ea996d71ef4081d8114c542618f7f76cc94a7fa5dfd3b",
-        "emitterBytes32": "0xfa59e09e2b179c45f28053beda282efd1bcbe1de2feb9a4daf7fc24f622e3a0b",
+        "txHash": "0x453636e0d8f801438895ecf70677702de6f7a9fb91ca849748c317acab0284ad",
+        "emitterBytes32": "0x216e491a592a7d8bf6bf8ff925941d5ecc26bb35b64c3755c88859b225d97d03",
         "sourceChain": "1"
       },
       "error": null,
-      "startedAt": "2026-08-24T18:35:44.507Z",
-      "completedAt": "2026-08-24T18:36:17.681Z"
+      "startedAt": "2026-09-16T02:46:58.534Z",
+      "completedAt": "2026-09-16T02:47:03.591Z"
     },
     {
       "name": "004-register-prime@emitter",
       "status": "completed",
       "output": {
-        "priceFeedPda": "C72f82HPJ5X4NAMvAaB1JNZPRcvRaarywnW6wkzEww2f",
+        "priceFeedPda": "FycaCJJ2QTbxwGR3Y7YkLJUrNods9nHHNDwxJYZ9sknC",
         "assetId": "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7",
         "assetIdBytes32": "0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da",
-        "priceIndex": "190",
-        "tx": "2XJRgxnwbXFfYeXaJQ6beqnL95Tj4YVxKYzzvAzyu6VL3DapjHsWHsfX3Xv6F8bhEhyZZiFuvKuyitur8YDy4cLP"
+        "priceIndex": "383",
+        "tx": "58ghPuVG3hv1ffbeG9fMMpfbXkZHu3uzshyWLQ2tqZNZ2d5L9QuQokEL4hEtA5kRY967gCANYqTF6c77BH1zA48N"
       },
       "error": null,
-      "startedAt": "2026-08-24T18:36:17.683Z",
-      "completedAt": "2026-08-24T18:36:21.170Z"
+      "startedAt": "2026-09-16T02:46:47.883Z",
+      "completedAt": "2026-09-16T02:46:51.509Z"
     },
     {
       "name": "005-register-sol@emitter",
       "status": "completed",
       "output": {
-        "priceFeedPda": "FpPUuGBTfNPdpH173e2MPPVBzzpaGECZAmhUrwUanVYj",
+        "priceFeedPda": "HdbpysjMpHvt13KNTHwiSuaq3D8g4uYLWLoBok2ttpTM",
         "assetId": "So11111111111111111111111111111111111111112",
         "assetIdBytes32": "0x069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001",
         "priceIndex": "1",
-        "tx": "2MqdDaFkFzehEpCFeRzuzuoMGhX6xvutdsXURysa4symgjH1mXC1xrxyY3X58tTe7P8UcTBPG399a6Y3Cnsvsxha"
+        "tx": "4dSycvBGXseC8Usqexg8tQBvphAUMiSRzds88TsQbhxkoyJZgmxoSmxPx56AexMQN8LCPrns2Hn4qFuiwJCHHD8g"
       },
       "error": null,
-      "startedAt": "2026-08-24T18:36:21.172Z",
-      "completedAt": "2026-08-24T18:36:24.047Z"
+      "startedAt": "2026-09-16T02:46:51.510Z",
+      "completedAt": "2026-09-16T02:46:54.335Z"
     },
     {
       "name": "006-register-jitosol@emitter",
       "status": "completed",
       "output": {
-        "poolFeedPda": "2SHb4tyomgUzZrmnsWG1gkP8PNLeNEg2j5qRHgi3Wazo",
+        "poolFeedPda": "CD2CNHassx1c3iyRhcC6smCwxTfRpYJqXRRZYGxCY57V",
         "assetId": "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn",
         "assetIdBytes32": "0xfcd141e9832caf10ad917495ca0f271b5b293cd47027ea737007ed40eb39a0bd",
         "stakePool": "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb",
-        "tx": "5xSNYw2HS4o6WedUym8UHiheMXw7zgxPMHMSbgisYxg9A1TQFTrPpzyypk5fvJQqsE2qUeVCkSMnshnscUPaLSVc"
+        "tx": "4GtAiNmfjjstjiejT1owa55pbsywftmqYLSH8bctwUq9DHacuWzHCspTCrzprqQ9aVNkaSp6p69mwNDyuNHnxkFc"
       },
       "error": null,
-      "startedAt": "2026-08-24T18:36:24.048Z",
-      "completedAt": "2026-08-24T18:36:26.553Z"
+      "startedAt": "2026-09-16T02:46:54.337Z",
+      "completedAt": "2026-09-16T02:46:58.533Z"
     },
     {
       "name": "007-set-prime@receiver",

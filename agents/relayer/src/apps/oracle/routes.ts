@@ -22,7 +22,7 @@ export const ROUTES: OracleRoute[] = [
   {
     source: "solana",
     sourceChain: WORMHOLE.solana,
-    sourceEmitter: "AN6yxTepWFFjQWbo4448bNHHQR1Je48ppTkgBEpZ1SoJ",
+    sourceEmitter: "2knjvgqZKtU3nV1r9RaLshS9JYWMerZ1ysSFcDyTVsdn",
     receiver: "0x582e2fac5af62dc024396b5e7f549c72273a69c3",
   },
   {
