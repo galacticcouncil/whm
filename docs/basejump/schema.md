@@ -3,13 +3,13 @@
 Two-rail data flow, wire format, and contract relationships. Design rationale lives in
 [spec.md](spec.md).
 
-## Base → Hydration
+## Ethereum → Hydration
 
 Both rails leave the same transaction. The fast one pays the user in ~2 min; the slow one replenishes
 the pool it was paid from, ~13 min later.
 
 ```
-A: Base (source)                Relay (off-chain)          B: Hydration (dest)
+A: Ethereum (source)            Relay (off-chain)          B: Hydration (dest)
 ┌──────────────────────────┐   ┌──────────────────┐       ┌──────────────────────────┐
 │ BasejumpEmitter          │   │                  │       │ BasejumpReceiver         │
 │                          │   │                  │       │ (verify + route)         │
@@ -31,7 +31,7 @@ A: Base (source)                Relay (off-chain)          B: Hydration (dest)
 │                          │   │ 4. submit to     │       │                          │
 └──────────────────────────┘   │    Hydration     │──────→│ 5. completeTransfer(vaa) │
                                │                  │       │    parseAndVerifyVM      │
-                               │  NOT IMPLEMENTED │       │    replay check          │
+                               │  relayer/basejump│       │    replay check          │
                                └──────────────────┘       │    emitter auth          │
                                                           │    decode payload        │
                                                           │            │             │
@@ -62,8 +62,8 @@ A: Base (source)                Relay (off-chain)          B: Hydration (dest)
                                                           └──────────────────────────┘
 ```
 
-The settlement rail is delivered by the relayer's `hydration-ntt` feature, which already carries the
-EURC route. The fast rail has no relayer feature yet — see [spec.md](spec.md#relaying).
+The settlement rail is delivered by the relayer's `ntt` app, which carries the USDC route; the fast
+rail by its `basejump` app — see [spec.md](spec.md#relaying).
 
 ## Atomicity
 
@@ -102,7 +102,7 @@ TransferPayload {
     uint256 amount;            // NET: gross − assetFee[sourceAsset]
     bytes32 recipient;         // AccountId32 on Hydration
     uint64  transferSequence;  // NTT manager sequence of the settlement leg
-    bytes   data;              // opaque, forwarded end-to-end
+    bytes   data;              // opaque; forwarded untouched to the landing (inbound-intent channel)
 }
 ```
 
@@ -115,8 +115,8 @@ when the settlement arrives.
 ## Contract relationships
 
 ```
-Base                                   Hydration
-────                                   ─────────
+Ethereum                               Hydration
+────────                               ─────────
 
 ┌──────────────────┐                   ┌──────────────────┐
 │ BasejumpEmitter  │                   │ BasejumpReceiver │
