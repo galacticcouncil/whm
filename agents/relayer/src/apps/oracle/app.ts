@@ -1,5 +1,3 @@
-import { parseAbi } from "viem";
-
 import { boot } from "../../boot";
 import { alerts, engineConfig, privateKey } from "../../config";
 import { createApp } from "../../engine/app";
@@ -8,10 +6,9 @@ import { createQueue } from "../../engine/queue";
 import logger from "../../logger";
 import type { Next, RelayerCtx } from "../../types";
 
+import { receiverAbi } from "./abi";
 import { APP_NAME, FROM_SEQUENCE, RETRIES, RPC_HYDRATION } from "./config";
 import { ROUTES, type OracleRoute } from "./routes";
-
-const receiverAbi = parseAbi(["function receiveMessage(bytes vaa) external"]);
 
 /**
  * Relays oracle price VAAs into Hydration. Each source chain's VAAs go to that source's own

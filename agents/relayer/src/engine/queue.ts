@@ -1,7 +1,7 @@
 import { formatEther, formatGwei, type Account, type Hash, type PublicClient } from "viem";
 
 import logger from "../logger";
-import { isDone, revertName } from "./revert";
+import { isDead, isDone, revertName } from "./revert";
 
 /** Enough gas for one submission; below this the process is out of runway and exits. */
 const MIN_GAS = 1_000_000n;
@@ -138,6 +138,11 @@ export function createQueue(deps: QueueDeps) {
 
       if (isDone(name)) {
         task.logger.info(`${task.label} already completed`);
+        task.resolve();
+      } else if (isDead(name)) {
+        // Nothing was written and no retry can change that — drop it, but at warn: a VAA that aged
+        // out of maxPriceAge is a real gap in the feed, not a completion.
+        task.logger.warn(`${task.label} dropped, cannot succeed (${name})`);
         task.resolve();
       } else if (message.includes("nonce too low")) {
         task.logger.info("nonce too low, reloading");

@@ -1,13 +1,28 @@
 import { BaseError, ContractFunctionRevertedError } from "viem";
 
 /** Custom-error names meaning the work is already done — ours and NTT's. Matched whole. */
-const DONE_ERRORS = new Set(["AlreadyRedeemed", "TransferAlreadyCompleted"]);
+const DONE_ERRORS = new Set(["AlreadyRedeemed", "TransferAlreadyCompleted", "StalePriceUpdate"]);
 
 /**
  * Require-string reverts meaning the same. The token bridge and NTT revert with strings, which
  * arrive prefixed by the contract that raised them, so these match as fragments.
  */
-const DONE_REASONS = ["transfer already completed", "already been redeemed", "VAA already processed"];
+const DONE_REASONS = [
+  "transfer already completed",
+  "already been redeemed",
+  "VAA already processed",
+];
+
+/**
+ * Reverts a retry can never clear, where the work did NOT succeed — as opposed to DONE_*, which
+ * means someone else already did it.
+ *
+ * Both are OracleReceiver's: `maxPriceAge` measures against `block.timestamp`, so a VAA past the
+ * window only gets further past it, and a payload that scales to zero is fixed bytes.
+ * `StalePriceUpdate` is deliberately NOT here — it means a newer price won the race, which is a
+ * genuine completion and belongs in DONE_ERRORS.
+ */
+const DEAD_REASONS = ["Price too stale", "Price too low to scale"];
 
 /**
  * The revert's own name: a custom error's name, or the string behind a require.
@@ -41,4 +56,19 @@ export function revertName(e: unknown): string | undefined {
 export function isDone(name: string | undefined): boolean {
   if (!name) return false;
   return DONE_ERRORS.has(name) || DONE_REASONS.some((reason) => name.includes(reason));
+}
+
+/**
+ * Whether a revert means a retry is pointless, without the work having succeeded.
+ *
+ * Kept apart from `isDone` so the queue can drop these while still reporting them as misses — a VAA
+ * that aged out of `maxPriceAge` is a real gap in the feed, and logging it as "already completed"
+ * would hide exactly the thing worth seeing.
+ *
+ * @param name The revert name from `revertName`.
+ * @returns True when no retry could succeed and nothing was written.
+ */
+export function isDead(name: string | undefined): boolean {
+  if (!name) return false;
+  return DEAD_REASONS.some((reason) => name.includes(reason));
 }
