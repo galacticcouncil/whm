@@ -2,7 +2,7 @@
   "migration": "oracle-relay-solana",
   "environment": "prod",
   "startedAt": "2026-08-24T18:34:51.681Z",
-  "completedAt": "2026-09-16T02:47:03.593Z",
+  "completedAt": "2026-09-17T02:38:48.688Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -120,6 +120,30 @@
       "error": null,
       "startedAt": "2026-08-24T20:15:36.803Z",
       "completedAt": "2026-08-24T20:15:45.554Z"
+    },
+    {
+      "name": "010-set-prime-checked@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x0c1a75a1ee82e44b53aea52a126eead165555c59d3ae2ecce10d6c84e2a6aa3e",
+        "assetId": "0x26759f460ee5f743ed66d27c8f2a5623bf39d53ed575955320661e6e13e0e3da",
+        "oracle": "0x09221057Cf7E75953D199FB319E606972A6A82Cd"
+      },
+      "error": null,
+      "startedAt": "2026-09-17T02:38:23.412Z",
+      "completedAt": "2026-09-17T02:38:27.062Z"
+    },
+    {
+      "name": "011-set-jitosol-checked@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x3b4d0d45cbda20a09468c9d976ebbe2a235d072a8a6dedafd90a6003262f008c",
+        "assetId": "0xfcd141e9832caf10ad917495ca0f271b5b293cd47027ea737007ed40eb39a0bd",
+        "oracle": "0x64b7BbAC63E5aDcA0ec35C4AEBf9937Fc1d79C1D"
+      },
+      "error": null,
+      "startedAt": "2026-09-17T02:38:40.083Z",
+      "completedAt": "2026-09-17T02:38:48.686Z"
     }
   ]
 }

@@ -2,7 +2,7 @@
   "migration": "oracle-relay-ethereum",
   "environment": "prod",
   "startedAt": "2026-08-25T08:01:35.137Z",
-  "completedAt": "2026-08-25T09:06:40.106Z",
+  "completedAt": "2026-09-17T02:37:49.879Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -90,6 +90,18 @@
       "error": null,
       "startedAt": "2026-08-25T08:09:57.354Z",
       "completedAt": "2026-08-25T08:10:02.399Z"
+    },
+    {
+      "name": "008-set-wsteth-checked@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0xc87b5e359a164e650c99e3167dd2507c83cc734eed8ae36e5cf37a04a177d414",
+        "assetId": "0x3725f7650a1fc235623c67881a5755db6c97d7575eddd7351396f0b26fe79334",
+        "oracle": "0xBE6B91cCb5b41e68426Dcb584830A360093c2775"
+      },
+      "error": null,
+      "startedAt": "2026-09-17T02:37:45.221Z",
+      "completedAt": "2026-09-17T02:37:49.877Z"
     }
   ]
 }
