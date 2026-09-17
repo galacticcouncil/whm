@@ -2,7 +2,7 @@
   "migration": "oracle-relay-ethereum",
   "environment": "prod",
   "startedAt": "2026-08-25T08:01:35.137Z",
-  "completedAt": "2026-09-17T02:37:49.879Z",
+  "completedAt": "2026-09-17T18:08:49.724Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -102,6 +102,18 @@
       "error": null,
       "startedAt": "2026-09-17T02:37:45.221Z",
       "completedAt": "2026-09-17T02:37:49.877Z"
+    },
+    {
+      "name": "009-set-apyusd-checked@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x8e59ce0e10597596aaeae9d1ea68e5c88a8e2e598b0f019bf9f0d380f0d2ad05",
+        "assetId": "0xde11c6e5fbb09ebf287fceb58deeb4a0e34ccb69e2deeb25dfe46ad04e35a5a8",
+        "oracle": "0x80FaaC4Da72FCcABDa5B276D9A931252D6242Caf"
+      },
+      "error": null,
+      "startedAt": "2026-09-17T18:08:44.996Z",
+      "completedAt": "2026-09-17T18:08:49.722Z"
     }
   ]
 }
