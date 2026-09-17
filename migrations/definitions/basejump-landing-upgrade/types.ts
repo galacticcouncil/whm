@@ -7,7 +7,7 @@ import type {
 
 type EvmWallet = ReturnType<typeof wallet.getWallet>;
 
-/** Hydration only: the receiver lives there, and the implementation is all this deploys. */
+/** Hydration only: the pool lives there, and the implementation is all this deploys. */
 export interface WalletContext {
   hydration: EvmWallet;
 }

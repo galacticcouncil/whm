@@ -202,14 +202,15 @@ an env-copied address would silently authorize a stale one.
 The migration does not touch the landing: the pool is TC-owned, so step 3 is governance. Three
 consequences:
 
-**The receiver's call must match the landing's code.** The pool's `transfer` takes three
-arguments (`0x57cfeeee`) and is not redeployed; a receiver calling any other selector reverts inside
-the pool on every `completeTransfer`. A receiver whose implementation does not match the current
-source is brought up to it with
-[`basejump-receiver-upgrade`](../../migrations/definitions/basejump-receiver-upgrade/): it builds,
-checks the artifact against the live pool's selector, deploys the current `BasejumpReceiver`
-implementation and records the `upgradeToAndCall` calldata for the TC. Vet it with
-`_probeBasejumpReceiverUpgrade.ts --impl <address>`, which enacts the TC motion on a fork and
+**The landing's code must match the receiver's call.** The receiver calls the four-argument
+`transfer(address,uint256,bytes32,bytes)` — `data` is the inbound-intent channel, so a recipient
+contract can be told what to do with the funds — and the pool must dispatch exactly that. A pool
+whose implementation does not match the current source is brought up to it with
+[`basejump-landing-upgrade`](../../migrations/definitions/basejump-landing-upgrade/): it builds,
+checks the artifact against the selector the live receiver calls, deploys the current
+`BasejumpLanding` implementation and records the `upgradeToAndCall` calldata for the TC. Storage
+layout is unchanged, so the pool balance, routes, authorizations and queue carry over. Vet it with
+`_probeBasejumpLandingUpgrade.ts --impl <address>`, which enacts the TC motion on a fork and
 replays the real VAAs waiting on the corridor. The `basejump` relayer can run before the motion
 enacts — its retry budget spans days — but a VAA that exhausts it needs a manual replay.
 

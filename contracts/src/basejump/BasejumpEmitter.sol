@@ -99,7 +99,7 @@ contract BasejumpEmitter is Initializable, UUPSUpgradeable, IBasejumpEmitter, IB
             INttManager(manager).transfer{value: deliveryPrice}(actualAmount, DEST_CHAIN_ID, landing);
 
         // 2. Fast path — the net amount, paid out of the pool this settlement replenishes. `data`
-        //    rides along untouched; the receiver drops it until an inbound-intent corridor exists.
+        //    rides along untouched for a contract recipient to act on (inbound intents).
         messageSequence = _fastTrack(asset, actualAmount, recipient, transferSequence, data);
     }
 
@@ -113,7 +113,7 @@ contract BasejumpEmitter is Initializable, UUPSUpgradeable, IBasejumpEmitter, IB
     /// @dev Publish the payout instruction for `amount` minus the asset's fee.
     /// @param amount The gross amount settled on the NTT rail.
     /// @param transferSequence The settlement leg's sequence, carried for correlation.
-    /// @param data Opaque bytes published untouched; not forwarded by the receiver.
+    /// @param data Opaque bytes forwarded to the delivery, untouched.
     /// @return messageSequence The Wormhole core sequence of the published message.
     function _fastTrack(
         address sourceAsset,

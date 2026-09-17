@@ -31,9 +31,8 @@ contract BasejumpReceiver is MessageReceiver, IBasejumpReceiver, IBasejumpPayloa
 
         TransferPayload memory transfer = abi.decode(vm.payload, (TransferPayload));
 
-        // `data` is not forwarded: Hydration recipients are AccountId32 accounts with no callback.
         IBasejumpLanding(address(uint160(uint256(landing)))).transfer(
-            transfer.sourceAsset, transfer.amount, transfer.recipient
+            transfer.sourceAsset, transfer.amount, transfer.recipient, transfer.data
         );
 
         emit TransferProcessed(transfer.sourceAsset, transfer.amount, transfer.recipient);

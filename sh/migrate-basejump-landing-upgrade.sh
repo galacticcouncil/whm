@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: migrate-basejump-receiver-upgrade.sh <env> [runner flags...]
+# Usage: migrate-basejump-landing-upgrade.sh <env> [runner flags...]
 #
-# Deploy the current BasejumpReceiver implementation on Hydration for a live receiver proxy.
+# Deploy the current BasejumpLanding implementation on Hydration for the live pool proxy.
 # The upgrade itself (upgradeToAndCall) is owner-gated and the owner is the Hydration TC, so the
 # step records the calldata for governance rather than sending it.
 #
@@ -14,9 +14,9 @@ set -euo pipefail
 #   PK_HYDRATION  Hydration deployer (0x...), needs an EVMAccounts.ContractDeployer slot
 #
 # Example:
-#   PK_HYDRATION=0x... ./sh/migrate-basejump-receiver-upgrade.sh prod
+#   PK_HYDRATION=0x... ./sh/migrate-basejump-landing-upgrade.sh prod
 
-ENV=${1:?Usage: migrate-basejump-receiver-upgrade.sh <env (prod|fork)>}
+ENV=${1:?Usage: migrate-basejump-landing-upgrade.sh <env (prod|fork)>}
 shift
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -41,4 +41,4 @@ export PK_HYDRATION
 # The action deploys contracts/out, so build it from this checkout first.
 (cd "$ROOT_DIR/contracts" && forge build)
 
-"$TSX" "$RUNNER" --migration basejump-receiver-upgrade --env "$ENV" "$@"
+"$TSX" "$RUNNER" --migration basejump-landing-upgrade --env "$ENV" "$@"

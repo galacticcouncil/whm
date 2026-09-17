@@ -1,28 +1,29 @@
 /**
- * PROBE (Basejump receiver upgrade): the TC motion that upgrades the live receiver `0x35bf…7c8a`
- * to the current `BasejumpReceiver`, enacted on a Hydration fork through the real governance path,
- * then proven by replaying the REAL guardian-signed fast-path VAAs waiting on the corridor.
+ * PROBE (Basejump landing upgrade): the TC motion that upgrades the live pool `0x70e9…f976` to the
+ * current `BasejumpLanding`, enacted on a Hydration fork through the real governance path, then
+ * proven by replaying the REAL guardian-signed fast-path VAAs waiting on the corridor.
  *
- * The pool's `transfer` takes three arguments (0x57cfeeee). The receiver must call exactly that,
- * so a receiver implementation calling any other selector reverts inside the pool on every
- * `completeTransfer`. The receiver's storage layout is unchanged by the upgrade.
+ * The receiver calls the landing's four-argument `transfer(address,uint256,bytes32,bytes)`; the
+ * live pool dispatches only the three-argument form (0x57cfeeee), so every `completeTransfer`
+ * reverts inside the pool. The landing's storage layout is unchanged by the upgrade: the pool
+ * balance, routes, authorizations and queue carry over untouched.
  *
  * Owner of the proxy is `0xAA7e…AA7E1`, the runtime's EmergencyAdminAccount. `EmergencyAdminOrigin`
  * is `EitherOf<EnsureRoot, TechCommitteeMajority>`, so the call is a TC motion, not a referendum:
  *
  *   technicalCommittee.propose(threshold,
  *     dispatcher.dispatchAsEmergencyAdmin(
- *       evm.call(admin, receiver, upgradeToAndCall(impl, 0x), 0, gas, maxFee, ..)))
+ *       evm.call(admin, landing, upgradeToAndCall(impl, 0x), 0, gas, maxFee, ..)))
  *
  * What runs here:
- *   1. deploy the current BasejumpReceiver implementation (or take a live one via `--impl`)
+ *   1. deploy the current BasejumpLanding implementation (or take a live one via `--impl`)
  *   2. print the calldata: evm input, the dispatcher call, its hash/len, and the TC `propose`
- *   3. replay VAA seq 0 against the receiver as deployed → must revert
+ *   3. replay VAA seq 0 against the pool as deployed → must revert
  *   4. enact the dispatcher call from a `TechnicalCommittee.Members(threshold, n)` origin via the
- *      scheduler, assert `Upgraded`, assert the ERC1967 slot, assert wiring unchanged
+ *      scheduler, assert `Upgraded`, assert the ERC1967 slot, assert pool state unchanged
  *   5. replay every fixture VAA → all must pay
  *
- *   npx tsx chopsticks/probes/_probeBasejumpReceiverUpgrade.ts [--impl <address>] [--root]
+ *   npx tsx chopsticks/probes/_probeBasejumpLandingUpgrade.ts [--impl <address>] [--root]
  *
  * `--root` enacts from Root instead of the TC origin (what a referendum would do).
  * Fixtures: `_canary-vaa*.json`, Wormholescan `/api/v1/vaas/2/<emitter>/<seq>` responses.
@@ -39,7 +40,6 @@ import {
   http,
   isAddress,
   keccak256,
-  pad,
   parseAbi,
   type Hex,
 } from "viem";
@@ -60,8 +60,8 @@ const USDC_ASSET_ID = 21;
 
 const LANDING = "0x70e9b12c3b19cb5f0e59984a5866278ab69df976" as Hex;
 const RECEIVER = "0x35bf3a1b9ac564c8f66c97cea1ee410cd3f97c8a" as Hex;
-const ETH_EMITTER = "0xa72e2bf29c840eb93adbb9ee1aa41580f01c9944" as Hex;
-const WORMHOLE_CORE = "0x3792a6d63c31941B2805181771795D9176fA82A1" as Hex;
+const ETH_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Hex;
+const USDC_PRECOMPILE = "0x0000000000000000000000000000000100000015" as Hex;
 const ERC1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc" as Hex;
 
 const EMERGENCY_ADMIN = "0xAA7e0000000000000000000000000000000AA7E1" as Hex;
@@ -86,8 +86,8 @@ if (implArg >= 0 && !isAddress(IMPL_OVERRIDE ?? "")) throw new Error("--impl nee
 const ENACT_AS_ROOT = process.argv.includes("--root");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RECEIVER_ARTIFACT = JSON.parse(
-  readFileSync(resolve(HERE, "../../contracts/out/BasejumpReceiver.sol/BasejumpReceiver.json"), "utf8"),
+const LANDING_ARTIFACT = JSON.parse(
+  readFileSync(resolve(HERE, "../../contracts/out/BasejumpLanding.sol/BasejumpLanding.json"), "utf8"),
 ) as { bytecode: { object: Hex } };
 
 type VaaFixture = { data: { vaa: string; sequence: number; txHash: string } };
@@ -96,20 +96,18 @@ const FIXTURES = readdirSync(HERE)
   .sort()
   .map((f) => JSON.parse(readFileSync(resolve(HERE, f), "utf8")) as VaaFixture);
 
-const RECEIVER_ABI = parseAbi([
+const LANDING_ABI = parseAbi([
   "function upgradeToAndCall(address newImplementation, bytes data) payable",
   "function proxiableUUID() view returns (bytes32)",
   "function owner() view returns (address)",
-  "function landing() view returns (bytes32)",
-  "function wormhole() view returns (address)",
-  "function authorizedEmitters(uint16) view returns (bytes32)",
-  "function processedVaas(bytes32) view returns (bool)",
-  "function completeTransfer(bytes)",
-]);
-const LANDING_ABI = parseAbi([
+  "function authorizedBridges(address) view returns (bool)",
+  "function destAssetFor(address) view returns (address)",
   "function pendingHead() view returns (uint256)",
   "function pendingTail() view returns (uint256)",
-  "function authorizedBridges(address) view returns (bool)",
+]);
+const RECEIVER_ABI = parseAbi([
+  "function processedVaas(bytes32) view returns (bool)",
+  "function completeTransfer(bytes)",
 ]);
 
 const TOPICS: Record<string, string> = {
@@ -273,32 +271,38 @@ async function main(): Promise<void> {
     // Read pallet_evm's storage directly: chopsticks' eth_getStorageAt answers zero here.
     const implSlot = async (): Promise<Hex> => {
       const raw = await retry("EVM.AccountStorages", () =>
-        api.query.EVM.AccountStorages.getValue(RECEIVER, ERC1967_IMPL_SLOT),
+        api.query.EVM.AccountStorages.getValue(LANDING, ERC1967_IMPL_SLOT),
       );
       const hex = typeof raw === "string" ? raw : (raw as { asHex?: () => string })?.asHex?.() ?? "0x";
       return getAddress(`0x${hex.slice(-40)}`);
     };
-    const read = <T>(fn: string, args: unknown[] = []) =>
+    const readLanding = <T>(fn: string, args: unknown[] = []) =>
+      retry(fn, () => pub.readContract({ address: LANDING, abi: LANDING_ABI, functionName: fn as never, args: args as never })) as Promise<T>;
+    const readReceiver = <T>(fn: string, args: unknown[] = []) =>
       retry(fn, () => pub.readContract({ address: RECEIVER, abi: RECEIVER_ABI, functionName: fn as never, args: args as never })) as Promise<T>;
 
-    // ── deployer: funded. The fork does not gate CREATE on EVMAccounts.ContractDeployer. ──
+    // ── deployer: funded and whitelisted. CREATE is gated on EVMAccounts.ContractDeployer (a `()`
+    //    value: `true` sets it, `null` would delete it). Mainnet needs a real slot — Root/GeneralAdmin.
     await hydration.setStorage({
       System: { Account: [[[deployerSub], { providers: 1, data: { free: 1_000_000n * 10n ** 12n } }]] },
       Tokens: { Accounts: [[[deployerSub, WETH_ASSET_ID], { free: 1_000n * 10n ** 18n }]] },
+      EVMAccounts: { ContractDeployer: [[[account.address], true]] },
     });
 
-    console.log(`\n🥢 Basejump receiver upgrade — real pool, real receiver, real VAAs`);
-    console.log(`   receiver  ${RECEIVER}`);
+    console.log(`\n🥢 Basejump landing upgrade — real pool, real receiver, real VAAs`);
     console.log(`   landing   ${LANDING}`);
+    console.log(`   receiver  ${RECEIVER}`);
     console.log(`   admin     ${EMERGENCY_ADMIN}`);
 
     // ── before ──
     const implBefore = await implSlot();
-    const owner = await read<Hex>("owner");
-    const wiringBefore = {
-      landing: await read<Hex>("landing"),
-      wormhole: await read<Hex>("wormhole"),
-      emitter2: await read<Hex>("authorizedEmitters", [2]),
+    const owner = await readLanding<Hex>("owner");
+    const stateBefore = {
+      receiverAuthorized: await readLanding<boolean>("authorizedBridges", [RECEIVER]),
+      usdcRoute: await readLanding<Hex>("destAssetFor", [ETH_USDC]),
+      pendingHead: await readLanding<bigint>("pendingHead"),
+      pendingTail: await readLanding<bigint>("pendingTail"),
+      pool: await tokenBalance(landingSub, USDC_ASSET_ID),
     };
     const members = (await retry("TC members", () => api.query.TechnicalCommittee.Members.getValue())) as unknown[];
     const n = members.length;
@@ -310,21 +314,19 @@ async function main(): Promise<void> {
     console.log(`   owner                ${owner}`);
     console.log(`   admin gas (WETH)     ${adminGas}  (ETH\\0-derived account)`);
     console.log(`   TC members           ${n}  → majority threshold ${threshold}`);
-    console.log(`   pool USDC            ${usdc(await tokenBalance(landingSub, USDC_ASSET_ID))}`);
+    console.log(`   pool USDC            ${usdc(stateBefore.pool)}`);
+    console.log(`   queue                ${stateBefore.pendingHead}/${stateBefore.pendingTail}`);
     record("owner is the emergency admin", owner.toLowerCase() === EMERGENCY_ADMIN.toLowerCase(), owner);
     record("admin has WETH for gas", adminGas > 0n, adminGas.toString());
-    record("receiver wired to the landing", wiringBefore.landing.toLowerCase() === pad(LANDING, { size: 32 }).toLowerCase());
-    record("receiver wired to the core", wiringBefore.wormhole.toLowerCase() === WORMHOLE_CORE.toLowerCase());
-    record("Ethereum emitter authorized", wiringBefore.emitter2.toLowerCase() === pad(ETH_EMITTER, { size: 32 }).toLowerCase());
-    record("receiver authorized on the landing", await retry("authorizedBridges", () =>
-      pub.readContract({ address: LANDING, abi: LANDING_ABI, functionName: "authorizedBridges", args: [RECEIVER] })));
+    record("receiver authorized on the landing", stateBefore.receiverAuthorized);
+    record("Ethereum USDC routed to asset 21", stateBefore.usdcRoute.toLowerCase() === USDC_PRECOMPILE.toLowerCase(), stateBefore.usdcRoute);
 
     // ── 1. the implementation ──
     let impl: Hex;
     if (IMPL_OVERRIDE) {
       impl = getAddress(IMPL_OVERRIDE);
     } else {
-      const { address, res } = await client.deploy(RECEIVER_ARTIFACT.bytecode.object);
+      const { address, res } = await client.deploy(LANDING_ARTIFACT.bytecode.object);
       const evs = await eventsAt(hydration, res.blockHash);
       if (!evmSucceeded(evs)) {
         logEvents(evs);
@@ -334,12 +336,12 @@ async function main(): Promise<void> {
     }
     const code = await retry("code", () => pub.getCode({ address: impl }));
     record(`implementation has code (${IMPL_OVERRIDE ? "live" : "deployed here"})`, !!code && code !== "0x", impl);
-    const uuid = await retry("proxiableUUID", () => pub.readContract({ address: impl, abi: RECEIVER_ABI, functionName: "proxiableUUID" }));
+    const uuid = await retry("proxiableUUID", () => pub.readContract({ address: impl, abi: LANDING_ABI, functionName: "proxiableUUID" }));
     record("proxiableUUID == ERC1967 impl slot", uuid === ERC1967_IMPL_SLOT, uuid);
 
     // ── 2. the calldata ──
-    const evmInput = encodeFunctionData({ abi: RECEIVER_ABI, functionName: "upgradeToAndCall", args: [impl, "0x"] });
-    const inner = meta.tx.evm.call(EMERGENCY_ADMIN, RECEIVER, evmInput, 0, GAS_LIMIT, MAX_FEE_PER_GAS, null, null, [], []);
+    const evmInput = encodeFunctionData({ abi: LANDING_ABI, functionName: "upgradeToAndCall", args: [impl, "0x"] });
+    const inner = meta.tx.evm.call(EMERGENCY_ADMIN, LANDING, evmInput, 0, GAS_LIMIT, MAX_FEE_PER_GAS, null, null, [], []);
     const call = meta.tx.dispatcher.dispatchAsEmergencyAdmin(inner);
     const callBytes = call.toU8a();
     const callHash = registry.hash(callBytes).toHex();
@@ -348,7 +350,7 @@ async function main(): Promise<void> {
     console.log(`\n── Calldata ──`);
     console.log(`   upgradeToAndCall(${impl}, 0x)`);
     console.log(`     evm input           : ${evmInput}`);
-    console.log(`   evm.call(admin → receiver, gas ${GAS_LIMIT}, maxFee ${MAX_FEE_PER_GAS})`);
+    console.log(`   evm.call(admin → landing, gas ${GAS_LIMIT}, maxFee ${MAX_FEE_PER_GAS})`);
     console.log(`     call                : ${inner.toHex()}`);
     console.log(`   dispatcher.dispatchAsEmergencyAdmin(evm.call)   ← what the TC motion carries`);
     console.log(`     len                 : ${callBytes.length} bytes`);
@@ -358,7 +360,7 @@ async function main(): Promise<void> {
     console.log(`     call                : ${propose.toHex()}`);
     if (!IMPL_OVERRIDE) {
       console.log(`\n   NOTE: impl ${impl} exists on THIS FORK only. For mainnet, deploy with`);
-      console.log(`   pnpm migrate:basejump-receiver-upgrade, re-run with --impl <address>, and submit that output.`);
+      console.log(`   pnpm migrate:basejump-landing-upgrade, re-run with --impl <address>, and submit that output.`);
     }
 
     // ── VAA delivery ──
@@ -376,7 +378,7 @@ async function main(): Promise<void> {
       const ok = evmSucceeded(evs);
       const poolAfter = await tokenBalance(landingSub, USDC_ASSET_ID, res.blockHash);
       const recipAfter = await tokenBalance(recipientSub, USDC_ASSET_ID, res.blockHash);
-      const processed = await read<boolean>("processedVaas", [v.hash]);
+      const processed = await readReceiver<boolean>("processedVaas", [v.hash]);
       console.log(`\n   seq ${v.sequence}: net ${usdc(v.amount)}, NTT transferSequence ${v.transferSequence}, source tx 0x${v.srcTx}`);
       console.log(`     completeTransfer  ${ok ? "Succeed" : "Revert"}   logs: ${evmLogs(evs).map((l) => l.name).join(" ") || "none"}`);
       console.log(`     pool       ${usdc(poolBefore)} → ${usdc(poolAfter)}`);
@@ -386,9 +388,9 @@ async function main(): Promise<void> {
       return expectPay ? paid : !ok && !processed && recipAfter === recipBefore;
     };
 
-    // ── 3. receiver as deployed → revert ──
-    console.log(`\n── 3. Receiver as deployed (impl ${implBefore}) ──`);
-    record(`seq ${vaas[0].sequence} reverts on the deployed receiver`, await deliver(vaas[0], false));
+    // ── 3. pool as deployed → revert ──
+    console.log(`\n── 3. Pool as deployed (impl ${implBefore}) ──`);
+    record(`seq ${vaas[0].sequence} reverts on the deployed pool`, await deliver(vaas[0], false));
 
     // ── 4. enact the upgrade through the scheduler with the TC origin ──
     const origin = ENACT_AS_ROOT
@@ -418,25 +420,26 @@ async function main(): Promise<void> {
     }
     record("EmergencyAdminOrigin accepted the origin", innerRes?.ok === true, innerRes?.err ?? "");
     record("EVM.call executed", evmSucceeded(evs));
-    record("Upgraded event from the receiver", evmLogs(evs).some((l) => l.address === RECEIVER && l.name === "Upgraded"));
+    record("Upgraded event from the landing", evmLogs(evs).some((l) => l.address === LANDING && l.name === "Upgraded"));
     const implAfter = await implSlot();
     record("ERC1967 slot points at the new impl", implAfter.toLowerCase() === impl.toLowerCase(), implAfter);
-    record("owner unchanged", (await read<Hex>("owner")).toLowerCase() === owner.toLowerCase());
-    record("landing unchanged", (await read<Hex>("landing")).toLowerCase() === wiringBefore.landing.toLowerCase());
-    record("core unchanged", (await read<Hex>("wormhole")).toLowerCase() === wiringBefore.wormhole.toLowerCase());
-    record("emitter authorization unchanged", (await read<Hex>("authorizedEmitters", [2])).toLowerCase() === wiringBefore.emitter2.toLowerCase());
+    record("owner unchanged", (await readLanding<Hex>("owner")).toLowerCase() === owner.toLowerCase());
+    record("receiver authorization unchanged", (await readLanding<boolean>("authorizedBridges", [RECEIVER])) === stateBefore.receiverAuthorized);
+    record("USDC route unchanged", (await readLanding<Hex>("destAssetFor", [ETH_USDC])).toLowerCase() === stateBefore.usdcRoute.toLowerCase());
+    record("queue unchanged", (await readLanding<bigint>("pendingHead")) === stateBefore.pendingHead && (await readLanding<bigint>("pendingTail")) === stateBefore.pendingTail);
+    record("pool balance unchanged", (await tokenBalance(landingSub, USDC_ASSET_ID)) === stateBefore.pool);
 
     // ── 5. every waiting VAA now pays ──
-    console.log(`\n── 5. Receiver on current code (impl ${impl}) ──`);
+    console.log(`\n── 5. Pool on current code (impl ${impl}) ──`);
     for (const v of vaas) record(`seq ${v.sequence} pays`, await deliver(v, true));
-    const pendingHead = await pub.readContract({ address: LANDING, abi: LANDING_ABI, functionName: "pendingHead" });
-    const pendingTail = await pub.readContract({ address: LANDING, abi: LANDING_ABI, functionName: "pendingTail" });
+    const pendingHead = await readLanding<bigint>("pendingHead");
+    const pendingTail = await readLanding<bigint>("pendingTail");
     record("nothing queued", pendingHead === pendingTail, `${pendingHead}/${pendingTail}`);
 
     const failed = results.filter((r) => !r.ok);
     console.log(
       failed.length === 0
-        ? `\n🥢 ✅ ${results.length}/${results.length} — the TC call upgrades the receiver in place and every waiting payout lands.`
+        ? `\n🥢 ✅ ${results.length}/${results.length} — the TC call upgrades the pool in place and every waiting payout lands.`
         : `\n🥢 ❌ ${failed.length} failed: ${failed.map((f) => f.step).join("; ")}`,
     );
     if (failed.length) process.exitCode = 1;

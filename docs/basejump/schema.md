@@ -102,7 +102,7 @@ TransferPayload {
     uint256 amount;            // NET: gross − assetFee[sourceAsset]
     bytes32 recipient;         // AccountId32 on Hydration
     uint64  transferSequence;  // NTT manager sequence of the settlement leg
-    bytes   data;              // opaque; published by the emitter, not forwarded by the receiver
+    bytes   data;              // opaque; forwarded untouched to the landing (inbound-intent channel)
 }
 ```
 

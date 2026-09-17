@@ -75,7 +75,12 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
     /// @param sourceAsset The source chain asset address (destAsset derived from destAssetFor mapping)
     /// @param amount The amount to transfer
     /// @param recipient The recipient as bytes32 (AccountId32)
-    function transfer(address sourceAsset, uint256 amount, bytes32 recipient) external onlyAuthorizedBridge {
+    /// @param /* data */ Opaque bytes from the originating Basejump VAA. Ignored on Hydration —
+    ///        recipients are AccountId32 substrate accounts without contract callback semantics.
+    function transfer(address sourceAsset, uint256 amount, bytes32 recipient, bytes memory /* data */)
+        external
+        onlyAuthorizedBridge
+    {
         address destAsset = destAssetFor[sourceAsset];
         if (destAsset == address(0)) revert AssetNotConfigured(sourceAsset);
 
