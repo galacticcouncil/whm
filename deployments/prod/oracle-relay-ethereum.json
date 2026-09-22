@@ -2,7 +2,7 @@
   "migration": "oracle-relay-ethereum",
   "environment": "prod",
   "startedAt": "2026-08-25T08:01:35.137Z",
-  "completedAt": "2026-09-17T18:08:49.724Z",
+  "completedAt": "2026-09-22T02:50:34.217Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -114,6 +114,30 @@
       "error": null,
       "startedAt": "2026-09-17T18:08:44.996Z",
       "completedAt": "2026-09-17T18:08:49.722Z"
+    },
+    {
+      "name": "010-renounce@emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0x5b3eb3d78faeffa66abe46e7b58315f70d0af604ebdfb11075e753c4f9b27e60",
+        "contract": "0xfbf682642a6a28760e717b637f12d014bd5db4b9",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-09-22T02:42:11.000Z",
+      "completedAt": "2026-09-22T02:42:11.000Z"
+    },
+    {
+      "name": "011-renounce@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x5f94cdb7cac219418ac93c2aabf80144ee233548046d021e231ff577ddc11892",
+        "contract": "0x6913770466fed4dbc24337cd7f1ae92af4321083",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-09-22T02:50:25.150Z",
+      "completedAt": "2026-09-22T02:50:34.215Z"
     }
   ]
 }
