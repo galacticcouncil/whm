@@ -1,0 +1,8 @@
+{
+  "name": "@whm/crates-near",
+  "private": true,
+  "scripts": {
+    "build": "cargo near build non-reproducible-wasm",
+    "test": "cargo test -p ntt-manager"
+  }
+}
