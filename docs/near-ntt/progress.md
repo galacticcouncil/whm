@@ -6,7 +6,7 @@ Implementation log for [spec.md](spec.md), one entry per stage. Branch: `feat/ne
 | ----- | ------------------------------------------------------------ | ----------- |
 | 1     | Spec, pre-implementation checks, crate scaffold, codec       | done        |
 | 2     | Outbound — `ft_on_transfer` → `publish_message` → callback   | done        |
-| 3     | Inbound — `complete` → `verify_vaa` → unlock                 | —           |
+| 3     | Inbound — `complete` → `verify_vaa` → unlock                 | done        |
 | 4     | `near-workspaces` tests against the real Wormhole NEAR core  | —           |
 | 5     | Migration (`near-ntt`), NEAR wallet in `@whm/common`, relayer route | —    |
 | 6     | Mainnet canary under launch caps                             | —           |
@@ -73,3 +73,45 @@ layer with the manager, sender, token and recipient hashes checked. Release wasm
 
 Not yet exercised: real promise execution — the unit tests call callbacks directly. Stage 4 runs the
 chain against the real core wasm.
+
+## Stage 3 — inbound
+
+`complete(vaa, account_id)` → joint `verify_vaa` + `storage_balance_of` → `on_verified` →
+`on_complete_settled`.
+
+| Module        | Added                                                                                   |
+| ------------- | --------------------------------------------------------------------------------------- |
+| `inbound.rs`  | `complete`, `on_verified`, `on_complete_settled`, `release_inbound`, `get_queued_inbound`; `inbound_of` — parse + check against config |
+| `payout.rs`   | `pay_out(.., register)` — optional `storage_deposit(registration_only)` before `ft_transfer`; `storage_deposit` / `storage_balance_of` on the token interface |
+| `outbound.rs` | `verify_vaa` on the core interface                                                      |
+| `lib.rs`      | `inbound_queue`; `registration_deposit` as an init parameter (`storage_balance_bounds().min`) |
+
+- **Checks, twice.** The same `inbound_of` runs in `complete` on unverified bytes (fail fast; a
+  panic returns the deposit) and in `on_verified` on the verified ones: peer for the emitter chain,
+  emitter = peer transceiver, source manager = peer manager, recipient manager = `sha256(self)`,
+  `toChain` 15, `sha256(account_id) == to`, amount non-zero. Replay by NTT digest, checked in both.
+- **Deposit.** `complete` requires `registration_deposit + 0.005 NEAR`; `on_verified` measures the
+  real storage cost, adds the registration if the recipient is unregistered, refunds the rest. The
+  refunder (`on_complete_settled`, the token bridge's pattern) returns everything if `on_verified`
+  failed — VAA unconsumed, retryable.
+- **Over the limit** → `inbound_queue` for 24 h, recipient registered now; `release_inbound` pays out.
+- Events: `transfer_received`, `transfer_queued_inbound`.
+- Gas: `verify_vaa` 30 TGas (as the token bridge), storage view 5, `on_verified` 15 + 30 for a
+  registering pay-out, refunder 5 — `complete` requires 85 TGas free.
+
+**Bug found and fixed while testing:** `on_verified` first *returned* its pay-out promise, so the
+refunder read the outcome of the whole pay-out chain. A failed registration downstream of a consumed
+VAA looked like a failed `on_verified`, and the deposit was refunded a second time — a repeatable
+drain of the contract's NEAR. `on_verified` now returns nothing and detaches its promises. Spec
+updated (Inbound).
+
+**Residual:** a failed `storage_deposit` sends its 0.00125 NEAR back to the contract, not to the
+caller; the transfer lands in `claimable`.
+
+**Tests** — 55 passing (18 new): the pre-check rejects each forged field (emitter, chain, source
+manager, recipient manager, target chain, recipient, deposit); a failed verification consumes
+nothing; a verified VAA consumes the digest and the limit and backflows outbound; replay refused
+before and after verification; a new message id is a new transfer; over-limit queues and releases
+at 24 h, not before; NEAR untrims 8 → 24; an unregistered recipient needs the registration in the
+deposit. Test VAAs are built with the codec and carry no signatures — only the core would reject
+them. Release wasm 491 KB before `wasm-opt`.

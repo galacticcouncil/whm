@@ -116,10 +116,11 @@ NativeTokenTransfer           prefix 0x994E5454
 Inbound replay key is the NTT digest, `keccak256(sourceChainId_be ‖ encodedNttManagerMessage)`, as
 on EVM — not the VAA hash, so re-signed VAAs for the same message cannot double-execute.
 
-**Golden vectors.** A forge script encodes a set of messages with the real `TransceiverStructs`
-library; the Rust codec must round-trip every one byte-for-byte, and a NEAR-encoded message must
-parse in a forge test. This is the whole of the cross-chain compatibility risk, and it is testable
-offline.
+**Golden vectors.** Real mainnet VAAs encoded by the deployed EVM `NttManager`s
+(`crates/near/contracts/ntt-manager/tests/fixtures/vaas.json`); the Rust codec round-trips every
+layer byte-for-byte. Still to add: a NEAR-encoded message parsed by the real `TransceiverStructs` in
+a forge test — the other direction. This is the whole of the cross-chain compatibility risk, and it
+is testable offline.
 
 ## Flow
 
@@ -175,28 +176,42 @@ Standard NTT `transfer(amount, 15, sha256(recipient_account))` on Hydration. The
 NEAR:
 
 ```
-complete(vaa, account_id)            attached deposit covers storage
+complete(vaa, account_id)            deposit ≥ registration_deposit + 0.005 NEAR
+  ├─ core.verify_vaa(vaa)            ┐ joint — both results reach on_verified
+  └─ token.storage_balance_of(acct)  ┘
+       → on_verified                 consumes the VAA, pays out (detached)
+            → on_complete_settled    refunds the whole deposit iff on_verified failed
 ```
 
-1. Cross-contract `verify_vaa(vaa)` on core → `.then(on_verified(...))`. Core verifies signatures
-   and the guardian set; it does not parse the body.
-2. `on_verified`: parse the body locally (the token bridge's `byte_utils` are the reference);
-   require emitter chain `73` and emitter `== transceiver_peer[73]`; parse `TransceiverMessage`;
-   require `source == manager_peer[73]` and `recipient == sha256(self)`; parse the transfer; require
-   `toChain == 15` and `sha256(account_id) == to`.
-3. **Replay.** Require the digest unexecuted; mark it executed. Storage paid from the deposit.
-4. **Rate limit.** Inbound capacity for chain 73 must cover it — otherwise queue it in
-   `inbound_queue[digest]` for 24 h (released by a later `release_inbound(digest, account_id)`).
-   Consume inbound, backflow outbound.
-5. Untrim to token decimals (ZEC ×1, NEAR ×10¹⁶).
-6. `token.storage_deposit(account_id, registration_only = true)` if the account is not registered,
-   then `ft_transfer(account_id, amount)` (1 yocto), `.then(on_unlocked(...))`.
-7. `on_unlocked`: failure → credit `claimable[account_id] += amount`. `claim()` pays it out later.
+1. **Pre-check** in `complete`, on the unverified bytes: every check in step 3, plus the digest
+   unexecuted and the deposit. A failure panics — nothing consumed, deposit returned.
+2. **Verify.** `verify_vaa` on core checks signatures and the guardian set; it does not parse the
+   body. `storage_balance_of` runs beside it, so `on_verified` knows whether the recipient is
+   registered without another hop.
+3. **`on_verified`** re-parses the same bytes: emitter chain has a peer and emitter
+   `== peer.transceiver`; `TransceiverMessage.source == peer.manager` and
+   `recipient == sha256(self)`; `toChain == 15`; `sha256(account_id) == to`; amount non-zero.
+4. **Replay.** Mark the NTT digest executed.
+5. **Rate limit.** Inbound capacity for the source chain covers it → consume, backflow outbound,
+   pay out. Otherwise → `inbound_queue[digest]` for 24 h; `release_inbound(digest)` — anyone — pays
+   it out after.
+6. **Deposit.** Measured storage cost + `registration_deposit` if unregistered; the rest refunded
+   to the caller. `registration_deposit` is an init parameter — `storage_balance_bounds().min`,
+   0.00125 NEAR for both tokens ([verify.md §4](verify.md#4-token-storage--000125-near-required)).
+7. **Pay out** (detached): `storage_deposit(account_id, registration_only)` if needed, then
+   `ft_transfer`, then `on_paid` — failure credits `claimable[account_id]`, paid out by `claim()`.
 
-The VAA is consumed in step 3 and the tokens leave in step 6 — different receipts, and a receipt
+The VAA is consumed in step 4 and the tokens leave in step 7 — different receipts, and a receipt
 cannot undo its predecessor. The **claimable fallback** is what makes that safe: a failed
-`ft_transfer` never loses funds, it parks them against the account the VAA named. This is the part
-of the contract most worth testing.
+`ft_transfer` never loses funds, it parks them against the account the VAA named.
+
+**Why `on_verified` returns nothing.** `on_complete_settled` refunds on a failed predecessor. If
+`on_verified` returned the pay-out promise, the refunder would read *that* chain's outcome, and a
+failure downstream of a consumed VAA — a failed registration — would refund the deposit a second
+time. Detached, it reads `on_verified` alone.
+
+**Residual:** a failed `storage_deposit` returns its 0.00125 NEAR to this contract, not to the
+caller; the transfer then lands in `claimable`. Small, and only on a token-side failure.
 
 ## Hub
 

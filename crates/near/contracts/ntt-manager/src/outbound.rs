@@ -24,6 +24,8 @@ pub const GAS_FOR_ON_RELEASED: Gas = Gas::from_tgas(10);
 #[ext_contract(ext_wormhole)]
 pub trait WormholeCore {
     fn publish_message(&mut self, data: String, nonce: u32) -> u64;
+    /// Verifies signatures and the guardian set; returns the set index. Does not parse the body.
+    fn verify_vaa(&self, vaa: String) -> u32;
 }
 
 /// `ft_transfer_call`'s `msg`.
@@ -121,7 +123,7 @@ impl NttManager {
                 self.outbound.backflow(transfer.amount.0, now);
                 self.inbound_limit(transfer.recipient_chain).debit(transfer.amount.0, now);
                 emit("transfer_failed", transfer_json(&transfer));
-                Some(self.pay_out(transfer.sender, transfer.amount.0))
+                Some(self.pay_out(transfer.sender, transfer.amount.0, None))
             }
         }
     }
@@ -172,7 +174,7 @@ impl NttManager {
 
         self.assert_gas(GAS_FOR_PAY_OUT);
         emit("transfer_cancelled", transfer_json(&transfer));
-        self.pay_out(transfer.sender, transfer.amount.0)
+        self.pay_out(transfer.sender, transfer.amount.0, None)
     }
 
     pub fn get_queued_outbound(&self, id: u64) -> Option<OutboundTransfer> {

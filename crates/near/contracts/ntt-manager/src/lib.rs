@@ -4,6 +4,7 @@
 //! Every address on the wire is `bytes32`; a NEAR account is its `sha256(account_id)`, the digest
 //! the Wormhole core on NEAR already uses for emitters.
 
+pub mod inbound;
 pub mod messages;
 pub mod outbound;
 pub mod payout;
@@ -14,8 +15,9 @@ pub mod vaa;
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
 use near_sdk::store::{LookupMap, LookupSet};
-use near_sdk::{env, near, require, AccountId, BorshStorageKey, PanicOnDefault};
+use near_sdk::{env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault};
 
+use inbound::InboundTransfer;
 use outbound::OutboundTransfer;
 use rate_limit::RateLimit;
 
@@ -30,6 +32,7 @@ enum StorageKey {
     Executed,
     Claimable,
     OutboundQueue,
+    InboundQueue,
 }
 
 /// A remote NTT deployment: its manager, its Wormhole emitter, and the precision it trims to.
@@ -58,6 +61,10 @@ pub struct NttManager {
     token: AccountId,
     token_decimals: u8,
 
+    /// The token's NEP-145 registration, `storage_balance_bounds().min` — paid from the `complete`
+    /// deposit for a first-time recipient.
+    registration_deposit: NearToken,
+
     /// `contract.wormhole_crypto.near` on mainnet.
     core: AccountId,
 
@@ -76,6 +83,9 @@ pub struct NttManager {
 
     /// Outbound transfers over the limit, locked and waiting out the 24 h delay.
     outbound_queue: LookupMap<u64, OutboundTransfer>,
+
+    /// Inbound transfers over the limit, verified and consumed, waiting out the 24 h delay.
+    inbound_queue: LookupMap<[u8; 32], InboundTransfer>,
 }
 
 #[near]
@@ -85,6 +95,7 @@ impl NttManager {
         owner: AccountId,
         token: AccountId,
         token_decimals: u8,
+        registration_deposit: U128,
         core: AccountId,
         outbound_limit: U128,
     ) -> Self {
@@ -93,6 +104,7 @@ impl NttManager {
             paused: false,
             token,
             token_decimals,
+            registration_deposit: NearToken::from_yoctonear(registration_deposit.0),
             core,
             seq: 0,
             peers: LookupMap::new(StorageKey::Peers),
@@ -101,18 +113,8 @@ impl NttManager {
             executed: LookupSet::new(StorageKey::Executed),
             claimable: LookupMap::new(StorageKey::Claimable),
             outbound_queue: LookupMap::new(StorageKey::OutboundQueue),
+            inbound_queue: LookupMap::new(StorageKey::InboundQueue),
         }
-    }
-
-    // =============== Transfers ==============================================================
-
-    /// Inbound, peer → NEAR. Anyone may call; `account_id` must hash to the transfer's `to`. The
-    /// attached deposit covers the recipient's token storage and the replay entry; the rest is
-    /// refunded.
-    #[payable]
-    pub fn complete(&mut self, vaa: String, account_id: AccountId) {
-        let _ = (vaa, account_id);
-        env::panic_str("Unimplemented: inbound, see docs/near-ntt/spec.md#inbound--hydration--near")
     }
 
     // =============== Admin ==================================================================
@@ -274,12 +276,21 @@ pub(crate) mod tests {
     pub(crate) const TRANSCEIVER: &str =
         "0x0000000000000000000000004e7b1e55d2354d4dc6abd876096dc201de0541d1";
 
+    /// ZEC and wNEAR both: `storage_balance_bounds().min`.
+    pub(crate) const REGISTRATION: u128 = 1_250_000_000_000_000_000_000;
+
     /// Calls as `predecessor` at `at` seconds, with a full 300 TGas.
     pub(crate) fn set_ctx(predecessor: &str, at: u64) {
+        set_ctx_with(predecessor, at, 0);
+    }
+
+    /// `set_ctx`, attaching `deposit` yocto.
+    pub(crate) fn set_ctx_with(predecessor: &str, at: u64, deposit: u128) {
         let mut ctx = VMContextBuilder::new();
         ctx.current_account_id(CONTRACT.parse().unwrap())
             .predecessor_account_id(predecessor.parse().unwrap())
             .block_timestamp(at * 1_000_000_000)
+            .attached_deposit(NearToken::from_yoctonear(deposit))
             .prepaid_gas(Gas::from_tgas(300));
         testing_env!(ctx.build());
     }
@@ -291,6 +302,7 @@ pub(crate) mod tests {
             accounts(0),
             TOKEN.parse().unwrap(),
             token_decimals,
+            U128(REGISTRATION),
             "contract.wormhole_crypto.near".parse().unwrap(),
             U128(outbound_limit),
         )

@@ -9,13 +9,29 @@ use crate::{emit, NttManager, NttManagerExt};
 
 pub const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 pub const GAS_FOR_ON_PAID: Gas = Gas::from_tgas(10);
+pub const GAS_FOR_REGISTER: Gas = Gas::from_tgas(10);
 
 /// Everything a pay-out consumes, so callers can reserve it inside their own static gas.
 pub const GAS_FOR_PAY_OUT: Gas = Gas::from_tgas(20);
 
+/// A pay-out that first registers the recipient's token storage.
+pub const GAS_FOR_PAY_OUT_REGISTERING: Gas = Gas::from_tgas(30);
+
+#[near(serializers = [json])]
+pub struct StorageBalance {
+    pub total: U128,
+    pub available: U128,
+}
+
 #[ext_contract(ext_ft)]
 pub trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
+    fn storage_deposit(
+        &mut self,
+        account_id: Option<AccountId>,
+        registration_only: Option<bool>,
+    ) -> StorageBalance;
+    fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance>;
 }
 
 #[near]
@@ -27,7 +43,7 @@ impl NttManager {
         let account = env::predecessor_account_id();
         let amount = self.claimable.remove(&account).unwrap_or(0);
         require!(amount > 0, "NothingToClaim");
-        self.pay_out(account, amount)
+        self.pay_out(account, amount, None)
     }
 
     /// Settles a pay-out: a failed `ft_transfer` credits `claimable` instead.
@@ -49,16 +65,36 @@ impl NttManager {
 }
 
 impl NttManager {
-    /// `ft_transfer` out of custody, settled by `on_paid`. Needs `GAS_FOR_PAY_OUT`.
-    pub(crate) fn pay_out(&mut self, account: AccountId, amount: u128) -> Promise {
-        ext_ft::ext(self.token.clone())
+    /// `ft_transfer` out of custody, settled by `on_paid`. With `register`, the recipient's token
+    /// storage is paid first — `storage_deposit(registration_only)` — from that deposit. Needs
+    /// `GAS_FOR_PAY_OUT`, or `GAS_FOR_PAY_OUT_REGISTERING` when registering.
+    ///
+    /// A failed registration is not special-cased: the `ft_transfer` after it fails, and `on_paid`
+    /// credits `claimable`.
+    pub(crate) fn pay_out(
+        &mut self,
+        account: AccountId,
+        amount: u128,
+        register: Option<NearToken>,
+    ) -> Promise {
+        let transfer = ext_ft::ext(self.token.clone())
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(GAS_FOR_FT_TRANSFER)
-            .ft_transfer(account.clone(), U128(amount), None)
-            .then(
-                Self::ext(env::current_account_id())
-                    .with_static_gas(GAS_FOR_ON_PAID)
-                    .on_paid(account, U128(amount)),
-            )
+            .ft_transfer(account.clone(), U128(amount), None);
+
+        let first = match register {
+            Some(deposit) => ext_ft::ext(self.token.clone())
+                .with_attached_deposit(deposit)
+                .with_static_gas(GAS_FOR_REGISTER)
+                .storage_deposit(Some(account.clone()), Some(true))
+                .then(transfer),
+            None => transfer,
+        };
+
+        first.then(
+            Self::ext(env::current_account_id())
+                .with_static_gas(GAS_FOR_ON_PAID)
+                .on_paid(account, U128(amount)),
+        )
     }
 }
