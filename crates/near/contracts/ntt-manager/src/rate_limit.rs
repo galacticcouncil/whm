@@ -48,6 +48,12 @@ impl RateLimit {
         self.last_tx_at = now;
     }
 
+    /// Takes back a backflow — saturating, since the capacity may have been spent since.
+    pub fn debit(&mut self, amount: u128, now: u64) {
+        self.capacity = self.capacity(now).saturating_sub(amount);
+        self.last_tx_at = now;
+    }
+
     /// Moves the limit, shifting the current capacity by the same difference.
     pub fn set_limit(&mut self, limit: u128, now: u64) {
         let capacity = self.capacity(now);
@@ -94,6 +100,17 @@ mod tests {
         assert_eq!(rl.capacity(0), 900);
         rl.backflow(500, 0);
         assert_eq!(rl.capacity(0), 1_000);
+    }
+
+    #[test]
+    fn debit_undoes_a_backflow_down_to_zero() {
+        let mut rl = RateLimit::new(1_000, 0);
+        assert!(rl.consume(500, 0));
+        rl.backflow(200, 0);
+        rl.debit(200, 0);
+        assert_eq!(rl.capacity(0), 500);
+        rl.debit(900, 0);
+        assert_eq!(rl.capacity(0), 0);
     }
 
     #[test]

@@ -146,12 +146,24 @@ token.ft_transfer_call(
    return the full amount (refund). With `true` → queue the transfer for 24 h, as NTT does
    elsewhere. Consume outbound, backflow the peer's inbound.
 5. Build the message; `seq += 1` for `id`.
-6. `publish_message(hex(message), nonce)` on core, then `.then(on_published(sender, amount, ...))`.
-7. `on_published`: success → return `0` unused (tokens stay locked). Failure → restore the rate
-   limit and return the full amount unused, so the token refunds it.
+6. Return **the dust only**, immediately — the tokens are now locked.
+7. Detached: `publish_message(hex(message), 0)` on core, then `on_published(transfer)`. Success →
+   `transfer_sent` event. Failure → restore both rate limits and pay the sender back through
+   `ft_transfer`; if that fails too, credit `claimable[sender]`.
 
-Lock and publish are two receipts, but the refund path makes them fail-closed: **either a message
-is published or the tokens go back.** There is no state where tokens are locked with no message.
+**Why detached.** Chaining the publish into `ft_on_transfer`'s return value (so a failure refunds
+through the unused amount) opens a double spend: if `publish_message` succeeds and `on_published`
+then fails for any reason, the token's `ft_resolve_transfer` sees a failed promise and refunds the
+**full** amount — while the guardians sign the message and Hydration mints. Detached, no callback
+failure can trigger a token refund. The worst remaining case is tokens locked with no message:
+over-collateralised, never double-minted.
+
+**Either a message is published or the tokens go back** — through `ft_transfer`, or through
+`claim()` if that fails.
+
+**Queued transfers** (`should_queue = true` over the limit) are locked with their `id` assigned and
+wait 24 h. `release_outbound(id)` — anyone — publishes one; a failed publish puts it back in the
+queue. `cancel_outbound(id)` — the sender, 1 yocto — pays it back.
 
 `ft_on_transfer` cannot receive a NEAR deposit, so the core `message_fee` (if non-zero) is paid from
 the contract's own balance. Gas: the caller attaches enough for `ft_on_transfer` + the publish (core
@@ -208,7 +220,7 @@ extra `setPeer`.
 | `outbound_limit`, `inbound_limit[chain]` | NTT rate limits, 24 h linear refill            |
 | `outbound_queue`, `inbound_queue`     | delayed transfers                                 |
 | `executed[digest]`                    | replay protection                                 |
-| `claimable[account]`                  | failed unlocks                                    |
+| `claimable[account]`                  | failed pay-outs — unlocks and refunds             |
 | `seq`                                 | `NttManagerMessage.id`                            |
 | `owner`, `paused`                     | admin                                             |
 
@@ -222,10 +234,12 @@ makes the code immutable. Until then, whoever holds a full-access key holds the 
 
 ## Invariants
 
-1. **Fail-closed outbound.** Tokens are locked iff a message was published; a failed publish
-   refunds through `ft_on_transfer`'s unused amount.
+1. **Fail-closed outbound.** Tokens stay locked only for a published or queued message; a failed
+   publish pays the sender back. No callback outcome can make the token refund a published transfer
+   — publishing is detached from `ft_on_transfer`'s return value.
 2. **Bound recipient.** Inbound tokens only ever reach the account whose `sha256` the VAA names.
-3. **No loss on failed unlock.** A consumed VAA whose `ft_transfer` fails credits `claimable`.
+3. **No loss on failed pay-out.** Every `ft_transfer` out of custody — inbound unlock, outbound
+   refund, cancelled queue entry, claim — credits `claimable` if it fails.
 4. **Replay-safe.** One execution per NTT digest.
 5. **Single hub.** Custody lives only on NEAR; Hydration only burns and mints.
 6. **Conservation.** `locked == Hydration supply + outbound not yet minted + inbound not yet

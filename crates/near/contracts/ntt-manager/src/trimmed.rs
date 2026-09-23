@@ -6,7 +6,7 @@ use near_sdk::near;
 /// NTT's wire precision ceiling.
 pub const TRIMMED_DECIMALS: u8 = 8;
 
-#[near(serializers = [borsh])]
+#[near(serializers = [borsh, json])]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrimmedAmount {
     pub amount: u64,

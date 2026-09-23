@@ -5,14 +5,18 @@
 //! the Wormhole core on NEAR already uses for emitters.
 
 pub mod messages;
+pub mod outbound;
+pub mod payout;
 pub mod rate_limit;
 pub mod trimmed;
 pub mod vaa;
 
 use near_sdk::json_types::U128;
+use near_sdk::serde_json::{self, json};
 use near_sdk::store::{LookupMap, LookupSet};
-use near_sdk::{env, near, require, AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue};
+use near_sdk::{env, near, require, AccountId, BorshStorageKey, PanicOnDefault};
 
+use outbound::OutboundTransfer;
 use rate_limit::RateLimit;
 
 /// Wormhole chain id of NEAR.
@@ -25,6 +29,7 @@ enum StorageKey {
     Inbound,
     Executed,
     Claimable,
+    OutboundQueue,
 }
 
 /// A remote NTT deployment: its manager, its Wormhole emitter, and the precision it trims to.
@@ -66,8 +71,11 @@ pub struct NttManager {
     /// NTT digests already executed — the replay key, not the VAA hash.
     executed: LookupSet<[u8; 32]>,
 
-    /// Inbound unlocks whose `ft_transfer` failed after the VAA was consumed.
+    /// Pay-outs whose `ft_transfer` failed — inbound unlocks and refunds alike.
     claimable: LookupMap<AccountId, u128>,
+
+    /// Outbound transfers over the limit, locked and waiting out the 24 h delay.
+    outbound_queue: LookupMap<u64, OutboundTransfer>,
 }
 
 #[near]
@@ -92,23 +100,11 @@ impl NttManager {
             inbound: LookupMap::new(StorageKey::Inbound),
             executed: LookupSet::new(StorageKey::Executed),
             claimable: LookupMap::new(StorageKey::Claimable),
+            outbound_queue: LookupMap::new(StorageKey::OutboundQueue),
         }
     }
 
     // =============== Transfers ==============================================================
-
-    /// Outbound, NEAR → peer. Called by `config.token` through `ft_transfer_call`, with
-    /// `msg = {"recipient_chain", "recipient", "should_queue"}`. Returns the unused amount, which the
-    /// token refunds: the trim dust always, the whole amount on a refused or failed send.
-    pub fn ft_on_transfer(
-        &mut self,
-        sender_id: AccountId,
-        amount: U128,
-        msg: String,
-    ) -> PromiseOrValue<U128> {
-        let _ = (sender_id, amount, msg);
-        env::panic_str("Unimplemented: outbound, see docs/near-ntt/spec.md#outbound--near--hydration")
-    }
 
     /// Inbound, peer → NEAR. Anyone may call; `account_id` must hash to the transfer's `to`. The
     /// attached deposit covers the recipient's token storage and the replay entry; the rest is
@@ -117,11 +113,6 @@ impl NttManager {
     pub fn complete(&mut self, vaa: String, account_id: AccountId) {
         let _ = (vaa, account_id);
         env::panic_str("Unimplemented: inbound, see docs/near-ntt/spec.md#inbound--hydration--near")
-    }
-
-    /// Pays out an inbound unlock that failed after its VAA was consumed.
-    pub fn claim(&mut self) {
-        env::panic_str("Unimplemented: claim, see docs/near-ntt/spec.md#inbound--hydration--near")
     }
 
     // =============== Admin ==================================================================
@@ -231,6 +222,20 @@ impl NttManager {
     fn assert_owner(&self) {
         require!(env::predecessor_account_id() == self.owner, "Unauthorized");
     }
+
+    pub(crate) fn peer(&self, chain_id: u16) -> Peer {
+        self.peers
+            .get(&chain_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("PeerNotRegistered"))
+    }
+
+    /// Every peer has an inbound limit — `set_peer` creates both together.
+    pub(crate) fn inbound_limit(&mut self, chain_id: u16) -> &mut RateLimit {
+        self.inbound
+            .get_mut(&chain_id)
+            .unwrap_or_else(|| env::panic_str("PeerNotRegistered"))
+    }
 }
 
 /// A NEAR account on the wire.
@@ -238,46 +243,71 @@ pub fn account_hash(account_id: &AccountId) -> [u8; 32] {
     env::sha256_array(account_id.as_bytes())
 }
 
+/// NEP-297 event, standard `whm-ntt`.
+pub(crate) fn emit(event: &str, data: serde_json::Value) {
+    let log = json!({ "standard": "whm-ntt", "version": "1.0.0", "event": event, "data": [data] });
+    env::log_str(&format!("EVENT_JSON:{log}"));
+}
+
 /// Block time, seconds.
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     env::block_timestamp() / 1_000_000_000
 }
 
-fn parse_bytes32(value: &str) -> [u8; 32] {
+pub(crate) fn parse_bytes32(value: &str) -> [u8; 32] {
     let bytes = hex::decode(value.trim_start_matches("0x"))
         .unwrap_or_else(|_| env::panic_str("InvalidHex"));
     bytes.try_into().unwrap_or_else(|_| env::panic_str("InvalidBytes32"))
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use near_sdk::test_utils::{accounts, VMContextBuilder};
-    use near_sdk::testing_env;
+    use near_sdk::{testing_env, Gas};
 
-    const HYDRATION: u16 = 73;
-    const MANAGER: &str = "0x000000000000000000000000FCaF4aA069C565d25539028970703F01e47D3E0B";
-    const TRANSCEIVER: &str = "0x0000000000000000000000004e7b1e55d2354d4dc6abd876096dc201de0541d1";
+    pub(crate) const CONTRACT: &str = "ntt-zec.whm.near";
+    pub(crate) const TOKEN: &str = "zec.omft.near";
+    pub(crate) const HYDRATION: u16 = 73;
+    pub(crate) const MANAGER: &str =
+        "0x000000000000000000000000FCaF4aA069C565d25539028970703F01e47D3E0B";
+    pub(crate) const TRANSCEIVER: &str =
+        "0x0000000000000000000000004e7b1e55d2354d4dc6abd876096dc201de0541d1";
+
+    /// Calls as `predecessor` at `at` seconds, with a full 300 TGas.
+    pub(crate) fn set_ctx(predecessor: &str, at: u64) {
+        let mut ctx = VMContextBuilder::new();
+        ctx.current_account_id(CONTRACT.parse().unwrap())
+            .predecessor_account_id(predecessor.parse().unwrap())
+            .block_timestamp(at * 1_000_000_000)
+            .prepaid_gas(Gas::from_tgas(300));
+        testing_env!(ctx.build());
+    }
+
+    /// Owned by `accounts(0)`, which stays the caller.
+    pub(crate) fn contract_with(token_decimals: u8, outbound_limit: u128) -> NttManager {
+        set_ctx(accounts(0).as_str(), 0);
+        NttManager::new(
+            accounts(0),
+            TOKEN.parse().unwrap(),
+            token_decimals,
+            "contract.wormhole_crypto.near".parse().unwrap(),
+            U128(outbound_limit),
+        )
+    }
 
     fn contract() -> NttManager {
-        let mut ctx = VMContextBuilder::new();
-        ctx.current_account_id("ntt-zec.whm.near".parse().unwrap())
-            .predecessor_account_id(accounts(0));
-        testing_env!(ctx.build());
-        NttManager::new(accounts(0), "zec.omft.near".parse().unwrap(), 8, "contract.wormhole_crypto.near".parse().unwrap(), U128(1_000))
+        contract_with(8, 1_000)
     }
 
     fn as_caller(account: AccountId) {
-        let mut ctx = VMContextBuilder::new();
-        ctx.current_account_id("ntt-zec.whm.near".parse().unwrap())
-            .predecessor_account_id(account);
-        testing_env!(ctx.build());
+        set_ctx(account.as_str(), 0);
     }
 
     #[test]
     fn emitter_is_sha256_of_the_account() {
         let c = contract();
-        assert_eq!(c.emitter(), hex::encode(env::sha256(b"ntt-zec.whm.near")));
+        assert_eq!(c.emitter(), hex::encode(env::sha256(CONTRACT.as_bytes())));
     }
 
     #[test]
