@@ -9,7 +9,7 @@ Implementation log for [spec.md](spec.md), one entry per stage. Branch: `feat/ne
 | 3     | Inbound — `complete` → `verify_vaa` → unlock                 | done        |
 | 4     | `near-workspaces` tests against the real Wormhole NEAR core  | done        |
 | 4b    | Drop the outbound queue — over-limit reverts                 | done        |
-| 5     | Migration (`near-ntt`), NEAR wallet in `@whm/common`, relayer route | —    |
+| 5     | Migration (`near-ntt-*`, NEAR side), `@whm/common/near`, scripts | done      |
 | 6     | Mainnet canary under launch caps                             | —           |
 
 ## Stage 1 — spec, checks, scaffold
@@ -179,3 +179,41 @@ from guardian set 7 — quorum (13) observes NEAR. Kept
 [`crates/near/scripts/check-emitter.sh`](../../crates/near/scripts/check-emitter.sh) as an optional
 live check (plain account, register + publish + poll Wormholescan); its decoder was exercised
 against that Portal VAA.
+
+## Stage 5 — migration, common, scripts
+
+**Scope decisions**
+
+- **No NEAR relayer.** Users redeem Hydration → NEAR themselves (`complete`), as on every other
+  destination; we do not fund NEAR transactions. NEAR → Hydration gets an `ntt` route in the
+  existing relayer once the Hydration addresses exist.
+- **NEAR side only.** The Hydration manager + transceiver are deployed and peered back to NEAR from
+  hydration-ntt. whm reads their addresses from env and outputs the NEAR emitter.
+- **One migration per token** — `near-ntt-zec`, `near-ntt-near` — sharing `migrations/actions/near-ntt/`.
+
+| Added                                   | What                                                                  |
+| --------------------------------------- | --------------------------------------------------------------------- |
+| `common/near` (`@whm/common/near`)      | `wallet.getWallet`; `call`, `view`, `events`, `receiptFailures`, `checked`, `accountHash` — on `near-api-js` 7.3 (root dependency) |
+| `migrations/actions/near-ntt/`          | `deployNtt` (create + fund + key + deploy + init, one tx; decimals and registration read from the token), `registerEmitter`, `registerStorage`, `setPeer`, `transferOwnership` |
+| `migrations/definitions/near-ntt-{zec,near}/` | 001 deploy · 002 register emitter @core · 003 register storage @token · 004 set peer @ntt · 005 transfer ownership @ntt |
+| `migrations/envs/prod/near-ntt-*.env`   | canary limits (10 ZEC, 1,000 NEAR / 24 h); Hydration addresses and new owner left to fill |
+| `sh/migrate-near-ntt-*.sh`, `pnpm migrate:near-ntt-*` | `PK_NEAR` only                                           |
+| `crates/near/scripts/ntt-manager/`      | `transfer`, `complete`, `claim`, `status`                             |
+
+**Smoke test** — local NEAR sandbox (nearcore 2.13.4) with the mainnet core and `wrap.near` wasm, core
+booted on a test guardian. Temporary setup files removed after.
+
+- `pnpm migrate:near-ntt-near` through the real runner and `sh` wrapper — all five steps ✓; state
+  file with `ntt-near.test.near`, emitter, 24 decimals and 0.00125 NEAR read from the token.
+- `transfer.ts` — 1.5 wNEAR + 1 yocto: locked 1.5, dust back, `transfer_sent`, Wormhole seq 1.
+- `complete.ts` — Hydration-shaped VAA signed by the test guardian, to an unregistered
+  `bob.test.near`: verified, registered, paid 1.5 wNEAR. Replay refused; `status.ts` shows the digest
+  executed and nothing claimable. `claim.ts` — nothing to claim.
+
+**Found:** the plain `cargo build` wasm aborts on panic without a message (near-sdk falls back to
+pure-Rust panics outside `cfg(near)`) — the replay surfaced as `unreachable`, not `AlreadyExecuted`.
+Deploys must use `cargo near build`; `NTT_WASM` points at its output. Spec build notes updated.
+
+**Open before running on mainnet:** `cargo-near` installed for the build; Hydration manager +
+transceiver from hydration-ntt; the NEAR custodian for `NTT_NEW_OWNER`; the `ntt` relayer route;
+`set_ntt_minter` referendum.

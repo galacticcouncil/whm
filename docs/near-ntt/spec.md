@@ -41,7 +41,6 @@ admin that can replace the MPC key. This contract replaces all of it with the gu
 | `NttManager`            | Hydration | BURNING, per token                                                      | **new deploy**, standard v2    |
 | `WormholeTransceiver`   | Hydration | per token                                                               | **new deploy**, standard       |
 | `ntt` app               | relayer   | NEAR → Hydration VAAs                                                    | existing — add routes          |
-| `near-ntt` app          | relayer   | Hydration → NEAR VAAs (optional in v1)                                  | **new**                        |
 
 Manager and transceiver are one contract on NEAR, as Solana bakes the transceiver into its manager.
 Splitting them buys multi-transceiver support at the cost of another async hop on every message;
@@ -288,10 +287,11 @@ before mainnet regardless.
 
 - **NEAR → Hydration.** The existing `ntt` app gets one route per token: `sourceChain: near` (15),
   `sourceEmitter: sha256(ntt account)`. Hydration gas is ours, as on every NTT route.
-- **Hydration → NEAR.** v1: **self-redeem** — the frontend submits `complete(vaa, account_id)` from
-  the user's own NEAR account, which already needs NEAR for storage. A `near-ntt` relayer app
-  (`near-api-js`, attaches gas + storage deposit) is v2, and then needs a fee — the intents
-  ceiling/claim model would apply.
+- **Hydration → NEAR.** **Self-redeem, no relayer** — the user submits `complete(vaa, account_id)`
+  from their own NEAR account, which needs NEAR for storage anyway, the same way users redeem on
+  every other destination chain. We do not fund NEAR transactions.
+  [`crates/near/scripts/ntt-manager/complete.ts`](../../crates/near/scripts/ntt-manager/complete.ts)
+  does it from the Hydration transceiver's emitter and sequence, or a raw VAA.
 
 ## Latency
 
@@ -336,11 +336,16 @@ relayer gate, no `5kx8…` admin with mint power.
   attribution.
 - **Emitter.** Register the contract with `register_emitter` (payable, permissionless) before the
   first publish, or `publish_message` panics `EmitterNotRegistered`.
-- **Migration.** A `near-ntt` definition deploying both ends. `WalletContext` gains a `near` wallet —
-  `@whm/common` has no NEAR wallet yet. Steps: deploy + init NEAR contract → register emitter →
-  deploy Hydration manager + transceiver → peers both ways → limits → ownership, with
-  `set_ntt_minter` as governance between them. The NTT CLI does not know NEAR, so peers are migration
-  steps, not `ntt push`.
+- **Migration — NEAR side only.** `near-ntt-zec` / `near-ntt-near`, one per token (state is keyed by
+  migration name), steps in `migrations/actions/near-ntt/`, wallet from `@whm/common/near`: deploy +
+  init (one transaction) → register emitter → register token storage → peer with Hydration →
+  ownership. The Hydration manager + transceiver are deployed **and peered back to NEAR** from
+  hydration-ntt; this migration only reads their addresses from env and outputs the NEAR emitter
+  for it. The NTT CLI does not know NEAR, so hydration-ntt's reverse peering is a plain `setPeer` /
+  `setWormholePeer`, not `ntt push`.
+- **Deploy with `cargo near build`.** A plain `cargo build --target wasm32` artifact runs, but
+  near-sdk without `cfg(near)` aborts on panic with no message — every refusal surfaces as a bare
+  `unreachable` trap. Found in the stage 5 smoke test.
 
 ## To verify
 

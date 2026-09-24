@@ -1,5 +1,6 @@
 import type * as anchor from "@coral-xyz/anchor";
 import type { wallet } from "@whm/common/evm";
+import type { wallet as nearWallet } from "@whm/common/near";
 
 import type { OracleEmitter } from "../../crates/solana/target/types/oracle_emitter";
 
@@ -14,3 +15,6 @@ export interface SolanaContext {
   provider: anchor.AnchorProvider;
   program: anchor.Program<OracleEmitter>;
 }
+
+/** NEAR wallet context — what each NEAR action expects. */
+export type NearContext = nearWallet.NearWallet;
