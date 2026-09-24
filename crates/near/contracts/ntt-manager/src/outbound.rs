@@ -5,6 +5,10 @@
 //! make the token refund the full amount after the message was already published — the guardians
 //! sign it, the peer mints, and the sender keeps their tokens too. Detached, the worst a failure can
 //! do is leave tokens locked with no message: over-collateralised, never double-minted.
+//!
+//! No outbound queue: a transfer over the outbound limit reverts, and the token refunds it. A queue
+//! entry would be storage the contract pays for — `ft_on_transfer` cannot take a deposit — so anyone
+//! could drain the contract's NEAR with dust-sized queued transfers once capacity ran out.
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
@@ -12,14 +16,12 @@ use near_sdk::{env, ext_contract, near, require, AccountId, Gas, Promise, Promis
 
 use crate::messages::{sequence_id, NativeTokenTransfer, NttManagerMessage, TransceiverMessage};
 use crate::payout::GAS_FOR_PAY_OUT;
-use crate::rate_limit::RATE_LIMIT_DURATION;
 use crate::trimmed::TrimmedAmount;
 use crate::{account_hash, emit, now, parse_bytes32, NttManager, NttManagerExt, Peer};
 
 /// The core requires ≥ 10 TGas prepaid on `publish_message`.
 pub const GAS_FOR_PUBLISH: Gas = Gas::from_tgas(20);
 pub const GAS_FOR_ON_PUBLISHED: Gas = Gas::from_tgas(10);
-pub const GAS_FOR_ON_RELEASED: Gas = Gas::from_tgas(10);
 
 #[ext_contract(ext_wormhole)]
 pub trait WormholeCore {
@@ -34,12 +36,10 @@ pub struct TransferMsg {
     pub recipient_chain: u16,
     /// Hex: a 20-byte EVM address (left-padded) or a full 32 bytes.
     pub recipient: String,
-    #[serde(default)]
-    pub should_queue: bool,
 }
 
-/// A transfer locked on NEAR, published or waiting in the queue.
-#[near(serializers = [borsh, json])]
+/// A transfer locked on NEAR, carried to `on_published`.
+#[near(serializers = [json])]
 #[derive(Clone, Debug)]
 pub struct OutboundTransfer {
     /// `NttManagerMessage.id`, assigned when locked.
@@ -50,7 +50,6 @@ pub struct OutboundTransfer {
     pub trimmed: TrimmedAmount,
     pub recipient_chain: u16,
     pub recipient: [u8; 32],
-    pub locked_at: u64,
 }
 
 #[near]
@@ -84,15 +83,9 @@ impl NttManager {
             trimmed,
             recipient_chain: msg.recipient_chain,
             recipient,
-            locked_at: now,
         };
 
-        if !self.outbound.consume(locked, now) {
-            require!(msg.should_queue, "TransferExceedsRateLimit");
-            emit("transfer_queued", transfer_json(&transfer));
-            self.outbound_queue.insert(transfer.id, transfer);
-            return PromiseOrValue::Value(U128(dust));
-        }
+        require!(self.outbound.consume(locked, now), "TransferExceedsRateLimit");
         self.inbound_limit(transfer.recipient_chain).backflow(locked, now);
 
         self.assert_gas(GAS_FOR_PUBLISH.saturating_add(GAS_FOR_ON_PUBLISHED).saturating_add(GAS_FOR_PAY_OUT));
@@ -126,59 +119,6 @@ impl NttManager {
                 Some(self.pay_out(transfer.sender, transfer.amount.0, None))
             }
         }
-    }
-
-    /// Publishes a queued transfer once its 24 h delay has passed. Anyone may call.
-    pub fn release_outbound(&mut self, id: u64) -> Promise {
-        require!(!self.paused, "Paused");
-        let transfer = self
-            .outbound_queue
-            .remove(&id)
-            .unwrap_or_else(|| env::panic_str("TransferNotQueued"));
-        require!(now() >= transfer.locked_at + RATE_LIMIT_DURATION, "TransferStillQueued");
-        let peer = self.peer(transfer.recipient_chain);
-
-        self.assert_gas(GAS_FOR_PUBLISH.saturating_add(GAS_FOR_ON_RELEASED));
-        self.publish(&transfer, &peer).then(
-            Self::ext(env::current_account_id())
-                .with_static_gas(GAS_FOR_ON_RELEASED)
-                .on_released(transfer),
-        )
-    }
-
-    /// Settles a release: a failed publish puts the transfer back in the queue, retryable.
-    #[private]
-    pub fn on_released(
-        &mut self,
-        transfer: OutboundTransfer,
-        #[callback_result] result: Result<u64, PromiseError>,
-    ) {
-        match result {
-            Ok(wormhole_sequence) => emit("transfer_sent", sent_json(&transfer, wormhole_sequence)),
-            Err(_) => {
-                emit("release_failed", transfer_json(&transfer));
-                self.outbound_queue.insert(transfer.id, transfer);
-            }
-        }
-    }
-
-    /// Withdraws a queued transfer back to its sender.
-    #[payable]
-    pub fn cancel_outbound(&mut self, id: u64) -> Promise {
-        near_sdk::assert_one_yocto();
-        let transfer = self
-            .outbound_queue
-            .remove(&id)
-            .unwrap_or_else(|| env::panic_str("TransferNotQueued"));
-        require!(env::predecessor_account_id() == transfer.sender, "Unauthorized");
-
-        self.assert_gas(GAS_FOR_PAY_OUT);
-        emit("transfer_cancelled", transfer_json(&transfer));
-        self.pay_out(transfer.sender, transfer.amount.0, None)
-    }
-
-    pub fn get_queued_outbound(&self, id: u64) -> Option<OutboundTransfer> {
-        self.outbound_queue.get(&id).cloned()
     }
 }
 
@@ -267,9 +207,8 @@ mod tests {
 
     const RECIPIENT: &str = "0x1111111111111111111111111111111111111111";
 
-    fn msg(should_queue: bool) -> String {
-        json!({ "recipient_chain": HYDRATION, "recipient": RECIPIENT, "should_queue": should_queue })
-            .to_string()
+    fn msg() -> String {
+        json!({ "recipient_chain": HYDRATION, "recipient": RECIPIENT }).to_string()
     }
 
     /// ZEC-shaped: 8 dp, outbound 1_000, Hydration inbound 1_000.
@@ -295,7 +234,7 @@ mod tests {
     #[test]
     fn locks_and_returns_only_the_dust() {
         let mut c = zec();
-        assert_eq!(value(c.ft_on_transfer(accounts(1), U128(400), msg(false))), 0);
+        assert_eq!(value(c.ft_on_transfer(accounts(1), U128(400), msg())), 0);
         assert_eq!(c.outbound_capacity(), U128(600));
         assert_eq!(c.seq, 1);
     }
@@ -307,7 +246,7 @@ mod tests {
         set_ctx(TOKEN, 0);
         // 1.5 NEAR + 1 yocto.
         let amount = 1_500_000_000_000_000_000_000_001u128;
-        assert_eq!(value(c.ft_on_transfer(accounts(1), U128(amount), msg(false))), 1);
+        assert_eq!(value(c.ft_on_transfer(accounts(1), U128(amount), msg())), 1);
     }
 
     #[test]
@@ -315,7 +254,7 @@ mod tests {
     fn only_the_configured_token() {
         let mut c = zec();
         set_ctx("wrap.near", 0);
-        let _ = c.ft_on_transfer(accounts(1), U128(1), msg(false));
+        let _ = c.ft_on_transfer(accounts(1), U128(1), msg());
     }
 
     #[test]
@@ -328,9 +267,9 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "TransferExceedsRateLimit")]
-    fn over_the_limit_without_queue_is_refunded() {
+    fn over_the_limit_is_refunded() {
         let mut c = zec();
-        let _ = c.ft_on_transfer(accounts(1), U128(1_001), msg(false));
+        let _ = c.ft_on_transfer(accounts(1), U128(1_001), msg());
     }
 
     #[test]
@@ -340,59 +279,13 @@ mod tests {
         set_ctx(&accounts(0).to_string(), 0);
         c.pause();
         set_ctx(TOKEN, 0);
-        let _ = c.ft_on_transfer(accounts(1), U128(1), msg(false));
-    }
-
-    #[test]
-    fn over_the_limit_with_queue_waits_24h() {
-        let mut c = zec();
-        assert_eq!(value(c.ft_on_transfer(accounts(1), U128(1_001), msg(true))), 0);
-        assert_eq!(c.outbound_capacity(), U128(1_000));
-        assert!(c.get_queued_outbound(0).is_some());
-
-        set_ctx(&accounts(2).to_string(), RATE_LIMIT_DURATION);
-        let _ = c.release_outbound(0);
-        assert!(c.get_queued_outbound(0).is_none());
-    }
-
-    #[test]
-    #[should_panic(expected = "TransferStillQueued")]
-    fn release_before_the_delay_is_refused() {
-        let mut c = zec();
-        let _ = c.ft_on_transfer(accounts(1), U128(1_001), msg(true));
-        set_ctx(&accounts(2).to_string(), RATE_LIMIT_DURATION - 1);
-        let _ = c.release_outbound(0);
-    }
-
-    #[test]
-    fn failed_release_goes_back_in_the_queue() {
-        let mut c = zec();
-        let _ = c.ft_on_transfer(accounts(1), U128(1_001), msg(true));
-        let transfer = c.get_queued_outbound(0).unwrap();
-        c.outbound_queue.remove(&0);
-
-        as_self();
-        c.on_released(transfer, Err(PromiseError::Failed));
-        assert!(c.get_queued_outbound(0).is_some());
-    }
-
-    #[test]
-    #[should_panic(expected = "Unauthorized")]
-    fn only_the_sender_cancels() {
-        let mut c = zec();
-        let _ = c.ft_on_transfer(accounts(1), U128(1_001), msg(true));
-        let mut ctx = near_sdk::test_utils::VMContextBuilder::new();
-        ctx.current_account_id(CONTRACT.parse().unwrap())
-            .predecessor_account_id(accounts(2))
-            .attached_deposit(near_sdk::NearToken::from_yoctonear(1));
-        near_sdk::testing_env!(ctx.build());
-        let _ = c.cancel_outbound(0);
+        let _ = c.ft_on_transfer(accounts(1), U128(1), msg());
     }
 
     #[test]
     fn published_keeps_the_tokens() {
         let mut c = zec();
-        let _ = c.ft_on_transfer(accounts(1), U128(400), msg(false));
+        let _ = c.ft_on_transfer(accounts(1), U128(400), msg());
         let transfer = OutboundTransfer {
             id: 0,
             sender: accounts(1),
@@ -400,7 +293,6 @@ mod tests {
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
             recipient: parse_recipient(RECIPIENT),
-            locked_at: 0,
         };
 
         as_self();
@@ -411,7 +303,7 @@ mod tests {
     #[test]
     fn failed_publish_restores_the_limit_and_refunds() {
         let mut c = zec();
-        let _ = c.ft_on_transfer(accounts(1), U128(400), msg(false));
+        let _ = c.ft_on_transfer(accounts(1), U128(400), msg());
         let transfer = OutboundTransfer {
             id: 0,
             sender: accounts(1),
@@ -419,7 +311,6 @@ mod tests {
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
             recipient: parse_recipient(RECIPIENT),
-            locked_at: 0,
         };
 
         as_self();
@@ -437,7 +328,6 @@ mod tests {
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
             recipient: parse_recipient(RECIPIENT),
-            locked_at: 0,
         };
         let peer = c.peer(HYDRATION);
         let bytes = c.encode_outbound(&transfer, &peer);

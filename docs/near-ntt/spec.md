@@ -51,7 +51,7 @@ v1 has one transceiver, so it does not.
 NEAR                                                        Hydration
 ────                                                        ─────────
 zec.omft.near / wrap.near
-  │ ft_transfer_call(ntt, amount, msg{73, to, false})
+  │ ft_transfer_call(ntt, amount, msg{73, to})
   ▼
 ntt-<token> (LOCKING)                                        NttManager (BURNING)
   ft_on_transfer                                               ▲
@@ -133,7 +133,7 @@ The user signs one transaction:
 token.ft_transfer_call(
   receiver_id = ntt-<token>.<ours>.near,
   amount,
-  msg = {"recipient_chain": 73, "recipient": "0x<H160>", "should_queue": false}
+  msg = {"recipient_chain": 73, "recipient": "0x<H160>"}
 )
 ```
 
@@ -144,9 +144,9 @@ token.ft_transfer_call(
 3. **Trim.** `trimmed = trim(amount, min(8, token_decimals, peer_decimals))`; the dust is returned
    as part of the unused amount, so NEP-141 refunds it to the sender automatically. No dust
    revert, no dust kept.
-4. **Rate limit.** Outbound capacity must cover `trimmed`. Breach with `should_queue = false` →
-   return the full amount (refund). With `true` → queue the transfer for 24 h, as NTT does
-   elsewhere. Consume outbound, backflow the peer's inbound.
+4. **Rate limit.** Outbound capacity must cover the amount, or `ft_on_transfer` panics
+   `TransferExceedsRateLimit` and the token refunds all of it. Consume outbound, backflow the peer's
+   inbound.
 5. Build the message; `seq += 1` for `id`.
 6. Return **the dust only**, immediately — the tokens are now locked.
 7. Detached: `publish_message(hex(message), 0)` on core, then `on_published(transfer)`. Success →
@@ -163,9 +163,12 @@ over-collateralised, never double-minted.
 **Either a message is published or the tokens go back** — through `ft_transfer`, or through
 `claim()` if that fails.
 
-**Queued transfers** (`should_queue = true` over the limit) are locked with their `id` assigned and
-wait 24 h. `release_outbound(id)` — anyone — publishes one; a failed publish puts it back in the
-queue. `cancel_outbound(id)` — the sender, 1 yocto — pays it back.
+**No outbound queue.** EVM NTT can queue an over-limit transfer for 24 h; this contract reverts
+instead, and the sender retries once capacity refills. A queue entry would be storage the contract
+pays for out of its own NEAR — `ft_on_transfer` cannot take a deposit — so once capacity ran out,
+anyone could drain that balance with dust-sized queued transfers and stall every state-writing
+call. `should_queue` is not part of `msg`. A transfer that clears NEAR but exceeds Hydration's
+inbound limit is still queued there, by stock NTT.
 
 `ft_on_transfer` cannot receive a NEAR deposit, so the core `message_fee` (if non-zero) is paid from
 the contract's own balance. Gas: the caller attaches enough for `ft_on_transfer` + the publish (core
@@ -234,7 +237,7 @@ extra `setPeer`.
 | `manager_peer[chain]`, `peer_decimals[chain]` | NTT manager peers                         |
 | `transceiver_peer[chain]`             | Wormhole emitter peers                            |
 | `outbound_limit`, `inbound_limit[chain]` | NTT rate limits, 24 h linear refill            |
-| `outbound_queue`, `inbound_queue`     | delayed transfers                                 |
+| `inbound_queue`                       | inbound transfers over the limit, 24 h            |
 | `executed[digest]`                    | replay protection                                 |
 | `claimable[account]`                  | failed pay-outs — unlocks and refunds             |
 | `seq`                                 | `NttManagerMessage.id`                            |
@@ -250,16 +253,17 @@ makes the code immutable. Until then, whoever holds a full-access key holds the 
 
 ## Invariants
 
-1. **Fail-closed outbound.** Tokens stay locked only for a published or queued message; a failed
+1. **Fail-closed outbound.** Tokens stay locked only for a published message; a failed
    publish pays the sender back. No callback outcome can make the token refund a published transfer
    — publishing is detached from `ft_on_transfer`'s return value.
 2. **Bound recipient.** Inbound tokens only ever reach the account whose `sha256` the VAA names.
 3. **No loss on failed pay-out.** Every `ft_transfer` out of custody — inbound unlock, outbound
-   refund, cancelled queue entry, claim — credits `claimable` if it fails.
+   refund, claim — credits `claimable` if it fails.
 4. **Replay-safe.** One execution per NTT digest.
 5. **Single hub.** Custody lives only on NEAR; Hydration only burns and mints.
 6. **Conservation.** `locked == Hydration supply + outbound not yet minted + inbound not yet
-   released + claimable`. The two middle terms are in-flight or queued messages. Alarm on drift.
+   released + claimable`. The two middle terms are in-flight messages and the inbound queue. Alarm
+   on drift.
 
 ## Tokens
 
@@ -316,7 +320,7 @@ relayer gate, no `5kx8…` admin with mint power.
 | Layer                   | Covers                                                                   | Tooling                         |
 | ----------------------- | ------------------------------------------------------------------------ | ------------------------------- |
 | Codec                   | golden vectors from `TransceiverStructs.sol`, both directions            | forge script + `cargo test`     |
-| Unit                    | trim, rate limits + backflow, queues, replay, peers, pause               | `cargo test`                    |
+| Unit                    | trim, rate limits + backflow, inbound queue, replay, peers, pause        | `cargo test`                    |
 | Async                   | publish failure → refund; `ft_transfer` failure → claimable; unregistered storage; out-of-gas mid-chain | `near-workspaces` sandbox |
 | Core integration        | real Wormhole NEAR core wasm with a test guardian set signing VAAs       | `near-workspaces` + `wormhole/near/contracts/wormhole` |
 | Hydration side          | NEAR-emitted VAA into the real manager / transceiver / `set_ntt_minter`  | chopsticks, guardian set substituted — the Basejump probe pattern |

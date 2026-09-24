@@ -18,7 +18,6 @@ use near_sdk::store::{LookupMap, LookupSet};
 use near_sdk::{env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault};
 
 use inbound::InboundTransfer;
-use outbound::OutboundTransfer;
 use rate_limit::RateLimit;
 
 /// Wormhole chain id of NEAR.
@@ -31,7 +30,6 @@ enum StorageKey {
     Inbound,
     Executed,
     Claimable,
-    OutboundQueue,
     InboundQueue,
 }
 
@@ -81,9 +79,6 @@ pub struct NttManager {
     /// Pay-outs whose `ft_transfer` failed — inbound unlocks and refunds alike.
     claimable: LookupMap<AccountId, u128>,
 
-    /// Outbound transfers over the limit, locked and waiting out the 24 h delay.
-    outbound_queue: LookupMap<u64, OutboundTransfer>,
-
     /// Inbound transfers over the limit, verified and consumed, waiting out the 24 h delay.
     inbound_queue: LookupMap<[u8; 32], InboundTransfer>,
 }
@@ -112,7 +107,6 @@ impl NttManager {
             inbound: LookupMap::new(StorageKey::Inbound),
             executed: LookupSet::new(StorageKey::Executed),
             claimable: LookupMap::new(StorageKey::Claimable),
-            outbound_queue: LookupMap::new(StorageKey::OutboundQueue),
             inbound_queue: LookupMap::new(StorageKey::InboundQueue),
         }
     }

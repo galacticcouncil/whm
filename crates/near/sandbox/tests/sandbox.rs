@@ -424,3 +424,26 @@ async fn failed_unlock_is_claimable() -> anyhow::Result<()> {
     let _ = &env.core;
     Ok(())
 }
+
+#[tokio::test]
+async fn over_the_limit_reverts_and_refunds() -> anyhow::Result<()> {
+    let env = setup(true).await?;
+    env.ntt
+        .call("set_outbound_limit")
+        .args_json(json!({ "limit": 10u128.pow(24).to_string() }))
+        .transact()
+        .await?
+        .into_result()?;
+    let before = balance(&env.token, env.alice.id().as_str()).await?;
+
+    let result = send_to_hydration(&env, 2 * 10u128.pow(24)).await?;
+    gas("outbound, over the limit", &result);
+
+    // ft_on_transfer panicked: the token's ft_resolve_transfer refunded everything.
+    assert_eq!(balance(&env.token, env.alice.id().as_str()).await?, before);
+    assert_eq!(balance(&env.token, env.ntt.id().as_str()).await?, 0);
+    assert!(event(&events(&result), "wormhole", "publish").is_none());
+    let capacity: String = view(&env.ntt, "outbound_capacity", json!({})).await?;
+    assert_eq!(capacity, 10u128.pow(24).to_string());
+    Ok(())
+}

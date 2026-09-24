@@ -8,6 +8,7 @@ Implementation log for [spec.md](spec.md), one entry per stage. Branch: `feat/ne
 | 2     | Outbound — `ft_on_transfer` → `publish_message` → callback   | done        |
 | 3     | Inbound — `complete` → `verify_vaa` → unlock                 | done        |
 | 4     | `near-workspaces` tests against the real Wormhole NEAR core  | done        |
+| 4b    | Drop the outbound queue — over-limit reverts                 | done        |
 | 5     | Migration (`near-ntt`), NEAR wallet in `@whm/common`, relayer route | —    |
 | 6     | Mainnet canary under launch caps                             | —           |
 
@@ -149,3 +150,23 @@ plus an in-repo regression through `NttPayload`: `contracts/test/ntt/NearPayload
   burnt gas plus that penalty, after the refund receipts land.
 
 **Tests** — 55 unit (`pnpm test`), 5 sandbox (`pnpm test:sandbox`), 1 forge in `contracts`.
+
+## Stage 4b — no outbound queue
+
+NEAR → Hydration over the outbound limit now **reverts**: `ft_on_transfer` panics
+`TransferExceedsRateLimit` and the token refunds the whole amount. `should_queue` is gone from
+`msg`.
+
+**Why.** Found in review after stage 4: a queued outbound entry (~200 bytes) is storage the contract
+pays for from its own NEAR, because `ft_on_transfer` cannot take a deposit. With capacity exhausted,
+anyone could queue 1e-8 ZEC transfers and drain that balance — and a contract out of NEAR for
+storage fails every state-writing call. Dropping the queue removes the vector and the code. The
+inbound queue stays: `complete`'s deposit pays for its entries.
+
+Removed: `outbound_queue`, `release_outbound` / `on_released`, `cancel_outbound`,
+`get_queued_outbound`, `OutboundTransfer.locked_at`, events `transfer_queued` / `release_failed` /
+`transfer_cancelled`.
+
+**Tests** — 51 unit (the 4 queue tests removed); sandbox 6 — new `over_the_limit_reverts_and_refunds`:
+limit lowered to 1 wNEAR, 2 sent, sender refunded in full, nothing locked, no publish, capacity
+untouched (6 TGas).
