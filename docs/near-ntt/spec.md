@@ -42,9 +42,7 @@ admin that can replace the MPC key. This contract replaces all of it with the gu
 | `WormholeTransceiver`   | Hydration | per token                                                               | **new deploy**, standard       |
 | `ntt` app               | relayer   | NEAR → Hydration VAAs                                                    | existing — add routes          |
 
-Manager and transceiver are one contract on NEAR, as Solana bakes the transceiver into its manager.
-Splitting them buys multi-transceiver support at the cost of another async hop on every message;
-v1 has one transceiver, so it does not.
+Manager and transceiver are one contract on NEAR — see [Why one contract](#why-one-contract).
 
 ```
 NEAR                                                        Hydration
@@ -63,6 +61,46 @@ ntt-<token> (LOCKING)                                        NttManager (BURNING
   │   peer + replay + rate limit                  WormholeTransceiver → core ────────────┘
   │   storage_deposit → ft_transfer → account          → guardians → relayer / user
 ```
+
+### Why one contract
+
+EVM NTT deploys `NttManager` and `WormholeTransceiver` as two contracts. Solana's standard deployment
+does not: the Wormhole transceiver is baked into the manager program — the live SOL / jitoSOL / PRIME
+routes have their transceiver at `PDA(["emitter"], manager)` and `release_wormhole_outbound` on the
+manager itself. This contract follows Solana, for a NEAR-specific reason.
+
+**On EVM and Solana, manager → transceiver is synchronous** — an internal call or a CPI, inside one
+atomic transaction. Keeping them apart is nearly free. **On NEAR every cross-contract call is a
+separate receipt**, in a later block, and nothing rolls back across receipts. Splitting would add a
+hop each way:
+
+- Outbound: manager → transceiver → core `publish_message` — one more receipt, and one more gap in
+  which tokens are locked with no message yet, to compensate for.
+- Inbound: transceiver → core `verify_vaa` → callback → manager → token `ft_transfer`. The
+  transceiver could consume a VAA while the call into the manager fails — a second "consumed but not
+  paid" state on top of the one `claimable` already covers. That class of receipt-gap bug is exactly
+  what stages 2 and 3 caught twice ([progress.md](progress.md)).
+- Each hop costs gas and roughly a block of latency, and needs mutual authentication — the manager
+  accepting calls only from its transceiver and the reverse — which is attack surface in itself.
+
+**What splitting buys is not used in v1.** Separate transceivers let one manager run several
+(Wormhole plus others, with a threshold). This route has exactly one.
+
+**Hydration cannot tell.** It peers `NttManager.setPeer(15, X)` and
+`WormholeTransceiver.setWormholePeer(15, X)` with the same `X = sha256(ntt account)`: the contract is
+both the source manager in the payload and the Wormhole emitter of the VAA. The real
+`TransceiverStructs` parses what it publishes ([Wire format](#wire-format)).
+
+**What it costs:**
+
+- A second transceiver needs a code change — the manager is not transceiver-agnostic.
+- Transceiver logic cannot be upgraded apart from the custody it sits next to.
+- The layout differs from the EVM reference, so an auditor has less to pattern-match against.
+
+**Reversible.** Splitting later means a transceiver contract plus a transceiver registry on the
+manager. The emitter becomes `sha256(transceiver account)`, so Hydration needs one
+`setWormholePeer(15, …)`; the manager peer stays as long as the manager account does. Split when
+there is a second transceiver to add — until then the extra hop is risk with nothing bought.
 
 ## Addressing
 
