@@ -8,7 +8,7 @@ and the guardian source in the local `wormhole` checkout.
 | --- | ------------------------------------------ | ----------------------------------- |
 | 1   | Core `message_fee`                         | ✅ 0                                |
 | 2   | Governor applies to NTT on NEAR            | ✅ No                               |
-| 3   | Guardians sign a non-Portal NEAR emitter   | ⚠️ Yes by source; no live precedent |
+| 3   | Guardians sign a non-Portal NEAR emitter   | ✅ Yes — source + 17/19 live on NEAR |
 | 4   | Token storage registration                 | ✅ 0.00125 NEAR, required           |
 | 5   | NEAR core verifies current Hydration VAAs  | ✅ Guardian set 7                   |
 | 6   | Gas profile vs 300 TGas                    | ✅ 6–19 TGas burnt per flow         |
@@ -37,9 +37,13 @@ it.
 **Consequence:** the NTT rate limits are the only caps on this route. Launch caps
 ([spec.md](spec.md#launch-caps)) are the whole safety margin, not an extra one.
 
-## 3. Guardians sign a non-Portal emitter — yes by source, unproven live
+## 3. Guardians sign a non-Portal emitter — yes
 
-`node/pkg/watchers/near/tx_processing.go`:
+The core signs whatever `publish_message` is given; the only question was whether the guardians'
+NEAR watcher filters by caller, and whether enough of them watch NEAR to reach quorum. Neither
+blocks.
+
+**The watcher is emitter-agnostic** (`node/pkg/watchers/near/tx_processing.go`):
 
 - Receipts are accepted when `executor_id == wormholeAccount` — the core contract, whoever called it.
 - The event must be `EVENT_JSON` with `standard: "wormhole"`, `event: "publish"`, a 32-byte emitter,
@@ -47,22 +51,28 @@ it.
 - The emitter is taken from the event, which the core sets to `sha256(predecessor_account_id)`
   (`contracts/wormhole/src/lib.rs`, `publish_message`).
 
-Nothing filters on the caller. But every one of the last 500 chain-15 VAAs on Wormholescan came from
-one emitter, `148410499d…fcb7` = `sha256("contract.portalbridge.near")` — so there is no live
-example of another NEAR emitter being signed.
+Nothing filters on the caller.
 
-**Settle it before mainnet, without a contract.** `publish_message` only requires the predecessor to
-be a registered emitter, and a plain account qualifies:
+**Quorum watches NEAR today.** The latest Portal VAA from NEAR,
+`15/148410499d…fcb7/9281` (2026-09-24T01:11Z), carries **17 signatures from guardian set 7** — 17
+of 19 guardians observe NEAR, against a quorum of 13. The same watcher, on the same guardians, sees
+our contract's publishes.
 
+No live VAA from a non-Portal NEAR emitter exists (the last 500 chain-15 VAAs are all from
+`sha256("contract.portalbridge.near")`; the NFT bridge has none), but nothing in the path
+distinguishes one. The stage 6 mainnet canary is the first publish from the real contract and
+confirms it end to end.
+
+**Optional pre-canary check** — [`crates/near/scripts/check-emitter.sh`](../../crates/near/scripts/check-emitter.sh).
+A plain account qualifies as an emitter, so no contract is needed: it registers the account,
+publishes one message, and polls Wormholescan until the signed VAA appears, decoding its header.
+~0.002 NEAR + gas; the VAA (chain 15, emitter `sha256(<account>)`) is accepted by nothing. Needs
+`near-cli-rs` with the account's key.
+
+```bash
+crates/near/scripts/check-emitter.sh <account>          # register, publish, wait
+crates/near/scripts/check-emitter.sh <account> --poll   # wait only
 ```
-near call contract.wormhole_crypto.near register_emitter '{"emitter":"<account>"}' \
-  --accountId <account> --deposit 0.01
-near call contract.wormhole_crypto.near publish_message '{"data":"deadbeef","nonce":0}' \
-  --accountId <account> --gas 30000000000000
-```
-
-Then look for a chain-15 VAA from `sha256("<account>")` on Wormholescan. `publish_message` requires
-≥ 10 TGas prepaid.
 
 ## 4. Token storage — 0.00125 NEAR, required
 

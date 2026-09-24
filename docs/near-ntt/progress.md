@@ -170,3 +170,12 @@ Removed: `outbound_queue`, `release_outbound` / `on_released`, `cancel_outbound`
 **Tests** — 51 unit (the 4 queue tests removed); sandbox 6 — new `over_the_limit_reverts_and_refunds`:
 limit lowered to 1 wNEAR, 2 sent, sender refunded in full, nothing locked, no publish, capacity
 untouched (6 TGas).
+
+## Pre-stage 5 — emitter check settled
+
+[verify.md §3](verify.md#3-guardians-sign-a-non-portal-emitter--yes) marked settled: the NEAR
+watcher is emitter-agnostic in source, and the latest Portal VAA from NEAR carries 17 signatures
+from guardian set 7 — quorum (13) observes NEAR. Kept
+[`crates/near/scripts/check-emitter.sh`](../../crates/near/scripts/check-emitter.sh) as an optional
+live check (plain account, register + publish + poll Wormholescan); its decoder was exercised
+against that Portal VAA.

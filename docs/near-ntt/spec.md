@@ -346,8 +346,7 @@ relayer gate, no `5kx8…` admin with mint power.
 
 Checked before implementation — results and evidence in [verify.md](verify.md): `message_fee` is 0,
 the Governor does not apply, both tokens need a 0.00125 NEAR registration, the NEAR core is on
-guardian set 7, and every flow burns 6–19 TGas. Still open:
+guardian set 7, every flow burns 6–19 TGas, and the NEAR watcher is emitter-agnostic with 17/19
+guardians observing NEAR. Still open:
 
-1. Guardians sign an emitter other than the token bridge on NEAR — yes by source, no live precedent.
-   A plain-account `publish_message` settles it ([verify.md §3](verify.md#3-guardians-sign-a-non-portal-emitter--yes-by-source-unproven-live)).
-2. Whether Wormhole ever answers — a canonical NEAR NTT would be worth adopting over ours.
+1. Whether Wormhole ever answers — a canonical NEAR NTT would be worth adopting over ours.
