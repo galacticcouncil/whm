@@ -7,7 +7,7 @@ set -euo pipefail
 # NttManager + WormholeTransceiver. NEAR side only: the Hydration side is hydration-ntt's.
 #
 # Arguments:
-#   <env>   Environment context: prod | fork (fork: the sandbox from `pnpm fork:near`)
+#   <env>   Environment context: prod | testnet | fork (fork: the sandbox from `pnpm fork:near`)
 #
 # Required env vars (set in shell or root .env):
 #   PK_NEAR       NEAR deployer secret key (ed25519:...) for NEAR_ACCOUNT
@@ -15,7 +15,7 @@ set -euo pipefail
 # Example:
 #   PK_NEAR=ed25519:... ./sh/migrate-near-ntt-near.sh prod
 
-ENV=${1:?Usage: migrate-near-ntt-near.sh <env (prod|fork)>}
+ENV=${1:?Usage: migrate-near-ntt-near.sh <env (prod|testnet|fork)>}
 shift
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"

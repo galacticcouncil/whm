@@ -25,8 +25,8 @@ async function main(): Promise<void> {
   const recipient = requiredArg("--recipient");
   const amount = BigInt(requiredArg("--amount"));
   const sequence = BigInt(requiredArg("--sequence"));
-  const manager = (optionalArg("--manager") ?? "0xFCaF4aA069C565d25539028970703F01e47D3E0B") as Hex;
-  const transceiver = (optionalArg("--transceiver") ?? "0x4e7b1E55D2354d4Dc6ABD876096Dc201de0541D1") as Hex;
+  const manager = (optionalArg("--manager") ?? "0x5b1334885320cFd7158760256c7bD0Af58006b09") as Hex;
+  const transceiver = (optionalArg("--transceiver") ?? "0x5e875F689EA8dd25e11a69cfb6C9f844C4b3B207") as Hex;
 
   const h = (x: string) => `0x${x}` as Hex;
   const u16 = (n: number) => toHex(n, { size: 2 });

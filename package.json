@@ -27,6 +27,7 @@
     "migrate:near-ntt-zec": "bash sh/migrate-near-ntt-zec.sh prod",
     "migrate:near-ntt-near": "bash sh/migrate-near-ntt-near.sh prod",
     "migrate:near-ntt-near:fork": "bash sh/migrate-near-ntt-near.sh fork",
+    "migrate:near-ntt-near:testnet": "bash sh/migrate-near-ntt-near.sh testnet",
     "print:oracles": "bash sh/print-oracles.sh"
   },
   "dependencies": {

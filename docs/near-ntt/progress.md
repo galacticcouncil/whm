@@ -232,3 +232,40 @@ guardian, `fork.ts`) and `wrap.near` code, `alice.test.near` holding 10 wNEAR. N
 Run end to end as a user would: fork up → migration (5/5) → `transfer.ts` (2 wNEAR locked, published) →
 `forkVaa.ts` + `complete.ts` (1 wNEAR to an unregistered `bob.test.near`) → `status.ts`. The stage 5
 smoke test's throwaway setup is now this.
+
+## Stage 5c — Hydration half on a chopsticks fork, testnet context
+
+There is no Hydration on Wormhole testnet (zero chain-73 VAAs on testnet Wormholescan), so a NEAR
+testnet transfer reaches Hydration through
+[`chopsticks/probes/_probeNearNttDelivery.ts`](../../chopsticks/probes/_probeNearNttDelivery.ts): the
+real VAA into a Hydration fork, with only the trust root substituted — the core's guardian set at the
+VAA's index becomes the signer(s) recovered from the VAA itself.
+
+The Hydration leg is deployed on the fork the way hydration-ntt deploys one (`DeployWormholeNttBase`):
+a wNEAR runtime asset (id 1355, 24 dp, registry cloned from asset 43), `EVMAccounts.NttMinters[1355]`,
+NttManager (BURNING) + WormholeTransceiver from hydration-ntt's artifacts behind ERC1967 proxies with
+`TransceiverStructs` linked. A fixed, fresh deployer (`keccak256("whm near-ntt fork deployer")`)
+makes the addresses deterministic — manager `0x5b13…6b09`, transceiver `0x5e87…B207` — so the NEAR
+testnet contract is peered with them in advance (`migrations/envs/testnet/near-ntt-near.env`).
+
+**Result (`--dev`, a NEAR-shaped VAA signed by a dev guardian):** the real core verified it, the pair
+minted exactly 1.5 wNEAR (1.5e24) to the recipient, the replay was rejected.
+
+**Fork-setup findings** (none in the design — all in reproducing registration by storage):
+
+- `EVMAccounts.ContractDeployer` whitelist: Hydration refuses `CREATE` from unlisted addresses.
+- Registration also puts a 1-byte code stub (`0x00`) at the asset's precompile address. NttManager's
+  `INttToken(token).mint(...)` returns nothing, so Solidity checks `extcodesize > 0` first and reverts
+  with **empty data** without it — found by dry-running each layer (core → library → transceiver →
+  manager) through `EthereumRuntimeRPCApi.call`.
+- Both need raw storage keys: the JSON form of `()` / `Vec<u8>` values does not apply.
+
+**Speed:** chopsticks costs ~64 s per block after a ~3 min first block, and the probe first built one
+block per tx (14 → ~17 min). `EthClient.signDeploy` / `signCall` / `sendBatch` (+ `sendRawEthTxs`)
+seal many txs in one block, sized per tx against the 45M block gas: 4 blocks, ~6.5 min. The fork uses
+Dwellir — catfish's rate limiter stalls lazy storage reads. Opt-in `CHOPSTICKS_DB` + `CHOPSTICKS_BLOCK`
+(`lib/network.ts`) cache fetched state for reruns pinned to one block.
+
+**Testnet context:** `migrations/envs/testnet/near-ntt-near.env`, `pnpm migrate:near-ntt-near:testnet` —
+the real testnet core (`wormhole.wormhole.testnet`, guardian set 0) and `wrap.testnet`.
+`deployments/testnet/` is gitignored, like `lark/`.
