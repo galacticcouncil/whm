@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build": "cargo near build non-reproducible-wasm",
-    "test": "cargo test -p ntt-manager"
+    "test": "cargo test -p ntt-manager",
+    "test:sandbox": "cargo build -p ntt-manager --target wasm32-unknown-unknown --release && NTT_WASM=$PWD/target/wasm32-unknown-unknown/release/ntt_manager.wasm cargo test -p ntt-sandbox -- --test-threads=1"
   }
 }

@@ -11,7 +11,7 @@ and the guardian source in the local `wormhole` checkout.
 | 3   | Guardians sign a non-Portal NEAR emitter   | ⚠️ Yes by source; no live precedent |
 | 4   | Token storage registration                 | ✅ 0.00125 NEAR, required           |
 | 5   | NEAR core verifies current Hydration VAAs  | ✅ Guardian set 7                   |
-| 6   | Gas profile vs 300 TGas                    | ⏳ Sandbox, during implementation   |
+| 6   | Gas profile vs 300 TGas                    | ✅ 6–19 TGas burnt per flow         |
 
 ## 1. Core `message_fee` — 0
 
@@ -99,10 +99,22 @@ guardian_set_index     7
 The latest Hydration VAA on Wormholescan (`73/…4e7b1e55…41d1/113`, 2026-09-23) is signed by guardian
 set 7. The NEAR core is current.
 
-## 6. Gas profile — during implementation
+## 6. Gas profile — 6–19 TGas burnt, far under 300
 
-Outbound is `ft_transfer_call` → `ft_on_transfer` → `publish_message` → `on_published` (→ the
-token's own `ft_resolve_transfer`). Inbound is `complete` → `verify_vaa` → `on_verified` →
-`storage_deposit` → `ft_transfer` → `on_unlocked`. Both must fit 300 TGas with the per-hop budgets
-fixed. Measured in the `near-workspaces` sandbox against the real core wasm; the frontend and relayer
-pin the results.
+Measured in the `near-workspaces` sandbox (`crates/near/sandbox`) against the deployed mainnet code
+of the core and `wrap.near`; total burnt across every receipt of the transaction:
+
+| Flow                                               | Burnt   |
+| -------------------------------------------------- | ------- |
+| Outbound — `ft_transfer_call` → lock → publish     | 12 TGas |
+| Outbound, publish fails → refund                   | 16 TGas |
+| Inbound — `complete`, first-time recipient         | 19 TGas |
+| Inbound, forged signature → deposit refunded       | 12 TGas |
+| `claim`                                            | 6 TGas  |
+
+What the contract *reserves* is higher — `ft_on_transfer` requires 50 TGas free, `complete` 85 —
+because static gas is reserved per hop before it is spent. Callers should attach 150–300 TGas; the
+unused part comes back, less NEAR's refund penalty.
+
+A registering `complete` costs the caller 0.00198 NEAR beyond gas: the 0.00125 registration and
+~73 bytes for the replay entry. The rest of the deposit is refunded.

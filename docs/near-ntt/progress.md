@@ -7,7 +7,7 @@ Implementation log for [spec.md](spec.md), one entry per stage. Branch: `feat/ne
 | 1     | Spec, pre-implementation checks, crate scaffold, codec       | done        |
 | 2     | Outbound — `ft_on_transfer` → `publish_message` → callback   | done        |
 | 3     | Inbound — `complete` → `verify_vaa` → unlock                 | done        |
-| 4     | `near-workspaces` tests against the real Wormhole NEAR core  | —           |
+| 4     | `near-workspaces` tests against the real Wormhole NEAR core  | done        |
 | 5     | Migration (`near-ntt`), NEAR wallet in `@whm/common`, relayer route | —    |
 | 6     | Mainnet canary under launch caps                             | —           |
 
@@ -115,3 +115,37 @@ before and after verification; a new message id is a new transfer; over-limit qu
 at 24 h, not before; NEAR untrims 8 → 24; an unregistered recipient needs the registration in the
 deposit. Test VAAs are built with the codec and carry no signatures — only the core would reject
 them. Release wasm 491 KB before `wasm-opt`.
+
+## Stage 4 — sandbox and EVM compatibility
+
+New crate [`crates/near/sandbox`](../../crates/near/sandbox/) (`ntt-sandbox`, tests only) — kept
+apart so `near-workspaces` stays out of the contract's unit tests. It runs against the **deployed
+mainnet code** of `contract.wormhole_crypto.near` and `wrap.near` (fetched with `view_code`, hashes
+in its README), with the core booted on a single test guardian.
+
+| Test                                   | Proves                                                                            |
+| -------------------------------------- | --------------------------------------------------------------------------------- |
+| `outbound_locks_and_publishes`         | real lock + publish; core event emitter = `sha256(ntt)`; payload decodes; 1 yocto dust refunded |
+| `failed_publish_refunds_the_sender`    | unregistered emitter → sender refunded, limit restored, `transfer_failed`         |
+| `inbound_verifies_registers_and_pays`  | real `verify_vaa`; unregistered recipient registered and paid; replay refused; deposit accounting |
+| `forged_signature_consumes_nothing`    | wrong guardian → nothing executed, deposit refunded                               |
+| `failed_unlock_is_claimable`           | empty custody → `claimable`; `claim` pays once custody exists                     |
+
+Gas: 6–19 TGas burnt per flow — [verify.md §6](verify.md#6-gas-profile--619-tgas-burnt-far-under-300).
+
+**EVM direction.** The payload the NEAR contract published through the real core, parsed and
+re-encoded by the real `TransceiverStructs` (`hydration-ntt` at `f4871dbe`) — identical bytes at all
+three layers. Kept as `sandbox/forge/NearPayload.t.sol` (runs from a copy of `hydration-ntt/evm`),
+plus an in-repo regression through `NttPayload`: `contracts/test/ntt/NearPayloadTest.sol`.
+
+**Notes**
+
+- The plain `cargo build --target wasm32-unknown-unknown` output deploys on the sandbox's nearcore
+  (2.13.4) — `cargo-near` is not needed for tests; `NTT_WASM` passes the prebuilt file. Mainnet
+  deploys should still go through `cargo near build` for a reproducible, `wasm-opt`'d artifact.
+- The sandbox binary has no darwin-x86_64 build; on Apple Silicon under a Rosetta toolchain, run on
+  `stable-aarch64-apple-darwin` (README).
+- NEAR charges a penalty on unused prepaid gas, so deposit-accounting assertions measure against
+  burnt gas plus that penalty, after the refund receipts land.
+
+**Tests** — 55 unit (`pnpm test`), 5 sandbox (`pnpm test:sandbox`), 1 forge in `contracts`.

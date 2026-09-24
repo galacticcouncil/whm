@@ -118,9 +118,10 @@ on EVM — not the VAA hash, so re-signed VAAs for the same message cannot doubl
 
 **Golden vectors.** Real mainnet VAAs encoded by the deployed EVM `NttManager`s
 (`crates/near/contracts/ntt-manager/tests/fixtures/vaas.json`); the Rust codec round-trips every
-layer byte-for-byte. Still to add: a NEAR-encoded message parsed by the real `TransceiverStructs` in
-a forge test — the other direction. This is the whole of the cross-chain compatibility risk, and it
-is testable offline.
+layer byte-for-byte. The other direction: a payload the NEAR contract published through the real
+core parses and re-encodes to the same bytes in the real `TransceiverStructs`
+(`crates/near/sandbox/forge`), and through `NttPayload` in this repo's forge suite. This was the
+whole of the cross-chain compatibility risk.
 
 ## Flow
 
@@ -340,10 +341,9 @@ relayer gate, no `5kx8…` admin with mint power.
 ## To verify
 
 Checked before implementation — results and evidence in [verify.md](verify.md): `message_fee` is 0,
-the Governor does not apply, both tokens need a 0.00125 NEAR registration, and the NEAR core is on
-guardian set 7. Still open:
+the Governor does not apply, both tokens need a 0.00125 NEAR registration, the NEAR core is on
+guardian set 7, and every flow burns 6–19 TGas. Still open:
 
 1. Guardians sign an emitter other than the token bridge on NEAR — yes by source, no live precedent.
    A plain-account `publish_message` settles it ([verify.md §3](verify.md#3-guardians-sign-a-non-portal-emitter--yes-by-source-unproven-live)).
-2. Gas profile of both flows against the 300 TGas cap — sandbox, during implementation.
-3. Whether Wormhole ever answers — a canonical NEAR NTT would be worth adopting over ours.
+2. Whether Wormhole ever answers — a canonical NEAR NTT would be worth adopting over ours.
