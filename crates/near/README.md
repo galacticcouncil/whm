@@ -61,3 +61,34 @@ npx tsx crates/near/scripts/ntt-manager/complete.ts --contract ntt-zec.<parent>.
 Deployment: `pnpm migrate:near-ntt-zec` / `pnpm migrate:near-ntt-near` — NEAR side only, see
 `migrations/definitions/near-ntt-*/index.ts`. Build the wasm with `pnpm run build` (`cargo near`)
 first: a plain `cargo build` artifact loses every panic message.
+
+## Local fork
+
+A NEAR sandbox set up for `near-ntt`, the way `pnpm fork:solana` is for the oracle:
+
+```bash
+pnpm fork:near                        # sandbox on :3030 — mainnet core (dev guardian) + wrap.near, alice with 10 wNEAR
+pnpm migrate:near-ntt-near:fork       # the real migration; PK_NEAR from the sandbox key
+
+export RPC_NEAR=http://127.0.0.1:3030
+PK=$(npx tsx crates/near/scripts/getForkKey.ts)
+S=crates/near/scripts/ntt-manager
+
+npx tsx $S/transfer.ts --contract ntt-near.test.near --token wrap.test.near \
+  --amount 2000000000000000000000000 --recipient 0x1111111111111111111111111111111111111111 \
+  --account alice.test.near --pk "$PK"
+
+VAA=$(npx tsx $S/forkVaa.ts --contract ntt-near.test.near --recipient bob.test.near --amount 100000000 --sequence 1)
+npx tsx $S/complete.ts --contract ntt-near.test.near --vaa "$VAA" --recipient bob.test.near \
+  --account test.near --pk "$PK"
+
+npx tsx $S/status.ts --contract ntt-near.test.near --account bob.test.near
+```
+
+- The sandbox binary comes from `pnpm test:sandbox` (near-workspaces downloads it into `target/`), or
+  set `NEAR_SANDBOX_BIN`. Home is `crates/near/.sandbox`, reset on every run; node log in
+  `.sandbox/node.log`.
+- `forkVaa.ts` signs as the fork guardian — a Hydration-shaped NTT VAA the real core accepts. Fork
+  only; nothing Hydration-side runs locally.
+- The fork env builds nothing: build the wasm first (`NTT_WASM` in `migrations/envs/fork/near-ntt-near.env`).
+- wNEAR-shaped (24 dp) only — `zec.omft.near`'s code has no known init. An 8-dp fork needs a test FT.

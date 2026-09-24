@@ -1,2 +1,5 @@
 # Compiler
 target/
+
+# Local sandbox home (sh/fork-near.sh)
+.sandbox/

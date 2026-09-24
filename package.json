@@ -6,6 +6,7 @@
     "fork:hydration": "bash sh/fork-hydration.sh",
     "fork:ethereum": "bash sh/fork-ethereum.sh",
     "fork:solana": "bash sh/fork-solana.sh",
+    "fork:near": "bash sh/fork-near.sh",
     "fork:all": "run-p fork:base fork:hydration fork:ethereum",
     "fork:intent": "run-p fork:hydration fork:ethereum",
     "migration:run": "npx tsx migrations/run.ts",
@@ -25,6 +26,7 @@
     "migrate:intent-mpc:fork": "bash sh/migrate-intent-mpc.sh fork",
     "migrate:near-ntt-zec": "bash sh/migrate-near-ntt-zec.sh prod",
     "migrate:near-ntt-near": "bash sh/migrate-near-ntt-near.sh prod",
+    "migrate:near-ntt-near:fork": "bash sh/migrate-near-ntt-near.sh fork",
     "print:oracles": "bash sh/print-oracles.sh"
   },
   "dependencies": {

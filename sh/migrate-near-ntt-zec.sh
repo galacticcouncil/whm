@@ -7,7 +7,7 @@ set -euo pipefail
 # NttManager + WormholeTransceiver. NEAR side only: the Hydration side is hydration-ntt's.
 #
 # Arguments:
-#   <env>   Environment context: prod (NEAR has no local fork)
+#   <env>   Environment context: prod
 #
 # Required env vars (set in shell or root .env):
 #   PK_NEAR       NEAR deployer secret key (ed25519:...) for NEAR_ACCOUNT

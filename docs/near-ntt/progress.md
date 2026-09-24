@@ -217,3 +217,18 @@ Deploys must use `cargo near build`; `NTT_WASM` points at its output. Spec build
 **Open before running on mainnet:** `cargo-near` installed for the build; Hydration manager +
 transceiver from hydration-ntt; the NEAR custodian for `NTT_NEW_OWNER`; the `ntt` relayer route;
 `set_ntt_minter` referendum.
+
+## Stage 5b — local fork
+
+`pnpm fork:near` (`sh/fork-near.sh` → `crates/near/scripts/ntt-manager/runSandbox.ts`), the NEAR
+counterpart of `fork:solana`: a fresh sandbox on :3030 with the mainnet core (booted on a dev
+guardian, `fork.ts`) and `wrap.near` code, `alice.test.near` holding 10 wNEAR. Node log in
+`crates/near/.sandbox/node.log` (gitignored).
+
+- `migrations/envs/fork/near-ntt-near.env` + `pnpm migrate:near-ntt-near:fork` — `PK_NEAR` read from
+  the sandbox by `crates/near/scripts/getForkKey.ts`, as the Solana fork does.
+- `forkVaa.ts` — a Hydration → NEAR NTT VAA signed by the fork guardian, for `complete.ts --vaa`.
+
+Run end to end as a user would: fork up → migration (5/5) → `transfer.ts` (2 wNEAR locked, published) →
+`forkVaa.ts` + `complete.ts` (1 wNEAR to an unregistered `bob.test.near`) → `status.ts`. The stage 5
+smoke test's throwaway setup is now this.
