@@ -45,7 +45,7 @@ cargo install --locked cargo-near
 ## Build
 
 ```bash
-pnpm run build                        # cargo near build → target/near/ntt_manager.wasm
+pnpm run build                        # cargo near build → target/near/ntt_manager/ntt_manager.wasm
 ```
 
 ## Test
@@ -95,6 +95,40 @@ npx tsx $S/status.ts --contract ntt-near.test.near --account bob.test.near
 - The fork migration builds nothing: build the wasm first (`NTT_WASM` in
   `migrations/envs/fork/near-ntt-near.env`).
 - wNEAR-shaped (24 dp) only — `zec.omft.near`'s code has no known init. An 8-dp fork needs a test FT.
+
+## Testnet
+
+NEAR has Wormhole on testnet (`wormhole.wormhole.testnet`, guardian set 0); Hydration does not. So the
+NEAR half runs on real testnet, and the real testnet VAA is delivered to Hydration on a chopsticks fork
+([`chopsticks/probes/_probeNearNttDelivery.ts`](../../chopsticks/probes/_probeNearNttDelivery.ts)) —
+which deploys a wNEAR NTT pair at fixed addresses the testnet contract is peered with.
+
+```bash
+# 0. build
+cd crates/near/contracts/ntt-manager && cargo near build non-reproducible-wasm && cd -
+
+# 1. account — faucet-funded (10 NEAR); keep the key in crates/near/.testnet/ (gitignored)
+curl -X POST https://helper.testnet.near.org/account -H 'content-type: application/json' \
+  -d '{"newAccountId":"<id>.testnet","newAccountPublicKey":"ed25519:<pub>"}'
+
+# 2. deploy — migrations/envs/testnet/near-ntt-near.env
+ACC=<id>.testnet; PK=ed25519:<secret>
+PK_NEAR="$PK" pnpm migrate:near-ntt-near:testnet
+
+# 3. wNEAR for the sender: storage_deposit + near_deposit on wrap.testnet (near-cli-rs or any wallet)
+
+# 4. NEAR → Hydration
+RPC_NEAR=https://rpc.testnet.near.org npx tsx crates/near/scripts/ntt-manager/transfer.ts \
+  --contract ntt-near.$ACC --token wrap.testnet --amount 500000000000000000000000 \
+  --recipient 0x1111111111111111111111111111111111111111 --account $ACC --pk "$PK"
+
+# 5. the Hydration half — waits for the testnet guardian, then delivers on a fork (~7 min)
+HYDRATION_NTT_OUT=<hydration-ntt>/evm/out npx tsx chopsticks/probes/_probeNearNttDelivery.ts \
+  --emitter <001 emitter> --sequence <wormhole_sequence>
+```
+
+Run 2026-09-24: `ntt-near.whm-ntt-0bugdc.testnet`, emitter `34831e4d…7213`, sequence 1 — signed by
+the testnet guardian `0x13947Bd4…C638`, delivered on the fork: 0.5 wNEAR minted, replay rejected.
 
 ## Deploy
 

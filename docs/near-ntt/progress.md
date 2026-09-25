@@ -269,3 +269,20 @@ Dwellir — catfish's rate limiter stalls lazy storage reads. Opt-in `CHOPSTICKS
 **Testnet context:** `migrations/envs/testnet/near-ntt-near.env`, `pnpm migrate:near-ntt-near:testnet` —
 the real testnet core (`wormhole.wormhole.testnet`, guardian set 0) and `wrap.testnet`.
 `deployments/testnet/` is gitignored, like `lark/`.
+
+## Stage 5d — NEAR → Hydration with a real testnet transfer
+
+| Step | Result |
+| ---- | ------ |
+| `cargo near build` | 247 KB (`target/near/ntt_manager/ntt_manager.wasm` — env paths corrected) |
+| Testnet account | `whm-ntt-0bugdc.testnet`, faucet-funded; key in `crates/near/.testnet/` (gitignored) |
+| `pnpm migrate:near-ntt-near:testnet` | 5/5 on the real testnet core and `wrap.testnet`; `ntt-near.whm-ntt-0bugdc.testnet`, emitter `34831e4d…7213`, peered with the fork wNEAR pair |
+| `transfer.ts` | 0.5 wNEAR locked, `transfer_sent`, Wormhole sequence 1 |
+| Testnet guardian | signed `15/34831e4d…7213/1` (`0x13947Bd4…C638`, set 0) — verify.md §3 confirmed live |
+| `_probeNearNttDelivery.ts --emitter … --sequence 1` | the unmodified testnet VAA verified by the real Hydration core on a fork; the wNEAR pair minted exactly 0.5 wNEAR (5e23); replay rejected |
+
+`transfer.ts` now prints the testnet Wormholescan URL when `RPC_NEAR` is testnet. Commands:
+[crates/near/README.md § Testnet](../../crates/near/README.md#testnet).
+
+Hydration → NEAR on testnet is not possible — nothing signs Hydration VAAs there — and stays covered
+by the sandbox suite and the local fork (`forkVaa.ts`).

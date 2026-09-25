@@ -8,7 +8,7 @@ and the guardian source in the local `wormhole` checkout.
 | --- | ------------------------------------------ | ----------------------------------- |
 | 1   | Core `message_fee`                         | ✅ 0                                |
 | 2   | Governor applies to NTT on NEAR            | ✅ No                               |
-| 3   | Guardians sign a non-Portal NEAR emitter   | ✅ Yes — source + 17/19 live on NEAR |
+| 3   | Guardians sign a non-Portal NEAR emitter   | ✅ Yes — signed live on testnet     |
 | 4   | Token storage registration                 | ✅ 0.00125 NEAR, required           |
 | 5   | NEAR core verifies current Hydration VAAs  | ✅ Guardian set 7                   |
 | 6   | Gas profile vs 300 TGas                    | ✅ 6–19 TGas burnt per flow         |
@@ -58,10 +58,15 @@ Nothing filters on the caller.
 of 19 guardians observe NEAR, against a quorum of 13. The same watcher, on the same guardians, sees
 our contract's publishes.
 
-No live VAA from a non-Portal NEAR emitter exists (the last 500 chain-15 VAAs are all from
-`sha256("contract.portalbridge.near")`; the NFT bridge has none), but nothing in the path
-distinguishes one. The stage 6 mainnet canary is the first publish from the real contract and
-confirms it end to end.
+No live VAA from a non-Portal NEAR emitter existed on mainnet (the last 500 chain-15 VAAs are all
+from `sha256("contract.portalbridge.near")`; the NFT bridge has none), but nothing in the path
+distinguishes one.
+
+**Confirmed live on testnet, 2026-09-24.** The `ntt-manager` contract deployed to NEAR testnet
+(`ntt-near.whm-ntt-0bugdc.testnet`) published a transfer; the Wormhole testnet guardian
+(`0x13947Bd48b18E53fdAeEe77F3473391aC727C638`, set 0) signed it —
+`15/34831e4dba0ea821cb7f0af0ce96f5efe4beb0db1fded12219e4329ff95a7213/1`. Same watcher code as
+mainnet. The stage 6 canary repeats it on mainnet.
 
 **Optional pre-canary check** — [`crates/near/scripts/check-emitter.sh`](../../crates/near/scripts/check-emitter.sh).
 A plain account qualifies as an emitter, so no contract is needed: it registers the account,

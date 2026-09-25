@@ -6,7 +6,7 @@ import { call, events } from "@whm/common/near";
 
 import { report, run, signer } from "./shared";
 
-const { requiredArg } = args;
+const { requiredArg, requiredEnv } = args;
 
 /** Wormhole chain id of Hydration. */
 const HYDRATION = 73;
@@ -45,5 +45,8 @@ run(async () => {
     return;
   }
   // The core's event is flat (not NEP-297 `data`): emitter and seq at the top level.
-  console.log(`VAA: https://api.wormholescan.io/api/v1/vaas/15/${publish.emitter}/${publish.seq}`);
+  const scan = requiredEnv("RPC_NEAR").includes("testnet")
+    ? "https://api.testnet.wormholescan.io"
+    : "https://api.wormholescan.io";
+  console.log(`VAA: ${scan}/api/v1/vaas/15/${publish.emitter}/${publish.seq}`);
 });

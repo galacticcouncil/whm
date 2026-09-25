@@ -3,3 +3,6 @@ target/
 
 # Local sandbox home (sh/fork-near.sh)
 .sandbox/
+
+# Testnet account keys (created via the faucet)
+.testnet/
