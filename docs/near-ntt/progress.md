@@ -308,6 +308,9 @@ or Medium. Fixed:
 `zec.omft.near`'s `ft_transfer` (audit lead): checked — every `*.omft.near` family is the standard
 single-receipt transfer.
 
+BTC / ZEC from their own chains — one transfer to an Omni connector deposit address, minted straight
+into the manager: [omft-routing.md](omft-routing.md).
+
 | Check | Result |
 | ----- | ------ |
 | `cargo test -p ntt-manager` | 58 passed |

@@ -8,7 +8,8 @@ One contract, `ntt-manager`: NttManager and Wormhole transceiver in one, LOCKING
 token. Its wire format is byte-for-byte EVM NTT, so the Hydration side is unmodified.
 
 Design: [docs/near-ntt/spec.md](../../docs/near-ntt/spec.md) · pre-implementation checks:
-[verify.md](../../docs/near-ntt/verify.md) · build log: [progress.md](../../docs/near-ntt/progress.md).
+[verify.md](../../docs/near-ntt/verify.md) · build log: [progress.md](../../docs/near-ntt/progress.md) ·
+BTC / ZEC from their own chains: [omft-routing.md](../../docs/near-ntt/omft-routing.md).
 
 ## Layout
 
