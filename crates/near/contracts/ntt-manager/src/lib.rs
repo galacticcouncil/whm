@@ -15,7 +15,7 @@ pub mod vaa;
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
 use near_sdk::store::{LookupMap, LookupSet};
-use near_sdk::{env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault};
+use near_sdk::{env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise};
 
 use inbound::InboundTransfer;
 use rate_limit::RateLimit;
@@ -23,6 +23,11 @@ use rate_limit::RateLimit;
 /// Wormhole chain id of NEAR.
 pub const NEAR_CHAIN_ID: u16 = 15;
 
+/// `migrate` on the new code, in the same batch as its deploy.
+pub const GAS_FOR_MIGRATE: Gas = Gas::from_tgas(50);
+
+/// Append-only: a redeploy that reorders or removes a variant points collections at the wrong
+/// prefix. Any change to a stored layout needs an `#[init(ignore_state)]` migration with it.
 #[near]
 #[derive(BorshStorageKey)]
 enum StorageKey {
@@ -112,8 +117,15 @@ impl NttManager {
     }
 
     // =============== Admin ==================================================================
+    //
+    // Every owner method takes exactly 1 yocto: a function-call access key cannot attach a deposit,
+    // so each one needs a full-access key on the owner account. Each logs a `whm-ntt` event.
 
     /// Registers or replaces a peer. `manager` and `transceiver` are 32-byte hex.
+    ///
+    /// Replacing one strands VAAs still in flight from the old pair until it is set again — they
+    /// never expire, and the replay key does not depend on the peer. Drain before rotating.
+    #[payable]
     pub fn set_peer(
         &mut self,
         chain_id: u16,
@@ -138,13 +150,23 @@ impl NttManager {
                 self.inbound.insert(chain_id, RateLimit::new(inbound_limit.0, now));
             }
         }
+        emit("peer_set", json!({
+            "chain_id": chain_id,
+            "manager": hex::encode(manager),
+            "transceiver": hex::encode(transceiver),
+            "decimals": decimals,
+            "inbound_limit": inbound_limit,
+        }));
     }
 
+    #[payable]
     pub fn set_outbound_limit(&mut self, limit: U128) {
         self.assert_owner();
         self.outbound.set_limit(limit.0, now());
+        emit("outbound_limit_set", json!({ "limit": limit }));
     }
 
+    #[payable]
     pub fn set_inbound_limit(&mut self, chain_id: u16, limit: U128) {
         self.assert_owner();
         let now = now();
@@ -152,21 +174,57 @@ impl NttManager {
             Some(rl) => rl.set_limit(limit.0, now),
             None => env::panic_str("PeerNotRegistered"),
         }
+        emit("inbound_limit_set", json!({ "chain_id": chain_id, "limit": limit }));
     }
 
+    #[payable]
     pub fn pause(&mut self) {
         self.assert_owner();
         self.paused = true;
+        emit("paused", json!({}));
     }
 
+    #[payable]
     pub fn unpause(&mut self) {
         self.assert_owner();
         self.paused = false;
+        emit("unpaused", json!({}));
     }
 
+    #[payable]
     pub fn transfer_ownership(&mut self, new_owner: AccountId) {
         self.assert_owner();
+        emit("ownership_transferred", json!({ "previous_owner": self.owner, "new_owner": new_owner }));
         self.owner = new_owner;
+    }
+
+    /// Redeploys this contract with the wasm passed as the call's raw input (not JSON), then runs
+    /// the new code's `migrate` — one batch on this account, so a `migrate` that fails reverts the
+    /// deploy too and the old code stays.
+    ///
+    /// The upgrade authority is `owner`, not an access key: once the account's keys are deleted
+    /// (migration step 006), only the owner can change the code — the NEAR form of EVM NTT's
+    /// owner-gated UUPS upgrade.
+    #[payable]
+    pub fn upgrade(&mut self) -> Promise {
+        self.assert_owner();
+        let code = env::input().unwrap_or_else(|| env::panic_str("NoCode"));
+        require!(!code.is_empty(), "NoCode");
+        emit("upgrade", json!({ "code_sha256": hex::encode(env::sha256_array(&code)) }));
+        Promise::new(env::current_account_id()).deploy_contract(code).function_call(
+            "migrate".to_string(),
+            Vec::new(),
+            NearToken::from_yoctonear(0),
+            GAS_FOR_MIGRATE,
+        )
+    }
+
+    /// Run by `upgrade` on the new code. Reads the state as it is; a release that changes a stored
+    /// layout replaces this body with the conversion. Every release keeps the method.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        env::state_read().unwrap_or_else(|| env::panic_str("NoState"))
     }
 
     // =============== Views ==================================================================
@@ -216,6 +274,7 @@ impl NttManager {
 
 impl NttManager {
     fn assert_owner(&self) {
+        near_sdk::assert_one_yocto();
         require!(env::predecessor_account_id() == self.owner, "Unauthorized");
     }
 
@@ -289,9 +348,9 @@ pub(crate) mod tests {
         testing_env!(ctx.build());
     }
 
-    /// Owned by `accounts(0)`, which stays the caller.
+    /// Owned by `accounts(0)`, which stays the caller — with the 1 yocto owner methods take.
     pub(crate) fn contract_with(token_decimals: u8, outbound_limit: u128) -> NttManager {
-        set_ctx(accounts(0).as_str(), 0);
+        set_ctx_with(accounts(0).as_str(), 0, 1);
         NttManager::new(
             accounts(0),
             TOKEN.parse().unwrap(),
@@ -307,7 +366,7 @@ pub(crate) mod tests {
     }
 
     fn as_caller(account: AccountId) {
-        set_ctx(account.as_str(), 0);
+        set_ctx_with(account.as_str(), 0, 1);
     }
 
     #[test]
@@ -349,5 +408,30 @@ pub(crate) mod tests {
         c.set_peer(HYDRATION, MANAGER.into(), TRANSCEIVER.into(), 8, U128(500));
         c.set_peer(HYDRATION, MANAGER.into(), TRANSCEIVER.into(), 8, U128(800));
         assert_eq!(c.inbound_capacity(HYDRATION), Some(U128(800)));
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
+    fn owner_methods_need_a_full_access_key() {
+        let mut c = contract();
+        set_ctx(accounts(0).as_str(), 0);
+        c.transfer_ownership(accounts(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "Paused")]
+    fn claims_wait_out_a_pause() {
+        let mut c = contract();
+        c.pause();
+        as_caller(accounts(1));
+        let _ = c.claim();
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn only_the_owner_upgrades() {
+        let mut c = contract();
+        as_caller(accounts(1));
+        let _ = c.upgrade();
     }
 }

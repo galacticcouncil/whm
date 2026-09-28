@@ -1,5 +1,5 @@
 import { nearToYocto } from "near-api-js";
-import { accountHash, call, checked } from "@whm/common/near";
+import { accountHash, call, checked, receiptFailures } from "@whm/common/near";
 
 import type { NearContext } from "../types";
 
@@ -27,7 +27,11 @@ export async function registerEmitter(params: RegisterEmitterParams): Promise<Re
   const outcome = await call(account, core, "register_emitter", { emitter: nttAccount }, {
     deposit: nearToYocto("0.01"),
   });
-  checked("register_emitter", outcome);
+  // Registration is permissionless: someone may have registered the account first. That is the
+  // same registration — the core keys it by account and signs as `sha256(account)` either way.
+  const failures = receiptFailures(outcome);
+  const takenFirst = failures.length > 0 && JSON.stringify(failures).includes("AlreadyRegistered");
+  if (!takenFirst) checked("register_emitter", outcome);
 
   return { txHash: outcome.transaction.hash, emitter: accountHash(nttAccount) };
 }

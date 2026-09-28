@@ -146,6 +146,7 @@ async fn setup(register_emitter: bool) -> anyhow::Result<Env> {
             "decimals": 18,
             "inbound_limit": (1_000u128 * 10u128.pow(24)).to_string(),
         }))
+        .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?
         .into_result()?;
@@ -256,12 +257,22 @@ async fn send_to_hydration(env: &Env, amount: u128) -> anyhow::Result<ExecutionF
 }
 
 async fn complete(env: &Env, vaa: &str, account: &str) -> anyhow::Result<ExecutionFinalResult> {
-    Ok(env
-        .relayer
+    complete_with(env, &env.relayer, vaa, account, NearToken::from_millinear(10), MAX_GAS).await
+}
+
+async fn complete_with(
+    env: &Env,
+    caller: &Account,
+    vaa: &str,
+    account: &str,
+    deposit: NearToken,
+    gas: Gas,
+) -> anyhow::Result<ExecutionFinalResult> {
+    Ok(caller
         .call(env.ntt.id(), "complete")
         .args_json(json!({ "vaa": vaa, "account_id": account }))
-        .deposit(NearToken::from_millinear(10))
-        .gas(MAX_GAS)
+        .deposit(deposit)
+        .gas(gas)
         .transact()
         .await?)
 }
@@ -315,6 +326,10 @@ async fn failed_publish_refunds_the_sender() -> anyhow::Result<()> {
     assert_eq!(balance(&env.token, env.ntt.id().as_str()).await?, 0);
     let capacity: String = view(&env.ntt, "outbound_capacity", json!({})).await?;
     assert_eq!(capacity, capacity_before);
+    // The inbound window was full, so the lock's backflow added nothing — and the refund took
+    // nothing back.
+    let inbound: String = view(&env.ntt, "inbound_capacity", json!({ "chain_id": HYDRATION })).await?;
+    assert_eq!(inbound, (1_000u128 * 10u128.pow(24)).to_string());
     assert!(event(&events(&result), "whm-ntt", "transfer_failed").is_some());
     Ok(())
 }
@@ -431,6 +446,7 @@ async fn over_the_limit_reverts_and_refunds() -> anyhow::Result<()> {
     env.ntt
         .call("set_outbound_limit")
         .args_json(json!({ "limit": 10u128.pow(24).to_string() }))
+        .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?
         .into_result()?;
@@ -445,5 +461,165 @@ async fn over_the_limit_reverts_and_refunds() -> anyhow::Result<()> {
     assert!(event(&events(&result), "wormhole", "publish").is_none());
     let capacity: String = view(&env.ntt, "outbound_capacity", json!({})).await?;
     assert_eq!(capacity, 10u128.pow(24).to_string());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failed_complete_refunds_more_than_the_free_balance() -> anyhow::Result<()> {
+    // The deposit dwarfs the contract's free balance (~50 NEAR less its code). `on_verified` fails
+    // on the forged signature; `on_complete_settled` must still hand the whole deposit back.
+    let env = setup(true).await?;
+    let whale = subaccount(&env.worker, "whale", 300).await?;
+    let deposit = NearToken::from_near(200);
+
+    let bob = format!("bob.{}", env.worker.root_account()?.id());
+    let payload = hydration_transfer(&env.ntt, &bob, 150_000_000, 1);
+    let forged = Guardian::new(0x22).sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+
+    let before = whale.view_account().await?.balance;
+    let result = complete_with(&env, &whale, &forged, &bob, deposit, MAX_GAS).await?;
+    env.worker.fast_forward(5).await?;
+    let spent = before.saturating_sub(whale.view_account().await?.balance).saturating_sub(burnt(&result));
+    println!("thin balance: caller kept-out {} yocto of a {deposit} deposit", spent.as_yoctonear());
+    assert!(spent < NearToken::from_millinear(1), "deposit not refunded: {:?}", result.failures());
+    Ok(())
+}
+
+#[tokio::test]
+async fn complete_at_the_minimum_gas_delivers() -> anyhow::Result<()> {
+    // Every other test prepays 300 TGas, whose surplus is spread over the promises and hides the
+    // static budgets. Here: the least gas the precheck accepts, on the heaviest path (registering).
+    let env = setup(true).await?;
+    assert!(send_to_hydration(&env, 5 * 10u128.pow(24)).await?.is_success());
+
+    let bob = format!("bob.{}", env.worker.root_account()?.id());
+    let payload = hydration_transfer(&env.ntt, &bob, 150_000_000, 1);
+    let vaa = env.guardian.sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+
+    for tgas in 85..=130 {
+        let result = complete_with(&env, &env.relayer, &vaa, &bob, NearToken::from_millinear(10), Gas::from_tgas(tgas)).await?;
+        // Refused by the precheck: nothing reached the core.
+        if !result.outcomes().iter().any(|o| o.executor_id == *env.core.id()) {
+            continue;
+        }
+        println!("complete accepted at {tgas} TGas");
+        assert!(result.failures().is_empty(), "at {tgas} TGas: {:?}", result.failures());
+        assert_eq!(balance(&env.token, &bob).await?, 1_500_000_000_000_000_000_000_000);
+        return Ok(());
+    }
+    anyhow::bail!("complete never accepted up to 130 TGas")
+}
+
+#[tokio::test]
+async fn outbound_at_the_minimum_gas_publishes() -> anyhow::Result<()> {
+    // The least `ft_transfer_call` gas `ft_on_transfer` accepts must still publish and settle — a
+    // detached publish that ran out of gas would leave the tokens locked with no message.
+    let env = setup(true).await?;
+    let msg = json!({ "recipient_chain": HYDRATION, "recipient": HYDRATION_RECIPIENT }).to_string();
+
+    for tgas in 50..=150 {
+        let before = balance(&env.token, env.ntt.id().as_str()).await?;
+        let result = env
+            .alice
+            .call(env.token.id(), "ft_transfer_call")
+            .args_json(json!({ "receiver_id": env.ntt.id(), "amount": 10u128.pow(24).to_string(), "msg": msg }))
+            .deposit(NearToken::from_yoctonear(1))
+            .gas(Gas::from_tgas(tgas))
+            .transact()
+            .await?;
+        // Refused (refunded in full, or never reached the contract).
+        if balance(&env.token, env.ntt.id().as_str()).await? == before {
+            continue;
+        }
+        println!("outbound accepted at {tgas} TGas");
+        assert!(result.failures().is_empty(), "at {tgas} TGas: {:?}", result.failures());
+        assert!(event(&events(&result), "whm-ntt", "transfer_sent").is_some());
+        return Ok(());
+    }
+    anyhow::bail!("outbound never accepted up to 150 TGas")
+}
+
+async fn upgrade(caller: &Account, env: &Env, code: &[u8]) -> anyhow::Result<ExecutionFinalResult> {
+    Ok(caller
+        .call(env.ntt.id(), "upgrade")
+        .args(code.to_vec())
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(MAX_GAS)
+        .transact()
+        .await?)
+}
+
+#[tokio::test]
+async fn the_owner_upgrades_and_state_survives() -> anyhow::Result<()> {
+    let env = setup(true).await?;
+    assert!(send_to_hydration(&env, 5 * 10u128.pow(24)).await?.is_success());
+    let peer_before: Value = view(&env.ntt, "get_peer", json!({ "chain_id": HYDRATION })).await?;
+    let capacity_before: String = view(&env.ntt, "outbound_capacity", json!({})).await?;
+
+    let result = upgrade(env.ntt.as_account(), &env, &ntt_wasm().await?).await?;
+    gas("upgrade", &result);
+    assert!(result.is_success(), "{:?}", result.failures());
+    assert!(event(&events(&result), "whm-ntt", "upgrade").is_some());
+
+    let peer: Value = view(&env.ntt, "get_peer", json!({ "chain_id": HYDRATION })).await?;
+    assert_eq!(peer, peer_before);
+    // The window only refills while the blocks pass — never reset by the upgrade.
+    let capacity: String = view(&env.ntt, "outbound_capacity", json!({})).await?;
+    assert!(capacity.parse::<u128>()? >= capacity_before.parse::<u128>()?);
+    assert!(capacity.parse::<u128>()? < 1_000 * 10u128.pow(24));
+    assert_eq!(balance(&env.token, env.ntt.id().as_str()).await?, 5 * 10u128.pow(24));
+    // Still a working contract: the next outbound publishes.
+    assert!(event(&events(&send_to_hydration(&env, 10u128.pow(24)).await?), "whm-ntt", "transfer_sent").is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn only_the_owner_upgrades() -> anyhow::Result<()> {
+    let env = setup(true).await?;
+    let result = upgrade(&env.alice, &env, &ntt_wasm().await?).await?;
+    assert!(result.is_failure());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failed_migrate_keeps_the_old_code() -> anyhow::Result<()> {
+    // wrap.near's code has no `migrate`: the batch fails as a whole and the deploy is undone.
+    let env = setup(true).await?;
+    let code_before = format!("{:?}", env.ntt.view_account().await?.contract_state);
+
+    let result = upgrade(env.ntt.as_account(), &env, WRAP_WASM).await?;
+    assert!(result.is_failure());
+    assert_eq!(format!("{:?}", env.ntt.view_account().await?.contract_state), code_before);
+    let owner: String = view(&env.ntt, "owner", json!({})).await?;
+    assert_eq!(owner, env.ntt.id().as_str());
+    Ok(())
+}
+
+#[tokio::test]
+async fn with_no_keys_left_the_owner_still_upgrades() -> anyhow::Result<()> {
+    // The prod end-state: ownership with a custodian, every key on the contract account deleted.
+    let env = setup(true).await?;
+    let custodian = subaccount(&env.worker, "custodian", 10).await?;
+    let handover = env
+        .ntt
+        .call("transfer_ownership")
+        .args_json(json!({ "new_owner": custodian.id() }))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await?;
+    assert!(handover.is_success(), "{:?}", handover.failures());
+    env.ntt
+        .as_account()
+        .batch(env.ntt.id())
+        .delete_key(env.ntt.as_account().secret_key().public_key())
+        .transact()
+        .await?
+        .into_result()?;
+    let keys = env.worker.view_access_keys(env.ntt.id()).await?;
+    assert!(keys.is_empty());
+
+    let result = upgrade(&custodian, &env, &ntt_wasm().await?).await?;
+    assert!(result.is_success(), "{:?}", result.failures());
+    assert!(event(&events(&send_to_hydration(&env, 10u128.pow(24)).await?), "whm-ntt", "transfer_sent").is_some());
     Ok(())
 }

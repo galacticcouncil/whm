@@ -11,6 +11,8 @@ import type { MigrationConfig } from "./types";
  *   003 register its storage on the token
  *   004 peer it with the Hydration manager + transceiver
  *   005 transfer its ownership to the NEAR custodian
+ *   006 delete the contract account's keys — from here only the owner can upgrade it (`upgrade`),
+ *       and no key can sign as its emitter. Refuses unless the code on chain is NTT_WASM
  *
  * NEAR SIDE ONLY. The Hydration NttManager (BURNING) and WormholeTransceiver are deployed and
  * configured from hydration-ntt — the usual per-token `add-chain Hydration --mode burning` — and
@@ -25,8 +27,6 @@ import type { MigrationConfig } from "./types";
  * OUTSIDE THIS MIGRATION:
  *   - EVMAccounts.set_ntt_minter(assetId, HYDRATION_NTT_MANAGER) — referendum.
  *   - Relayer: an `ntt` route, sourceChain 15, sourceEmitter = 001's `emitter`.
- *   - Removing the NEAR contract account's full-access keys, after the canary — the step that makes
- *     the code immutable. Until then the deployer key can redeploy it.
  *
  * Required PK env vars:
  *   PK_NEAR — NEAR deployer, `ed25519:…`, for NEAR_ACCOUNT (the NTT contract is its sub-account)

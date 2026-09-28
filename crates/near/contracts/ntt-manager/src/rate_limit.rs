@@ -42,10 +42,13 @@ impl RateLimit {
         true
     }
 
-    /// Returns `amount` to the window — the opposite direction's transfer, or a refund.
-    pub fn backflow(&mut self, amount: u128, now: u64) {
-        self.capacity = self.capacity(now).saturating_add(amount).min(self.limit);
+    /// Returns `amount` to the window — the opposite direction's transfer, or a refund. Capped at
+    /// the limit; returns what was actually added, so a later `debit` takes back no more than that.
+    pub fn backflow(&mut self, amount: u128, now: u64) -> u128 {
+        let before = self.capacity(now);
+        self.capacity = before.saturating_add(amount).min(self.limit);
         self.last_tx_at = now;
+        self.capacity - before
     }
 
     /// Takes back a backflow — saturating, since the capacity may have been spent since.
@@ -96,9 +99,18 @@ mod tests {
     fn backflow_is_capped_at_limit() {
         let mut rl = RateLimit::new(1_000, 0);
         assert!(rl.consume(300, 0));
-        rl.backflow(200, 0);
+        assert_eq!(rl.backflow(200, 0), 200);
         assert_eq!(rl.capacity(0), 900);
-        rl.backflow(500, 0);
+        assert_eq!(rl.backflow(500, 0), 100);
+        assert_eq!(rl.capacity(0), 1_000);
+    }
+
+    #[test]
+    fn debiting_the_applied_backflow_leaves_a_full_window_full() {
+        let mut rl = RateLimit::new(1_000, 0);
+        let applied = rl.backflow(400, 0);
+        assert_eq!(applied, 0);
+        rl.debit(applied, 0);
         assert_eq!(rl.capacity(0), 1_000);
     }
 

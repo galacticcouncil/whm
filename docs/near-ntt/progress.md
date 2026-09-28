@@ -286,3 +286,33 @@ the real testnet core (`wormhole.wormhole.testnet`, guardian set 0) and `wrap.te
 
 Hydration → NEAR on testnet is not possible — nothing signs Hydration VAAs there — and stays covered
 by the sandbox suite and the local fork (`forkVaa.ts`).
+
+## Stage 6 — audit fixes, owner-gated upgrade
+
+`/near-audit` (8 agents, [audit-2026-09-28.md](audit-2026-09-28.md), gitignored): no Critical, High
+or Medium. Fixed:
+
+| Report item | Fix |
+| ----------- | --- |
+| F1 `message_fee` not attached | Spec now matches the code: none attached, fail-closed (refund), recover by `upgrade` |
+| F2 failed publish debits unadded inbound capacity | `backflow` returns what it added; `OutboundTransfer.inbound_backflow` is what the refund takes back |
+| F3 32-byte recipient the EVM peer cannot decode | `parse_recipient` requires the upper 12 bytes zero |
+| Pause not re-checked across receipts | `on_verified` and `claim` check it |
+| Owner methods callable by function-call keys | 1 yocto on every owner method; a `whm-ntt` event on each |
+| Refund may precede the failed deposit's return | Deposit passed to `on_verified` as an argument, never attached. Against the old wasm the refund still worked (200 NEAR back in full), so the lead was a false alarm — kept for independence from receipt order |
+| Static gas untested at the minimum | Sandbox: `complete` accepted at 92 TGas delivers; outbound accepted at 84 TGas publishes |
+| Key custody — a key on the account can forge emitter messages | `upgrade` (owner, raw wasm, deploy + `migrate` in one batch) and migration step `006-delete-keys@ntt` — the multisig owner is the only upgrade authority, like EVM NTT |
+| `register_emitter` front-run | Step 002 treats `AlreadyRegistered` as done |
+| Residual, integrator notes, peer rotation, `StorageKey` | Documented in spec.md and code |
+
+`zec.omft.near`'s `ft_transfer` (audit lead): checked — every `*.omft.near` family is the standard
+single-receipt transfer.
+
+| Check | Result |
+| ----- | ------ |
+| `cargo test -p ntt-manager` | 58 passed |
+| Sandbox | 13 passed — the 6 before + limits on a failed publish, thin-balance refund, 2 minimum-gas, 4 upgrade |
+| `pnpm migrate:near-ntt-near:fork` | 6/6 — keys deleted; `upgrade.ts` as owner then upgraded the keyless contract; a transfer after it published |
+
+The testnet contract (`ntt-near.whm-ntt-0bugdc.testnet`) runs pre-stage-6 code: step 006 refuses on
+it (code hash ≠ `NTT_WASM`). Redeploy it with the deployer key first.

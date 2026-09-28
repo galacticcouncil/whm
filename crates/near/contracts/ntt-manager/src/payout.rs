@@ -36,10 +36,13 @@ pub trait FungibleToken {
 
 #[near]
 impl NttManager {
-    /// Pays out an account's claimable balance — what a failed pay-out credited.
+    /// Pays out an account's claimable balance — what a failed pay-out credited. Stopped by the
+    /// pause, like `complete` and `release_inbound`. A failed outbound's refund is not: it only
+    /// returns the sender's own tokens.
     #[payable]
     pub fn claim(&mut self) -> Promise {
         near_sdk::assert_one_yocto();
+        require!(!self.paused, "Paused");
         let account = env::predecessor_account_id();
         let amount = self.claimable.remove(&account).unwrap_or(0);
         require!(amount > 0, "NothingToClaim");

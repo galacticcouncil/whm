@@ -177,18 +177,21 @@ token.ft_transfer_call(
 `ft_on_transfer(sender_id, amount, msg)`:
 
 1. Require `predecessor == config.token` — a call from any other token is refunded in full.
-2. Parse `msg`; require a peer for `recipient_chain`.
+2. Parse `msg`; require a peer for `recipient_chain`. `recipient` must be an EVM address — 20 bytes,
+   or 32 with the upper 12 zero. The peer's `fromWormholeFormat` reverts `NotAnEvmAddress` on
+   anything else, so such a transfer would lock here and never redeem there.
 3. **Trim.** `trimmed = trim(amount, min(8, token_decimals, peer_decimals))`; the dust is returned
    as part of the unused amount, so NEP-141 refunds it to the sender automatically. No dust
    revert, no dust kept.
 4. **Rate limit.** Outbound capacity must cover the amount, or `ft_on_transfer` panics
    `TransferExceedsRateLimit` and the token refunds all of it. Consume outbound, backflow the peer's
-   inbound.
+   inbound — capped at its limit, so the amount actually added travels with the transfer.
 5. Build the message; `seq += 1` for `id`.
 6. Return **the dust only**, immediately — the tokens are now locked.
 7. Detached: `publish_message(hex(message), 0)` on core, then `on_published(transfer)`. Success →
-   `transfer_sent` event. Failure → restore both rate limits and pay the sender back through
-   `ft_transfer`; if that fails too, credit `claimable[sender]`.
+   `transfer_sent` event. Failure → return the outbound capacity, take back only the inbound
+   backflow step 4 actually added, and pay the sender back through `ft_transfer`; if that fails
+   too, credit `claimable[sender]`.
 
 **Why detached.** Chaining the publish into `ft_on_transfer`'s return value (so a failure refunds
 through the unused amount) opens a double spend: if `publish_message` succeeds and `on_published`
@@ -207,9 +210,16 @@ anyone could drain that balance with dust-sized queued transfers and stall every
 call. `should_queue` is not part of `msg`. A transfer that clears NEAR but exceeds Hydration's
 inbound limit is still queued there, by stock NTT.
 
-`ft_on_transfer` cannot receive a NEAR deposit, so the core `message_fee` (if non-zero) is paid from
-the contract's own balance. Gas: the caller attaches enough for `ft_on_transfer` + the publish (core
-requires ≥ 10 TGas prepaid) + the callback; the frontend fixes it at a measured value.
+**Message fee: none attached, fail-closed.** `ft_on_transfer` cannot receive a NEAR deposit, so
+`publish` attaches none — the core's `message_fee` is 0 ([verify.md §1](verify.md)). Paying it out
+of the contract's balance would let any sender drain that balance, one transfer at a time. If
+Wormhole governance ever sets a non-zero fee, every publish fails and is refunded (step 7): nothing
+is lost, outbound halts, and the owner upgrades the contract to pay it from a deposit.
+
+Gas: the caller attaches enough for `ft_on_transfer` + the publish (core requires ≥ 10 TGas
+prepaid) + the callback. The least `ft_transfer_call` gas `ft_on_transfer` accepts through
+`wrap.near` — 84 TGas in the sandbox — still publishes and settles
+(`outbound_at_the_minimum_gas_publishes`).
 
 ### Inbound — Hydration → NEAR
 
@@ -229,7 +239,9 @@ complete(vaa, account_id)            deposit ≥ registration_deposit + 0.005 NE
 2. **Verify.** `verify_vaa` on core checks signatures and the guardian set; it does not parse the
    body. `storage_balance_of` runs beside it, so `on_verified` knows whether the recipient is
    registered without another hop.
-3. **`on_verified`** re-parses the same bytes: emitter chain has a peer and emitter
+3. **`on_verified`** re-checks the pause — `complete` checked it receipts earlier, and a pause
+   landing in between must stop the unlock too (a panic here refunds, VAA unconsumed). Then it
+   re-parses the same bytes: emitter chain has a peer and emitter
    `== peer.transceiver`; `TransceiverMessage.source == peer.manager` and
    `recipient == sha256(self)`; `toChain == 15`; `sha256(account_id) == to`; amount non-zero.
 4. **Replay.** Mark the NTT digest executed.
@@ -237,7 +249,8 @@ complete(vaa, account_id)            deposit ≥ registration_deposit + 0.005 NE
    pay out. Otherwise → `inbound_queue[digest]` for 24 h; `release_inbound(digest)` — anyone — pays
    it out after.
 6. **Deposit.** Measured storage cost + `registration_deposit` if unregistered; the rest refunded
-   to the caller. `registration_deposit` is an init parameter — `storage_balance_bounds().min`,
+   to the caller. The deposit never leaves the contract after `complete`: `on_verified` is passed
+   its amount, not attached it, so `on_complete_settled` always has it on hand to refund. `registration_deposit` is an init parameter — `storage_balance_bounds().min`,
    0.00125 NEAR for both tokens ([verify.md §4](verify.md#4-token-storage--000125-near-required)).
 7. **Pay out** (detached): `storage_deposit(account_id, registration_only)` if needed, then
    `ft_transfer`, then `on_paid` — failure credits `claimable[account_id]`, paid out by `claim()`.
@@ -251,8 +264,17 @@ cannot undo its predecessor. The **claimable fallback** is what makes that safe:
 failure downstream of a consumed VAA — a failed registration — would refund the deposit a second
 time. Detached, it reads `on_verified` alone.
 
-**Residual:** a failed `storage_deposit` returns its 0.00125 NEAR to this contract, not to the
-caller; the transfer then lands in `claimable`. Small, and only on a token-side failure.
+**Residual:** a registration that does not go as planned leaves its 0.00125 NEAR with this
+contract, not the caller. A failed `storage_deposit` refunds it here, and the transfer lands in
+`claimable`. A recipient that registers between `storage_balance_of` and `storage_deposit` — or a
+balance view that errors, or two completes racing for the same new recipient — makes
+`storage_deposit` succeed and refund to its predecessor, this contract. 1:1 griefing at most, for
+0.00125 NEAR.
+
+**`claimable` storage is the contract's.** `on_paid` runs with no deposit, so a failed pay-out's
+`claimable` entry (~125 bytes) is paid from the contract's balance. Forcing one takes a real
+Hydration burn and a recipient that unregisters mid-flight, so it costs more than it drains — but
+keep the contract's free balance monitored.
 
 ## Hub
 
@@ -280,13 +302,34 @@ extra `setPeer`.
 | `seq`                                 | `NttManagerMessage.id`                            |
 | `owner`, `paused`                     | admin                                             |
 
-`owner`-only: `set_peer`, `set_limits`, `pause` / `unpause`, `transfer_ownership`. No instruction
-moves locked tokens except inbound completion and `claim`. No admin withdraw.
+`owner`-only: `set_peer`, `set_outbound_limit` / `set_inbound_limit`, `pause` / `unpause`,
+`transfer_ownership`, `upgrade`. Each takes exactly 1 yocto — a function-call access key cannot
+attach a deposit, so every owner call needs a full-access key or the multisig's own call — and logs
+a `whm-ntt` event (`peer_set`, `outbound_limit_set`, `inbound_limit_set`, `paused`, `unpaused`,
+`ownership_transferred`, `upgrade`). No instruction moves locked tokens except inbound completion
+and `claim`. No admin withdraw.
 
-**Upgradeability is account keys, not a proxy.** A NEAR contract is redeployable by any full-access
-key on its account. Prod end-state, matching the other corridors: ownership to the Hydration TC's
-counterpart (a NEAR multisig), and **all full-access keys removed** from the contract account, which
-makes the code immutable. Until then, whoever holds a full-access key holds the custody.
+The pause stops every user-driven way out of custody — `ft_on_transfer`, `complete`, `on_verified`,
+`release_inbound`, `claim`. A failed outbound's refund still runs: it returns the sender's own
+tokens.
+
+Replacing a peer (`set_peer` on a chain that has one) strands VAAs in flight from the old pair until
+it is set again — VAAs never expire and the replay key does not depend on the peer. Drain before
+rotating.
+
+**Upgradeability is the owner, not the keys.** A NEAR contract is redeployable by any full-access
+key on its account, and a full-access key is one ed25519 key — a multisig cannot hold one. It could
+also sign `publish_message` as this contract's emitter, and Hydration would mint what it signed. So
+the upgrade authority is moved into the contract: `upgrade` (owner, 1 yocto) takes the new wasm as
+raw input and deploys it with a call to its `migrate` in one batch — a `migrate` that fails reverts
+the deploy, and the old code stays. Prod end-state, matching the EVM managers' owner-gated UUPS
+upgrade: ownership to a NEAR multisig (migration step 005), then **every key on the contract
+account deleted** (step 006). From there only the owner can change the code, and no key can speak
+as the emitter. `crates/near/scripts/ntt-manager/upgrade.ts --print` gives the multisig proposal.
+
+`migrate` is `#[init(ignore_state)]` and today reads the state as it is. A release that changes a
+stored layout (`Peer`, `RateLimit`, `InboundTransfer`, the contract struct) converts it there;
+`StorageKey` is append-only. Every release keeps `migrate`.
 
 ## Invariants
 
@@ -331,6 +374,13 @@ before mainnet regardless.
   [`crates/near/scripts/ntt-manager/complete.ts`](../../crates/near/scripts/ntt-manager/complete.ts)
   does it from the Hydration transceiver's emitter and sequence, or a raw VAA.
 
+**For integrators.** `complete`, `release_inbound` and `claim` return chains that always end in
+success — a failed pay-out lands in `claimable`, a failed `on_verified` is refunded — so a contract
+chaining `.then` on them must read the `whm-ntt` events, not the promise result. The guardian NEAR
+watcher stops at the first failed Wormhole-core outcome in a transaction: a batch that publishes
+and also runs a failing `verify_vaa` can lock tokens with no VAA. Send transfers in a transaction
+of their own.
+
 ## Latency
 
 | Leg                          | Estimate                                                      |
@@ -348,7 +398,7 @@ Seconds to a minute end to end, unmeasured.
 | Zcash connector | NEAR MPC custody of native ZEC + light client; DAO admin                       | ZEC only   |
 | Token contracts | `zec.omft.near` / `wrap.near` admins — could pause or upgrade the token        | both       |
 | Wormhole        | guardians (13/19)                                                              | both       |
-| NTT contracts   | NEAR contract (full-access keys until removed) + Hydration manager owner (TC)  | both       |
+| NTT contracts   | NEAR contract owner (multisig; upgrades via `upgrade`, no account keys) + Hydration manager owner (TC) | both |
 
 Against the fallback, every Omni row is gone: no MPC signing on the transfer path, no trusted
 relayer gate, no `5kx8…` admin with mint power.
@@ -359,7 +409,8 @@ relayer gate, no `5kx8…` admin with mint power.
 | ----------------------- | ------------------------------------------------------------------------ | ------------------------------- |
 | Codec                   | golden vectors from `TransceiverStructs.sol`, both directions            | forge script + `cargo test`     |
 | Unit                    | trim, rate limits + backflow, inbound queue, replay, peers, pause        | `cargo test`                    |
-| Async                   | publish failure → refund; `ft_transfer` failure → claimable; unregistered storage; out-of-gas mid-chain | `near-workspaces` sandbox |
+| Async                   | publish failure → refund (limits restored exactly); `ft_transfer` failure → claimable; unregistered storage; a refund larger than the contract's free balance; `complete` / outbound at the minimum accepted gas | `near-workspaces` sandbox |
+| Upgrade                 | owner upgrade keeps state; non-owner refused; failed `migrate` keeps the old code; upgrade with no account keys left | `near-workspaces` sandbox |
 | Core integration        | real Wormhole NEAR core wasm with a test guardian set signing VAAs       | `near-workspaces` + `wormhole/near/contracts/wormhole` |
 | Hydration side          | NEAR-emitted VAA into the real manager / transceiver / `set_ntt_minter`  | chopsticks, guardian set substituted — the Basejump probe pattern |
 | Mainnet canary          | one small transfer each way under launch caps                            | —                               |
@@ -377,7 +428,9 @@ relayer gate, no `5kx8…` admin with mint power.
 - **Migration — NEAR side only.** `near-ntt-zec` / `near-ntt-near`, one per token (state is keyed by
   migration name), steps in `migrations/actions/near-ntt/`, wallet from `@whm/common/near`: deploy +
   init (one transaction) → register emitter → register token storage → peer with Hydration →
-  ownership. The Hydration manager + transceiver are deployed **and peered back to NEAR** from
+  ownership → delete the account's keys (refuses unless the code on chain is `NTT_WASM`, the build
+  with `upgrade`). Registering the emitter is idempotent — it is permissionless, so a third party
+  may have done it first. The Hydration manager + transceiver are deployed **and peered back to NEAR** from
   hydration-ntt; this migration only reads their addresses from env and outputs the NEAR emitter
   for it. The NTT CLI does not know NEAR, so hydration-ntt's reverse peering is a plain `setPeer` /
   `setWormholePeer`, not `ntt push`.

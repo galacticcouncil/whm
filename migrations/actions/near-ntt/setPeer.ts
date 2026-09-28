@@ -26,7 +26,7 @@ export type SetPeerResult = {
 
 /**
  * Registers a peer on the NEAR NTT contract — its manager, its Wormhole emitter, the precision it
- * trims to — and that peer's inbound limit. Owner-only.
+ * trims to — and that peer's inbound limit. Owner-only, 1 yocto (a full-access key).
  *
  * @param params Owner wallet, NTT contract account, peer chain, manager, transceiver, decimals, limit
  * @returns The transaction and what was set
@@ -40,7 +40,7 @@ export async function setPeer(params: SetPeerParams): Promise<SetPeerResult> {
     transceiver,
     decimals,
     inbound_limit: inboundLimit,
-  });
+  }, { deposit: 1n });
   checked("set_peer", outcome);
 
   return {

@@ -139,10 +139,10 @@ pnpm migrate:near-ntt-zec             # or :near — PK_NEAR, env in migrations/
 
 `001` deploy (create + fund + deploy + init in one transaction) · `002` register emitter on the core ·
 `003` register storage on the token · `004` peer with the Hydration manager + transceiver · `005`
-transfer ownership. Before it: the Hydration manager + transceiver from hydration-ntt, their
-addresses in the env. After it: hydration-ntt peers them back with `001`'s emitter, the
-`set_ntt_minter` referendum, an `ntt` relayer route (NEAR → Hydration), and — after the canary —
-removing the contract account's full-access keys. Details in
+transfer ownership to the NEAR multisig · `006` delete the contract account's keys — from then on
+only the owner upgrades it (`upgrade`). Before it: the Hydration manager + transceiver from
+hydration-ntt, their addresses in the env. After it: hydration-ntt peers them back with `001`'s
+emitter, the `set_ntt_minter` referendum, and an `ntt` relayer route (NEAR → Hydration). Details in
 [`migrations/definitions/near-ntt-zec/index.ts`](../../migrations/definitions/near-ntt-zec/index.ts).
 
 ## Scripts
@@ -155,6 +155,7 @@ removing the contract account's full-access keys. Details in
 | `transfer.ts`  | NEAR → Hydration: `ft_transfer_call`; prints the Wormholescan VAA URL             |
 | `complete.ts`  | Hydration → NEAR: redeem by `--vaa`, or `--emitter` + `--sequence` (Wormholescan) |
 | `claim.ts`     | pay out the signer's `claimable` balance                                          |
+| `upgrade.ts`   | owner: redeploy + `migrate` in one batch; `--print` gives the multisig proposal   |
 | `status.ts`    | owner, peer, capacities; `--account` claimable; `--digest` executed / queued      |
 | `runSandbox.ts`| the local fork (`pnpm fork:near`)                                                 |
 | `forkVaa.ts`   | fork only: a Hydration → NEAR VAA signed by the fork guardian                     |

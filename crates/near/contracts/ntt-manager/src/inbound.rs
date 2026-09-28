@@ -8,6 +8,11 @@
 //!             → on_complete_settled    refunds the whole deposit if on_verified failed
 //! ```
 //!
+//! The deposit stays with the contract from `complete` on — `on_verified` is told its amount, it is
+//! not attached. A deposit attached to a receipt that fails comes back in a refund receipt of its
+//! own, which can land after `on_complete_settled` has already paid the refund out of the
+//! contract's free balance; held here, it is always on hand when the refund goes out.
+//!
 //! The VAA is consumed in `on_verified` and the tokens leave in a later receipt. `pay_out` makes
 //! that safe: a failed `ft_transfer` credits `claimable` against the account the VAA named.
 
@@ -88,8 +93,7 @@ impl NttManager {
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(callback_gas)
-                    .with_attached_deposit(deposit)
-                    .on_verified(vaa, account_id, caller.clone()),
+                    .on_verified(vaa, account_id, caller.clone(), U128(deposit.as_yoctonear())),
             )
             .then(
                 Self::ext(env::current_account_id())
@@ -99,22 +103,27 @@ impl NttManager {
     }
 
     /// Consumes the VAA. Any panic here unwinds it — the VAA stays unconsumed and
-    /// `on_complete_settled` returns the deposit.
+    /// `on_complete_settled` returns the deposit. `deposit` is what `complete` received and still
+    /// holds; only the contract can call this, so it is trusted.
+    ///
+    /// Re-checks the pause: `complete` checked it receipts ago, and a pause landing in between must
+    /// stop the unlock too.
     ///
     /// Returns nothing, and every promise it starts is detached: `on_complete_settled` reads this
     /// call's own outcome. Returning the pay-out would make a failure downstream of a consumed VAA
     /// — a failed registration — look like a failed `on_verified`, and the deposit would be
     /// refunded a second time.
     #[private]
-    #[payable]
     pub fn on_verified(
         &mut self,
         vaa: String,
         account_id: AccountId,
         caller: AccountId,
+        deposit: U128,
         #[callback_result] verified: Result<u32, PromiseError>,
         #[callback_result] storage: Result<Option<StorageBalance>, PromiseError>,
     ) {
+        require!(!self.paused, "Paused");
         require!(verified.is_ok(), "VaaVerifyFailed");
         let storage_before = env::storage_usage();
 
@@ -141,14 +150,15 @@ impl NttManager {
         // measurable after it.
         self.inbound_queue.flush();
 
-        // An unreadable balance is treated as unregistered: registering twice only refunds.
+        // An unreadable balance is treated as unregistered. Registering an account that already is
+        // succeeds and refunds — to this contract, the predecessor: the documented residual.
         let registered = matches!(storage, Ok(Some(_)));
         let registration = if registered { None } else { Some(self.registration_deposit) };
 
         let storage_cost = env::storage_byte_cost()
             .saturating_mul(env::storage_usage().saturating_sub(storage_before) as u128);
         let used = storage_cost.saturating_add(registration.unwrap_or(NearToken::from_yoctonear(0)));
-        let deposit = env::attached_deposit();
+        let deposit = NearToken::from_yoctonear(deposit.0);
         require!(deposit >= used, "InsufficientDeposit");
         let excess = deposit.saturating_sub(used);
         if !excess.is_zero() {
@@ -320,9 +330,16 @@ mod tests {
     }
 
     fn verified(c: &mut NttManager, o: &Overrides, registered: bool, at: u64) {
-        set_ctx_with(CONTRACT, at, DEPOSIT);
+        set_ctx_with(CONTRACT, at, 0);
         let storage = registered.then(|| StorageBalance { total: U128(1), available: U128(0) });
-        c.on_verified(vaa(o), RECIPIENT.parse().unwrap(), "relayer.near".parse().unwrap(), Ok(7), Ok(storage))
+        c.on_verified(
+            vaa(o),
+            RECIPIENT.parse().unwrap(),
+            "relayer.near".parse().unwrap(),
+            U128(DEPOSIT),
+            Ok(7),
+            Ok(storage),
+        )
     }
 
     fn digest(o: &Overrides) -> String {
@@ -392,11 +409,12 @@ mod tests {
     #[should_panic(expected = "VaaVerifyFailed")]
     fn a_failed_verification_consumes_nothing() {
         let mut c = zec();
-        set_ctx_with(CONTRACT, 0, DEPOSIT);
+        set_ctx_with(CONTRACT, 0, 0);
         c.on_verified(
             vaa(&defaults()),
             RECIPIENT.parse().unwrap(),
             "relayer.near".parse().unwrap(),
+            U128(DEPOSIT),
             Err(PromiseError::Failed),
             Ok(None),
         );
@@ -487,13 +505,25 @@ mod tests {
     #[should_panic(expected = "InsufficientDeposit")]
     fn an_unregistered_recipient_needs_the_registration() {
         let mut c = zec();
-        set_ctx_with(CONTRACT, 0, 1_000_000_000_000_000_000_000); // 0.001 NEAR < 0.00125
+        set_ctx_with(CONTRACT, 0, 0);
         c.on_verified(
             vaa(&defaults()),
             RECIPIENT.parse().unwrap(),
             "relayer.near".parse().unwrap(),
+            U128(1_000_000_000_000_000_000_000), // 0.001 NEAR < 0.00125
             Ok(7),
             Ok(None),
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "Paused")]
+    fn a_pause_landing_after_complete_stops_the_unlock() {
+        let mut c = zec();
+        let o = defaults();
+        complete(&mut c, &o);
+        set_ctx_with(&near_sdk::test_utils::accounts(0).to_string(), 0, 1);
+        c.pause();
+        verified(&mut c, &o, true, 0);
     }
 }

@@ -34,7 +34,7 @@ pub trait WormholeCore {
 #[near(serializers = [json])]
 pub struct TransferMsg {
     pub recipient_chain: u16,
-    /// Hex: a 20-byte EVM address (left-padded) or a full 32 bytes.
+    /// Hex: a 20-byte EVM address, or the same left-padded to 32 bytes.
     pub recipient: String,
 }
 
@@ -50,6 +50,9 @@ pub struct OutboundTransfer {
     pub trimmed: TrimmedAmount,
     pub recipient_chain: u16,
     pub recipient: [u8; 32],
+    /// What the lock actually returned to the peer's inbound window — the backflow is capped, so a
+    /// refund takes back this, not `amount`.
+    pub inbound_backflow: U128,
 }
 
 #[near]
@@ -76,6 +79,9 @@ impl NttManager {
         let locked = amount.0 - dust;
 
         let now = now();
+        require!(self.outbound.consume(locked, now), "TransferExceedsRateLimit");
+        let inbound_backflow = self.inbound_limit(msg.recipient_chain).backflow(locked, now);
+
         let transfer = OutboundTransfer {
             id: self.next_seq(),
             sender: sender_id,
@@ -83,10 +89,8 @@ impl NttManager {
             trimmed,
             recipient_chain: msg.recipient_chain,
             recipient,
+            inbound_backflow: U128(inbound_backflow),
         };
-
-        require!(self.outbound.consume(locked, now), "TransferExceedsRateLimit");
-        self.inbound_limit(transfer.recipient_chain).backflow(locked, now);
 
         self.assert_gas(GAS_FOR_PUBLISH.saturating_add(GAS_FOR_ON_PUBLISHED).saturating_add(GAS_FOR_PAY_OUT));
         // Detached — see the module docs. The returned value is only the dust.
@@ -114,7 +118,7 @@ impl NttManager {
             Err(_) => {
                 let now = now();
                 self.outbound.backflow(transfer.amount.0, now);
-                self.inbound_limit(transfer.recipient_chain).debit(transfer.amount.0, now);
+                self.inbound_limit(transfer.recipient_chain).debit(transfer.inbound_backflow.0, now);
                 emit("transfer_failed", transfer_json(&transfer));
                 Some(self.pay_out(transfer.sender, transfer.amount.0, None))
             }
@@ -165,7 +169,10 @@ impl NttManager {
     }
 }
 
-/// A 20-byte EVM address is left-padded; 32 bytes pass through. Zero is rejected.
+/// A 20-byte EVM address is left-padded; 32 bytes pass through if they are one. Zero is rejected.
+///
+/// Every peer is an EVM NttManager, whose `fromWormholeFormat` reverts `NotAnEvmAddress` on
+/// non-zero upper bytes — such a transfer would lock here and never redeem there.
 fn parse_recipient(value: &str) -> [u8; 32] {
     let bytes = hex::decode(value.trim_start_matches("0x"))
         .unwrap_or_else(|_| env::panic_str("InvalidRecipient"));
@@ -179,6 +186,7 @@ fn parse_recipient(value: &str) -> [u8; 32] {
         _ => env::panic_str("InvalidRecipient"),
     };
     require!(recipient != [0u8; 32], "InvalidRecipient");
+    require!(recipient[..12] == [0u8; 12], "InvalidRecipient");
     recipient
 }
 
@@ -202,7 +210,7 @@ fn sent_json(transfer: &OutboundTransfer, wormhole_sequence: u64) -> serde_json:
 mod tests {
     use super::*;
     use crate::messages::TransceiverMessage;
-    use crate::tests::{contract_with, set_ctx, CONTRACT, HYDRATION, MANAGER, TOKEN, TRANSCEIVER};
+    use crate::tests::{contract_with, set_ctx, set_ctx_with, CONTRACT, HYDRATION, MANAGER, TOKEN, TRANSCEIVER};
     use near_sdk::test_utils::accounts;
 
     const RECIPIENT: &str = "0x1111111111111111111111111111111111111111";
@@ -276,7 +284,7 @@ mod tests {
     #[should_panic(expected = "Paused")]
     fn paused_is_refunded() {
         let mut c = zec();
-        set_ctx(&accounts(0).to_string(), 0);
+        set_ctx_with(&accounts(0).to_string(), 0, 1);
         c.pause();
         set_ctx(TOKEN, 0);
         let _ = c.ft_on_transfer(accounts(1), U128(1), msg());
@@ -293,6 +301,7 @@ mod tests {
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
             recipient: parse_recipient(RECIPIENT),
+            inbound_backflow: U128(0),
         };
 
         as_self();
@@ -311,6 +320,7 @@ mod tests {
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
             recipient: parse_recipient(RECIPIENT),
+            inbound_backflow: U128(0),
         };
 
         as_self();
@@ -328,6 +338,7 @@ mod tests {
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
             recipient: parse_recipient(RECIPIENT),
+            inbound_backflow: U128(0),
         };
         let peer = c.peer(HYDRATION);
         let bytes = c.encode_outbound(&transfer, &peer);
@@ -350,7 +361,36 @@ mod tests {
     #[test]
     fn recipients_pad_or_pass_through() {
         assert_eq!(&parse_recipient(RECIPIENT)[..12], &[0u8; 12]);
-        let full = format!("0x{}", "22".repeat(32));
-        assert_eq!(parse_recipient(&full), [0x22; 32]);
+        let padded = format!("0x{}{}", "00".repeat(12), "22".repeat(20));
+        assert_eq!(parse_recipient(&padded), parse_recipient(&format!("0x{}", "22".repeat(20))));
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidRecipient")]
+    fn a_recipient_the_evm_peer_cannot_decode_is_refunded() {
+        // An AccountId32, say — `fromWormholeFormat` would revert on Hydration.
+        parse_recipient(&format!("0x{}", "22".repeat(32)));
+    }
+
+    #[test]
+    fn failed_publish_takes_back_only_the_backflow_it_added() {
+        // Inbound window full: the lock's backflow adds nothing, so the refund must debit nothing.
+        let mut c = zec();
+        let _ = c.ft_on_transfer(accounts(1), U128(400), msg());
+        assert_eq!(c.inbound_capacity(HYDRATION), Some(U128(1_000)));
+        let transfer = OutboundTransfer {
+            id: 0,
+            sender: accounts(1),
+            amount: U128(400),
+            trimmed: TrimmedAmount { amount: 400, decimals: 8 },
+            recipient_chain: HYDRATION,
+            recipient: parse_recipient(RECIPIENT),
+            inbound_backflow: U128(0),
+        };
+
+        as_self();
+        let _ = c.on_published(transfer, Err(PromiseError::Failed));
+        assert_eq!(c.inbound_capacity(HYDRATION), Some(U128(1_000)));
+        assert_eq!(c.outbound_capacity(), U128(1_000));
     }
 }
