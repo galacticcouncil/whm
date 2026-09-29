@@ -1,6 +1,6 @@
 ---
 name: new-hydration-asset
-description: Register a new Hydration runtime asset for an NTT burning leg (the currencies precompile token), the fast way — permissionless `assetRegistry.register_external` for the Wormhole location, then a TC-majority `assetRegistry.update` for metadata, then `set_ntt_minter` at go-live. Builds the location, checks it, encodes and dry-runs every call with polkadot-api against live Hydration. Trigger on "register asset on Hydration", "create Hydration asset for <token>", "asset registry for NTT", "register_external", or `/hydration-ntt-asset <tokens>`.
+description: Register a new Hydration runtime asset for an NTT burning leg (the currencies precompile token), the fast way — permissionless `assetRegistry.register_external` for the Wormhole location, then a TC-majority `assetRegistry.update` for metadata, then `set_ntt_minter` at go-live. Builds the location, checks it, encodes and dry-runs every call with polkadot-api against live Hydration. Trigger on "register asset on Hydration", "create Hydration asset for <token>", "asset registry for NTT", "register_external", or `/new-hydration-asset <tokens>`.
 ---
 
 # Hydration runtime asset for an NTT burning leg
@@ -123,14 +123,41 @@ const loc = (chain, key32) => ({
 - Hand the hex to the user. Tell them that `register_external` is permissionless, so a concurrent
   registration can shift the ids: the **real** ids come from the `Registered` events after submission.
 
-### Step 4: TC `update` batch (after the real ids are known)
+### Step 4: TC `update` motion
 
-- Per token: `AssetRegistry.update({ asset_id, name, asset_type: Token, existential_deposit,
-xcm_rate_limit, is_sufficient: true, symbol, decimals, location: undefined })`, all in one `batch_all`.
-- Dry-run it with a TC-majority origin (`Enum('TechnicalCommittee', Enum('Members', [n, m]))` with
-  `n/m ≥ 1/2`, checking the origin variant names in the descriptors). Then read back the expected
-  `Updated` events.
-- Output: the call hex plus call hash, for the TC motion.
+**Ids:** once the registration is on-chain, take each id from `AssetRegistry.LocationAssets.getValue(loc)`,
+never from the expected-id table. Before that, use the expected ids, and regenerate the motion if any id
+moved.
+
+1. Per token: `AssetRegistry.update({ asset_id, name: Binary.fromText(name), asset_type: Enum('Token'),
+existential_deposit, xcm_rate_limit, is_sufficient: true, symbol: Binary.fromText(sym), decimals,
+location: undefined })`, all in one `Utility.batch_all`. Leave `location` unset (`None`); TC can't
+   set it anyway.
+2. Names must be unique (`AssetRegistry.AssetIds.getValue(Binary.fromText(name))` returns `undefined`)
+   and between `MinStringLimit` (3) and `StringLimit` (32) bytes.
+3. Motion: `TechnicalCommittee.propose({ threshold, proposal: batch.decodedCall, length_bound })`
+   - `threshold = ceil(members / 2)` for TC majority, where members =
+     `TechnicalCommittee.Members.getValue().length`. For 7 members that's 4.
+   - `length_bound` = the byte length of the encoded batch.
+   - Proposal hash = `Blake2256(batch bytes)` (`@polkadot-api/substrate-bindings`). Members vote on
+     this hash.
+4. **Dry-run** (verified method; it also works _before_ the assets exist): run a Root-origin
+   `DryRunApi.dry_run_call` of
+   ```
+   Utility.batch_all[
+     Utility.dispatch_as(system.Signed(<any account>), <register_external batch>),
+     Utility.dispatch_as(TechnicalCommittee.Members(threshold, members), <update batch>) ]
+   ```
+   Check `execution_result.success`, **both** `Utility.DispatchedAs` results `success: true`
+   (`dispatch_as` doesn't fail the outer call on an inner error), and one `AssetRegistry.Updated` per
+   token with `asset_type: Token`, `is_sufficient: true`, and the right name, symbol, decimals, ED and
+   rate limit.
+5. Output: the update batch hex, its hash, the `propose` call hex, `length_bound`, and a per-token
+   table of values.
+
+**Ordering rule:** the TC `update` must be enacted **before** `set_ntt_minter`, so the asset is a
+sufficient `Token` before anyone holds a balance. Changing External → Token and insufficient →
+sufficient is only clean while supply is zero.
 
 ### Step 5: precompile check
 
@@ -161,5 +188,23 @@ expected ids 1001355–1001358. `register_external` batch:
 0x0d0210330400030602776800000000000000000000000000000000000000000000000000000000000005bc0620000000000000000000000000555555555555555555555555555555555555555533040003060277680000000000000000000000000000000000000000000000000000000000000521010620000000000000000000000000117cc2133c37b721f49de2a7a74833232b3b4c0c3304000306027768000000000000000000000000000000000000000000000000000000000000053c06203174446b8cc98197d6f2c9e504d6d229f0adb00d2b7566af0e54a84a876fef0f3304000306027768000000000000000000000000000000000000000000000000000000000000053c0620b55c490bafb82aeb4b950fa479341c1b5fbfa814f8253b6acdf8426b7cd9d3c0
 ```
 
-Decimals for the TC update: HYPE 18, SPY 18, ZEC 8, NEAR 24. Re-check `NextAssetId` before reusing
-this hex; if another asset got registered first, the ids are stale.
+TC `update` motion for those ids (TC 7 members, threshold 4). The whole register → update
+sequence dry-ran OK via Root `dispatch_as`. ED ≈ $0.01 at HYPE $87.50, SPY $765.61, ZEC $1,483.98,
+NEAR $4.82. The `xcm_rate_limit` values were _proposed_ (≈ $45k per day for HYPE/SPY, and a ≈ $5k
+canary for the unaudited NEAR contract); TC can raise them later with another `update`.
+
+| id      | name                   | symbol | dec | ED (raw)               | xcm_rate_limit |
+| ------- | ---------------------- | ------ | --- | ---------------------- | -------------- |
+| 1001355 | Hyperliquid (Wormhole) | HYPE   | 18  | 114285714285714        | 500 HYPE       |
+| 1001356 | SPY (Wormhole)         | SPY    | 18  | 13061480386097         | 60 SPY         |
+| 1001357 | Zcash (Wormhole)       | ZEC    | 8   | 674                    | 3 ZEC          |
+| 1001358 | NEAR (Wormhole)        | NEAR   | 24  | 2074688796680497925311 | 1,000 NEAR     |
+
+- update batch hash: `0x3fd18baafc6d25090f902d3b10035d7cd1bbbe9e8737ff5ca3594e4250bac1e1`, `length_bound` 288
+- `propose` call:
+  ```
+  0x1902100d021033018b470f00015848797065726c69717569642028576f726d686f6c652901000192246737f1670000000000000000000001000050efe2d6e41a1b00000000000000010101104859504501120033018c470f0001385350592028576f726d686f6c6529010001310ee61ce10b00000000000000000000010000703b1bd2aa4003000000000000000101010c53505901120033018d470f0001405a636173682028576f726d686f6c6529010001a20200000000000000000000000000000100a3e1110000000000000000000000000101010c5a454301080033018e470f00013c4e4541522028576f726d686f6c6529010001bf0cb49768441778700000000000000001000000e83c80d09f3c2e3b0300000000010101104e4541520118008104
+  ```
+
+Re-check `NextAssetId` (or, after registration, `LocationAssets`) before reusing any of this hex. If
+another asset got registered first, the ids are stale and both batches must be regenerated.
