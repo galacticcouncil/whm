@@ -13,8 +13,7 @@ library GovernanceCodec {
     uint256 internal constant MAX_CALL_DATA_LENGTH = 32_768;
     uint256 internal constant MAX_PAYLOAD_LENGTH = 65_536;
 
-    bytes32 internal constant ACTION_DOMAIN =
-        keccak256("hydration.cross-chain-governance.action.v1");
+    bytes32 internal constant ACTION_DOMAIN = keccak256("hydration.cross-chain-governance.action.v1");
 
     struct Call {
         address target;
@@ -50,14 +49,7 @@ library GovernanceCodec {
         _validateHeader(destinationWormholeChain, destinationExecutor, governanceNonce);
         _validateCalldataCalls(calls);
 
-        payload = abi.encode(
-            MAGIC,
-            VERSION,
-            destinationWormholeChain,
-            destinationExecutor,
-            governanceNonce,
-            calls
-        );
+        payload = abi.encode(MAGIC, VERSION, destinationWormholeChain, destinationExecutor, governanceNonce, calls);
         if (payload.length > MAX_PAYLOAD_LENGTH) revert PayloadTooLarge(payload.length);
     }
 
@@ -78,9 +70,7 @@ library GovernanceCodec {
 
         if (magic != MAGIC) revert InvalidMagic(magic);
         if (version != VERSION) revert InvalidVersion(version);
-        _validateHeader(
-            action.destinationWormholeChain, action.destinationExecutor, action.governanceNonce
-        );
+        _validateHeader(action.destinationWormholeChain, action.destinationExecutor, action.governanceNonce);
         _validateMemoryCalls(action.calls);
 
         bytes memory canonical = abi.encode(
@@ -105,11 +95,10 @@ library GovernanceCodec {
         return keccak256(abi.encode(ACTION_DOMAIN, emitterChain, emitterAddress, payloadHash));
     }
 
-    function _validateHeader(
-        uint16 destinationWormholeChain,
-        address destinationExecutor,
-        uint64 governanceNonce
-    ) private pure {
+    function _validateHeader(uint16 destinationWormholeChain, address destinationExecutor, uint64 governanceNonce)
+        private
+        pure
+    {
         if (destinationWormholeChain == 0) revert InvalidDestinationChain();
         if (destinationExecutor == address(0)) revert InvalidDestinationExecutor();
         if (governanceNonce == 0) revert InvalidGovernanceNonce();
