@@ -14,7 +14,7 @@ The following parameters are agreed for v0.1:
 | Minimum execution delay | 24 hours from destination queueing |
 | Execution grace period | 7 days after the action matures |
 | Batch behavior | Atomic, at most 16 calls |
-| Upgrade model | UUPS; executor upgrades require self-call, emitter upgrades require governance caller |
+| Upgrade model | UUPS; executor upgrades require self-call, dispatcher upgrades require governance caller |
 | Technical Committee | Veto-only Safe configured independently per destination chain |
 | Veto sovereignty | Absolute; there is no Root bypass or forced vetoer replacement in v0.1 |
 | Queue and execution | Permissionless; failed execution remains retryable until expiry |
@@ -50,7 +50,7 @@ administrative roles; it is not an EOA.
 
 - General user bridging or token transfers.
 - Automatic proof that a message corresponds to a particular referendum number. Authorization comes
-  from the OpenGov-controlled emitter path, not from an unverified identifier in the payload.
+  from the OpenGov-controlled dispatcher path, not from an unverified identifier in the payload.
 - Technical Committee execution, payload modification, or early execution.
 - `delegatecall` into arbitrary targets.
 - Non-EVM destination chains in the first version.
@@ -69,7 +69,7 @@ pallet-dispatcher
   governance account
       |
       v
-GovernanceEmitter.publish(action)
+GovernanceDispatcher.publish(action)
       |
       | Wormhole message / guardian-signed VAA
       v
@@ -92,8 +92,8 @@ on one destination chain.
 
 | Authority | Capability |
 | --- | --- |
-| Hydration OpenGov | Publish destination actions through the governance-only emitter |
-| Wormhole Guardians | Attest that the configured Hydration emitter published a message |
+| Hydration OpenGov | Publish destination actions through the governance dispatcher |
+| Wormhole Guardians | Attest that the configured Hydration dispatcher published a message |
 | Technical Committee multisig | Veto any queued, unexecuted action before expiry |
 | Any account | Submit a valid VAA and execute a matured, unexpired action |
 | Governance executor | Own positions/assets and exercise downstream contract permissions |
@@ -143,34 +143,34 @@ The existing `dispatch_as_aave_manager` pattern is insufficient as-is: it belong
 Parameters authority domain and reports its inner dispatch result in an event while returning outer
 success.
 
-### Governance emitter
+### Governance dispatcher
 
-`GovernanceEmitter` is deployed on Hydration EVM and configured with:
+`GovernanceDispatcher` is deployed on Hydration EVM and configured with:
 
 - the Hydration Wormhole core contract;
 - the dedicated cross-chain governance EVM address; and
 - the supported message version.
 
-Only the dedicated governance address may publish. The emitter assigns a monotonically increasing
+Only the dedicated governance address may publish. The dispatcher assigns a monotonically increasing
 `governanceNonce`; callers do not choose or reuse it. Each publication emits the destination,
 nonce, action hash, and Wormhole sequence.
 
-The emitter proxy is deployed with initialization calldata in the same transaction. Initialization
+The dispatcher proxy is deployed with initialization calldata in the same transaction. Initialization
 requires nonzero Wormhole and governance addresses, verifies that the Wormhole address has code,
 requires the core contract to report Hydration Wormhole chain ID 73, sets `governanceNonce = 1`, and
 cannot be repeated. The implementation constructor disables initializers. There is no deployer owner
 and no setter for the governance caller.
 
 Publication is payable and requires `msg.value == wormhole.messageFee()`. A fee change therefore
-fails closed instead of trapping excess value or spending an unbounded emitter balance. The
-emitter forwards exactly `msg.value`, never `address(this).balance`; forced native balance cannot be
+fails closed instead of trapping excess value or spending an unbounded dispatcher balance. The
+dispatcher forwards exactly `msg.value`, never `address(this).balance`; forced native balance cannot be
 spent by publication. The dispatcher must propagate a fee-check revert. The Wormhole consistency
 level is the code constant `202`, which Hydration's production watcher treats as finalized. Live
 verification showed that level `200` skips the pending queue with zero confirmations, while
 otherwise-identical messages at `202` wait for finality. Governance cannot lower the constant
 through a setter.
 
-The emitter is UUPS-upgradeable. `_authorizeUpgrade` accepts only the fixed governance caller and its
+The dispatcher is UUPS-upgradeable. `_authorizeUpgrade` accepts only the fixed governance caller and its
 state uses namespaced storage. The nonce must survive every upgrade and must revert rather than wrap.
 There is no `ProxyAdmin` or alternate upgrade authority. The generic `MessageEmitter` is not suitable
 because its `sendMessage` function is permissionless.
@@ -198,7 +198,8 @@ event ActionPublished(
 destination fields and invalid calls, constructs the one canonical payload encoding, and enforces all
 v1 size limits. It reserves and increments the governance nonce before calling Wormhole; a revert
 rolls the increment back. The action ID uses the core contract's verified local Wormhole chain ID,
-the left-zero-padded emitter address, and the payload hash according to the formula below.
+the left-zero-padded Wormhole emitter address of the dispatcher, and the payload hash according to
+the formula below.
 
 ## Message format
 
@@ -244,7 +245,7 @@ load-bearing because a top-level struct containing a dynamic array has a differe
 
 `0x484458474f56` is the ASCII `HDXGOV` protocol discriminator and `1` is the independently checked
 protocol version.
-Both must match. The emitter assigns `governanceNonce`, starting at 1 and increasing by one for every
+Both must match. The dispatcher assigns `governanceNonce`, starting at 1 and increasing by one for every
 published destination message. Each message has its own nonce even when one referendum targets
 several chains.
 
@@ -256,7 +257,7 @@ Protocol v1 limits are:
 | Calldata in one `Call.data` | 32,768 bytes |
 | Complete encoded Wormhole payload | 65,536 bytes |
 
-Both emitter and executor enforce all three limits. The total limit applies to the exact ABI-encoded
+Both dispatcher and executor enforce all three limits. The total limit applies to the exact ABI-encoded
 payload, including tuple and array overhead. These are application limits, not claims about a global
 Wormhole limit: Wormhole documents payload capacity as chain-dependent, and the EVM sender does not
 impose a fixed payload cap. Every supported source/destination combination must still pass a
@@ -276,7 +277,7 @@ Every action commits to:
 - the authorized source Wormhole chain and emitter, through VAA verification;
 - the destination Wormhole chain;
 - the destination executor address;
-- the emitter-assigned governance nonce;
+- the dispatcher-assigned governance nonce;
 - every call's target, value, and calldata.
 
 The destination chain and executor checks prevent the same VAA from being executed by another
@@ -300,15 +301,15 @@ bytes32 actionId = keccak256(
 ```
 
 The source chain and emitter come from the verified VAA, never from payload fields. Including them in
-the action ID prevents collisions across an authorized-emitter migration. The record stores
+the action ID prevents collisions across an authorized-dispatcher migration. The record stores
 `payloadHash`, so execution verifies the exact signed bytes without recomputing the action ID from the
-executor's current source configuration. Consequently, changing the authorized emitter does not
-strand actions that were already queued from the previous emitter.
+executor's current source configuration. Consequently, changing the authorized dispatcher does not
+strand actions that were already queued from the previous dispatcher.
 
 The payload deliberately contains no referendum or preimage hash. A preimage cannot contain its own
 hash without creating a circular dependency, and a caller-supplied referendum identifier would not
 be independently trustworthy. The canonical audit identifiers are the Hydration enactment
-transaction and block, Wormhole sequence and VAA hash, emitter-assigned governance nonce, and
+transaction and block, Wormhole sequence and VAA hash, dispatcher-assigned governance nonce, and
 destination action ID. Proposal tooling and published governance metadata must link these records.
 
 ## Destination executor
@@ -317,7 +318,7 @@ Each destination has an independent `GovernanceExecutor` configured with:
 
 - Wormhole core address;
 - authorized Hydration Wormhole chain ID;
-- authorized Hydration emitter address;
+- authorized Hydration dispatcher address in Wormhole universal-address form;
 - local Wormhole chain ID, read from and checked against the Wormhole core contract;
 - Technical Committee vetoer address;
 - a 24-hour veto period; and
@@ -334,7 +335,7 @@ The executor must be able to receive native tokens and ERC-721 position NFTs. Su
 token receiver interfaces is added only where an identified integration requires it.
 
 The ERC-1967 proxy is deployed with initialization calldata in the same transaction. Initialization
-requires a Wormhole contract with code, a nonzero source emitter, and a deployed Safe contract as
+requires a Wormhole contract with code, a nonzero source dispatcher, and a deployed Safe contract as
 vetoer; verifies the local Wormhole chain ID from the core contract; installs the 24-hour and 7-day
 minimums; and cannot be repeated. The implementation constructor disables initializers. The
 executor uses namespaced storage and has no `ProxyAdmin`, deployer owner, or other upgrade path.
@@ -377,23 +378,24 @@ interface IGovernanceExecutor {
     function state(bytes32 actionId) external view returns (ActionState);
 
     function setVetoer(address newVetoer) external;
-    function setSourceEmitter(bytes32 sourceEmitter) external;
+    function setSourceDispatcher(bytes32 sourceDispatcher) external;
     function setTiming(uint48 vetoPeriod, uint48 executionGracePeriod) external;
 }
 ```
 
-`setVetoer`, `setSourceEmitter`, `setTiming`, and UUPS upgrade authorization are `onlySelf`. The
+`setVetoer`, `setSourceDispatcher`, `setTiming`, and UUPS upgrade authorization are `onlySelf`. The
 initializer alone sets their bootstrap values. Timing changes affect only actions queued after the
 change because every action stores its own deadlines. `setVetoer` rejects zero and requires deployed
-code. Hydration Wormhole chain ID 73 is immutable in v1; `setSourceEmitter` rotates only the nonzero
-emitter address. `setTiming` enforces a minimum 24-hour execution delay and minimum 7-day grace
+code. Hydration Wormhole chain ID 73 is immutable in v1; `setSourceDispatcher` rotates only the
+nonzero dispatcher address. `setTiming` enforces a minimum 24-hour execution delay and minimum 7-day grace
 period; governance may lengthen them but cannot weaken these v1 floors without a vetoable
 implementation upgrade.
 
-`setSourceEmitter` replaces, rather than supplements, the authorized source. Before executing a
-source migration, operators must queue and reconcile every intended VAA from the old emitter; an old
-VAA first submitted after replacement is intentionally rejected. Already queued old-emitter actions
-remain executable because their records retain the original payload hash and action ID.
+`setSourceDispatcher` replaces, rather than supplements, the authorized source. Before executing a
+source migration, operators must queue and reconcile every intended VAA from the old dispatcher; an
+old-dispatcher VAA first submitted after replacement is intentionally rejected. Already queued
+old-dispatcher actions remain executable because their records retain the original payload hash and
+action ID.
 
 The executor also implements `receive()` and `IERC721Receiver.onERC721Received`.
 
@@ -418,9 +420,9 @@ event ActionVetoed(
 
 event ActionExecuted(bytes32 indexed actionId, address indexed caller);
 event VetoerUpdated(address indexed previousVetoer, address indexed newVetoer);
-event SourceEmitterUpdated(
-    bytes32 previousSourceEmitter,
-    bytes32 newSourceEmitter
+event SourceDispatcherUpdated(
+    bytes32 previousSourceDispatcher,
+    bytes32 newSourceDispatcher
 );
 event TimingUpdated(uint48 vetoPeriod, uint48 executionGracePeriod);
 ```
@@ -459,7 +461,7 @@ payload hash, avoiding unbounded calldata duplication in storage and re-encoding
 
 1. Enter a reentrancy guard before calling the Wormhole core.
 2. Parse and verify the VAA with the configured Wormhole core.
-3. Require the configured Hydration source chain and emitter from the verified VM.
+3. Require the configured Hydration source chain and dispatcher's emitter address from the verified VM.
 4. Reject an already consumed VAA hash and a payload larger than 65,536 bytes.
 5. Decode only the `HDXGOV` discriminator and supported message version.
 6. Re-encode the decoded payload and require byte-for-byte canonical equality.
@@ -537,7 +539,7 @@ This includes:
 - executor implementation upgrades;
 - vetoer rotation;
 - veto-period and grace-period changes;
-- source emitter migration on Hydration chain 73; and
+- source dispatcher migration on Hydration chain 73; and
 - recovery or migration to a replacement executor.
 
 Bootstrap configuration is performed by atomic proxy initialization. No deployer authority exists
@@ -610,7 +612,7 @@ No relayer is trusted for correctness, but production needs automation for avail
 
 A governance app in `agents/relayer` should:
 
-- watch the Hydration emitter;
+- watch the Hydration dispatcher;
 - fetch and submit signed VAAs to the correct destination;
 - track pending actions and their deadlines;
 - execute actions after maturity;
@@ -622,7 +624,7 @@ Independent parties can perform the same queue and execute calls.
 
 ## Security invariants
 
-1. Only a VAA from the configured Hydration emitter can create an action.
+1. Only a VAA from the configured Hydration dispatcher can create an action.
 2. A VAA or action ID cannot create more than one queued action on an executor.
 3. An action cannot execute on a destination other than the one encoded in its payload.
 4. No action executes before its full local veto period has elapsed.
@@ -667,7 +669,7 @@ Expected failure modes and responses:
 | Target changes after queueing | TC must evaluate and, if necessary, veto; the executor authenticates calldata, not target code or state |
 | Action never executes | It expires after the grace period |
 | Wormhole fee changes before enactment | Source publication reverts and the dispatcher reports failure |
-| Emitter call reverts on Hydration | Dispatcher reports enactment failure; no VAA is published |
+| Governance dispatcher call reverts on Hydration | Runtime dispatcher reports enactment failure; no VAA is published |
 | Executor bug | Governed migration or upgrade path, subject to the same delay and veto |
 
 ## Deployment model
@@ -677,7 +679,7 @@ Each destination deployment has its own configuration and custody record. At min
 - chain ID and Wormhole chain ID;
 - proxy and implementation addresses;
 - Wormhole core address;
-- Hydration emitter chain and address;
+- Hydration dispatcher chain and address;
 - vetoer multisig address and threshold;
 - veto and grace periods;
 - implementation code hash;
@@ -690,15 +692,15 @@ state files under `deployments/prod/`.
 
 Before the Hydration deployment, verify on-chain that the proposed `0xaa7e...aa7e2` identity has no
 EVM code, account binding, nonce history, approvals, or existing protocol roles. After deployment,
-monitor its native balance and assert that the governance emitter remains the only contract that
+monitor its native balance and assert that the governance dispatcher remains the only contract that
 recognizes it as privileged.
 
 ## Test gates
 
 ### Solidity unit and fuzz tests
 
-- Emitter caller authorization, exact Wormhole fee, fixed finality, and nonce persistence/overflow.
-- Canonical encoding and size enforcement on both emitter and executor.
+- Dispatcher caller authorization, exact Wormhole fee, fixed finality, and nonce persistence/overflow.
+- Canonical encoding and size enforcement on both dispatcher and executor.
 - Source-chain and emitter authentication.
 - Payload version and canonical action hashing.
 - Rejection of trailing bytes, alternate offsets, overlapping ABI regions, and dirty padding.
@@ -715,7 +717,7 @@ recognizes it as privileged.
 - Revert/return-data truncation at 4,096 bytes.
 - Native-value sum overflow, insufficient balance, and exact accounting.
 - Self-administration and upgrade authorization.
-- Old-emitter VAA behavior before and after a source migration.
+- Old-dispatcher VAA behavior before and after a source migration.
 - Rejection of a mixed upgrade/action batch.
 - Atomic proxy initialization, implementation initialization lock, and reinitialization attempts.
 - Enforcement of the 24-hour and 7-day timing floors.
@@ -780,7 +782,7 @@ recognizes it as privileged.
 
 - [x] Confirm atomic batch execution.
 - [x] Choose UUPS with upgrades authorized only through an executor self-call.
-- [x] Define `onlySelf` vetoer, source-emitter, timing, and UUPS administration.
+- [x] Define `onlySelf` vetoer, source-dispatcher, timing, and UUPS administration.
 - [x] Require native-token and ERC-721 receipt in the core executor.
 - [x] Accept native funding through `receive()` and allow outflow only through delayed governance.
 - [x] Eliminate deployer authority through atomic initialization and `onlySelf` administration.

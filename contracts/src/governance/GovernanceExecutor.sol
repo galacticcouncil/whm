@@ -10,8 +10,8 @@ import {GovernanceCodec} from "./GovernanceCodec.sol";
 import {IGovernanceExecutor} from "./interfaces/IGovernanceExecutor.sol";
 
 /// @title GovernanceExecutor — delayed destination executor for Hydration OpenGov
-/// @notice Accepts only guardian-verified messages from the configured Hydration emitter. Actions
-///         wait locally for the veto period, then execute atomically and permissionlessly.
+/// @notice Accepts only guardian-verified messages from the configured Hydration dispatcher.
+///         Actions wait locally for the veto period, then execute atomically and permissionlessly.
 contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, IGovernanceExecutor {
     /// @notice Wormhole identifier assigned to Hydration; source-chain selection is immutable in v1.
     uint16 public constant HYDRATION_WORMHOLE_CHAIN = 73;
@@ -35,8 +35,9 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
     struct ExecutorStorage {
         /// @dev Trusted verifier. Guardian quorum security terminates at this core contract.
         IWormhole wormhole;
-        /// @dev Currently authorized Hydration emitter. Rotation does not alter queued records.
-        bytes32 sourceEmitter;
+        /// @dev Authorized Hydration dispatcher as a Wormhole emitter address. Rotation does not
+        ///      alter queued records.
+        bytes32 sourceDispatcher;
         /// @dev Veto-only Technical Committee Safe for this destination chain.
         address vetoer;
         uint16 localWormholeChain;
@@ -80,14 +81,14 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
     /// @dev Reads the local Wormhole ID from the trusted core instead of accepting caller input.
     function initialize(
         address wormhole_,
-        bytes32 sourceEmitter_,
+        bytes32 sourceDispatcher_,
         address vetoer_,
         uint48 vetoPeriod_,
         uint48 executionGracePeriod_
     ) external initializer {
         if (wormhole_ == address(0)) revert ZeroAddress();
         if (wormhole_.code.length == 0) revert AddressHasNoCode(wormhole_);
-        if (sourceEmitter_ == bytes32(0)) revert InvalidSourceEmitter();
+        if (sourceDispatcher_ == bytes32(0)) revert InvalidSourceDispatcher();
         _validateVetoerAddress(vetoer_);
         _validateTiming(vetoPeriod_, executionGracePeriod_);
 
@@ -98,7 +99,7 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
 
         ExecutorStorage storage $ = _getExecutorStorage();
         $.wormhole = IWormhole(wormhole_);
-        $.sourceEmitter = sourceEmitter_;
+        $.sourceDispatcher = sourceDispatcher_;
         $.vetoer = vetoer_;
         $.localWormholeChain = localChain;
         $.vetoPeriod = vetoPeriod_;
@@ -124,7 +125,7 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
         ExecutorStorage storage $ = _getExecutorStorage();
         (IWormhole.VM memory vm, bool valid,) = $.wormhole.parseAndVerifyVM(vaa);
         if (!valid) revert InvalidVaa();
-        if (vm.emitterChainId != HYDRATION_WORMHOLE_CHAIN || vm.emitterAddress != $.sourceEmitter) {
+        if (vm.emitterChainId != HYDRATION_WORMHOLE_CHAIN || vm.emitterAddress != $.sourceDispatcher) {
             revert UnauthorizedEmitter(vm.emitterChainId, vm.emitterAddress);
         }
         if ($.consumedVaas[vm.hash]) revert VaaAlreadyConsumed(vm.hash);
@@ -135,7 +136,7 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
         }
 
         bytes32 payloadHash = keccak256(vm.payload);
-        // Wormhole sequence is intentionally absent. The emitter-assigned nonce lives inside the
+        // Wormhole sequence is intentionally absent. The dispatcher-assigned nonce lives inside the
         // payload, while source chain + emitter + payload hash fully identify the authorization.
         actionId_ = GovernanceCodec.actionId(vm.emitterChainId, vm.emitterAddress, payloadHash);
         if ($.actions[actionId_].storedStatus != 0) revert ActionAlreadyQueued(actionId_);
@@ -260,13 +261,13 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
 
     /// @inheritdoc IGovernanceExecutor
     /// @dev Already queued actions remain executable because execution authenticates their stored
-    ///      payload hash instead of consulting the current emitter.
-    function setSourceEmitter(bytes32 newSourceEmitter) external onlySelf {
-        if (newSourceEmitter == bytes32(0)) revert InvalidSourceEmitter();
+    ///      payload hash instead of consulting the current dispatcher.
+    function setSourceDispatcher(bytes32 newSourceDispatcher) external onlySelf {
+        if (newSourceDispatcher == bytes32(0)) revert InvalidSourceDispatcher();
         ExecutorStorage storage $ = _getExecutorStorage();
-        bytes32 previous = $.sourceEmitter;
-        $.sourceEmitter = newSourceEmitter;
-        emit SourceEmitterUpdated(previous, newSourceEmitter);
+        bytes32 previous = $.sourceDispatcher;
+        $.sourceDispatcher = newSourceDispatcher;
+        emit SourceDispatcherUpdated(previous, newSourceDispatcher);
     }
 
     /// @inheritdoc IGovernanceExecutor
@@ -284,9 +285,9 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
         return address(_getExecutorStorage().wormhole);
     }
 
-    /// @notice Returns the currently authorized Hydration emitter.
-    function sourceEmitter() external view returns (bytes32) {
-        return _getExecutorStorage().sourceEmitter;
+    /// @notice Returns the currently authorized Hydration dispatcher in Wormhole address form.
+    function sourceDispatcher() external view returns (bytes32) {
+        return _getExecutorStorage().sourceDispatcher;
     }
 
     /// @notice Returns this destination's veto-only Technical Committee Safe.

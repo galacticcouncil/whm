@@ -152,7 +152,7 @@ contract GovernanceExecutorTest is Test {
     uint16 constant DESTINATION_CHAIN = 2;
     uint48 constant VETO_PERIOD = 24 hours;
     uint48 constant GRACE_PERIOD = 7 days;
-    bytes32 constant SOURCE_EMITTER = bytes32(uint256(0xE1117));
+    bytes32 constant SOURCE_DISPATCHER = bytes32(uint256(0xE1117));
 
     MockGovernanceWormhole internal wormhole;
     ExecutorCodecHarness internal codec;
@@ -176,7 +176,7 @@ contract GovernanceExecutorTest is Test {
                         address(implementation),
                         abi.encodeCall(
                             GovernanceExecutor.initialize,
-                            (address(wormhole), SOURCE_EMITTER, address(safe), VETO_PERIOD, GRACE_PERIOD)
+                            (address(wormhole), SOURCE_DISPATCHER, address(safe), VETO_PERIOD, GRACE_PERIOD)
                         )
                     )
                 )
@@ -189,7 +189,7 @@ contract GovernanceExecutorTest is Test {
     /// @notice Initialization records only the explicitly trusted source, vetoer, and timing.
     function testInitialization() public view {
         assertEq(executor.wormhole(), address(wormhole));
-        assertEq(executor.sourceEmitter(), SOURCE_EMITTER);
+        assertEq(executor.sourceDispatcher(), SOURCE_DISPATCHER);
         assertEq(executor.vetoer(), address(safe));
         assertEq(executor.localWormholeChain(), DESTINATION_CHAIN);
         assertEq(executor.vetoPeriod(), VETO_PERIOD);
@@ -199,13 +199,13 @@ contract GovernanceExecutorTest is Test {
     /// @notice The implementation contract is permanently locked against initialization.
     function testImplementationCannotBeInitialized() public {
         vm.expectRevert();
-        implementation.initialize(address(wormhole), SOURCE_EMITTER, address(safe), VETO_PERIOD, GRACE_PERIOD);
+        implementation.initialize(address(wormhole), SOURCE_DISPATCHER, address(safe), VETO_PERIOD, GRACE_PERIOD);
     }
 
     /// @notice Proxy bootstrap configuration can be written exactly once.
     function testProxyCannotBeReinitialized() public {
         vm.expectRevert();
-        executor.initialize(address(wormhole), SOURCE_EMITTER, address(safe), VETO_PERIOD, GRACE_PERIOD);
+        executor.initialize(address(wormhole), SOURCE_DISPATCHER, address(safe), VETO_PERIOD, GRACE_PERIOD);
     }
 
     /// @notice Initialization rejects dependencies that cannot implement the expected contracts.
@@ -213,10 +213,10 @@ contract GovernanceExecutorTest is Test {
         address eoa = makeAddr("eoa");
 
         vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.AddressHasNoCode.selector, eoa));
-        _deployExecutor(eoa, SOURCE_EMITTER, address(safe), VETO_PERIOD, GRACE_PERIOD);
+        _deployExecutor(eoa, SOURCE_DISPATCHER, address(safe), VETO_PERIOD, GRACE_PERIOD);
 
         vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.AddressHasNoCode.selector, eoa));
-        _deployExecutor(address(wormhole), SOURCE_EMITTER, eoa, VETO_PERIOD, GRACE_PERIOD);
+        _deployExecutor(address(wormhole), SOURCE_DISPATCHER, eoa, VETO_PERIOD, GRACE_PERIOD);
     }
 
     /// @notice The initial configuration cannot weaken the immutable v1 timing floors.
@@ -224,28 +224,28 @@ contract GovernanceExecutorTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IGovernanceExecutor.VetoPeriodTooShort.selector, VETO_PERIOD - 1, VETO_PERIOD)
         );
-        _deployExecutor(address(wormhole), SOURCE_EMITTER, address(safe), VETO_PERIOD - 1, GRACE_PERIOD);
+        _deployExecutor(address(wormhole), SOURCE_DISPATCHER, address(safe), VETO_PERIOD - 1, GRACE_PERIOD);
 
         vm.expectRevert(
             abi.encodeWithSelector(IGovernanceExecutor.GracePeriodTooShort.selector, GRACE_PERIOD - 1, GRACE_PERIOD)
         );
-        _deployExecutor(address(wormhole), SOURCE_EMITTER, address(safe), VETO_PERIOD, GRACE_PERIOD - 1);
+        _deployExecutor(address(wormhole), SOURCE_DISPATCHER, address(safe), VETO_PERIOD, GRACE_PERIOD - 1);
     }
 
     /// @notice Zero bootstrap authorities and a core reporting chain zero fail closed.
     function testInitializationRejectsZeroConfiguration() public {
         vm.expectRevert(IGovernanceExecutor.ZeroAddress.selector);
-        _deployExecutor(address(0), SOURCE_EMITTER, address(safe), VETO_PERIOD, GRACE_PERIOD);
+        _deployExecutor(address(0), SOURCE_DISPATCHER, address(safe), VETO_PERIOD, GRACE_PERIOD);
 
-        vm.expectRevert(IGovernanceExecutor.InvalidSourceEmitter.selector);
+        vm.expectRevert(IGovernanceExecutor.InvalidSourceDispatcher.selector);
         _deployExecutor(address(wormhole), bytes32(0), address(safe), VETO_PERIOD, GRACE_PERIOD);
 
         vm.expectRevert(IGovernanceExecutor.ZeroAddress.selector);
-        _deployExecutor(address(wormhole), SOURCE_EMITTER, address(0), VETO_PERIOD, GRACE_PERIOD);
+        _deployExecutor(address(wormhole), SOURCE_DISPATCHER, address(0), VETO_PERIOD, GRACE_PERIOD);
 
         MockGovernanceWormhole zeroChainCore = new MockGovernanceWormhole(0);
         vm.expectRevert(IGovernanceExecutor.InvalidLocalWormholeChain.selector);
-        _deployExecutor(address(zeroChainCore), SOURCE_EMITTER, address(safe), VETO_PERIOD, GRACE_PERIOD);
+        _deployExecutor(address(zeroChainCore), SOURCE_DISPATCHER, address(safe), VETO_PERIOD, GRACE_PERIOD);
     }
 
     /// @notice A key absent from storage has the explicit Unknown state.
@@ -258,7 +258,7 @@ contract GovernanceExecutorTest is Test {
     /// @notice A valid VAA stores only its commitment and deadlines and starts pending.
     function testQueuesVerifiedAction() public {
         bytes memory payload = _oneCallPayload(1, address(target), 0, hex"1234");
-        bytes memory vaa = _vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 10, payload);
+        bytes memory vaa = _vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 10, payload);
         bytes32 actionId = executor.queue(vaa);
 
         IGovernanceExecutor.ActionRecord memory record = executor.action(actionId);
@@ -275,14 +275,14 @@ contract GovernanceExecutorTest is Test {
     /// @notice Guardian verification failure cannot create or consume an action.
     function testRejectsInvalidVaa() public {
         bytes memory payload = _oneCallPayload(1, address(target), 0, hex"");
-        bytes memory vaa = _vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 10, payload);
+        bytes memory vaa = _vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 10, payload);
         wormhole.markInvalid(vaa);
 
         vm.expectRevert(IGovernanceExecutor.InvalidVaa.selector);
         executor.queue(vaa);
     }
 
-    /// @notice A validly signed message from any emitter other than governance is unauthorized.
+    /// @notice A validly signed message from any dispatcher other than governance is unauthorized.
     function testRejectsWrongSource() public {
         bytes memory payload = _oneCallPayload(1, address(target), 0, hex"");
         bytes32 attacker = bytes32(uint256(0xBAD));
@@ -293,14 +293,14 @@ contract GovernanceExecutorTest is Test {
         executor.queue(_vaa(HYDRATION_CHAIN, attacker, 10, payload));
     }
 
-    /// @notice Even the configured emitter is unauthorized when the verified source chain differs.
+    /// @notice Even the configured dispatcher is unauthorized when the verified source chain differs.
     function testRejectsWrongSourceChain() public {
         bytes memory payload = _oneCallPayload(1, address(target), 0, hex"");
 
         vm.expectRevert(
-            abi.encodeWithSelector(IGovernanceExecutor.UnauthorizedEmitter.selector, uint16(2), SOURCE_EMITTER)
+            abi.encodeWithSelector(IGovernanceExecutor.UnauthorizedEmitter.selector, uint16(2), SOURCE_DISPATCHER)
         );
-        executor.queue(_vaa(2, SOURCE_EMITTER, 10, payload));
+        executor.queue(_vaa(2, SOURCE_DISPATCHER, 10, payload));
     }
 
     /// @notice A VAA cannot be replayed against a chain other than the one signed into its payload.
@@ -311,7 +311,7 @@ contract GovernanceExecutorTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IGovernanceExecutor.WrongDestination.selector, uint16(30), address(executor))
         );
-        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 10, payload));
+        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 10, payload));
     }
 
     /// @notice Destination binding includes the executor address, not only its chain.
@@ -323,7 +323,7 @@ contract GovernanceExecutorTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IGovernanceExecutor.WrongDestination.selector, DESTINATION_CHAIN, otherExecutor)
         );
-        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 10, payload));
+        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 10, payload));
     }
 
     /// @notice Deadline arithmetic cannot truncate into the uint48 fields stored in an action.
@@ -332,13 +332,13 @@ contract GovernanceExecutorTest is Test {
         vm.warp(uint256(type(uint48).max) - VETO_PERIOD - GRACE_PERIOD + 1);
 
         vm.expectRevert(IGovernanceExecutor.DeadlineOverflow.selector);
-        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 10, payload));
+        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 10, payload));
     }
 
     /// @notice The exact signed Wormhole envelope can be accepted at most once.
     function testRejectsVaaReplay() public {
         bytes memory payload = _oneCallPayload(1, address(target), 0, hex"");
-        bytes memory vaa = _vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 10, payload);
+        bytes memory vaa = _vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 10, payload);
         executor.queue(vaa);
 
         vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.VaaAlreadyConsumed.selector, keccak256(vaa)));
@@ -348,10 +348,10 @@ contract GovernanceExecutorTest is Test {
     /// @notice Distinct envelopes carrying the same source-domain payload cannot duplicate an action.
     function testRejectsDuplicateActionFromDifferentVaa() public {
         bytes memory payload = _oneCallPayload(1, address(target), 0, hex"");
-        bytes32 actionId = executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 10, payload));
+        bytes32 actionId = executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 10, payload));
 
         vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.ActionAlreadyQueued.selector, actionId));
-        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 11, payload));
+        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 11, payload));
     }
 
     // ─── Veto authority ─────────────────────────────────────────
@@ -635,7 +635,7 @@ contract GovernanceExecutorTest is Test {
     /// @notice Neither deployer nor veto Safe receives a direct configuration privilege.
     function testAdminFunctionsAreOnlySelf() public {
         vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.OnlySelf.selector, address(this)));
-        executor.setSourceEmitter(bytes32(uint256(2)));
+        executor.setSourceDispatcher(bytes32(uint256(2)));
 
         MockSafe newSafe = new MockSafe();
         vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.OnlySelf.selector, address(this)));
@@ -706,24 +706,25 @@ contract GovernanceExecutorTest is Test {
         assertEq(uint256(executor.state(actionId)), uint256(IGovernanceExecutor.ActionState.Ready));
     }
 
-    /// @notice Rotation rejects newly submitted old-emitter VAAs without stranding old queued actions.
-    function testEmitterRotationPreservesQueuedActions() public {
+    /// @notice Rotation rejects newly submitted old-dispatcher VAAs without stranding queued actions.
+    function testDispatcherRotationPreservesQueuedActions() public {
         bytes32 queuedOld = _queue(_setNumberPayload(1, 42), 10);
-        bytes32 newEmitter = bytes32(uint256(0xBEEF));
-        bytes memory rotationPayload =
-            _oneCallPayload(2, address(executor), 0, abi.encodeCall(IGovernanceExecutor.setSourceEmitter, (newEmitter)));
+        bytes32 newDispatcher = bytes32(uint256(0xBEEF));
+        bytes memory rotationPayload = _oneCallPayload(
+            2, address(executor), 0, abi.encodeCall(IGovernanceExecutor.setSourceDispatcher, (newDispatcher))
+        );
         bytes32 rotation = _queue(rotationPayload, 11);
         vm.warp(executor.action(rotation).executableAt);
         executor.execute(rotation, rotationPayload);
-        assertEq(executor.sourceEmitter(), newEmitter);
+        assertEq(executor.sourceDispatcher(), newDispatcher);
 
         bytes memory laterPayload = _oneCallPayload(3, address(target), 0, hex"");
         vm.expectRevert(
-            abi.encodeWithSelector(IGovernanceExecutor.UnauthorizedEmitter.selector, HYDRATION_CHAIN, SOURCE_EMITTER)
+            abi.encodeWithSelector(IGovernanceExecutor.UnauthorizedEmitter.selector, HYDRATION_CHAIN, SOURCE_DISPATCHER)
         );
-        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_EMITTER, 12, laterPayload));
+        executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, 12, laterPayload));
 
-        bytes32 queuedNew = executor.queue(_vaa(HYDRATION_CHAIN, newEmitter, 12, laterPayload));
+        bytes32 queuedNew = executor.queue(_vaa(HYDRATION_CHAIN, newDispatcher, 12, laterPayload));
         assertEq(uint256(executor.state(queuedNew)), uint256(IGovernanceExecutor.ActionState.Pending));
 
         bytes memory oldPayload = _setNumberPayload(1, 42);
@@ -757,7 +758,7 @@ contract GovernanceExecutorTest is Test {
         GovernanceExecutorV2 upgraded = GovernanceExecutorV2(payable(address(executor)));
         assertEq(upgraded.version(), 2);
         assertEq(upgraded.initializedValue(), 99);
-        assertEq(upgraded.sourceEmitter(), SOURCE_EMITTER);
+        assertEq(upgraded.sourceDispatcher(), SOURCE_DISPATCHER);
         assertEq(upgraded.vetoer(), address(safe));
         IGovernanceExecutor.ActionRecord memory pendingAfter = upgraded.action(pending);
         assertEq(pendingAfter.payloadHash, pendingBefore.payloadHash);
@@ -830,12 +831,12 @@ contract GovernanceExecutorTest is Test {
     }
 
     function _queue(bytes memory payload, uint64 sequence) internal returns (bytes32) {
-        return executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_EMITTER, sequence, payload));
+        return executor.queue(_vaa(HYDRATION_CHAIN, SOURCE_DISPATCHER, sequence, payload));
     }
 
     function _deployExecutor(
         address wormhole_,
-        bytes32 sourceEmitter_,
+        bytes32 sourceDispatcher_,
         address vetoer_,
         uint48 vetoPeriod_,
         uint48 gracePeriod_
@@ -847,7 +848,7 @@ contract GovernanceExecutorTest is Test {
                         address(implementation),
                         abi.encodeCall(
                             GovernanceExecutor.initialize,
-                            (wormhole_, sourceEmitter_, vetoer_, vetoPeriod_, gracePeriod_)
+                            (wormhole_, sourceDispatcher_, vetoer_, vetoPeriod_, gracePeriod_)
                         )
                     )
                 )
