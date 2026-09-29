@@ -19,6 +19,7 @@ The following parameters are agreed for v0.1:
 | Veto sovereignty | Absolute; there is no Root bypass or forced vetoer replacement in v0.1 |
 | Queue and execution | Permissionless; failed execution remains retryable until expiry |
 | Message destination | Exactly one destination executor per Wormhole message |
+| Wormhole consistency | `202` (Hydration finalized) |
 
 ## Abstract
 
@@ -164,8 +165,10 @@ Publication is payable and requires `msg.value == wormhole.messageFee()`. A fee 
 fails closed instead of trapping excess value or spending an unbounded emitter balance. The
 emitter forwards exactly `msg.value`, never `address(this).balance`; forced native balance cannot be
 spent by publication. The dispatcher must propagate a fee-check revert. The Wormhole consistency
-level is a code constant set to the strongest finality supported for Hydration and must be verified
-against the production core contract before deployment; governance cannot lower it through a setter.
+level is the code constant `202`, which Hydration's production watcher treats as finalized. Live
+verification showed that level `200` skips the pending queue with zero confirmations, while
+otherwise-identical messages at `202` wait for finality. Governance cannot lower the constant
+through a setter.
 
 The emitter is UUPS-upgradeable. `_authorizeUpgrade` accepts only the fixed governance caller and its
 state uses namespaced storage. The nonce must survive every upgrade and must revert rather than wrap.
@@ -221,7 +224,7 @@ The signed Wormhole payload is exactly:
 
 ```solidity
 abi.encode(
-    bytes4(0x48594756), // ASCII "HYGV"
+    bytes6(0x484458474f56), // ASCII "HDXGOV"
     uint8(1),
     destinationWormholeChain,
     destinationExecutor,
@@ -233,13 +236,14 @@ abi.encode(
 Its canonical ABI tuple is:
 
 ```text
-(bytes4,uint8,uint16,address,uint64,(address,uint256,bytes)[])
+(bytes6,uint8,uint16,address,uint64,(address,uint256,bytes)[])
 ```
 
 The payload is encoded as the tuple above, not as `abi.encode(GovernanceAction)`. This distinction is
 load-bearing because a top-level struct containing a dynamic array has a different ABI envelope.
 
-`0x48594756` is the protocol discriminator and `1` is the independently checked protocol version.
+`0x484458474f56` is the ASCII `HDXGOV` protocol discriminator and `1` is the independently checked
+protocol version.
 Both must match. The emitter assigns `governanceNonce`, starting at 1 and increasing by one for every
 published destination message. Each message has its own nonce even when one referendum targets
 several chains.
@@ -457,7 +461,7 @@ payload hash, avoiding unbounded calldata duplication in storage and re-encoding
 2. Parse and verify the VAA with the configured Wormhole core.
 3. Require the configured Hydration source chain and emitter from the verified VM.
 4. Reject an already consumed VAA hash and a payload larger than 65,536 bytes.
-5. Decode only the `HYGV` discriminator and supported message version.
+5. Decode only the `HDXGOV` discriminator and supported message version.
 6. Re-encode the decoded payload and require byte-for-byte canonical equality.
 7. Require the local Wormhole chain ID and `address(this)` as destination.
 8. Reject an empty batch, more than 16 calls, a zero target, or oversized call data.
@@ -763,13 +767,13 @@ recognizes it as privileged.
 
 ### Message protocol
 
-- [x] Freeze the `HYGV` ABI tuple and protocol version 1.
+- [x] Freeze the `HDXGOV` ABI tuple and protocol version 1.
 - [x] Freeze the source-domain-separated `actionId` derivation.
 - [x] Set the maximum batch size to 16 calls.
 - [x] Limit each call's calldata to 32 KiB and the complete payload to 64 KiB.
 - [x] Omit a self-referential preimage or referendum hash from the payload.
 - [x] Confirm exactly one destination executor per message.
-- [ ] Verify and freeze the strongest Hydration Wormhole consistency level supported in production.
+- [x] Freeze Hydration Wormhole consistency at `202` (finalized).
 - [ ] Rehearse the 64 KiB maximum payload on Hydration and every destination before launch.
 
 ### Executor
@@ -819,7 +823,6 @@ recognizes it as privileged.
 
 1. What exact Robinhood Uniswap v4 periphery deployment and custody model will be used?
 2. Which NTT roles should remain with an emergency multisig rather than the delayed executor?
-3. What numeric Wormhole consistency level represents strongest supported Hydration finality?
 
 ## Deferred considerations
 
