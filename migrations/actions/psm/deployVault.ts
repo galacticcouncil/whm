@@ -48,7 +48,7 @@ export async function deployVault(params: DeployVaultParams): Promise<DeployResu
     return { implAddress, proxyAddress: proxy, ownerAddress: account.address };
   }
 
-  // Named struct, not positional args: eleven of them do not fit on the stack, and a
+  // Named struct, not positional args: nine of them do not fit on the stack, and a
   // transposed address here is not something a later setter can fix.
   const initializeData = encodeFunctionData({
     abi,

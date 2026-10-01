@@ -86,10 +86,14 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
 
         hollar = IGhoToken(_hollar);
 
+        // Zero USDC decimals would make `scale` 1e18 and every wire unit a whole HOLLAR.
         uint8 hollarDecimals = hollar.decimals();
-        if (hollarDecimals < usdcDecimals) revert IncorrectDecimals();
+        if (usdcDecimals == 0 || hollarDecimals < usdcDecimals) revert IncorrectDecimals();
         scale = 10 ** uint256(hollarDecimals - usdcDecimals);
 
+        // The vault lives on another chain than the core this contract listens to. Reading the
+        // core here also proves the address is one.
+        if (_baseChainId == 0 || _baseChainId == wormhole.chainId()) revert InvalidChainId(_baseChainId);
         baseChainId = _baseChainId;
 
         // Ships paused. The deployment order unpauses redeem first, then mint, once the bucket
@@ -122,21 +126,31 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     function _processMessage(IWormhole.VM memory vm) internal override {
         // The inherited emitter check compares against `authorizedEmitters[chain]`, which is
         // bytes32(0) for every chain nobody bound — so a VAA carrying a zero emitter matches the
-        // mapping default and passes on any unbound chain. `setBaseEmitter` binds one chain and
-        // refuses zero, so pinning the chain here closes it without touching the shared base.
+        // mapping default on any unbound chain, this one included until `setBaseEmitter` runs.
+        // Refusing everything before the bind and pinning the chain after it closes both without
+        // touching the shared base.
+        if (!emitterFrozen) revert EmitterNotSet();
         if (vm.emitterChainId != baseChainId) revert UnexpectedEmitterChain(vm.emitterChainId);
 
         (uint8 kind, bytes32 rawRecipient, uint256 usdcAmount, bytes32 rawOrigin) = PsmPayload.decode(vm.payload);
         if (kind != PsmPayload.KIND_MINT && kind != PsmPayload.KIND_REMINT) revert UnexpectedKind(kind);
+        // The vault never publishes a zero amount; refused like any payload it could not have
+        // produced, so it cannot leave a dead entry in the queue.
+        if (usdcAmount == 0) revert ZeroAmount();
 
         address recipient = PsmPayload.toAddress(rawRecipient);
         address origin = PsmPayload.toAddress(rawOrigin);
+        bool remint = kind == PsmPayload.KIND_REMINT;
 
-        if (mintPaused) return _queue(recipient, origin, usdcAmount, QueueReason.MintPaused);
+        if (mintPaused) return _queue(recipient, origin, usdcAmount, remint, QueueReason.MintPaused);
 
         uint256 hollarAmount = usdcAmount * scale;
-        if (hollarAmount > _bucketHeadroom()) return _queue(recipient, origin, usdcAmount, QueueReason.BucketFull);
-        if (!inbound.tryConsume(usdcAmount)) return _queue(recipient, origin, usdcAmount, QueueReason.RateLimited);
+        if (hollarAmount > _bucketHeadroom()) {
+            return _queue(recipient, origin, usdcAmount, remint, QueueReason.BucketFull);
+        }
+        if (!inbound.tryConsume(usdcAmount)) {
+            return _queue(recipient, origin, usdcAmount, remint, QueueReason.RateLimited);
+        }
 
         hollar.mint(recipient, hollarAmount);
         emit Minted(recipient, usdcAmount, hollarAmount);
@@ -175,32 +189,41 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         emit PendingMintFlushed(id, entry.recipient, entry.amount);
     }
 
-    /// @notice Give up on a queued mint and send the USDC back on Base instead.
+    /// @notice Give up on a queued mint and send the USDC back on Base instead. A queued deposit
+    ///         refunds fee-free; a queued re-mint goes back as a redemption and pays the fee.
     /// @dev Nothing was minted, so there is nothing to burn and the bucket does not move. This is
     ///      the exit from "queued forever" — without it, a mint queued behind a capacity that
-    ///      governance never raises has no path back to the depositor's money.
+    ///      governance never raises has no path back to the depositor's money. Gated by neither
+    ///      pause: the exit stays open exactly when entries queue, and the credit it books on
+    ///      Base still waits behind the vault's own claims pause.
     ///
-    ///      The USDC goes back to the entry's `origin` — the account that locked it on Base.
-    ///      Nobody picks: not `msg.sender`, whose Hydration address may not exist on Base, and not
-    ///      an argument, which the far side could not return if it named nobody.
+    ///      The USDC goes back to the entry's `origin`. Nobody picks: not `msg.sender`, whose
+    ///      Hydration address may not exist on Base, and not an argument, which the far side
+    ///      could not return if it named nobody.
     /// @param id The queue slot, from the `MintQueued` event or `pendingEntryOf`.
-    function cancelPendingMint(uint256 id) external payable returns (uint64 sequence) {
+    /// @param maxFeeBps Read only when the entry is a re-mint: the fee limit its redemption carries.
+    function cancelPendingMint(uint256 id, uint16 maxFeeBps) external payable returns (uint64 sequence) {
         PendingMint memory entry = pendingMints[id];
         if (entry.amount == 0) revert NotQueued(id);
         if (entry.recipient != msg.sender) revert NotYourPendingMint(id, entry.recipient);
 
-        return _cancelPending(id, entry);
+        return _cancelPending(id, entry, maxFeeBps);
     }
 
     /// @notice Cancel a queued mint on the recipient's behalf. Admin only, same books as the
     ///         recipient's own cancel, and the USDC goes back to the same place: the account that
     ///         locked it.
     /// @dev The lever for an entry its owner cannot clear — a contract wallet, an unreachable user.
-    function cancelPendingMintFor(uint256 id) external payable onlyRole(DEFAULT_ADMIN_ROLE) returns (uint64 sequence) {
+    function cancelPendingMintFor(uint256 id, uint16 maxFeeBps)
+        external
+        payable
+        onlyRole(DEFAULT_ADMIN_ROLE)
+        returns (uint64 sequence)
+    {
         PendingMint memory entry = pendingMints[id];
         if (entry.amount == 0) revert NotQueued(id);
 
-        return _cancelPending(id, entry);
+        return _cancelPending(id, entry, maxFeeBps);
     }
 
     // ─── Redeem — Hydration to Base ─────────────────────────────
@@ -209,7 +232,14 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     /// @param usdcAmount Denominated in USDC units, so the burn is an exact multiple of `scale`
     ///        and no fractional remainder can strand here.
     /// @param baseRecipient Who receives the USDC on Base.
-    function redeem(uint256 usdcAmount, address baseRecipient) external payable returns (uint64 sequence) {
+    /// @param maxFeeBps The most the redeemer will pay. The fee is assessed on Base when the
+    ///        message lands; above this the vault books nothing and the HOLLAR is re-minted to the
+    ///        caller. `PsmPayload.NO_FEE_CAP` sets no limit.
+    function redeem(uint256 usdcAmount, address baseRecipient, uint16 maxFeeBps)
+        external
+        payable
+        returns (uint64 sequence)
+    {
         if (redeemPaused) revert RedeemPaused();
         if (baseRecipient == address(0)) revert ZeroAddress();
 
@@ -228,7 +258,8 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
             PsmPayload.KIND_REDEEM,
             PsmPayload.fromAddress(baseRecipient),
             usdcAmount,
-            PsmPayload.fromAddress(msg.sender)
+            PsmPayload.fromAddress(msg.sender),
+            maxFeeBps
         );
 
         emit RedeemInitiated(msg.sender, baseRecipient, usdcAmount, sequence);
@@ -237,16 +268,21 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     // ─── Views ──────────────────────────────────────────────────
 
     /// @notice The most that can be redeemed right now, in USDC units. The UI must show this
-    ///         before anyone burns.
+    ///         before anyone burns, so it reports zero while redeem is paused.
     function maxRedeemable() external view returns (uint256) {
+        if (redeemPaused) return 0;
+
         (, uint256 level) = hollar.getFacilitatorBucket(address(this));
         uint256 byBucket = level / scale;
         uint256 byLimit = outbound.available();
         return byBucket < byLimit ? byBucket : byLimit;
     }
 
-    /// @notice Room for new mints in USDC units, net of what is already queued.
+    /// @notice Room for new mints in USDC units, net of what is already queued. Zero while mint
+    ///         is paused: an arriving attestation queues, whatever the bucket says.
     function mintHeadroom() external view returns (uint256) {
+        if (mintPaused) return 0;
+
         uint256 byBucket = _bucketHeadroom() / scale;
         uint256 byLimit = inbound.available();
         uint256 room = byBucket < byLimit ? byBucket : byLimit;
@@ -260,12 +296,20 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         return level;
     }
 
-    /// @notice A recipient's first live entry. `id` is what `flushPendingMint` and
-    ///         `cancelPendingMint` take; `MintQueued` carries the same figure.
-    /// @dev No position is reported because there is no line to hold a place in — a recipient
-    ///      with several entries can flush any of them, in any order, as headroom allows.
-    function pendingEntryOf(address recipient) external view returns (bool found, uint256 id) {
-        for (uint256 i = 0; i < pendingTail; i++) {
+    /// @notice A recipient's first live entry with an id in `[fromId, fromId + maxIds)`. `id` is
+    ///         what `flushPendingMint` and `cancelPendingMint` take; `MintQueued` carries it too.
+    /// @dev Caller-bounded because ids are never reclaimed: `pendingTail` only grows, so a walk
+    ///      from zero would cost ~2.4k gas per retired id, forever. No position: there is no line.
+    function pendingEntryOf(address recipient, uint256 fromId, uint256 maxIds)
+        external
+        view
+        returns (bool found, uint256 id)
+    {
+        uint256 tail = pendingTail;
+        if (fromId >= tail) return (false, 0);
+
+        uint256 end = tail - fromId > maxIds ? fromId + maxIds : tail;
+        for (uint256 i = fromId; i < end; i++) {
             if (pendingMints[i].amount != 0 && pendingMints[i].recipient == recipient) return (true, i);
         }
         return (false, 0);
@@ -313,9 +357,11 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
 
     // ─── Internal ───────────────────────────────────────────────
 
-    function _queue(address recipient, address origin, uint256 usdcAmount, QueueReason reason) private {
+    function _queue(address recipient, address origin, uint256 usdcAmount, bool remint, QueueReason reason)
+        private
+    {
         uint256 id = pendingTail++;
-        pendingMints[id] = PendingMint({recipient: recipient, origin: origin, amount: usdcAmount});
+        pendingMints[id] = PendingMint({recipient: recipient, origin: origin, remint: remint, amount: usdcAmount});
 
         pendingOf[recipient] += usdcAmount;
         totalPendingMint += usdcAmount;
@@ -323,20 +369,25 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         emit MintQueued(id, recipient, usdcAmount, reason);
     }
 
-    /// @dev Nothing was minted, so nothing is burned and the bucket does not move. The refund is
+    /// @dev Nothing was minted, so nothing is burned and the bucket does not move. The message is
     ///      addressed to the entry's origin and names its recipient as origin in turn, so a
-    ///      cancellation of the resulting credit on Base re-mints back to them.
-    function _cancelPending(uint256 id, PendingMint memory entry) private returns (uint64 sequence) {
+    ///      cancellation of the resulting credit on Base re-mints back to them. A cancelled
+    ///      re-mint is burned HOLLAR leaving as USDC — a redemption however it got here — so it
+    ///      goes back as KIND_REDEEM and pays the fee; only a cancelled deposit refunds fee-free.
+    function _cancelPending(uint256 id, PendingMint memory entry, uint16 maxFeeBps)
+        private
+        returns (uint64 sequence)
+    {
         delete pendingMints[id];
         pendingOf[entry.recipient] -= entry.amount;
         totalPendingMint -= entry.amount;
 
         bytes32 baseRecipient = PsmPayload.fromAddress(entry.origin);
+        uint8 kind = entry.remint ? PsmPayload.KIND_REDEEM : PsmPayload.KIND_REFUND;
 
-        sequence =
-            _publish(PsmPayload.KIND_REFUND, baseRecipient, entry.amount, PsmPayload.fromAddress(entry.recipient));
+        sequence = _publish(kind, baseRecipient, entry.amount, PsmPayload.fromAddress(entry.recipient), maxFeeBps);
 
-        emit PendingMintCancelled(id, entry.recipient, entry.amount, baseRecipient, sequence);
+        emit PendingMintCancelled(id, entry.recipient, entry.amount, baseRecipient, kind, sequence);
     }
 
     function _bucketHeadroom() private view returns (uint256) {
@@ -347,11 +398,16 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     /// @dev Consistency 200 — the guardians sign on inclusion and the leg settles in seconds. The
     ///      redeem leg carries no cap: its reorg exposure is one Hydration block wide and falls on
     ///      the protocol, not on holders.
-    function _publish(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin) private returns (uint64 sequence) {
+    function _publish(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin, uint16 maxFeeBps)
+        private
+        returns (uint64 sequence)
+    {
         uint256 fee = wormhole.messageFee();
         if (msg.value < fee) revert InsufficientMessageFee(msg.value, fee);
 
-        sequence = wormhole.publishMessage{value: fee}(0, PsmPayload.encode(kind, recipient, amount, origin), 200);
+        sequence = wormhole.publishMessage{value: fee}(
+            0, PsmPayload.encode(kind, recipient, amount, origin, maxFeeBps), 200
+        );
 
         if (msg.value > fee) {
             (bool ok,) = msg.sender.call{value: msg.value - fee}("");

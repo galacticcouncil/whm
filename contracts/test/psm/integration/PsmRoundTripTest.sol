@@ -156,12 +156,12 @@ contract PsmRoundTripTest is Test {
         (, level) = hollar.getFacilitatorBucket(address(facilitator));
     }
 
-    /// @dev principal × 1e12 >= bucket level. The gap is in-flight plus pending; a violation is
-    ///      HOLLAR nobody locked USDC for.
+    /// @dev principal × 1e12 >= bucket level + pending × 1e12: every attested unit is minted,
+    ///      queued, or in flight. A violation is HOLLAR, or a pending claim, nobody locked USDC for.
     function _assertBacked() internal view {
         assertGe(
-            vault.principal() * SCALE + facilitator.totalPendingMint() * SCALE,
-            _bucketLevel(),
+            vault.principal() * SCALE,
+            _bucketLevel() + facilitator.totalPendingMint() * SCALE,
             "unbacked HOLLAR"
         );
     }
@@ -189,7 +189,7 @@ contract PsmRoundTripTest is Test {
         // 3 — burn on Hydration
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(1_000e6, bob);
+        facilitator.redeem(1_000e6, bob, type(uint16).max);
         vm.stopPrank();
         assertEq(_bucketLevel(), 0, "the burn released the whole bucket");
 
@@ -241,7 +241,7 @@ contract PsmRoundTripTest is Test {
         _assertBacked();
 
         vm.prank(alice);
-        facilitator.cancelPendingMint(0);
+        facilitator.cancelPendingMint(0, type(uint16).max);
         _relayHydrationToBase();
 
         assertEq(vault.owed(alice), 500e6, "a refund carries no fee");
@@ -265,7 +265,7 @@ contract PsmRoundTripTest is Test {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(10_000e6, alice);
+        facilitator.redeem(10_000e6, alice, type(uint16).max);
         vm.stopPrank();
 
         // Borrowers drain the reserve before the credit lands.
@@ -305,7 +305,7 @@ contract PsmRoundTripTest is Test {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(10_000e6, alice);
+        facilitator.redeem(10_000e6, alice, type(uint16).max);
         vm.stopPrank();
 
         assertEq(hollar.balanceOf(alice), 0, "HOLLAR burned, irreversibly");
@@ -333,6 +333,99 @@ contract PsmRoundTripTest is Test {
         _assertSolvent();
     }
 
+    // ─── Cancelling a queued re-mint ────────────────────────────
+
+    /// @dev The cycle that used to be a free redemption: redeem (fee assessed on Base), cancel at
+    ///      the head (gross re-minted), the re-mint queues on the inbound limit — which it does by
+    ///      default on the day of the original mint — and is cancelled in turn. That second cancel
+    ///      goes back as a redemption, so the credit it produces is field-for-field the one the
+    ///      first cancel undid, and the fee is paid exactly once.
+    function test_roundTrip_cancelledRemintPaysTheRedeemFee() public {
+        vm.prank(admin);
+        facilitator.setLimits(10_000e6, RateLimiter.UNLIMITED, 1 days);
+
+        vm.prank(alice);
+        vault.deposit(10_000e6, _toBytes32(alice));
+        _relayBaseToHydration(); // spends the day's inbound window
+
+        // Alice burns, naming bob on Base — so recipient and origin differ all the way round.
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(10_000e6, bob, type(uint16).max);
+        vm.stopPrank();
+        _relayHydrationToBase();
+
+        uint256 fee = (10_000e6 * 5) / 10_000;
+        assertEq(vault.owed(bob), 10_000e6 - fee);
+
+        // 1 — bob walks away from the head: the gross is re-minted to alice...
+        vm.prank(bob);
+        vault.cancelQueuedRedemption(0);
+        _relayBaseToHydration();
+        assertEq(facilitator.pendingOf(alice), 10_000e6, "...and queues on the spent inbound window");
+        assertEq(hollar.balanceOf(alice), 0);
+
+        // 2 — alice cancels the queued re-mint: back to Base as a redemption, not a refund.
+        vm.prank(alice);
+        facilitator.cancelPendingMint(0, type(uint16).max);
+        _relayHydrationToBase();
+
+        (address recipient, address origin,,, uint256 amount, uint256 gross) = vault.queue(1);
+        assertEq(recipient, bob, "the credit the cancel undid: same Base recipient");
+        assertEq(origin, alice, "same Hydration redeemer");
+        assertEq(amount, 10_000e6 - fee, "fee included");
+        assertEq(gross, 10_000e6);
+
+        vm.prank(bob);
+        vault.claim();
+        assertEq(usdc.balanceOf(bob), 10_000e6 - fee, "one fee, however the queue was walked");
+        assertEq(vault.surplus(), fee);
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    /// @dev Walking that loop again changes nothing: the credit comes back identical every time,
+    ///      and the fee is still paid once at the end.
+    function test_roundTrip_cancelLoopIsAFixedPoint() public {
+        vm.prank(admin);
+        facilitator.setLimits(10_000e6, RateLimiter.UNLIMITED, 1 days);
+
+        vm.prank(alice);
+        vault.deposit(10_000e6, _toBytes32(alice));
+        _relayBaseToHydration();
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(10_000e6, alice, type(uint16).max);
+        vm.stopPrank();
+        _relayHydrationToBase();
+
+        uint256 fee = (10_000e6 * 5) / 10_000;
+        for (uint256 i = 0; i < 3; i++) {
+            uint256 head = vault.queueHead();
+            vm.prank(alice);
+            vault.cancelQueuedRedemption(head);
+            assertEq(vault.principal() + vault.totalOwed(), 10_000e6, "gross back in principal");
+            _relayBaseToHydration();
+
+            (bool found, uint256 id) = facilitator.pendingEntryOf(alice, 0, 10);
+            assertTrue(found, "the re-mint queued");
+            vm.prank(alice);
+            facilitator.cancelPendingMint(id, type(uint16).max);
+            _relayHydrationToBase();
+
+            (,,,, uint256 amount, uint256 gross) = vault.queue(vault.queueHead());
+            assertEq(amount, 10_000e6 - fee, "the same credit every time");
+            assertEq(gross, 10_000e6);
+            assertEq(vault.principal() + vault.totalOwed(), 10_000e6, "the books conserve the gross");
+            assertEq(hollar.balanceOf(alice), 0, "nothing mints along the way");
+        }
+
+        vm.prank(alice);
+        vault.claim();
+        assertEq(usdc.balanceOf(alice), 1_000_000e6 - fee);
+        _assertSolvent();
+    }
+
     // ─── Replay across the corridor ─────────────────────────────
 
     function test_roundTrip_replayIsRefusedOnBothSides() public {
@@ -348,5 +441,119 @@ contract PsmRoundTripTest is Test {
 
         assertEq(_bucketLevel(), 1_000e18, "one deposit, one mint");
         _assertBacked();
+    }
+
+    // ─── Fee raised in flight ───────────────────────────────────
+
+    /// @dev The fee is assessed when the credit lands. A raise inside the relay window used to
+    ///      re-price a burn that could not be undone; now the burn carries the limit it was quoted,
+    ///      and above it the HOLLAR comes back whole.
+    function test_roundTrip_feeRaisedInFlightReturnsTheHollar() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6, _toBytes32(alice));
+        _relayBaseToHydration();
+
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(10_000e6, bob, 5); // quoted 5 bps
+        vm.stopPrank();
+        assertEq(hollar.balanceOf(alice), 0);
+
+        vm.prank(admin);
+        vault.setFees(50, 25); // raised before the message lands
+
+        _relayHydrationToBase();
+        assertEq(vault.owed(bob), 0, "not booked at a fee she never agreed to");
+        assertEq(vault.principal(), 10_000e6, "backing untouched");
+
+        _relayBaseToHydration();
+        assertEq(hollar.balanceOf(alice), 10_000e18, "the burn came back whole");
+        assertEq(vault.principal() * SCALE, _bucketLevel(), "equal at rest");
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    // ─── A cancelled refund ─────────────────────────────────────
+
+    /// @dev A deposit that never minted owes no redemption fee, however often it is cancelled.
+    ///      Its refund credit, cancelled at the vault head, goes back as the mint it was; cancelled
+    ///      again on Hydration it refunds in full. The depositor here never acts — the deposit's
+    ///      recipient walks the whole cycle as the credit's origin — and is still made whole.
+    function test_roundTrip_cancelledRefundStaysFeeFree() public {
+        hollar.setFacilitatorBucketCapacity(address(facilitator), 100e18); // 500 cannot mint
+
+        vm.prank(alice);
+        vault.deposit(500e6, _toBytes32(bob));
+        _relayBaseToHydration();
+        assertEq(facilitator.pendingOf(bob), 500e6, "queued");
+
+        vm.prank(bob);
+        facilitator.cancelPendingMint(0, type(uint16).max);
+        _relayHydrationToBase();
+        assertEq(vault.owed(alice), 500e6, "refunded in full");
+
+        vm.warp(366 days); // the origin may cancel once the credit has waited a day
+        vm.prank(bob); // the refund credit's origin
+        vault.cancelQueuedRedemption(0);
+        _relayBaseToHydration();
+        assertEq(facilitator.pendingOf(bob), 500e6, "back in the mint queue, as a mint");
+
+        vm.prank(bob);
+        facilitator.cancelPendingMint(1, type(uint16).max);
+        _relayHydrationToBase();
+
+        assertEq(vault.owed(alice), 500e6, "still in full: nothing was ever redeemed");
+        assertEq(vault.surplus(), 0, "no fee taken");
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    // ─── Cancel or pay, never both ──────────────────────────────
+
+    /// @dev One credit has one way out. Cancel and payment both act on the same queue slot on
+    ///      Base, so whichever lands first consumes it and the other finds nothing. The HOLLAR
+    ///      comes back only through the message the cancel itself publishes — there is nothing a
+    ///      redeemer can trigger on Hydration to be made whole twice.
+    function test_roundTrip_cancelAndPaymentAreMutuallyExclusive() public {
+        vm.prank(alice);
+        vault.deposit(2_000e6, _toBytes32(alice));
+        _relayBaseToHydration();
+        uint256 usdcAfterDeposit = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(1_000e6, alice, type(uint16).max);
+        vm.stopPrank();
+        _relayHydrationToBase(); // credit 0
+
+        // Cancel lands first: the payment paths then find nothing.
+        vm.prank(alice);
+        vault.cancelQueuedRedemption(0);
+        assertEq(vault.drain(10), 0, "nothing left to pay");
+        vm.prank(alice);
+        vm.expectRevert();
+        vault.claim();
+        assertEq(usdc.balanceOf(alice), usdcAfterDeposit, "no USDC moved");
+
+        _relayBaseToHydration();
+        assertEq(hollar.balanceOf(alice), 2_000e18, "HOLLAR back, once");
+
+        // Payment lands first: the cancel then finds nothing, and nothing is re-minted.
+        vm.prank(alice);
+        facilitator.redeem(1_000e6, alice, type(uint16).max);
+        _relayHydrationToBase(); // credit 1
+        uint256 fee = (1_000e6 * 5) / 10_000;
+        assertEq(vault.drain(10), 1_000e6 - fee, "paid");
+
+        uint256 published = baseCore.publishedCount();
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(IHollarBaseVault.NotQueued.selector, 1));
+        vault.cancelQueuedRedemption(1);
+        assertEq(baseCore.publishedCount(), published, "no re-mint went out");
+
+        assertEq(usdc.balanceOf(alice), usdcAfterDeposit + 1_000e6 - fee, "paid once");
+        assertEq(hollar.balanceOf(alice), 1_000e18, "and that HOLLAR stays burned");
+        _assertBacked();
+        _assertSolvent();
     }
 }

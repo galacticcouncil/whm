@@ -40,6 +40,13 @@ contract ForkWormhole {
         return 0;
     }
 
+    /// @dev Storage-free like the rest: the Wormhole id of whichever fork this is installed on.
+    function chainId() external view returns (uint16) {
+        if (block.chainid == 8453) return 30;
+        if (block.chainid == 222222) return 73;
+        return 0;
+    }
+
     function publishMessage(uint32 nonce, bytes memory payload, uint8 consistencyLevel)
         external
         payable

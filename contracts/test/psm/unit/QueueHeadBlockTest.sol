@@ -151,6 +151,33 @@ contract QueueHeadBlockTest is Test, IHollarBaseVault {
         assertEq(amount, 10_000e6, "gross re-minted, so the fee is not charged for nothing");
     }
 
+    /// The recipient's own call must not retire them. A blacklisted head who calls `claim` is
+    /// refused with the credit intact and the cancel exit still open; it takes `drain` to retire
+    /// them, which anyone can run once it is clear they cannot be paid.
+    function test_blacklistedHeadCallingClaimIsRefusedNotRetired() public {
+        vm.prank(alice);
+        vault.deposit(100_000e6, PsmPayload.fromAddress(alice));
+        vault.receiveMessage(_vaa(alice, 10_000e6, 1));
+        _blacklist(alice);
+
+        uint256 credit = 10_000e6 - (10_000e6 * 5) / 10_000;
+        assertEq(vault.claimable(alice), credit, "liquidity says payable; the view cannot see the blacklist");
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(RecipientUnpayable.selector, alice));
+        vault.claim();
+
+        assertEq(vault.owed(alice), credit, "still queued");
+        assertEq(vault.unpayable(alice), 0, "not retired");
+        assertEq(vault.queueHead(), 0);
+
+        // The exit she keeps by not having been retired.
+        vm.prank(alice);
+        vault.cancelQueuedRedemption(0);
+        assertEq(vault.owed(alice), 0);
+        assertEq(vault.queueLength(), 0);
+    }
+
     /// Only the credit's own recipient may cancel it.
     function test_cancelIsRecipientOnly() public {
 

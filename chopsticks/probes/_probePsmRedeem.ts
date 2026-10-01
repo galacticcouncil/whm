@@ -80,7 +80,7 @@ const facilitatorAbi = parseAbi([
   "function setLimits(uint256,uint256,uint256)",
   "function setPaused(bool,bool)",
   "function receiveMessage(bytes)",
-  "function redeem(uint256,address) payable returns (uint64)",
+  "function redeem(uint256,address,uint16) payable returns (uint64)",
   "function outstanding() view returns (uint256)",
   "function maxRedeemable() view returns (uint256)",
   "function scale() view returns (uint256)",
@@ -93,12 +93,16 @@ function truncatedEvmAccount(h160: Hex): Hex {
   return `0x45544800${h160.slice(2)}${"00".repeat(8)}` as Hex;
 }
 
-/** The 98-byte PSM body: version | kind | recipient | amount | origin. */
-function psmPayload(kind: number, recipient: Hex, amount: bigint, origin: Hex): Hex {
+/** Fee limit the probe redeems with, and the value a body without one carries. */
+const MAX_FEE_BPS = 5;
+const NO_FEE_CAP = 0xffff;
+
+/** The 100-byte PSM body: version | kind | recipient | amount | origin | maxFeeBps. */
+function psmPayload(kind: number, recipient: Hex, amount: bigint, origin: Hex, maxFeeBps = NO_FEE_CAP): Hex {
   return `0x01${kind.toString(16).padStart(2, "0")}${pad(recipient, { size: 32 }).slice(2)}${pad(
     `0x${amount.toString(16)}`,
     { size: 32 },
-  ).slice(2)}${pad(origin, { size: 32 }).slice(2)}` as Hex;
+  ).slice(2)}${pad(origin, { size: 32 }).slice(2)}${maxFeeBps.toString(16).padStart(4, "0")}` as Hex;
 }
 
 /** Fail fast on an EVM revert: pallet_ethereum reports it as Ethereum.Executed.exit_reason. */
@@ -281,7 +285,7 @@ async function main(): Promise<void> {
       encodeFunctionData({
         abi: facilitatorAbi,
         functionName: "redeem",
-        args: [REDEEM_USDC, me],
+        args: [REDEEM_USDC, me, MAX_FEE_BPS],
       }),
     );
     await assertSucceeded(net, res, "redeem");
@@ -330,8 +334,8 @@ async function main(): Promise<void> {
     }
 
     // Decode the event properly rather than slicing off the tail: `payload` is a dynamic `bytes`,
-    // so ABI pads it from 98 to 128 and appends `consistencyLevel` after the offset word. Slicing
-    // the last 98 bytes would therefore start inside the body and misread every field.
+    // so ABI pads it from 100 to 128 and appends `consistencyLevel` after the offset word. Slicing
+    // the last 100 bytes would therefore start inside the body and misread every field.
     const [, , payload, consistency] = decodeAbiParameters(
       [{ type: "uint64" }, { type: "uint32" }, { type: "bytes" }, { type: "uint8" }],
       toHex(published.data),
@@ -339,10 +343,11 @@ async function main(): Promise<void> {
     const body = payload as Hex;
     const kind = parseInt(body.slice(4, 6), 16);
     const bytes = (body.length - 2) / 2;
-    const origin = getAddress(`0x${body.slice(2 + 66 * 2 + 24)}`);
+    const origin = getAddress(`0x${body.slice(2 + 66 * 2 + 24, 2 + 98 * 2)}`);
+    const maxFeeBps = parseInt(body.slice(2 + 98 * 2), 16);
     console.log(`   consistency ${consistency} (200 = publish immediately)`);
-    console.log(`   published: kind ${kind} (2 = redeem), ${bytes} bytes, origin ${origin}`);
-    const wireOk = kind === 2 && bytes === 98 && origin === me;
+    console.log(`   published: kind ${kind} (2 = redeem), ${bytes} bytes, origin ${origin}, maxFeeBps ${maxFeeBps}`);
+    const wireOk = kind === 2 && bytes === 100 && origin === me && maxFeeBps === MAX_FEE_BPS;
     console.log(`   ${wireOk ? "✅ outbound wire format correct" : "❌ wire mismatch"}`);
     if (!wireOk) process.exitCode = 1;
   } finally {

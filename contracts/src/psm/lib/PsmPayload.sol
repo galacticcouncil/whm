@@ -5,13 +5,17 @@ pragma solidity ^0.8.24;
 /// @notice Fixed-width, byte-packed body carried inside a Wormhole VAA payload. Both ends of the
 ///         corridor decode with this library, so the format has exactly one definition.
 ///
-/// @dev Layout, 98 bytes, big-endian:
+/// @dev Layout, 100 bytes, big-endian:
 ///
-///        ┌───────┬───────┬──────────────────────────┬──────────────────────────┬──────────────────────────┐
-///        │  [0]  │  [1]  │         [2 .. 34)        │        [34 .. 66)        │        [66 .. 98)        │
-///        │ uint8 │ uint8 │          bytes32         │          uint256         │          bytes32         │
-///        │version│ kind  │ recipient — left-pad H160│ amount — USDC units, 6dp │  origin — left-pad H160  │
-///        └───────┴───────┴──────────────────────────┴──────────────────────────┴──────────────────────────┘
+///        ┌───────┬───────┬─────────────┬─────────────┬─────────────┬─────────────┐
+///        │  [0]  │  [1]  │  [2 .. 34)  │ [34 .. 66)  │ [66 .. 98)  │ [98 .. 100) │
+///        │ uint8 │ uint8 │   bytes32   │   uint256   │   bytes32   │   uint16    │
+///        │version│ kind  │  recipient  │   amount    │   origin    │  maxFeeBps  │
+///        └───────┴───────┴─────────────┴─────────────┴─────────────┴─────────────┘
+///
+///      `recipient` and `origin` are left-padded H160s; `amount` is USDC units, 6 dp. `maxFeeBps`
+///      is read on KIND_REDEEM only: the redemption fee is assessed on Base when the message
+///      lands, so the burn carries the most its redeemer will pay.
 ///
 ///      **`origin` is the account that signed the originating transaction on the source chain**:
 ///      the depositor on Base, the redeemer on Hydration. It is the one address guaranteed to
@@ -35,19 +39,23 @@ library PsmPayload {
     ///         as empty: an unparsed message must never mint.
     uint8 internal constant VERSION = 1;
 
-    /// @notice Base to Hydration: a deposit was locked, mint against it.
+    /// @notice Base to Hydration: a deposit was locked, mint against it. Also what a cancelled
+    ///         refund credit goes back as — the same deposit, attested again.
     uint8 internal constant KIND_MINT = 1;
     /// @notice Hydration to Base: HOLLAR was burned, credit the redemption.
     uint8 internal constant KIND_REDEEM = 2;
-    /// @notice Hydration to Base: a queued mint was cancelled, credit it back with no fee.
+    /// @notice Hydration to Base: a queued deposit was cancelled, credit it back with no fee.
     uint8 internal constant KIND_REFUND = 3;
     /// @notice Base to Hydration: a queued redemption was cancelled, re-mint what was burned. Handled
     ///         exactly like a mint — bucket-checked and charged to the inbound window — and kept as
-    ///         its own kind only so a cancel is distinguishable from a deposit on the wire.
+    ///         its own kind so the facilitator can tell it from a deposit when it is cancelled in turn.
     uint8 internal constant KIND_REMINT = 4;
 
     /// @notice Exact encoded length. Anything else is refused rather than padded or truncated.
-    uint256 internal constant LENGTH = 98;
+    uint256 internal constant LENGTH = 100;
+
+    /// @notice `maxFeeBps` for a message that sets no limit.
+    uint16 internal constant NO_FEE_CAP = type(uint16).max;
 
     // ─── Errors ─────────────────────────────────────────────────
 
@@ -61,13 +69,22 @@ library PsmPayload {
 
     /// @notice Pack a body for publishing. Callers are responsible for having validated the
     ///         recipient on the source chain, where the user still holds their funds.
-    function encode(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin)
+    function encode(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin, uint16 maxFeeBps)
         internal
         pure
         returns (bytes memory)
     {
         if (!_knownKind(kind)) revert UnknownKind(kind);
-        return abi.encodePacked(VERSION, kind, recipient, amount, origin);
+        return abi.encodePacked(VERSION, kind, recipient, amount, origin, maxFeeBps);
+    }
+
+    /// @notice The same, with no fee limit — for the kinds that carry no fee.
+    function encode(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        return encode(kind, recipient, amount, origin, NO_FEE_CAP);
     }
 
     // ─── Decode ─────────────────────────────────────────────────
@@ -101,6 +118,16 @@ library PsmPayload {
 
         if (version != VERSION) revert UnsupportedVersion(version);
         if (!_knownKind(kind)) revert UnknownKind(kind);
+    }
+
+    /// @notice The trailing `maxFeeBps` of a body. Kept out of `decode` because only a redemption
+    ///         reads it.
+    function feeCap(bytes memory body) internal pure returns (uint16 cap) {
+        if (body.length != LENGTH) revert InvalidLength(body.length);
+        assembly {
+            // bytes [98 .. 100) are the high two bytes of the word at content offset 98.
+            cap := shr(240, mload(add(body, 0x82)))
+        }
     }
 
     function _knownKind(uint8 kind) private pure returns (bool) {

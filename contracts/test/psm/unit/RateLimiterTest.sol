@@ -73,6 +73,22 @@ contract RateLimiterTest is Test {
         limiter.set(100, 0);
     }
 
+    /// @dev `_sync` multiplies capacity by elapsed seconds. A finite capacity near the uint256
+    ///      ceiling overflowed that the moment the bucket dipped below full — inside `set` too, so
+    ///      it could never be reconfigured. Finite capacities are bounded; only UNLIMITED is above.
+    function test_capacityIsBounded() public {
+        limiter.set(RateLimiter.MAX_CAPACITY, 1 days);
+        assertEq(limiter.available(), RateLimiter.MAX_CAPACITY);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(RateLimiter.CapacityTooLarge.selector, RateLimiter.MAX_CAPACITY + 1)
+        );
+        limiter.set(RateLimiter.MAX_CAPACITY + 1, 1 days);
+
+        limiter.set(RateLimiter.UNLIMITED, 0);
+        assertEq(limiter.available(), RateLimiter.UNLIMITED, "unlimited is still asked for by name");
+    }
+
     // ─── Refill ─────────────────────────────────────────────────
 
     function test_startsFull() public {

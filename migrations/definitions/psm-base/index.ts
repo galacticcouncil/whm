@@ -22,17 +22,26 @@ import type { MigrationConfig } from "./types";
  * both binds are one-shot and self-freezing, so a step that runs before the address it needs
  * exists cannot be corrected by re-running it — only by redeploying that side.
  *
- * Build first — the PSM contracts live under a separate Foundry profile, and the actions read
- * artifacts from contracts/out-psm/:
+ * The PSM contracts live under a separate Foundry profile and the actions read artifacts from
+ * contracts/out-psm/. sh/migrate-psm-base.sh builds them first; by hand it is
  *
  *   FOUNDRY_PROFILE=psm pnpm --filter @whm/contracts build
  *
+ * The emitter binds (005/006) read before they write — an already-bound value is idempotent on
+ * resume, a different one throws — and the handovers refuse to hand the role to the deployer
+ * itself. A `failed` step still re-runs on every invocation; `--from <next>` does not skip it.
+ *
  * Two things this migration deliberately does NOT do, because neither is ours to run:
  *
- *   - GhoToken.addFacilitator(facilitator, label, capacity). Substrate-side, executed by the technical
- *     committee. Until it lands the facilitator has a zero bucket and mints nothing.
- *   - Unpausing. Both contracts ship paused. Redeem is unpaused first, then mint, once the bucket
- *     is granted and the invariant has been watched — a guardian action, after this migration.
+ *   - GhoToken.addFacilitator(facilitator, label, capacity). Hydration governance — the GHO roles
+ *     sit on the dispatcher's AaveManager account, so it is dispatch_as_aave_manager from Root or
+ *     the EconomicParameters track, not a technical-committee motion. Until it lands the
+ *     facilitator has a zero bucket and mints nothing.
+ *   - Unpausing. Both contracts ship paused. Once this migration has bound both emitters
+ *     (005/006), the go-live order is redeem unpaused → mint unpaused, once the bucket is granted
+ *     and the invariant has been watched → the vault's deposits last, each a guardian action.
+ *     Deposits go last because a deposit that lands while mint is paused only queues, and a
+ *     queue → cancel → refund loop spends the deposit window for free.
  *
  * Required PK env vars:
  *   PK_FACILITATOR — Hydration deployer

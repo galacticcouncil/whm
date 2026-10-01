@@ -123,7 +123,7 @@ contract HydrationFacilitatorForkTest is Test {
         deal(HOLLAR, address(facilitator), IGhoToken(HOLLAR).balanceOf(address(facilitator)) + usdcAmount * SCALE);
         vm.mockCall(HOLLAR, abi.encodeWithSelector(bytes4(keccak256("transferFrom(address,address,uint256)"))), abi.encode(true));
         vm.prank(from);
-        facilitator.redeem(usdcAmount, baseRecipient);
+        facilitator.redeem(usdcAmount, baseRecipient, type(uint16).max);
         vm.clearMockedCalls();
     }
 
@@ -182,7 +182,7 @@ contract HydrationFacilitatorForkTest is Test {
             abi.encodeWithSelector(IHollarBaseFacilitator.ExceedsBucketLevel.selector, 20_000e18, 6_000e18)
         );
         vm.prank(alice);
-        facilitator.redeem(20_000e6, makeAddr("baseRecipient"));
+        facilitator.redeem(20_000e6, makeAddr("baseRecipient"), type(uint16).max);
 
         assertEq(_level(), 6_000e18, "bucket untouched by the refusal");
     }

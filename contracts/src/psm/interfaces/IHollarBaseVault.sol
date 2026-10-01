@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 interface IHollarBaseVault {
     // ─── Types ──────────────────────────────────────────────────
 
-    /// @notice Init arguments, grouped. Eleven of them do not fit on the stack as parameters, and
+    /// @notice Init arguments, grouped. Nine of them do not fit on the stack as parameters, and
     ///         at this width names at the call site are worth more than positions anyway.
     struct VaultInit {
         address wormhole;
@@ -23,9 +23,15 @@ interface IHollarBaseVault {
     ///         like anyone else's.
     struct Credit {
         address recipient;
-        /// @dev The redeemer on Hydration — who burned. A cancellation re-mints here and nowhere
-        ///      else: it is the one address known to exist on that chain.
+        /// @dev The Hydration account the value came from — the redeemer, or for a refund the
+        ///      recipient of the entry it undid. A cancellation re-mints here and nowhere else:
+        ///      it is the one address known to exist on that chain.
         address origin;
+        /// @dev Booked from a KIND_REFUND: a deposit that never minted. Cancelling it attests the
+        ///      deposit again (KIND_MINT), so a second cancel on Hydration still refunds fee-free.
+        bool refund;
+        /// @dev When it was booked. The origin may cancel only `ORIGIN_CANCEL_DELAY` after this.
+        uint64 creditedAt;
         /// @dev What the recipient is paid, net of fee.
         uint256 amount;
         /// @dev What left `principal` to book this credit. Cancelling returns this, not `amount`:
@@ -43,6 +49,10 @@ interface IHollarBaseVault {
         uint256 indexed index, address indexed recipient, uint256 gross, uint256 fee, uint256 credited, uint8 kind
     );
     event Disputed(address indexed recipient, uint256 amount, uint256 principal);
+    /// @dev A redemption that landed above its own fee limit: nothing booked, HOLLAR sent back.
+    event RedeemReturned(
+        address indexed recipient, address indexed origin, uint256 amount, uint256 feeBps, uint256 maxFeeBps, uint64 sequence
+    );
     event Claimed(address indexed recipient, uint256 amount);
     event RedemptionCancelled(
         uint256 indexed index, address indexed recipient, uint256 gross, bytes32 hydrationRecipient, uint64 sequence
@@ -59,20 +69,26 @@ interface IHollarBaseVault {
     event FeesSet(uint256 redeemFeeBps, uint256 surplusFloorBps);
     event DepositsPausedSet(bool paused);
     event ClaimsPausedSet(bool paused);
+    event InvestPausedSet(bool paused);
 
     // ─── Errors ─────────────────────────────────────────────────
 
     error DepositsPaused();
     error ClaimsPaused();
     error EmitterAlreadySet();
+    error EmitterNotSet();
     error ZeroAddress();
     error ZeroAmount();
+    error InvalidChainId(uint16 chainId);
+    error RecipientUnpayable(address recipient);
+    error FloorTooHigh(uint256 bps);
     error OraclePriceInvalid(int256 answer);
     error UsdcBelowFloor(uint256 price, uint256 floorPrice);
     error OracleNotConfigured();
     error NotAtQueueHead(address caller, address head);
     error CancelNotAtHead(uint256 index, uint256 head);
     error NotYourCredit(uint256 index, address owner);
+    error OriginCancelTooEarly(uint256 index, uint256 opensAt);
     error NotQueued(uint256 index);
     error NothingUnpayable(address recipient);
     error InsufficientLiquidity(uint256 requested, uint256 available);

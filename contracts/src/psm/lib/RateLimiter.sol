@@ -14,6 +14,11 @@ pragma solidity ^0.8.24;
 ///      start of a window and the refill spent at its end — so the true worst case over an
 ///      arbitrary window is `2 × capacity`, not `capacity`. Size the parameter against the burst,
 ///      which is the number that bounds a single incident.
+///
+/// @dev **Bounded.** A finite capacity is at most `MAX_CAPACITY`. `_sync` multiplies the capacity
+///      by the elapsed seconds, and a value near the `uint256` ceiling overflows that product the
+///      moment the bucket is below full — inside `set` too, which syncs the old capacity first, so
+///      such a limit could never be reconfigured. `UNLIMITED` is the only value above the bound.
 library RateLimiter {
     // ─── Types ──────────────────────────────────────────────────
 
@@ -32,10 +37,14 @@ library RateLimiter {
     /// @notice The explicit opt-out. Never a default.
     uint256 internal constant UNLIMITED = type(uint256).max;
 
+    /// @notice Largest finite capacity. Leaves `capacity * elapsed` 128 bits of headroom.
+    uint256 internal constant MAX_CAPACITY = type(uint128).max;
+
     // ─── Errors ─────────────────────────────────────────────────
 
     error RateLimitExceeded(uint256 requested, uint256 available);
     error ZeroWindow();
+    error CapacityTooLarge(uint256 capacity);
 
     // ─── Config ─────────────────────────────────────────────────
 
@@ -44,6 +53,7 @@ library RateLimiter {
     ///         config change.
     function set(Limit storage self, uint256 capacity, uint256 window) internal {
         if (capacity != 0 && capacity != UNLIMITED && window == 0) revert ZeroWindow();
+        if (capacity > MAX_CAPACITY && capacity != UNLIMITED) revert CapacityTooLarge(capacity);
 
         (uint256 current,) = _sync(self);
         bool fresh = self.lastUpdate == 0;

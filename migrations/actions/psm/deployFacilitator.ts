@@ -8,8 +8,8 @@ import erc1967ProxyJson from "../../../contracts/out-psm/ERC1967Proxy.sol/ERC196
 
 /**
  * Artifacts come from out-psm/, not out/. The PSM contracts are built under the `psm` Foundry
- * profile (optimizer + via-IR) because HollarBaseVault does not fit under EIP-170 without it.
- * Build with `FOUNDRY_PROFILE=psm forge build` before running this migration.
+ * profile (optimizer on, 200 runs) because HollarBaseVault does not fit under EIP-170 without it.
+ * sh/migrate-psm-base.sh builds it; run `FOUNDRY_PROFILE=psm forge build` yourself otherwise.
  */
 export type DeployFacilitatorParams = WalletContext & {
   wormholeCore: `0x${string}`;

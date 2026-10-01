@@ -8,7 +8,7 @@ const step: MigrationStep = {
     const vault = ctx.outputs["001-deploy-vault"].proxyAddress;
     // This key is a path to the reserve itself, and by owner decision it sits behind a 4-of-7
     // multisig rather than a timelock, so an upgrade lands the moment it is signed. It must never
-    // be an EOA.
+    // be an EOA — enforced below by refusing an address with no code.
     const newAdmin = ctx.env.VAULT_NEW_OWNER;
     if (!newAdmin) throw new Error("Missing VAULT_NEW_OWNER");
 
@@ -16,6 +16,7 @@ const step: MigrationStep = {
       ...ctx.wallet.base,
       contract: vault as `0x${string}`,
       newAdmin: newAdmin as `0x${string}`,
+      requireContract: true,
     });
   },
 };

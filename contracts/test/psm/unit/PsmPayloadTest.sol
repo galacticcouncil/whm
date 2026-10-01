@@ -13,13 +13,14 @@ contract PsmPayloadTest is Test {
 
     // Constructed independently of the library, from the layout diagram in the spec's section 5:
     //   version 1 | kind 2 (redeem) | recipient 0x1111…0000 left-padded | amount 1_000_000 (1 USDC)
-    //   | origin 0xaaaa…3333 left-padded
+    //   | origin 0xaaaa…3333 left-padded | maxFeeBps 5
     bytes internal constant GOLDEN =
-        hex"0102000000000000000000000000111122223333444455556666777788889999000000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000aaaabbbbccccddddeeeeffff0000111122223333";
+        hex"0102000000000000000000000000111122223333444455556666777788889999000000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000aaaabbbbccccddddeeeeffff00001111222233330005";
 
     address internal constant GOLDEN_ADDR = 0x1111222233334444555566667777888899990000;
     uint256 internal constant GOLDEN_AMOUNT = 1_000_000;
     address internal constant GOLDEN_ORIGIN = 0xAAAabbbbcccCDdDdEEeeFfff0000111122223333;
+    uint16 internal constant GOLDEN_CAP = 5;
 
     // ─── The layout itself ──────────────────────────────────────
 
@@ -27,9 +28,13 @@ contract PsmPayloadTest is Test {
     ///      the same way; only a fixture built outside the library catches that.
     function test_encode_matchesGoldenVector() public pure {
         bytes memory out = PsmPayload.encode(
-            PsmPayload.KIND_REDEEM, PsmPayload.fromAddress(GOLDEN_ADDR), GOLDEN_AMOUNT, PsmPayload.fromAddress(GOLDEN_ORIGIN)
+            PsmPayload.KIND_REDEEM,
+            PsmPayload.fromAddress(GOLDEN_ADDR),
+            GOLDEN_AMOUNT,
+            PsmPayload.fromAddress(GOLDEN_ORIGIN),
+            GOLDEN_CAP
         );
-        assertEq(out.length, PsmPayload.LENGTH, "length must be exactly 98");
+        assertEq(out.length, 100, "length must be exactly 100");
         assertEq(out, GOLDEN, "byte layout drifted from the spec");
     }
 
@@ -39,6 +44,7 @@ contract PsmPayloadTest is Test {
         assertEq(PsmPayload.toAddress(recipient), GOLDEN_ADDR);
         assertEq(amount, GOLDEN_AMOUNT);
         assertEq(PsmPayload.toAddress(origin), GOLDEN_ORIGIN);
+        assertEq(PsmPayload.feeCap(GOLDEN), GOLDEN_CAP);
     }
 
     // ─── Round trip ─────────────────────────────────────────────
@@ -72,7 +78,7 @@ contract PsmPayloadTest is Test {
     ///      shape change would look like a clean boot and disarm every check downstream.
     function testFuzz_decode_rejectsUnknownVersion(uint8 version) public {
         vm.assume(version != PsmPayload.VERSION);
-        bytes memory body = abi.encodePacked(version, PsmPayload.KIND_MINT, bytes32(uint256(1)), uint256(1), bytes32(uint256(1)));
+        bytes memory body = abi.encodePacked(version, PsmPayload.KIND_MINT, bytes32(uint256(1)), uint256(1), bytes32(uint256(1)), uint16(0));
         vm.expectRevert(abi.encodeWithSelector(PsmPayload.UnsupportedVersion.selector, version));
         this.decodeExternal(body);
     }
@@ -81,7 +87,7 @@ contract PsmPayloadTest is Test {
 
     function testFuzz_decode_rejectsUnknownKind(uint8 kind) public {
         vm.assume(kind < PsmPayload.KIND_MINT || kind > PsmPayload.KIND_REMINT);
-        bytes memory body = abi.encodePacked(PsmPayload.VERSION, kind, bytes32(uint256(1)), uint256(1), bytes32(uint256(1)));
+        bytes memory body = abi.encodePacked(PsmPayload.VERSION, kind, bytes32(uint256(1)), uint256(1), bytes32(uint256(1)), uint16(0));
         vm.expectRevert(abi.encodeWithSelector(PsmPayload.UnknownKind.selector, kind));
         this.decodeExternal(body);
     }
@@ -137,5 +143,34 @@ contract PsmPayloadTest is Test {
 
     function toAddressExternal(bytes32 raw) external pure returns (address) {
         return PsmPayload.toAddress(raw);
+    }
+
+    // ─── Fee cap ────────────────────────────────────────────────
+
+    function feeCapExternal(bytes memory body) external pure returns (uint16) {
+        return PsmPayload.feeCap(body);
+    }
+
+    /// @dev The trailing field survives the trip for every value, next to a full-width origin.
+    function testFuzz_feeCapRoundTrips(uint16 cap, address origin) public pure {
+        vm.assume(origin != address(0));
+        bytes memory body = PsmPayload.encode(
+            PsmPayload.KIND_REDEEM, PsmPayload.fromAddress(address(1)), 1, PsmPayload.fromAddress(origin), cap
+        );
+        assertEq(PsmPayload.feeCap(body), cap);
+        (,,, bytes32 o) = PsmPayload.decode(body);
+        assertEq(PsmPayload.toAddress(o), origin, "the cap does not bleed into the origin");
+    }
+
+    /// @dev The four-argument form is for the kinds that carry no fee: it sets no limit.
+    function test_encode_withoutACapSetsNoLimit() public pure {
+        bytes memory body =
+            PsmPayload.encode(PsmPayload.KIND_MINT, PsmPayload.fromAddress(address(1)), 1, PsmPayload.fromAddress(address(1)));
+        assertEq(PsmPayload.feeCap(body), PsmPayload.NO_FEE_CAP);
+    }
+
+    function test_feeCap_rejectsWrongLength() public {
+        vm.expectRevert(abi.encodeWithSelector(PsmPayload.InvalidLength.selector, uint256(98)));
+        this.feeCapExternal(new bytes(98));
     }
 }

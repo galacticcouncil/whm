@@ -848,4 +848,287 @@ contract HollarBaseVaultTest is Test, IHollarBaseVault {
         assertEq(vault.totalOwed(), 0, "nothing credited");
         assertEq(vault.principal(), 10_000e6, "and the books are untouched");
     }
+
+    // ─── Init ───────────────────────────────────────────────────
+
+    function _initData(uint16 hydrationChain) internal view returns (bytes memory) {
+        return abi.encodeCall(
+            HollarBaseVault.initializeVault,
+            (
+                VaultInit({
+                    wormhole: address(wormhole),
+                    usdc: address(usdc),
+                    aUsdc: address(aUsdc),
+                    addressesProvider: address(provider),
+                    hydrationChainId: hydrationChain,
+                    minUsdcPrice: MIN_PRICE,
+                    admin: admin,
+                    guardian: guardian,
+                    treasurer: treasurer
+                })
+            )
+        );
+    }
+
+    /// @dev The facilitator's chain is checked against the core's own id, which also proves the core.
+    function test_initialize_rejectsOwnChainAsHydration() public {
+        address impl = address(new HollarBaseVault());
+
+        vm.expectRevert(abi.encodeWithSelector(InvalidChainId.selector, BASE_CHAIN));
+        new ERC1967Proxy(impl, _initData(BASE_CHAIN));
+
+        vm.expectRevert(abi.encodeWithSelector(InvalidChainId.selector, uint16(0)));
+        new ERC1967Proxy(impl, _initData(0));
+    }
+
+    // ─── Unbound window ─────────────────────────────────────────
+
+    /// @dev Until the one-shot bind the mapping holds zero for Hydration, which is what a
+    ///      zero-emitter VAA would match in the shared base. Nothing is accepted before it.
+    function test_receiveRedeem_refusesEverythingBeforeTheBind() public {
+        HollarBaseVault fresh =
+            HollarBaseVault(address(new ERC1967Proxy(address(new HollarBaseVault()), _initData(HYDRATION_CHAIN))));
+
+        bytes memory payload =
+            PsmPayload.encode(PsmPayload.KIND_REDEEM, PsmPayload.fromAddress(alice), 1_000e6, PsmPayload.fromAddress(alice));
+
+        vm.expectRevert(EmitterNotSet.selector);
+        fresh.receiveMessage(abi.encode(HYDRATION_CHAIN, bytes32(0), payload, uint256(1)));
+    }
+
+    // ─── Views under pause ──────────────────────────────────────
+
+    /// @dev Paused reads as nothing claimable: the view must not promise what `claim` refuses.
+    function test_claimable_isZeroWhilePaused() public {
+        _deposit(alice, 10_000e6);
+        vault.receiveMessage(_redeemVaa(alice, 1_000e6, PsmPayload.KIND_REDEEM));
+        assertGt(vault.claimable(alice), 0);
+
+        vm.prank(guardian);
+        vault.setClaimsPaused(true);
+        assertEq(vault.claimable(alice), 0);
+    }
+
+    // ─── Unwind is sticky ───────────────────────────────────────
+
+    /// @dev Regression: `_investBestEffort` sweeps the whole idle balance, so one deposit of any
+    ///      size after an unwind put the entire reserve back into the pool the guardian had just
+    ///      left. The unwind now stops re-supply until a guardian clears it.
+    function test_emergencyUnwind_stopsReinvestUntilCleared() public {
+        _deposit(alice, 10_000e6);
+
+        vm.expectEmit(false, false, false, true, address(vault));
+        emit InvestPausedSet(true);
+        vm.prank(guardian);
+        vault.emergencyUnwindAave(10_000e6);
+        assertTrue(vault.investPaused());
+
+        _deposit(bob, 1e6);
+        assertEq(aUsdc.balanceOf(address(vault)), 0, "a deposit after the unwind stays idle");
+        assertEq(usdc.balanceOf(address(vault)), 10_001e6);
+        assertEq(vault.principal(), 10_001e6, "attested all the same");
+        _assertSolvent();
+
+        vm.prank(guardian);
+        vault.setInvestPaused(false);
+        assertEq(aUsdc.balanceOf(address(vault)), 10_001e6, "clearing re-supplies what was idle, at once");
+        assertEq(usdc.balanceOf(address(vault)), 0);
+        _assertSolvent();
+    }
+
+    function test_setInvestPaused_onlyGuardian() public {
+        vm.prank(admin);
+        vm.expectRevert();
+        vault.setInvestPaused(true);
+    }
+
+    /// @dev The stop can be set without an unwind: a guardian who wants new deposits held idle.
+    function test_setInvestPaused_trueHoldsDepositsIdle() public {
+        vm.expectEmit(false, false, false, true, address(vault));
+        emit InvestPausedSet(true);
+        vm.prank(guardian);
+        vault.setInvestPaused(true);
+
+        _deposit(alice, 10_000e6);
+        assertEq(aUsdc.balanceOf(address(vault)), 0, "held idle");
+        assertEq(usdc.balanceOf(address(vault)), 10_000e6);
+        assertEq(vault.principal(), 10_000e6);
+
+        vm.prank(guardian);
+        vault.setInvestPaused(false);
+        assertEq(aUsdc.balanceOf(address(vault)), 10_000e6, "and supplied once cleared");
+    }
+
+    /// @dev Above 100% the floor only locks the treasurer out; far above it, it overflowed `sweepable`.
+    function test_setFees_floorCapped() public {
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(FloorTooHigh.selector, 10_001));
+        vault.setFees(5, 10_001);
+
+        vm.prank(admin);
+        vault.setFees(5, 10_000);
+        assertEq(vault.surplusFloorBps(), 10_000, "exactly 100% is the ceiling, not past it");
+    }
+
+    // ─── Fee limit carried by the redemption ────────────────────
+
+    function _cappedRedeemVaa(address recipient, address origin, uint256 amount, uint16 cap, uint256 salt)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        return abi.encode(
+            HYDRATION_CHAIN,
+            HYDRATION_EMITTER,
+            PsmPayload.encode(
+                PsmPayload.KIND_REDEEM, PsmPayload.fromAddress(recipient), amount, PsmPayload.fromAddress(origin), cap
+            ),
+            salt
+        );
+    }
+
+    /// @dev The fee is assessed when the credit lands, so a raise in the relay window would
+    ///      re-price a burn that cannot be undone. The burn carries its own limit instead: above
+    ///      it nothing is booked, `principal` stands, and the HOLLAR goes back to who burned it.
+    function test_receiveRedeem_overItsFeeLimitSendsTheHollarBack() public {
+        address redeemer = makeAddr("hydrationRedeemer");
+        _deposit(alice, 1_000e6);
+
+        vm.prank(admin);
+        vault.setFees(50, 25); // raised while the redemption was in flight
+
+        vm.expectEmit(true, true, false, true, address(vault));
+        emit RedeemReturned(bob, redeemer, 400e6, 50, 5, 1);
+        vault.receiveMessage(_cappedRedeemVaa(bob, redeemer, 400e6, 5, 1));
+
+        assertEq(vault.principal(), 1_000e6, "nothing left the books");
+        assertEq(vault.owed(bob), 0, "and nothing was credited");
+        assertEq(vault.queueLength(), 0);
+
+        (uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin) =
+            PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_REMINT, "the burn goes back as a re-mint");
+        assertEq(PsmPayload.toAddress(recipient), redeemer, "to who burned");
+        assertEq(amount, 400e6, "whole");
+        assertEq(PsmPayload.toAddress(origin), bob, "naming the Base recipient as origin in turn");
+        _assertSolvent();
+    }
+
+    /// @dev At the limit is within it.
+    function test_receiveRedeem_atItsFeeLimitBooksNormally() public {
+        _deposit(alice, 1_000e6);
+
+        vault.receiveMessage(_cappedRedeemVaa(bob, bob, 400e6, 5, 1));
+
+        assertEq(vault.owed(bob), 400e6 - 2e5, "credited net of the 5 bps it agreed to");
+        assertEq(vault.principal(), 600e6);
+    }
+
+    /// @dev Sending the HOLLAR back mints on Hydration, so it waits out a claims pause like every
+    ///      other path that does. The delivery reverts, the VAA stays unconsumed, and it lands
+    ///      once payment is open again.
+    function test_receiveRedeem_overItsFeeLimitWaitsOutAClaimsPause() public {
+        _deposit(alice, 1_000e6);
+        bytes memory vaa = _cappedRedeemVaa(bob, bob, 400e6, 4, 1);
+
+        vm.prank(guardian);
+        vault.setClaimsPaused(true);
+        vm.expectRevert(ClaimsPaused.selector);
+        vault.receiveMessage(vaa);
+
+        vm.prank(guardian);
+        vault.setClaimsPaused(false);
+        vault.receiveMessage(vaa);
+
+        (uint8 kind,,,) = PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_REMINT, "returned once unpaused");
+        assertEq(vault.principal(), 1_000e6);
+    }
+
+    /// @dev An over-claim is an incident, never a re-mint: it is parked before the limit is read.
+    function test_receiveRedeem_overClaimParksEvenOverItsFeeLimit() public {
+        _deposit(alice, 100e6);
+        uint256 published = wormhole.publishedCount();
+
+        vault.receiveMessage(_cappedRedeemVaa(bob, bob, 500e6, 0, 1));
+
+        assertEq(vault.disputed(bob), 500e6);
+        assertEq(wormhole.publishedCount(), published, "nothing went back to Hydration");
+    }
+
+    // ─── Who may cancel ─────────────────────────────────────────
+
+    /// @dev A redeemer who named a payment address they do not control must still be able to walk
+    ///      away from a stalled head — but not to recall a payment the queue is about to make. So
+    ///      the origin may ask only once the credit has waited a day unpaid; until then it is the
+    ///      recipient's alone. The HOLLAR goes back to the origin whoever asks.
+    function test_cancelQueuedRedemption_originMayCancelAfterTheWait() public {
+        address paymentAddress = makeAddr("paymentAddress");
+        _deposit(alice, 10_000e6);
+        vault.receiveMessage(_redeemVaaWithOrigin(paymentAddress, alice, 1_000e6));
+        uint256 opensAt = 365 days + vault.ORIGIN_CANCEL_DELAY();
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(NotYourCredit.selector, 0, paymentAddress));
+        vault.cancelQueuedRedemption(0);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(OriginCancelTooEarly.selector, 0, opensAt));
+        vault.cancelQueuedRedemption(0);
+
+        vm.warp(opensAt - 1);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(OriginCancelTooEarly.selector, 0, opensAt));
+        vault.cancelQueuedRedemption(0);
+
+        vm.warp(opensAt);
+        vm.prank(alice);
+        vault.cancelQueuedRedemption(0);
+
+        assertEq(vault.owed(paymentAddress), 0);
+        assertEq(vault.principal(), 10_000e6, "gross back in backing");
+        (uint8 kind, bytes32 recipient, uint256 amount,) = PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_REMINT);
+        assertEq(PsmPayload.toAddress(recipient), alice, "to the origin, as always");
+        assertEq(amount, 1_000e6);
+    }
+
+    /// @dev The wait binds the origin only. The recipient may leave the moment the credit lands.
+    function test_cancelQueuedRedemption_recipientNeedsNoWait() public {
+        _deposit(alice, 10_000e6);
+        vault.receiveMessage(_redeemVaaWithOrigin(bob, alice, 1_000e6));
+
+        vm.prank(bob);
+        vault.cancelQueuedRedemption(0);
+        assertEq(vault.owed(bob), 0);
+    }
+
+    /// @dev A refund credit is a deposit that never minted. Cancelled, it goes back as the mint
+    ///      it was — not as a re-mint, whose own cancel would return as a fee-charged redemption.
+    function test_cancelQueuedRedemption_refundGoesBackAsAMint() public {
+        _deposit(alice, 1_000e6);
+        vault.receiveMessage(_redeemVaa(bob, 400e6, PsmPayload.KIND_REFUND));
+        (,, bool refund,,,) = vault.queue(0);
+        assertTrue(refund);
+
+        vm.prank(bob);
+        vault.cancelQueuedRedemption(0);
+
+        (uint8 kind,, uint256 amount,) = PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_MINT, "the same deposit, attested again");
+        assertEq(amount, 400e6);
+        assertEq(vault.principal(), 1_000e6);
+    }
+
+    /// @dev The far side never publishes zero. Refused before anything is read from it, so it can
+    ///      neither book an empty credit nor be sent back as an empty re-mint.
+    function test_receiveRedeem_rejectsZeroAmount() public {
+        _deposit(alice, 1_000e6);
+
+        vm.expectRevert(ZeroAmount.selector);
+        vault.receiveMessage(_cappedRedeemVaa(bob, bob, 0, type(uint16).max, 1));
+
+        vm.expectRevert(ZeroAmount.selector);
+        vault.receiveMessage(_cappedRedeemVaa(bob, bob, 0, 0, 2));
+    }
 }

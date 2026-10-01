@@ -298,8 +298,10 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         facilitator.setPaused(true, false);
         facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, baseDepositor, 100e6, 1));
 
+        vm.expectEmit(true, true, false, true);
+        emit PendingMintCancelled(0, alice, 100e6, PsmPayload.fromAddress(baseDepositor), PsmPayload.KIND_REFUND, 0);
         vm.prank(alice);
-        facilitator.cancelPendingMint(0);
+        facilitator.cancelPendingMint(0, type(uint16).max);
 
         assertEq(facilitator.pendingOf(alice), 0);
         assertEq(facilitator.totalPendingMint(), 0);
@@ -321,7 +323,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(NotYourPendingMint.selector, 0, alice));
-        facilitator.cancelPendingMint(0);
+        facilitator.cancelPendingMint(0, type(uint16).max);
     }
 
     /// @dev The admin's version picks nothing either: same origin, same books.
@@ -333,10 +335,10 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.prank(bob);
         vm.expectRevert();
-        facilitator.cancelPendingMintFor(0);
+        facilitator.cancelPendingMintFor(0, type(uint16).max);
 
         vm.prank(admin);
-        facilitator.cancelPendingMintFor(0);
+        facilitator.cancelPendingMintFor(0, type(uint16).max);
 
         assertEq(facilitator.pendingOf(alice), 0);
         assertEq(facilitator.totalPendingMint(), 0);
@@ -349,13 +351,14 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(NotQueued.selector, 0));
-        facilitator.cancelPendingMintFor(0);
+        facilitator.cancelPendingMintFor(0, type(uint16).max);
     }
 
     // ─── Re-mint ────────────────────────────────────────────────
 
     /// @dev A re-mint is a mint on the books: same bucket check, same inbound charge. The kind is
-    ///      distinguishable on the wire and nowhere else.
+    ///      distinguishable on the wire and on the queued entry, where it decides what a cancel
+    ///      sends back — and nowhere else.
     function test_receiveRemint_chargesInboundLikeAMint() public {
         vm.prank(admin);
         facilitator.setLimits(150e6, RateLimiter.UNLIMITED, 1 days);
@@ -399,7 +402,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), 100e18);
-        facilitator.redeem(40e6, bob);
+        facilitator.redeem(40e6, bob, type(uint16).max);
         vm.stopPrank();
 
         assertEq(hollar.balanceOf(alice), 60e18);
@@ -420,7 +423,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), 100e18);
-        facilitator.redeem(100e6, bob);
+        facilitator.redeem(100e6, bob, type(uint16).max);
         vm.stopPrank();
 
         assertEq(wormhole.lastPublished().consistencyLevel, 200);
@@ -436,7 +439,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
         vm.expectRevert(abi.encodeWithSelector(ExceedsBucketLevel.selector, 200e18, 100e18));
-        facilitator.redeem(200e6, bob);
+        facilitator.redeem(200e6, bob, type(uint16).max);
         vm.stopPrank();
     }
 
@@ -450,7 +453,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
         vm.expectRevert();
-        facilitator.redeem(redeemed, bob);
+        facilitator.redeem(redeemed, bob, type(uint16).max);
         vm.stopPrank();
     }
 
@@ -458,7 +461,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
     function test_redeem_rejectsZeroRecipient() public {
         vm.expectRevert(ZeroAddress.selector);
         vm.prank(alice);
-        facilitator.redeem(100e6, address(0));
+        facilitator.redeem(100e6, address(0), type(uint16).max);
     }
 
     function test_redeem_respectsPause() public {
@@ -467,7 +470,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.expectRevert(RedeemPaused.selector);
         vm.prank(alice);
-        facilitator.redeem(100e6, bob);
+        facilitator.redeem(100e6, bob, type(uint16).max);
     }
 
     // ─── Authority ──────────────────────────────────────────────
@@ -512,6 +515,10 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         facilitator.setPaused(true, false);
         facilitator.receiveMessage(_mintVaa(alice, 100e6));
 
+        assertEq(facilitator.mintHeadroom(), 0, "nothing mints while paused, whatever the bucket says");
+
+        vm.prank(guardian);
+        facilitator.setPaused(false, false);
         assertEq(facilitator.mintHeadroom(), 10_000e6 - 100e6, "queued mints already claim headroom");
     }
 
@@ -545,5 +552,210 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         vm.expectRevert();
         facilitator.receiveMessage(_mintVaaFrom(BASE_CHAIN, bytes32(0), alice, 1_000e6, 3));
         assertEq(hollar.balanceOf(alice), 0);
+    }
+
+    // ─── Init ───────────────────────────────────────────────────
+
+    function _initData(uint8 usdcDecimals, uint16 baseChain) internal view returns (bytes memory) {
+        return abi.encodeCall(
+            HollarBaseFacilitator.initializeFacilitator,
+            (address(wormhole), address(hollar), usdcDecimals, baseChain, admin, guardian)
+        );
+    }
+
+    /// @dev Zero USDC decimals would make `scale` 1e18 — every wire unit a whole HOLLAR, bounded
+    ///      by nothing but the bucket. Refused with the other decimals mismatch.
+    function test_initialize_rejectsZeroUsdcDecimals() public {
+        address impl = address(new HollarBaseFacilitator());
+
+        vm.expectRevert(IncorrectDecimals.selector);
+        new ERC1967Proxy(impl, _initData(0, BASE_CHAIN));
+    }
+
+    /// @dev The vault's chain is checked against the core's own id, which also proves the core.
+    function test_initialize_rejectsOwnChainAsBase() public {
+        address impl = address(new HollarBaseFacilitator());
+
+        vm.expectRevert(abi.encodeWithSelector(InvalidChainId.selector, HYDRATION_CHAIN));
+        new ERC1967Proxy(impl, _initData(6, HYDRATION_CHAIN));
+
+        vm.expectRevert(abi.encodeWithSelector(InvalidChainId.selector, uint16(0)));
+        new ERC1967Proxy(impl, _initData(6, 0));
+    }
+
+    // ─── Unbound window ─────────────────────────────────────────
+
+    /// @dev Between deployment and the one-shot bind the mapping holds zero for the pinned chain,
+    ///      which is what a zero-emitter VAA would match in the shared base. Nothing is accepted
+    ///      until the bind.
+    function test_receiveMint_refusesEverythingBeforeTheBind() public {
+        HollarBaseFacilitator fresh = HollarBaseFacilitator(
+            address(new ERC1967Proxy(address(new HollarBaseFacilitator()), _initData(6, BASE_CHAIN)))
+        );
+
+        vm.expectRevert(EmitterNotSet.selector);
+        fresh.receiveMessage(_mintVaaFrom(BASE_CHAIN, bytes32(0), alice, 1_000e6, 1));
+    }
+
+    /// @dev The vault never publishes zero. A payload it could not have produced is refused, not
+    ///      queued, so no dead entry can ever sit in the queue.
+    function test_receiveMint_rejectsZeroAmount() public {
+        vm.expectRevert(ZeroAmount.selector);
+        facilitator.receiveMessage(_mintVaa(alice, 0));
+
+        // Paused too: the check sits before the queue branch, or a dead entry would sit there.
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+        vm.expectRevert(ZeroAmount.selector);
+        facilitator.receiveMessage(_mintVaaFrom(BASE_CHAIN, BASE_EMITTER, alice, 0, 1));
+        assertEq(facilitator.pendingTail(), 0, "nothing queued");
+    }
+
+    // ─── Cancelling a re-mint ───────────────────────────────────
+
+    /// @dev A queued re-mint is burned HOLLAR waiting to come back. Cancelling it sends the USDC
+    ///      out as a redemption — KIND_REDEEM, so the vault charges the fee the cancelled credit
+    ///      would have paid — never as the fee-free refund a cancelled deposit gets. Pinned
+    ///      because the alternative was a free round trip: redeem, cancel at the head, let the
+    ///      re-mint queue, cancel it here.
+    function test_cancelPendingMint_remintEntryLeavesAsRedeem() public {
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_REMINT, alice, bob, 100e6, 1));
+
+        vm.expectEmit(true, true, false, true);
+        emit PendingMintCancelled(0, alice, 100e6, PsmPayload.fromAddress(bob), PsmPayload.KIND_REDEEM, 0);
+        vm.prank(alice);
+        facilitator.cancelPendingMint(0, type(uint16).max);
+
+        (uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin) =
+            PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_REDEEM, "a cancelled re-mint is a redemption");
+        assertEq(PsmPayload.toAddress(recipient), bob, "back to the Base recipient the credit named");
+        assertEq(PsmPayload.toAddress(origin), alice, "naming the redeemer as origin in turn");
+        assertEq(amount, 100e6);
+        assertEq(_bucketLevel(), 0, "nothing minted, nothing burns");
+    }
+
+    /// @dev The admin path shares the rule.
+    function test_cancelPendingMintFor_remintEntryLeavesAsRedeem() public {
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_REMINT, alice, bob, 100e6, 1));
+
+        vm.prank(admin);
+        facilitator.cancelPendingMintFor(0, type(uint16).max);
+
+        (uint8 kind, bytes32 recipient,,) = PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_REDEEM);
+        assertEq(PsmPayload.toAddress(recipient), bob);
+    }
+
+    /// @dev The third way a re-mint queues. Pinned on its own because at launch the bucket equals
+    ///      the inbound cap, so a competing mint landing between the burn and the re-mint's
+    ///      arrival queues it here rather than on the limiter.
+    function test_cancelPendingMint_remintQueuedOnFullBucketLeavesAsRedeem() public {
+        hollar.setFacilitatorBucketCapacity(address(facilitator), 50e18);
+
+        vm.expectEmit(true, true, false, true);
+        emit MintQueued(0, alice, 100e6, QueueReason.BucketFull);
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_REMINT, alice, bob, 100e6, 1));
+
+        vm.prank(alice);
+        facilitator.cancelPendingMint(0, type(uint16).max);
+
+        (uint8 kind,,,) = PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_REDEEM);
+    }
+
+    // ─── Cancel under pause ─────────────────────────────────────
+
+    /// @dev The way out of the queue stays open under both pauses — a pause is exactly when
+    ///      entries queue. What it books on Base still waits behind the vault's own claims pause.
+    function test_cancelPendingMint_worksUnderBothPauses() public {
+        vm.prank(guardian);
+        facilitator.setPaused(true, true);
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, alice, 100e6, 1));
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, bob, bob, 100e6, 2));
+
+        vm.prank(alice);
+        facilitator.cancelPendingMint(0, type(uint16).max);
+        assertEq(facilitator.pendingOf(alice), 0, "the recipient can leave");
+
+        vm.prank(admin);
+        facilitator.cancelPendingMintFor(1, type(uint16).max);
+        assertEq(facilitator.pendingOf(bob), 0, "and the admin can clear an entry");
+        assertEq(facilitator.totalPendingMint(), 0);
+    }
+
+    // ─── Views under pause ──────────────────────────────────────
+
+    /// @dev What the UI shows before anyone burns must be what `redeem` will accept.
+    function test_maxRedeemable_isZeroWhileRedeemPaused() public {
+        facilitator.receiveMessage(_mintVaa(alice, 250e6));
+        assertEq(facilitator.maxRedeemable(), 250e6);
+
+        vm.prank(guardian);
+        facilitator.setPaused(false, true);
+        assertEq(facilitator.maxRedeemable(), 0, "paused reads as nothing redeemable");
+    }
+
+    // ─── Bounded walk ───────────────────────────────────────────
+
+    /// @dev Ids are never reclaimed, so the walk is bounded by the caller: it starts at `fromId`,
+    ///      stops after `maxIds`, and a window past the tail is clamped.
+    function test_pendingEntryOf_scansOnlyTheGivenWindow() public {
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, alice, 10e6, 1)); // id 0
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, bob, bob, 10e6, 2)); // id 1
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, alice, 10e6, 3)); // id 2
+
+        (bool found, uint256 id) = facilitator.pendingEntryOf(alice, 0, 1);
+        assertTrue(found);
+        assertEq(id, 0, "the first live entry in the window");
+
+        (found, id) = facilitator.pendingEntryOf(alice, 1, 10);
+        assertTrue(found);
+        assertEq(id, 2, "the walk starts at fromId, not at zero");
+
+        (found,) = facilitator.pendingEntryOf(bob, 2, 10);
+        assertFalse(found, "bob's entry is behind the window");
+
+        (found, id) = facilitator.pendingEntryOf(alice, 2, type(uint256).max);
+        assertTrue(found, "a window past the tail is clamped, not overflowed");
+        assertEq(id, 2);
+
+        (found,) = facilitator.pendingEntryOf(alice, 3, 10);
+        assertFalse(found, "nothing beyond the tail");
+    }
+
+    // ─── Fee limit ──────────────────────────────────────────────
+
+    /// @dev The redeemer's limit rides on the burn; the vault reads it when the fee is assessed.
+    function test_redeem_carriesItsFeeLimit() public {
+        facilitator.receiveMessage(_mintVaa(alice, 100e6));
+
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), 100e18);
+        facilitator.redeem(40e6, bob, 7);
+        vm.stopPrank();
+
+        assertEq(PsmPayload.feeCap(wormhole.lastPublished().payload), 7);
+    }
+
+    /// @dev A cancelled re-mint is a redemption, so it carries a limit too — the canceller's.
+    function test_cancelPendingMint_remintCarriesTheCancellersFeeLimit() public {
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_REMINT, alice, bob, 100e6, 1));
+
+        vm.prank(alice);
+        facilitator.cancelPendingMint(0, 9);
+
+        bytes memory payload = wormhole.lastPublished().payload;
+        (uint8 kind,,,) = PsmPayload.decode(payload);
+        assertEq(kind, PsmPayload.KIND_REDEEM);
+        assertEq(PsmPayload.feeCap(payload), 9);
     }
 }

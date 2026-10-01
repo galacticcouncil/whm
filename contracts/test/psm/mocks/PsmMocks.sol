@@ -148,6 +148,8 @@ contract MockGho is MockToken {
     }
 
     function mint(address account, uint256 amount) public override {
+        // The real token refuses zero on both; mirrored so no mock-only path can pass here.
+        require(amount > 0, "INVALID_MINT_AMOUNT");
         Bucket storage bucket = buckets[msg.sender];
         require(bucket.level + amount <= bucket.capacity, "FACILITATOR_BUCKET_CAPACITY_EXCEEDED");
         bucket.level += amount;
@@ -162,7 +164,8 @@ contract MockGho is MockToken {
     }
 
     function burn(uint256 amount) external {
-        // No floor and no require — 0.8 underflow is the guard.
+        require(amount > 0, "INVALID_BURN_AMOUNT");
+        // No floor — 0.8 underflow is the guard.
         buckets[msg.sender].level -= amount;
         _move(msg.sender, address(0), amount);
         totalSupply -= amount;

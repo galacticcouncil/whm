@@ -43,6 +43,9 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     /// @notice Fee ceiling the admin dial cannot pass. 5% would already be an emergency setting.
     uint256 internal constant MAX_FEE_BPS = 500;
 
+    /// @notice How long a credit is its recipient's alone. After it, the origin may cancel too.
+    uint256 public constant ORIGIN_CANCEL_DELAY = 1 days;
+
     /// @notice Publish immediately — guardians sign on inclusion. The chosen level for this
     ///         route: Safe and Finalized are available on both Base's and Hydration's guardian
     ///         sets but are not used here. What bounds the instant-level risk is the bucket, not
@@ -103,6 +106,10 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     mapping(address => uint256) public unpayable;
     uint256 public totalUnpayable;
 
+    /// @notice Set by `emergencyUnwindAave`: deposits stop re-supplying Aave until a guardian
+    ///         clears it. Declared last; keep new state below.
+    bool public investPaused;
+
     // ─── Init ───────────────────────────────────────────────────
 
     function initializeVault(VaultInit calldata p) external initializer {
@@ -115,6 +122,11 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         ) revert ZeroAddress();
         // Nothing ships fail-open: the gate is an init argument, not a later setter.
         if (p.minUsdcPrice == 0) revert OracleNotConfigured();
+        // The facilitator lives on another chain than the core this contract listens to. Reading
+        // the core here also proves the address is one.
+        if (p.hydrationChainId == 0 || p.hydrationChainId == wormhole.chainId()) {
+            revert InvalidChainId(p.hydrationChainId);
+        }
 
         usdc = IERC20(p.usdc);
         aUsdc = IERC20(p.aUsdc);
@@ -197,12 +209,15 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///      liquidity — the HOLLAR is already burned and there is no way to give it back.
     function _processMessage(IWormhole.VM memory vm) internal override {
         // See the facilitator's counterpart: the inherited emitter check treats the mapping default
-        // as a valid key, so a zero-emitter VAA passes on any chain nobody bound. Pinning the chain
-        // here closes it without changing the shared base.
+        // as a valid key, so a zero-emitter VAA passes on any chain nobody bound — this one
+        // included until `setHydrationEmitter` runs. Refusing everything before the bind and
+        // pinning the chain after it closes both without changing the shared base.
+        if (!emitterFrozen) revert EmitterNotSet();
         if (vm.emitterChainId != hydrationChainId) revert UnexpectedEmitterChain(vm.emitterChainId);
 
         (uint8 kind, bytes32 rawRecipient, uint256 amount, bytes32 rawOrigin) = PsmPayload.decode(vm.payload);
         if (kind != PsmPayload.KIND_REDEEM && kind != PsmPayload.KIND_REFUND) revert UnexpectedKind(kind);
+        if (amount == 0) revert ZeroAmount();
 
         address recipient = PsmPayload.toAddress(rawRecipient);
         address origin = PsmPayload.toAddress(rawOrigin);
@@ -216,18 +231,38 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
             return;
         }
 
+        // A redemption carries the most its redeemer will pay. The fee is assessed here, not at
+        // the burn, so above that limit nothing is booked and the HOLLAR goes back.
+        if (kind == PsmPayload.KIND_REDEEM) {
+            uint16 cap = PsmPayload.feeCap(vm.payload);
+            if (redeemFeeBps > cap) return _returnRedeem(recipient, origin, amount, cap);
+        }
+
         principal -= amount;
 
         // A refund is a cancelled mint coming home. Nothing was minted and no service was
         // rendered, so it carries no fee.
-        uint256 fee = kind == PsmPayload.KIND_REDEEM ? (amount * redeemFeeBps) / BPS : 0;
+        bool refund = kind == PsmPayload.KIND_REFUND;
+        uint256 fee = refund ? 0 : (amount * redeemFeeBps) / BPS;
         uint256 credited = amount - fee;
 
-        if (credited == 0) revert ZeroAmount();
-
-        uint256 index = _enqueue(recipient, origin, credited, amount);
+        uint256 index = _enqueue(recipient, origin, refund, credited, amount);
 
         emit RedeemCredited(index, recipient, amount, fee, credited, kind);
+    }
+
+    /// @dev `principal` was never reduced, so the books already hold the HOLLAR this re-mints.
+    ///      Refused while claims are paused, like every path that mints on Hydration: the delivery
+    ///      reverts and the VAA lands once they are not. It publishes from a non-payable delivery,
+    ///      so it holds only while the core's message fee is zero — were that to change, the
+    ///      delivery reverts the same way and the VAA stays replayable.
+    function _returnRedeem(address recipient, address origin, uint256 amount, uint16 cap) private {
+        if (claimsPaused) revert ClaimsPaused();
+
+        uint64 sequence =
+            _publish(PsmPayload.KIND_REMINT, PsmPayload.fromAddress(origin), amount, PsmPayload.fromAddress(recipient));
+
+        emit RedeemReturned(recipient, origin, amount, redeemFeeBps, cap, sequence);
     }
 
 
@@ -253,7 +288,10 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         uint256 available = _reserveLiquidity();
         if (entry > available) revert InsufficientLiquidity(entry, available);
 
-        _settle(index);
+        // A recipient the reserve cannot pay is retired by `drain`, never by their own call: a
+        // revert here leaves the credit queued and `cancelQueuedRedemption` open to them, where a
+        // silent retirement would have closed it.
+        if (!_settle(index)) revert RecipientUnpayable(msg.sender);
     }
 
     /// @notice Pay the queue head-first from whatever the reserve can currently release.
@@ -296,9 +334,11 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///      incident that pauses claims to stop a bad payout must also stop that queue entry from
     ///      converting into a fresh mint on the other chain.
     ///
-    ///      The HOLLAR goes back to the credit's `origin` — the account that burned it on Hydration.
-    ///      Nobody picks: not `msg.sender`, whose Base address may not exist on Hydration, and not
-    ///      an argument, which the far side could not return if it named nobody.
+    ///      The value goes back to `origin` whoever asks — nobody picks, not `msg.sender` and not
+    ///      an argument. The `recipient` may ask at any time. The `origin` may ask once the credit
+    ///      has waited `ORIGIN_CANCEL_DELAY` unpaid: a recipient that is a payment address rather
+    ///      than the redeemer's own will never call this, so the redeemer needs an exit from a
+    ///      real stall — but not a way to recall a payment the queue is about to make.
     /// @param index The queue slot, from the `RedeemCredited` event or `queueEntryOf` — cancellable
     ///        only once it is the head, i.e. once `queueEntryOf` reports `position == 0`.
     function cancelQueuedRedemption(uint256 index) external payable returns (uint64 sequence) {
@@ -306,7 +346,11 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
         Credit memory credit = queue[index];
         if (credit.amount == 0) revert NotQueued(index);
-        if (credit.recipient != msg.sender) revert NotYourCredit(index, credit.recipient);
+        if (credit.recipient != msg.sender) {
+            if (credit.origin != msg.sender) revert NotYourCredit(index, credit.recipient);
+            uint256 opensAt = uint256(credit.creditedAt) + ORIGIN_CANCEL_DELAY;
+            if (block.timestamp < opensAt) revert OriginCancelTooEarly(index, opensAt);
+        }
         // Only the head ever moves. Zeroing a slot behind it would leave a hole every later
         // advance has to walk, and nothing bounds how many an attacker can leave.
         if (index != queueHead) revert CancelNotAtHead(index, queueHead);
@@ -374,8 +418,12 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     }
 
     /// @notice What a recipient could actually be paid now — bounded by Aave's real liquidity,
-    ///         not by our aUSDC balance, and by their position in the queue.
+    ///         not by our aUSDC balance, by their position in the queue, and by the pause.
+    /// @dev Says nothing about whether USDC can reach them, nor whether Aave will release it: a
+    ///      blacklisted head or a paused pool reads as payable here and is refused by `claim`.
     function claimable(address recipient) external view returns (uint256) {
+        if (claimsPaused) return 0;
+
         uint256 index = queueHead;
         if (index >= queueTail || queue[index].recipient != recipient) return 0;
 
@@ -428,10 +476,28 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     }
 
     /// @notice Pull the reserve out of Aave into this contract. Cannot send it anywhere.
+    /// @dev Also stops re-supply: `_investBestEffort` sweeps the whole idle balance, so without
+    ///      this the next deposit of any size would put the reserve straight back into the pool
+    ///      the guardian just left.
     function emergencyUnwindAave(uint256 amount) external onlyRole(GUARDIAN_ROLE) {
         if (amount == 0) revert ZeroAmount();
-        IPool(addressesProvider.getPool()).withdraw(address(usdc), amount, address(this));
-        emit Unwound(amount);
+        // Aave reads `type(uint256).max` as withdraw-all, so log what moved, not what was asked.
+        uint256 withdrawn = IPool(addressesProvider.getPool()).withdraw(address(usdc), amount, address(this));
+        emit Unwound(withdrawn);
+
+        if (!investPaused) {
+            investPaused = true;
+            emit InvestPausedSet(true);
+        }
+    }
+
+    /// @notice Clear (or set) the re-supply stop. Clearing re-supplies whatever is idle at once
+    ///         rather than waiting for the next deposit to do it.
+    function setInvestPaused(bool paused) external onlyRole(GUARDIAN_ROLE) {
+        investPaused = paused;
+        emit InvestPausedSet(paused);
+
+        if (!paused) _investBestEffort();
     }
 
     // ─── Treasurer ──────────────────────────────────────────────
@@ -464,6 +530,8 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
     function setFees(uint256 _redeemFeeBps, uint256 _surplusFloorBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_redeemFeeBps > MAX_FEE_BPS) revert FeeTooHigh(_redeemFeeBps);
+        // Above 100% the floor is just the treasurer locked out; past ~1e67 it overflows `sweepable`.
+        if (_surplusFloorBps > BPS) revert FloorTooHigh(_surplusFloorBps);
         redeemFeeBps = _redeemFeeBps;
         surplusFloorBps = _surplusFloorBps;
         emit FeesSet(_redeemFeeBps, _surplusFloorBps);
@@ -484,21 +552,30 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
     /// @dev Callers guarantee `amount > 0`. Returns the slot, which is what the events carry and
     ///      what `cancelQueuedRedemption` takes.
-    function _enqueue(address recipient, address origin, uint256 amount, uint256 gross)
+    function _enqueue(address recipient, address origin, bool refund, uint256 amount, uint256 gross)
         private
         returns (uint256 index)
     {
         index = queueTail;
-        queue[index] = Credit({recipient: recipient, origin: origin, amount: amount, gross: gross});
+        queue[index] = Credit({
+            recipient: recipient,
+            origin: origin,
+            refund: refund,
+            creditedAt: uint64(block.timestamp),
+            amount: amount,
+            gross: gross
+        });
         queueTail = index + 1;
         owed[recipient] += amount;
         totalOwed += gross;
     }
 
-    /// @dev Reverses a credit exactly: `gross` returns to `principal` and the same figure is
-    ///      re-minted to the credit's origin, so the corridor lands where it stood before the
-    ///      redemption. The re-mint names this credit's recipient as its own origin, so if it
-    ///      queues on Hydration and is cancelled there, the refund comes back to them.
+    /// @dev Reverses a credit exactly: `gross` returns to `principal` and the same figure goes
+    ///      back to the credit's origin, so the corridor lands where it stood before. The message
+    ///      names this credit's recipient as its own origin, so a cancel on Hydration comes back
+    ///      to them — as what the value is. A redemption credit returns as KIND_REMINT, whose
+    ///      cancel is a fee-charged KIND_REDEEM; a refund credit, a deposit that never minted,
+    ///      returns as the KIND_MINT it was, whose cancel is a fee-free KIND_REFUND.
     function _cancel(uint256 index, Credit memory credit) private returns (uint64 sequence) {
         queue[index].amount = 0;
         queueHead = index + 1;
@@ -511,10 +588,9 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         // Publishes instant like everything else here, which is the residual this route carries:
         // this mints HOLLAR without locking anything new, so a Base reorg that unwound the
         // cancellation while the message stood would leave the credit queued AND the HOLLAR
-        // reissued. Bounded by the deposit rate limit and the bucket, nothing narrower.
-        sequence = _publish(
-            PsmPayload.KIND_REMINT, hydrationRecipient, credit.gross, PsmPayload.fromAddress(credit.recipient)
-        );
+        // reissued. Bounded on arrival by the inbound limit and the bucket, nothing narrower.
+        uint8 kind = credit.refund ? PsmPayload.KIND_MINT : PsmPayload.KIND_REMINT;
+        sequence = _publish(kind, hydrationRecipient, credit.gross, PsmPayload.fromAddress(credit.recipient));
 
         emit RedemptionCancelled(index, credit.recipient, credit.gross, hydrationRecipient, sequence);
     }
@@ -535,7 +611,9 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         queueHead = index + 1;
 
         owed[recipient] -= amount;
-        // Releases the fee to surplus, here and only here: delivery is what earns it.
+        // Releases the fee to surplus, here and only here. A credit leaves the queue by payment or
+        // by retirement, and retirement is terminal — no cancel can reclaim the gross afterwards —
+        // so consuming the slot is what earns the fee, delivered or not.
         totalOwed -= gross;
 
         // Sourcing the money is a reserve concern: if Aave will not release it, that reverts and
@@ -603,6 +681,8 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     /// @dev Aave refusing must never block a deposit. The USDC is already locked and attested;
     ///      whether it earns yield is a strictly lesser concern than whether it arrives.
     function _investBestEffort() private {
+        if (investPaused) return;
+
         uint256 idle = usdc.balanceOf(address(this));
         if (idle == 0) return;
 
