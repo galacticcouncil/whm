@@ -2,9 +2,16 @@
 pragma solidity ^0.8.22;
 
 /// @title Destination interface for Hydration cross-chain governance
-/// @notice A verified Hydration action is queued locally, remains vetoable until expiry, and may be
-///         executed permissionlessly only during its maturity window.
+/// @notice Verified Hydration actions are locally queued with TC veto/fast-track controls. The TC
+///         may also queue 30-day recovery actions that Hydration governance can veto.
 interface IGovernanceExecutor {
+    /// @notice Authority that introduced an action into the executor.
+    enum ActionAuthority {
+        Unknown,
+        Governance,
+        TechnicalCommittee
+    }
+
     /// @notice User-facing lifecycle state. `Ready` and `Expired` are derived from timestamps;
     ///         terminal veto and execution states are stored.
     enum ActionState {
@@ -21,7 +28,7 @@ interface IGovernanceExecutor {
     struct ActionRecord {
         /// @notice Hash of the exact canonical Wormhole payload accepted by `queue`.
         bytes32 payloadHash;
-        /// @notice Monotonic nonce assigned by the Hydration governance dispatcher.
+        /// @notice Monotonic nonce assigned by the action's source authority.
         uint64 governanceNonce;
         /// @notice Destination timestamp at which the VAA was accepted.
         uint48 queuedAt;
@@ -48,6 +55,9 @@ interface IGovernanceExecutor {
     error ReentrantCall();
     error NotVetoer(address caller);
     error OnlySelf(address caller);
+    error WrongActionAuthority(bytes32 actionId, ActionAuthority expected, ActionAuthority actual);
+    error GovernanceVetoProtected(bytes32 actionId);
+    error IncorrectTechnicalCommitteeNonce(uint64 expected, uint64 supplied);
     error ActionNotPending(bytes32 actionId);
     error ActionNotReady(bytes32 actionId, uint48 executableAt);
     error ActionExpired(bytes32 actionId, uint48 expiresAt);
@@ -67,6 +77,15 @@ interface IGovernanceExecutor {
     );
     event ActionVetoed(bytes32 indexed actionId, address indexed vetoer, bytes32 indexed reasonHash);
     event ActionExecuted(bytes32 indexed actionId, address indexed caller);
+    event ActionFastTracked(bytes32 indexed actionId, address indexed technicalCommittee);
+    event TechnicalCommitteeActionQueued(
+        bytes32 indexed actionId,
+        uint64 indexed technicalCommitteeNonce,
+        bytes32 payloadHash,
+        uint48 queuedAt,
+        uint48 executableAt,
+        uint48 expiresAt
+    );
     event VetoerUpdated(address indexed previousVetoer, address indexed newVetoer);
     event SourceDispatcherUpdated(bytes32 previousSourceDispatcher, bytes32 newSourceDispatcher);
     event TimingUpdated(uint48 vetoPeriod, uint48 executionGracePeriod);
@@ -89,9 +108,17 @@ interface IGovernanceExecutor {
     /// @return actionId Source-domain-separated identifier of the accepted payload.
     function queue(bytes calldata vaa) external returns (bytes32 actionId);
 
+    /// @notice Queues an action proposed by the Technical Committee with the long recovery delay.
+    /// @dev The payload uses the normal canonical governance encoding and may contain arbitrary calls.
+    function queueTechnicalCommitteeAction(bytes calldata payload) external returns (bytes32 actionId);
+
     /// @notice Irreversibly cancels a pending action; callable only by the configured vetoer.
     /// @param reasonHash Optional hash of an off-chain incident or rationale; it may be zero.
     function veto(bytes32 actionId, bytes32 reasonHash) external;
+
+    /// @notice Cancels a Technical Committee action through a verified governance self-call.
+    /// @dev A sole governance call to this function cannot itself be vetoed by the committee.
+    function vetoTechnicalCommitteeAction(bytes32 actionId, bytes32 reasonHash) external;
 
     /// @notice Atomically performs a matured action using the exact queued payload.
     /// @dev Permissionless. A downstream revert restores the pending state, permitting retry.
@@ -99,6 +126,12 @@ interface IGovernanceExecutor {
 
     /// @notice Returns the persistent record, or an all-zero record for an unknown ID.
     function action(bytes32 actionId) external view returns (ActionRecord memory);
+
+    /// @notice Returns whether governance or the Technical Committee queued an action.
+    function actionAuthority(bytes32 actionId) external view returns (ActionAuthority);
+
+    /// @notice Returns the last nonce assigned to a Technical Committee action.
+    function technicalCommitteeNonce() external view returns (uint64);
 
     /// @notice Returns the stored or timestamp-derived lifecycle state.
     function state(bytes32 actionId) external view returns (ActionState);

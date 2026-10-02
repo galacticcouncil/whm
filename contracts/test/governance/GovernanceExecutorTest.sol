@@ -405,6 +405,18 @@ contract GovernanceExecutorTest is Test {
         executor.veto(actionId, bytes32(0));
     }
 
+    /// @notice The committee may approve and execute an authenticated governance action immediately.
+    function testTechnicalCommitteeCanFastTrackGovernanceAction() public {
+        bytes memory payload = _setNumberPayload(1, 42);
+        bytes32 actionId = _queue(payload, 10);
+
+        vm.prank(address(safe));
+        executor.execute(actionId, payload);
+
+        assertEq(target.number(), 42);
+        assertEq(uint256(executor.state(actionId)), uint256(IGovernanceExecutor.ActionState.Executed));
+    }
+
     // ─── Execution timing and atomicity ─────────────────────────
 
     /// @notice No caller can bypass the complete destination-local review period.
@@ -415,6 +427,21 @@ contract GovernanceExecutorTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(IGovernanceExecutor.ActionNotReady.selector, actionId, record.executableAt)
+        );
+        executor.execute(actionId, payload);
+    }
+
+    /// @notice Fast-track authority applies only to OpenGov actions, not committee recovery actions.
+    function testTechnicalCommitteeCannotFastTrackItsOwnAction() public {
+        bytes memory payload = _setNumberPayload(1, 42);
+        vm.prank(address(safe));
+        bytes32 actionId = executor.queueTechnicalCommitteeAction(payload);
+
+        vm.prank(address(safe));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IGovernanceExecutor.ActionNotReady.selector, actionId, executor.action(actionId).executableAt
+            )
         );
         executor.execute(actionId, payload);
     }
@@ -628,6 +655,101 @@ contract GovernanceExecutorTest is Test {
 
         assertEq(nft.ownerOf(tokenId), address(executor));
         assertEq(uint256(executor.state(actionId)), uint256(IGovernanceExecutor.ActionState.Executed));
+    }
+
+    // ─── Technical Committee recovery ──────────────────────────
+
+    /// @notice The committee can propose an arbitrary executor call, but it waits for 30 days.
+    function testTechnicalCommitteeActionExecutesAfterRecoveryDelay() public {
+        bytes memory payload = _setNumberPayload(1, 42);
+        uint48 queuedAt = uint48(block.timestamp);
+
+        vm.prank(address(safe));
+        bytes32 actionId = executor.queueTechnicalCommitteeAction(payload);
+
+        IGovernanceExecutor.ActionRecord memory record = executor.action(actionId);
+        assertEq(record.governanceNonce, 1);
+        assertEq(record.queuedAt, queuedAt);
+        assertEq(record.executableAt, queuedAt + executor.TECHNICAL_COMMITTEE_DELAY());
+        assertEq(record.expiresAt, record.executableAt + GRACE_PERIOD);
+        assertEq(
+            uint256(executor.actionAuthority(actionId)),
+            uint256(IGovernanceExecutor.ActionAuthority.TechnicalCommittee)
+        );
+
+        vm.warp(record.executableAt);
+        executor.execute(actionId, payload);
+        assertEq(target.number(), 42);
+    }
+
+    /// @notice The delayed recovery lane can transfer full proxy control through a UUPS upgrade.
+    function testTechnicalCommitteeCanUpgradeAfterRecoveryDelay() public {
+        GovernanceExecutorV2 v2 = new GovernanceExecutorV2();
+        bytes memory initializeV2 = abi.encodeCall(GovernanceExecutorV2.initializeV2, (99));
+        bytes memory upgradeCall = abi.encodeWithSignature("upgradeToAndCall(address,bytes)", address(v2), initializeV2);
+        bytes memory payload = _oneCallPayload(1, address(executor), 0, upgradeCall);
+
+        vm.prank(address(safe));
+        bytes32 actionId = executor.queueTechnicalCommitteeAction(payload);
+        vm.warp(executor.action(actionId).executableAt);
+        executor.execute(actionId, payload);
+
+        GovernanceExecutorV2 upgraded = GovernanceExecutorV2(payable(address(executor)));
+        assertEq(upgraded.version(), 2);
+        assertEq(upgraded.initializedValue(), 99);
+    }
+
+    /// @notice No account other than the configured committee can introduce a recovery action.
+    function testOnlyTechnicalCommitteeCanQueueRecoveryAction() public {
+        bytes memory payload = _setNumberPayload(1, 42);
+        vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.NotVetoer.selector, address(this)));
+        executor.queueTechnicalCommitteeAction(payload);
+    }
+
+    /// @notice Committee payloads use the executor-assigned monotonic nonce for auditability.
+    function testTechnicalCommitteeActionRequiresNextNonce() public {
+        bytes memory payload = _setNumberPayload(2, 42);
+        vm.prank(address(safe));
+        vm.expectRevert(
+            abi.encodeWithSelector(IGovernanceExecutor.IncorrectTechnicalCommitteeNonce.selector, 1, 2)
+        );
+        executor.queueTechnicalCommitteeAction(payload);
+    }
+
+    /// @notice OpenGov can cancel a recovery action, and the committee cannot censor that veto.
+    function testGovernanceVetoesTechnicalCommitteeAction() public {
+        bytes memory committeePayload = _setNumberPayload(1, 42);
+        vm.prank(address(safe));
+        bytes32 committeeAction = executor.queueTechnicalCommitteeAction(committeePayload);
+
+        bytes32 reasonHash = keccak256("governance veto");
+        bytes memory vetoPayload = _oneCallPayload(
+            1,
+            address(executor),
+            0,
+            abi.encodeCall(IGovernanceExecutor.vetoTechnicalCommitteeAction, (committeeAction, reasonHash))
+        );
+        bytes32 vetoAction = _queue(vetoPayload, 10);
+
+        vm.prank(address(safe));
+        vm.expectRevert(
+            abi.encodeWithSelector(IGovernanceExecutor.GovernanceVetoProtected.selector, vetoAction)
+        );
+        executor.veto(vetoAction, bytes32(0));
+
+        vm.warp(executor.action(vetoAction).executableAt);
+        executor.execute(vetoAction, vetoPayload);
+
+        assertEq(uint256(executor.state(committeeAction)), uint256(IGovernanceExecutor.ActionState.Vetoed));
+        vm.warp(executor.action(committeeAction).executableAt);
+        vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.ActionNotPending.selector, committeeAction));
+        executor.execute(committeeAction, committeePayload);
+    }
+
+    /// @notice Cancellation cannot be invoked directly without an authenticated governance action.
+    function testTechnicalCommitteeActionVetoIsOnlySelf() public {
+        vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.OnlySelf.selector, address(this)));
+        executor.vetoTechnicalCommitteeAction(bytes32(uint256(1)), bytes32(0));
     }
 
     // ─── Self-administration ────────────────────────────────────

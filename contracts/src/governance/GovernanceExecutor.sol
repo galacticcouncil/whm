@@ -9,9 +9,9 @@ import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 import {GovernanceCodec} from "./GovernanceCodec.sol";
 import {IGovernanceExecutor} from "./interfaces/IGovernanceExecutor.sol";
 
-/// @title GovernanceExecutor — delayed destination executor for Hydration OpenGov
-/// @notice Accepts only guardian-verified messages from the configured Hydration dispatcher.
-///         Actions wait locally for the veto period, then execute atomically and permissionlessly.
+/// @title GovernanceExecutor — destination executor for Hydration OpenGov
+/// @notice Executes guardian-verified OpenGov messages, with TC veto and fast-track controls, and
+///         supports long-delay TC recovery actions that OpenGov can veto.
 contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, IGovernanceExecutor {
     /// @notice Wormhole identifier assigned to Hydration; source-chain selection is immutable in v1.
     uint16 public constant HYDRATION_WORMHOLE_CHAIN = 73;
@@ -19,6 +19,8 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
     uint48 public constant MIN_VETO_PERIOD = 24 hours;
     /// @notice Governance may lengthen but cannot shorten this execution window without an upgrade.
     uint48 public constant MIN_EXECUTION_GRACE_PERIOD = 7 days;
+    /// @notice Minimum notice before a Technical Committee recovery action can execute.
+    uint48 public constant TECHNICAL_COMMITTEE_DELAY = 30 days;
 
     // Zero deliberately means "unknown", making an uninitialized mapping entry unambiguous.
     uint8 private constant STATUS_PENDING = 1;
@@ -28,6 +30,11 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
     uint256 private constant MAX_RETURN_DATA = 4_096;
     /// @dev Used to forbid continuing a batch after its implementation and semantics have changed.
     bytes4 private constant UPGRADE_TO_AND_CALL_SELECTOR = bytes4(keccak256("upgradeToAndCall(address,bytes)"));
+    bytes4 private constant VETO_TECHNICAL_COMMITTEE_ACTION_SELECTOR =
+        IGovernanceExecutor.vetoTechnicalCommitteeAction.selector;
+
+    uint8 private constant AUTHORITY_GOVERNANCE = uint8(ActionAuthority.Governance);
+    uint8 private constant AUTHORITY_TECHNICAL_COMMITTEE = uint8(ActionAuthority.TechnicalCommittee);
 
     /// @dev Upgrade-safe application state. New versions must append fields and preserve this
     ///      ERC-7201 namespace; moving or reordering existing fields corrupts proxy state.
@@ -38,7 +45,7 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
         /// @dev Authorized Hydration dispatcher as a Wormhole emitter address. Rotation does not
         ///      alter queued records.
         bytes32 sourceDispatcher;
-        /// @dev Veto-only Technical Committee Safe for this destination chain.
+        /// @dev Technical Committee Safe for veto, fast-track, and delayed recovery on this chain.
         address vetoer;
         uint16 localWormholeChain;
         /// @dev Defaults copied into each newly queued record; existing deadlines never change.
@@ -50,6 +57,11 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
         ///      envelopes could theoretically contain an identical governance payload.
         mapping(bytes32 => bool) consumedVaas;
         mapping(bytes32 => ActionRecord) actions;
+        /// @dev Kept separate from ActionRecord to preserve the original public record layout.
+        mapping(bytes32 => uint8) actionAuthorities;
+        /// @dev Governance cancellation actions cannot be censored by the authority they constrain.
+        mapping(bytes32 => bool) governanceVetoProtected;
+        uint64 technicalCommitteeNonce;
     }
 
     bytes32 private constant EXECUTOR_STORAGE_LOCATION =
@@ -65,7 +77,7 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
     }
 
     /// @dev A proxy calling itself has `msg.sender == address(this)`. Therefore configuration and
-    ///      upgrades are reachable only as calls inside a matured, non-vetoed governance action.
+    ///      upgrades are reachable only through an action executed by this contract.
     modifier onlySelf() {
         if (msg.sender != address(this)) revert OnlySelf(msg.sender);
         _;
@@ -156,6 +168,8 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
             expiresAt: uint48(expiresAt_),
             storedStatus: STATUS_PENDING
         });
+        $.actionAuthorities[actionId_] = AUTHORITY_GOVERNANCE;
+        $.governanceVetoProtected[actionId_] = _isTechnicalCommitteeVeto(decoded);
 
         emit ActionQueued(
             actionId_,
@@ -169,11 +183,71 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
     }
 
     /// @inheritdoc IGovernanceExecutor
+    function queueTechnicalCommitteeAction(bytes calldata payload) external nonReentrant returns (bytes32 actionId_) {
+        ExecutorStorage storage $ = _getExecutorStorage();
+        if (msg.sender != $.vetoer) revert NotVetoer(msg.sender);
+
+        GovernanceCodec.GovernanceAction memory decoded = GovernanceCodec.decode(payload);
+        _validateDestination(decoded, $);
+
+        uint64 nonce = $.technicalCommitteeNonce + 1;
+        if (decoded.governanceNonce != nonce) {
+            revert IncorrectTechnicalCommitteeNonce(nonce, decoded.governanceNonce);
+        }
+        $.technicalCommitteeNonce = nonce;
+        bytes32 payloadHash = keccak256(payload);
+        actionId_ = keccak256(
+            abi.encode("HYDRATION_TECHNICAL_COMMITTEE_ACTION_V1", block.chainid, address(this), nonce, payloadHash)
+        );
+
+        uint256 executableAt_ = block.timestamp + TECHNICAL_COMMITTEE_DELAY;
+        uint256 expiresAt_ = executableAt_ + $.executionGracePeriod;
+        if (expiresAt_ > type(uint48).max) revert DeadlineOverflow();
+
+        uint48 queuedAt_ = uint48(block.timestamp);
+        $.actions[actionId_] = ActionRecord({
+            payloadHash: payloadHash,
+            governanceNonce: nonce,
+            queuedAt: queuedAt_,
+            executableAt: uint48(executableAt_),
+            expiresAt: uint48(expiresAt_),
+            storedStatus: STATUS_PENDING
+        });
+        $.actionAuthorities[actionId_] = AUTHORITY_TECHNICAL_COMMITTEE;
+
+        emit TechnicalCommitteeActionQueued(
+            actionId_, nonce, payloadHash, queuedAt_, uint48(executableAt_), uint48(expiresAt_)
+        );
+    }
+
+    /// @inheritdoc IGovernanceExecutor
     /// @dev Veto remains valid at and after maturity through `expiresAt`, inclusive. Once execution
     ///      is possible, transaction ordering decides a veto/execution race.
     function veto(bytes32 actionId_, bytes32 reasonHash) external nonReentrant {
         ExecutorStorage storage $ = _getExecutorStorage();
         if (msg.sender != $.vetoer) revert NotVetoer(msg.sender);
+
+        ActionAuthority authority = ActionAuthority($.actionAuthorities[actionId_]);
+        if (authority != ActionAuthority.Governance) {
+            revert WrongActionAuthority(actionId_, ActionAuthority.Governance, authority);
+        }
+        if ($.governanceVetoProtected[actionId_]) revert GovernanceVetoProtected(actionId_);
+
+        ActionRecord storage record = $.actions[actionId_];
+        if (record.storedStatus != STATUS_PENDING) revert ActionNotPending(actionId_);
+        if (block.timestamp > record.expiresAt) revert ActionExpired(actionId_, record.expiresAt);
+
+        record.storedStatus = STATUS_VETOED;
+        emit ActionVetoed(actionId_, msg.sender, reasonHash);
+    }
+
+    /// @inheritdoc IGovernanceExecutor
+    function vetoTechnicalCommitteeAction(bytes32 actionId_, bytes32 reasonHash) external onlySelf {
+        ExecutorStorage storage $ = _getExecutorStorage();
+        ActionAuthority authority = ActionAuthority($.actionAuthorities[actionId_]);
+        if (authority != ActionAuthority.TechnicalCommittee) {
+            revert WrongActionAuthority(actionId_, ActionAuthority.TechnicalCommittee, authority);
+        }
 
         ActionRecord storage record = $.actions[actionId_];
         if (record.storedStatus != STATUS_PENDING) revert ActionNotPending(actionId_);
@@ -196,15 +270,15 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
         if (suppliedHash != record.payloadHash) {
             revert PayloadHashMismatch(record.payloadHash, suppliedHash);
         }
-        if (block.timestamp < record.executableAt) {
+        bool fastTracked = block.timestamp < record.executableAt
+            && $.actionAuthorities[actionId_] == AUTHORITY_GOVERNANCE && msg.sender == $.vetoer;
+        if (block.timestamp < record.executableAt && !fastTracked) {
             revert ActionNotReady(actionId_, record.executableAt);
         }
         if (block.timestamp > record.expiresAt) revert ActionExpired(actionId_, record.expiresAt);
 
         GovernanceCodec.GovernanceAction memory decoded = GovernanceCodec.decode(payload);
-        if (decoded.destinationWormholeChain != $.localWormholeChain || decoded.destinationExecutor != address(this)) {
-            revert WrongDestination(decoded.destinationWormholeChain, decoded.destinationExecutor);
-        }
+        _validateDestination(decoded, $);
 
         // Preflight the complete batch before interaction. Solidity 0.8 checked arithmetic also
         // makes an overflowing sum fail closed.
@@ -229,12 +303,23 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
             if (!success) revert CallFailed(i, returnData);
         }
 
+        if (fastTracked) emit ActionFastTracked(actionId_, msg.sender);
         emit ActionExecuted(actionId_, msg.sender);
     }
 
     /// @inheritdoc IGovernanceExecutor
     function action(bytes32 actionId_) external view returns (ActionRecord memory) {
         return _getExecutorStorage().actions[actionId_];
+    }
+
+    /// @inheritdoc IGovernanceExecutor
+    function actionAuthority(bytes32 actionId_) external view returns (ActionAuthority) {
+        return ActionAuthority(_getExecutorStorage().actionAuthorities[actionId_]);
+    }
+
+    /// @inheritdoc IGovernanceExecutor
+    function technicalCommitteeNonce() external view returns (uint64) {
+        return _getExecutorStorage().technicalCommitteeNonce;
     }
 
     /// @inheritdoc IGovernanceExecutor
@@ -290,7 +375,7 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
         return _getExecutorStorage().sourceDispatcher;
     }
 
-    /// @notice Returns this destination's veto-only Technical Committee Safe.
+    /// @notice Returns this destination's Technical Committee Safe.
     function vetoer() external view returns (address) {
         return _getExecutorStorage().vetoer;
     }
@@ -315,8 +400,8 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
         return _getExecutorStorage().consumedVaas[vaaHash];
     }
 
-    /// @dev UUPS calls this from proxy context. `onlySelf` makes an upgrade an ordinary delayed,
-    ///      vetoable governance action rather than a deployer or multisig privilege.
+    /// @dev UUPS calls this from proxy context. `onlySelf` requires an authenticated OpenGov action
+    ///      or a matured, non-vetoed Technical Committee recovery action.
     function _authorizeUpgrade(address) internal view override onlySelf {}
 
     /// @dev An upgrade must be the sole zero-value call. Otherwise later calls in the batch would
@@ -329,6 +414,29 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
             selector := mload(add(data, 0x20))
         }
         return selector == UPGRADE_TO_AND_CALL_SELECTOR;
+    }
+
+    /// @dev A governance action whose sole effect is canceling a committee action is immune from
+    ///      committee veto. It still waits the ordinary governance delay and executes permissionlessly.
+    function _isTechnicalCommitteeVeto(GovernanceCodec.GovernanceAction memory decoded) private view returns (bool) {
+        if (decoded.calls.length != 1) return false;
+        GovernanceCodec.Call memory call_ = decoded.calls[0];
+        if (call_.target != address(this) || call_.value != 0 || call_.data.length != 68) return false;
+        bytes4 selector;
+        bytes memory data = call_.data;
+        assembly ("memory-safe") {
+            selector := mload(add(data, 0x20))
+        }
+        return selector == VETO_TECHNICAL_COMMITTEE_ACTION_SELECTOR;
+    }
+
+    function _validateDestination(
+        GovernanceCodec.GovernanceAction memory decoded,
+        ExecutorStorage storage $
+    ) private view {
+        if (decoded.destinationWormholeChain != $.localWormholeChain || decoded.destinationExecutor != address(this)) {
+            revert WrongDestination(decoded.destinationWormholeChain, decoded.destinationExecutor);
+        }
     }
 
     /// @dev Performs a normal EVM CALL—never DELEGATECALL—and copies at most 4 KiB of untrusted

@@ -11,12 +11,13 @@ The following parameters are agreed for v0.1:
 | --- | --- |
 | Hydration governance origin | Root |
 | Hydration governance identity | Fixed runtime account mapped to `0xaa7e0000000000000000000000000000000aa7e2` |
-| Minimum execution delay | 24 hours from destination queueing |
+| OpenGov execution delay | 24 hours from destination queueing; TC may fast-track |
+| Technical Committee recovery delay | 30 days from destination queueing; OpenGov may veto |
 | Execution grace period | 7 days after the action matures |
 | Batch behavior | Atomic, at most 16 calls |
 | Upgrade model | UUPS; executor upgrades require self-call, dispatcher upgrades require governance caller |
-| Technical Committee | Veto-only Safe configured independently per destination chain |
-| Veto sovereignty | Absolute; there is no Root bypass or forced vetoer replacement in v0.1 |
+| Technical Committee | Safe configured independently per destination chain; veto and fast-track OpenGov actions, propose 30-day recovery actions |
+| Recovery veto | OpenGov cancellation of a TC recovery action cannot be vetoed by the TC |
 | Queue and execution | Permissionless; failed execution remains retryable until expiry |
 | Message destination | Exactly one destination executor per Wormhole message |
 | Wormhole consistency | `202` (Hydration finalized) |
@@ -29,9 +30,11 @@ Wormhole Native Token Transfer (NTT) deployments.
 
 An enacted Hydration governance call publishes a destination-bound action through Wormhole. A
 governance executor on the destination verifies the signed Wormhole message and queues the action.
-The destination chain's Technical Committee multisig has an exclusive 24-hour review period and may
-veto the action at any time until it executes or expires. If it is not vetoed, anyone may execute it
-after the delay and before its expiry.
+The destination chain's Technical Committee multisig may veto the action or approve and execute it
+before the ordinary 24-hour delay. If it does neither, anyone may execute it after the delay and
+before its expiry. The committee may also propose arbitrary recovery calls, including ownership
+transfers and upgrades. Those calls wait 30 days and OpenGov can veto them through a protected
+governance action before they mature.
 
 The executor is a contract account. It owns the Uniswap position NFTs and holds the relevant NTT
 administrative roles; it is not an EOA.
@@ -40,7 +43,7 @@ administrative roles; it is not an EOA.
 
 - Make Hydration OpenGov the proposal authority for protocol-owned positions and NTT administration
   on external EVM chains.
-- Give the Technical Committee a bounded, veto-only emergency control.
+- Give the Technical Committee bounded veto, fast-track, and long-delay recovery controls.
 - Allow arbitrary EVM calls so new integrations do not require a new governance bridge.
 - Require no trusted relayer: VAA submission and matured-action execution are permissionless.
 - Make every stage observable, replay-safe, and independently verifiable on-chain.
@@ -51,7 +54,7 @@ administrative roles; it is not an EOA.
 - General user bridging or token transfers.
 - Automatic proof that a message corresponds to a particular referendum number. Authorization comes
   from the OpenGov-controlled dispatcher path, not from an unverified identifier in the payload.
-- Technical Committee execution, payload modification, or early execution.
+- Unauthenticated Technical Committee calls or modification of an OpenGov-signed payload.
 - `delegatecall` into arbitrary targets.
 - Non-EVM destination chains in the first version.
 
@@ -94,12 +97,13 @@ on one destination chain.
 | --- | --- |
 | Hydration OpenGov | Publish destination actions through the governance dispatcher |
 | Wormhole Guardians | Attest that the configured Hydration dispatcher published a message |
-| Technical Committee multisig | Veto any queued, unexecuted action before expiry |
+| Technical Committee multisig | Veto or fast-track OpenGov actions; propose calls subject to a 30-day OpenGov-veto window |
 | Any account | Submit a valid VAA and execute a matured, unexpired action |
 | Governance executor | Own positions/assets and exercise downstream contract permissions |
 
-The Technical Committee cannot create actions, change calldata, execute early, or undo execution.
-A veto is final for that action ID. OpenGov may publish a new action with a new nonce.
+The Technical Committee cannot alter a verified OpenGov payload or undo execution. A veto is final
+for that action ID. OpenGov may publish a new action with a new nonce. Committee-originated actions
+cannot be fast-tracked, and their OpenGov cancellation actions cannot be vetoed by the committee.
 
 ## Hydration source path
 
@@ -322,6 +326,7 @@ Each destination has an independent `GovernanceExecutor` configured with:
 - local Wormhole chain ID, read from and checked against the Wormhole core contract;
 - Technical Committee vetoer address;
 - a 24-hour veto period; and
+- a fixed 30-day Technical Committee recovery delay; and
 - a 7-day execution grace period measured from action maturity.
 
 For an action queued at `queuedAt`:
@@ -330,6 +335,9 @@ For an action queued at `queuedAt`:
 executableAt = queuedAt + 24 hours
 expiresAt    = executableAt + 7 days
 ```
+
+For a Technical Committee recovery action, `executableAt = queuedAt + 30 days`. The normal grace
+period applies after that maturity timestamp.
 
 The executor must be able to receive native tokens and ERC-721 position NFTs. Support for other
 token receiver interfaces is added only where an identified integration requires it.
@@ -361,6 +369,12 @@ interface IGovernanceExecutor {
         Expired
     }
 
+    enum ActionAuthority {
+        Unknown,
+        Governance,
+        TechnicalCommittee
+    }
+
     struct ActionRecord {
         bytes32 payloadHash;
         uint64 governanceNonce;
@@ -371,10 +385,14 @@ interface IGovernanceExecutor {
     }
 
     function queue(bytes calldata vaa) external returns (bytes32 actionId);
+    function queueTechnicalCommitteeAction(bytes calldata payload) external returns (bytes32 actionId);
     function veto(bytes32 actionId, bytes32 reasonHash) external;
+    function vetoTechnicalCommitteeAction(bytes32 actionId, bytes32 reasonHash) external;
     function execute(bytes32 actionId, bytes calldata payload) external;
 
     function action(bytes32 actionId) external view returns (ActionRecord memory);
+    function actionAuthority(bytes32 actionId) external view returns (ActionAuthority);
+    function technicalCommitteeNonce() external view returns (uint64);
     function state(bytes32 actionId) external view returns (ActionState);
 
     function setVetoer(address newVetoer) external;
@@ -419,6 +437,15 @@ event ActionVetoed(
 );
 
 event ActionExecuted(bytes32 indexed actionId, address indexed caller);
+event ActionFastTracked(bytes32 indexed actionId, address indexed technicalCommittee);
+event TechnicalCommitteeActionQueued(
+    bytes32 indexed actionId,
+    uint64 indexed technicalCommitteeNonce,
+    bytes32 payloadHash,
+    uint48 queuedAt,
+    uint48 executableAt,
+    uint48 expiresAt
+);
 event VetoerUpdated(address indexed previousVetoer, address indexed newVetoer);
 event SourceDispatcherUpdated(
     bytes32 previousSourceDispatcher,
@@ -486,12 +513,11 @@ A veto is irreversible. It does not consume or alter unrelated actions. The reas
 recorded off-chain; `reasonHash` may link to that record and may be zero when no external record is
 provided.
 
-The veto is absolute in v0.1. The configured Safe can veto an action that would replace the vetoer,
-so a malicious veto authority can block all future governance actions. There is no Root bypass,
-timeout override, or forced vetoer rotation. An unavailable Safe cannot veto and may be replaced by
-a normal queued action; the intentionally unsolved case is an actively malicious Safe. A bypass for
-that case may be considered in a later protocol version, but must not be assumed by v0.1 deployments
-or operations.
+The configured Safe can veto ordinary OpenGov actions, including an action that would replace the
+vetoer. The sole exception is a narrowly recognized OpenGov action containing exactly one
+zero-value self-call to `vetoTechnicalCommitteeAction`. This exception ensures a compromised TC
+cannot censor governance's veto of the TC's own recovery action. It does not provide a general Root
+bypass or forced vetoer rotation.
 
 ### Execute
 
@@ -501,7 +527,8 @@ or operations.
 2. Decode, canonically re-encode, and revalidate the discriminator, version, destination, targets,
    batch count, and payload limits.
 3. Require the stored action status to be pending.
-4. Require `block.timestamp >= executableAt`.
+4. Require `block.timestamp >= executableAt`, unless the action came from OpenGov and the configured
+   TC is the caller.
 5. Require `block.timestamp <= expiresAt`.
 6. Enter a reentrancy guard and set the stored status to executed before the first external call.
 7. Execute every call in order using normal EVM `call`.
@@ -522,6 +549,26 @@ implementation semantics.
 A failed execution remains pending and retryable until expiry. Tooling records the failed transaction
 and bounded revert data because reverted EVM logs do not persist.
 
+When the TC executes a verified OpenGov action before `executableAt`, the executor emits
+`ActionFastTracked`. The payload hash, destination checks, balance checks, atomicity, replay
+protection, and expiry rules are identical to ordinary execution. Fast-track authority never applies
+to a TC-originated recovery action.
+
+### Technical Committee recovery
+
+`queueTechnicalCommitteeAction(bytes payload)` accepts a canonical destination payload only from
+the configured TC Safe. The payload must contain the next local monotonically increasing TC nonce;
+the executor uses it in an authority-separated action ID, then records a fixed 30-day delay. The
+current nonce is publicly readable. After maturity, execution is permissionless and uses
+the same atomic call path as an OpenGov action. This lets the TC recover or transfer downstream
+ownership, migrate assets, or upgrade the proxy when OpenGov is unavailable, without granting an
+immediate arbitrary-call capability.
+
+OpenGov vetoes such an action by publishing a normal action whose sole call is
+`vetoTechnicalCommitteeAction(actionId, reasonHash)`. That governance action waits the normal
+OpenGov delay, but the TC cannot veto it. Direct calls to the cancellation method fail because it is
+`onlySelf`. TC actions expire after the configured grace period just like OpenGov actions.
+
 ### Expiry
 
 After the grace period, an unexecuted action cannot execute. Expiry is derived permanently from the
@@ -530,9 +577,9 @@ storage for replay protection and auditability. OpenGov must publish a new actio
 
 ### Self-administration
 
-Changes to the executor itself must pass through the same queue and veto process. The executor is a
-UUPS proxy. Sensitive setters and `_authorizeUpgrade` use `onlySelf`, so they succeed only when the
-executor calls itself from a matured action.
+Changes to the executor itself pass through an authenticated action. The executor is a UUPS proxy.
+Sensitive setters and `_authorizeUpgrade` use `onlySelf`, so they succeed only when the executor
+calls itself from an executed OpenGov action or a matured, non-vetoed TC recovery action.
 
 This includes:
 
@@ -624,22 +671,23 @@ Independent parties can perform the same queue and execute calls.
 
 ## Security invariants
 
-1. Only a VAA from the configured Hydration dispatcher can create an action.
-2. A VAA or action ID cannot create more than one queued action on an executor.
+1. Only a VAA from the configured Hydration dispatcher or the configured TC can create an action.
+2. A VAA or authority-separated action ID cannot create more than one queued action on an executor.
 3. An action cannot execute on a destination other than the one encoded in its payload.
-4. No action executes before its full local veto period has elapsed.
-5. The vetoer can cancel but cannot create, alter, or execute actions.
-6. Vetoed, expired, and executed actions can never execute.
-7. A failed batch changes neither the action's terminal state nor downstream state.
-8. Successful calls originate from the executor address that owns the governed resources.
-9. Executor configuration and upgrades follow the same delay and veto path as external calls.
-10. Deployment keys retain no authority after initialization and handover.
-11. Alternate or non-canonical ABI encodings cannot represent an executable action.
-12. No configuration call can reduce the execution delay below 24 hours or the grace period below 7
+4. Only the TC can execute a verified OpenGov action before its local veto period has elapsed.
+5. A TC-originated action cannot execute before its fixed 30-day delay.
+6. The TC can veto ordinary OpenGov actions but cannot veto OpenGov cancellation of a TC action.
+7. Vetoed, expired, and executed actions can never execute.
+8. A failed batch changes neither the action's terminal state nor downstream state.
+9. Successful calls originate from the executor address that owns the governed resources.
+10. Executor configuration and upgrades follow an authenticated OpenGov or delayed TC action path.
+11. Deployment keys retain no authority after initialization and handover.
+12. Alternate or non-canonical ABI encodings cannot represent an executable action.
+13. No configuration call can reduce the ordinary execution delay below 24 hours or the grace period below 7
     days in implementation v1.
-13. Proxy initialization is atomic and neither implementation contract can be initialized directly.
-14. An implementation upgrade cannot be mixed with other calls in one action.
-15. An ordinary configuration action cannot authorize a source chain other than Hydration Wormhole
+14. Proxy initialization is atomic and neither implementation contract can be initialized directly.
+15. An implementation upgrade cannot be mixed with other calls in one action.
+16. An ordinary configuration action cannot authorize a source chain other than Hydration Wormhole
     chain 73.
 
 ## Threat model
@@ -662,7 +710,7 @@ Expected failure modes and responses:
 | Wrong destination | Rejected |
 | Malformed or unsupported payload | Rejected |
 | Technical Committee offline | Action executes normally after the delay |
-| Technical Committee compromised | It can censor pending actions, but cannot execute or steal assets |
+| Technical Committee compromised | It can censor or fast-track OpenGov actions and propose arbitrary calls, but OpenGov has 30 days to cancel each TC proposal |
 | Destination outage spans the review period | Veto remains callable after maturity, but veto and execution may race when the chain resumes |
 | Relayer offline | Any account can queue or execute |
 | Downstream call reverts | Atomic batch reverts and remains retryable |
@@ -670,7 +718,7 @@ Expected failure modes and responses:
 | Action never executes | It expires after the grace period |
 | Wormhole fee changes before enactment | Source publication reverts and the dispatcher reports failure |
 | Governance dispatcher call reverts on Hydration | Runtime dispatcher reports enactment failure; no VAA is published |
-| Executor bug | Governed migration or upgrade path, subject to the same delay and veto |
+| Executor bug | OpenGov upgrade path, or TC recovery upgrade subject to the 30-day OpenGov-veto window |
 
 ## Deployment model
 
@@ -755,14 +803,15 @@ recognizes it as privileged.
 - [x] Select Root as the OpenGov origin.
 - [x] Assign the fixed `CrossChainGovernanceAccount` and `0xaa7e...aa7e2` EVM address.
 - [x] Make the deployment Root-only.
-- [x] Confirm that the Technical Committee is veto-only.
-- [x] Accept absolute veto sovereignty with no bypass or forced replacement in v0.1.
-- [ ] Revisit vetoer recovery in a later protocol version.
+- [x] Allow the Technical Committee to veto or fast-track verified OpenGov actions.
+- [x] Allow TC recovery actions only after a fixed 30-day, OpenGov-vetoable delay.
+- [x] Prevent the TC from vetoing an OpenGov cancellation of a TC recovery action.
 
 ### Timing and lifecycle
 
 - [x] Set the production veto period to 24 hours from queueing.
 - [x] Set the execution grace period to 7 days after maturity.
+- [x] Set the Technical Committee recovery delay to 30 days.
 - [x] Define exact boundary semantics: veto through `expiresAt`; execute from `executableAt` through
   `expiresAt`, inclusive; after maturity transaction ordering resolves a veto/execution race.
 - [x] Derive expiry from timestamps; retain records and provide no expiry/pruning transaction.
@@ -828,9 +877,9 @@ recognizes it as privileged.
 
 ## Deferred considerations
 
-- A recovery or rotation mechanism for an actively malicious Technical Committee Safe.
-  Any future mechanism must preserve a meaningful review window and must not silently weaken the
-  v0.1 absolute-veto guarantee.
+- A forced rotation mechanism for an actively malicious Technical Committee Safe. The protected
+  recovery-action veto prevents a malicious TC from taking over through its 30-day action lane, but
+  it can still censor an ordinary OpenGov action that attempts to replace the Safe.
 
 ## References
 
