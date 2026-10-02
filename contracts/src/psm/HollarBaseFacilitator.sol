@@ -33,6 +33,11 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     /// @notice Pauses either leg. Cannot move funds and cannot mint.
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
+    /// @notice Redeems publish immediately; exits wait for finality. Wormhole reads any level but
+    ///         200 and 201 as finalized; 1 is the value its SDK names `Finalized`.
+    uint8 internal constant CONSISTENCY_INSTANT = 200;
+    uint8 internal constant CONSISTENCY_FINALIZED = 1;
+
     // ─── Config ─────────────────────────────────────────────────
 
     IGhoToken public hollar;
@@ -259,7 +264,8 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
             PsmPayload.fromAddress(baseRecipient),
             usdcAmount,
             PsmPayload.fromAddress(msg.sender),
-            maxFeeBps
+            maxFeeBps,
+            CONSISTENCY_INSTANT
         );
 
         emit RedeemInitiated(msg.sender, baseRecipient, usdcAmount, sequence);
@@ -385,7 +391,9 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         bytes32 baseRecipient = PsmPayload.fromAddress(entry.origin);
         uint8 kind = entry.remint ? PsmPayload.KIND_REDEEM : PsmPayload.KIND_REFUND;
 
-        sequence = _publish(kind, baseRecipient, entry.amount, PsmPayload.fromAddress(entry.recipient), maxFeeBps);
+        sequence = _publish(
+            kind, baseRecipient, entry.amount, PsmPayload.fromAddress(entry.recipient), maxFeeBps, CONSISTENCY_FINALIZED
+        );
 
         emit PendingMintCancelled(id, entry.recipient, entry.amount, baseRecipient, kind, sequence);
     }
@@ -395,18 +403,24 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         return capacity > level ? capacity - level : 0;
     }
 
-    /// @dev Consistency 200 — the guardians sign on inclusion and the leg settles in seconds. The
-    ///      redeem leg carries no cap: its reorg exposure is one Hydration block wide and falls on
-    ///      the protocol, not on holders.
-    function _publish(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin, uint16 maxFeeBps)
-        private
-        returns (uint64 sequence)
-    {
+    /// @dev The level is chosen per call site, not per kind: KIND_REDEEM is both a redemption
+    ///      and a cancelled re-mint. Redeems go instant — their reorg exposure is one Hydration
+    ///      block wide, bounded by the outbound limit, and falls on the protocol. A cancelled
+    ///      pending mint goes finalized: it sends value out with nothing new burned, costs nothing
+    ///      and can be repeated, so a reorg after signing would pay twice.
+    function _publish(
+        uint8 kind,
+        bytes32 recipient,
+        uint256 amount,
+        bytes32 origin,
+        uint16 maxFeeBps,
+        uint8 consistency
+    ) private returns (uint64 sequence) {
         uint256 fee = wormhole.messageFee();
         if (msg.value < fee) revert InsufficientMessageFee(msg.value, fee);
 
         sequence = wormhole.publishMessage{value: fee}(
-            0, PsmPayload.encode(kind, recipient, amount, origin, maxFeeBps), 200
+            0, PsmPayload.encode(kind, recipient, amount, origin, maxFeeBps), consistency
         );
 
         if (msg.value > fee) {

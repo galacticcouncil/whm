@@ -370,7 +370,7 @@ contract PsmRoundTripTest is Test {
         facilitator.cancelPendingMint(0, type(uint16).max);
         _relayHydrationToBase();
 
-        (address recipient, address origin,,, uint256 amount, uint256 gross) = vault.queue(1);
+        (address recipient, address origin,, uint256 amount, uint256 gross) = vault.queue(1);
         assertEq(recipient, bob, "the credit the cancel undid: same Base recipient");
         assertEq(origin, alice, "same Hydration redeemer");
         assertEq(amount, 10_000e6 - fee, "fee included");
@@ -413,7 +413,7 @@ contract PsmRoundTripTest is Test {
             facilitator.cancelPendingMint(id, type(uint16).max);
             _relayHydrationToBase();
 
-            (,,,, uint256 amount, uint256 gross) = vault.queue(vault.queueHead());
+            (,,, uint256 amount, uint256 gross) = vault.queue(vault.queueHead());
             assertEq(amount, 10_000e6 - fee, "the same credit every time");
             assertEq(gross, 10_000e6);
             assertEq(vault.principal() + vault.totalOwed(), 10_000e6, "the books conserve the gross");
@@ -476,9 +476,8 @@ contract PsmRoundTripTest is Test {
     // ─── A cancelled refund ─────────────────────────────────────
 
     /// @dev A deposit that never minted owes no redemption fee, however often it is cancelled.
-    ///      Its refund credit, cancelled at the vault head, goes back as the mint it was; cancelled
-    ///      again on Hydration it refunds in full. The depositor here never acts — the deposit's
-    ///      recipient walks the whole cycle as the credit's origin — and is still made whole.
+    ///      Its refund credit, cancelled at the vault head by the depositor it is addressed to,
+    ///      goes back as the mint it was; cancelled again on Hydration it refunds in full.
     function test_roundTrip_cancelledRefundStaysFeeFree() public {
         hollar.setFacilitatorBucketCapacity(address(facilitator), 100e18); // 500 cannot mint
 
@@ -492,8 +491,7 @@ contract PsmRoundTripTest is Test {
         _relayHydrationToBase();
         assertEq(vault.owed(alice), 500e6, "refunded in full");
 
-        vm.warp(366 days); // the origin may cancel once the credit has waited a day
-        vm.prank(bob); // the refund credit's origin
+        vm.prank(alice); // the depositor wants the mint after all
         vault.cancelQueuedRedemption(0);
         _relayBaseToHydration();
         assertEq(facilitator.pendingOf(bob), 500e6, "back in the mint queue, as a mint");

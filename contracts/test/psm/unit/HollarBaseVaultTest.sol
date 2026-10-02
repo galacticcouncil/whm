@@ -181,16 +181,42 @@ contract HollarBaseVaultTest is Test, IHollarBaseVault {
         _assertSolvent();
     }
 
-    /// @dev 200 is the chosen level, not the only one this route could reach — Safe (201) and
-    ///      Finalized (202) are available on both guardian sets but unused here by design; the
-    ///      bucket, not consistency, bounds the instant-level risk. Pinned because a silent switch
-    ///      to 201 would delay every message behind a threshold nobody signed up to.
+    /// @dev Deposits go instant by design; the bucket and the deposit limit, not consistency,
+    ///      bound the reorg risk. Pinned because a silent switch to a slower level would delay
+    ///      every deposit behind a threshold nobody signed up to.
     function test_deposit_alwaysPublishesInstant() public {
         _deposit(alice, 10e6);
         assertEq(wormhole.lastPublished().consistencyLevel, 200, "small");
 
         _deposit(alice, 500_000e6);
         assertEq(wormhole.lastPublished().consistencyLevel, 200, "large is no different");
+    }
+
+    /// @dev Exits wait for finality: a cancel or a fee-limit return sends value back with nothing
+    ///      new locked, so a reorg after signing would pay twice. Per call site, not per kind — a
+    ///      cancelled refund is a KIND_MINT like a deposit, and goes finalized.
+    function test_exitsPublishFinalized() public {
+        _deposit(alice, 10_000e6);
+        assertEq(wormhole.lastPublished().consistencyLevel, 200, "a deposit's MINT is instant");
+
+        vault.receiveMessage(_redeemVaaSalted(bob, 1_000e6, PsmPayload.KIND_REFUND, 1));
+        vm.prank(bob);
+        vault.cancelQueuedRedemption(0);
+        (uint8 kind,,,) = PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_MINT);
+        assertEq(wormhole.lastPublished().consistencyLevel, 1, "a cancelled refund's MINT is finalized");
+
+        vault.receiveMessage(_redeemVaaSalted(bob, 1_000e6, PsmPayload.KIND_REDEEM, 2));
+        vm.prank(bob);
+        vault.cancelQueuedRedemption(1);
+        assertEq(wormhole.lastPublished().consistencyLevel, 1, "a cancelled redemption");
+
+        vm.prank(admin);
+        vault.setFees(50, 25);
+        vault.receiveMessage(_cappedRedeemVaa(bob, bob, 1_000e6, 5, 3));
+        (kind,,,) = PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_REMINT);
+        assertEq(wormhole.lastPublished().consistencyLevel, 1, "a fee-limit return");
     }
 
     /// @dev Rejected here, where the depositor still holds their money. The far side has no way
@@ -1103,12 +1129,64 @@ contract HollarBaseVaultTest is Test, IHollarBaseVault {
         assertEq(vault.owed(bob), 0);
     }
 
+    /// @dev The wait runs from when the credit reaches the head, not from when it was booked. A
+    ///      credit that sat behind a stalled head for days is about to be paid the moment that
+    ///      head clears; its origin gets no cancel until it has itself been the head for a day.
+    function test_cancelQueuedRedemption_originWaitRunsFromReachingTheHead() public {
+        address paymentAddress = makeAddr("paymentAddress");
+        _deposit(alice, 10_000e6);
+        vault.receiveMessage(_redeemVaaSalted(bob, 1_000e6, PsmPayload.KIND_REDEEM, 1));
+        vault.receiveMessage(_redeemVaaWithOrigin(paymentAddress, alice, 1_000e6));
+
+        vm.warp(365 days + 3 days); // booked three days ago, behind bob the whole time
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(CancelNotAtHead.selector, 1, 0));
+        vault.cancelQueuedRedemption(1);
+
+        vault.drain(1); // bob is paid; the payment address is the head from now
+        uint256 opensAt = 365 days + 3 days + vault.ORIGIN_CANCEL_DELAY();
+        assertEq(vault.headSince(), 365 days + 3 days);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(OriginCancelTooEarly.selector, 1, opensAt));
+        vault.cancelQueuedRedemption(1);
+
+        vm.warp(opensAt);
+        vm.prank(alice);
+        vault.cancelQueuedRedemption(1);
+        assertEq(vault.owed(paymentAddress), 0);
+    }
+
+    /// @dev A refund's origin is the deposit's recipient on Hydration, who put nothing in. They
+    ///      cannot cancel it, however long it waits: only the depositor it is addressed to can.
+    function test_cancelQueuedRedemption_originCannotCancelARefund() public {
+        _deposit(alice, 1_000e6);
+        vault.receiveMessage(
+            VaaBuilder.build(
+                HYDRATION_CHAIN,
+                HYDRATION_EMITTER,
+                PsmPayload.encode(
+                    PsmPayload.KIND_REFUND, PsmPayload.fromAddress(alice), 400e6, PsmPayload.fromAddress(bob)
+                )
+            )
+        );
+        vm.warp(365 days + 30 days);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(NotYourCredit.selector, 0, alice));
+        vault.cancelQueuedRedemption(0);
+
+        vm.prank(alice);
+        vault.cancelQueuedRedemption(0);
+        assertEq(vault.owed(alice), 0);
+    }
+
     /// @dev A refund credit is a deposit that never minted. Cancelled, it goes back as the mint
     ///      it was — not as a re-mint, whose own cancel would return as a fee-charged redemption.
     function test_cancelQueuedRedemption_refundGoesBackAsAMint() public {
         _deposit(alice, 1_000e6);
         vault.receiveMessage(_redeemVaa(bob, 400e6, PsmPayload.KIND_REFUND));
-        (,, bool refund,,,) = vault.queue(0);
+        (,, bool refund,,) = vault.queue(0);
         assertTrue(refund);
 
         vm.prank(bob);

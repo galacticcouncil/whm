@@ -758,4 +758,23 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         assertEq(kind, PsmPayload.KIND_REDEEM);
         assertEq(PsmPayload.feeCap(payload), 9);
     }
+
+    /// @dev A cancelled pending mint is an exit and waits for finality, whatever kind it sends —
+    ///      KIND_REDEEM here is the same kind `redeem` sends instantly.
+    function test_cancelPendingMint_publishesFinalized() public {
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, bob, 100e6, 1));
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_REMINT, alice, bob, 100e6, 2));
+
+        vm.startPrank(alice);
+        facilitator.cancelPendingMint(0, type(uint16).max);
+        assertEq(wormhole.lastPublished().consistencyLevel, 1, "a refund");
+
+        facilitator.cancelPendingMint(1, type(uint16).max);
+        vm.stopPrank();
+        (uint8 kind,,,) = PsmPayload.decode(wormhole.lastPublished().payload);
+        assertEq(kind, PsmPayload.KIND_REDEEM);
+        assertEq(wormhole.lastPublished().consistencyLevel, 1, "a cancelled re-mint's REDEEM");
+    }
 }

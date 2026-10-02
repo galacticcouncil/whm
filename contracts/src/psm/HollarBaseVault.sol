@@ -43,14 +43,14 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     /// @notice Fee ceiling the admin dial cannot pass. 5% would already be an emergency setting.
     uint256 internal constant MAX_FEE_BPS = 500;
 
-    /// @notice How long a credit is its recipient's alone. After it, the origin may cancel too.
+    /// @notice How long a redemption must sit at the head unpaid before its origin may cancel it.
     uint256 public constant ORIGIN_CANCEL_DELAY = 1 days;
 
-    /// @notice Publish immediately — guardians sign on inclusion. The chosen level for this
-    ///         route: Safe and Finalized are available on both Base's and Hydration's guardian
-    ///         sets but are not used here. What bounds the instant-level risk is the bucket, not
-    ///         consistency. See `_publish`.
+    /// @notice Deposits publish immediately — guardians sign on inclusion. See `_publish`.
     uint8 internal constant CONSISTENCY_INSTANT = 200;
+    /// @notice Exits wait for finality. Wormhole reads any level but 200 and 201 as finalized; 1
+    ///         is the value its SDK names `Finalized`.
+    uint8 internal constant CONSISTENCY_FINALIZED = 1;
 
     // ─── Config ─────────────────────────────────────────────────
 
@@ -109,6 +109,10 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     /// @notice Set by `emergencyUnwindAave`: deposits stop re-supplying Aave until a guardian
     ///         clears it. Declared last; keep new state below.
     bool public investPaused;
+
+    /// @notice When the entry now at the head got there. The origin's wait runs from here, not
+    ///         from booking: a credit that queued behind a stall is about to be paid once it clears.
+    uint64 public headSince;
 
     // ─── Init ───────────────────────────────────────────────────
 
@@ -198,7 +202,8 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
         _investBestEffort();
 
-        sequence = _publish(PsmPayload.KIND_MINT, recipient, received, PsmPayload.fromAddress(msg.sender));
+        sequence =
+            _publish(PsmPayload.KIND_MINT, recipient, received, PsmPayload.fromAddress(msg.sender), CONSISTENCY_INSTANT);
 
         emit Deposited(msg.sender, recipient, received, sequence);
     }
@@ -255,12 +260,19 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///      Refused while claims are paused, like every path that mints on Hydration: the delivery
     ///      reverts and the VAA lands once they are not. It publishes from a non-payable delivery,
     ///      so it holds only while the core's message fee is zero — were that to change, the
-    ///      delivery reverts the same way and the VAA stays replayable.
+    ///      delivery reverts the same way and the VAA stays replayable. Published at finality: a
+    ///      reorg that unwound this delivery would leave the redemption deliverable again while
+    ///      the returned HOLLAR stood.
     function _returnRedeem(address recipient, address origin, uint256 amount, uint16 cap) private {
         if (claimsPaused) revert ClaimsPaused();
 
-        uint64 sequence =
-            _publish(PsmPayload.KIND_REMINT, PsmPayload.fromAddress(origin), amount, PsmPayload.fromAddress(recipient));
+        uint64 sequence = _publish(
+            PsmPayload.KIND_REMINT,
+            PsmPayload.fromAddress(origin),
+            amount,
+            PsmPayload.fromAddress(recipient),
+            CONSISTENCY_FINALIZED
+        );
 
         emit RedeemReturned(recipient, origin, amount, redeemFeeBps, cap, sequence);
     }
@@ -335,10 +347,11 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///      converting into a fresh mint on the other chain.
     ///
     ///      The value goes back to `origin` whoever asks — nobody picks, not `msg.sender` and not
-    ///      an argument. The `recipient` may ask at any time. The `origin` may ask once the credit
-    ///      has waited `ORIGIN_CANCEL_DELAY` unpaid: a recipient that is a payment address rather
-    ///      than the redeemer's own will never call this, so the redeemer needs an exit from a
-    ///      real stall — but not a way to recall a payment the queue is about to make.
+    ///      an argument. The `recipient` may ask at any time. The `origin` may ask only for a
+    ///      redemption, and only once it has sat at the head unpaid for `ORIGIN_CANCEL_DELAY`: a
+    ///      recipient that is a payment address will never call this, so the redeemer needs an
+    ///      exit from a real stall — but not a way to recall a payment the queue is about to
+    ///      make. A refund's origin is the deposit's recipient on Hydration, who put nothing in.
     /// @param index The queue slot, from the `RedeemCredited` event or `queueEntryOf` — cancellable
     ///        only once it is the head, i.e. once `queueEntryOf` reports `position == 0`.
     function cancelQueuedRedemption(uint256 index) external payable returns (uint64 sequence) {
@@ -346,14 +359,17 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
         Credit memory credit = queue[index];
         if (credit.amount == 0) revert NotQueued(index);
-        if (credit.recipient != msg.sender) {
-            if (credit.origin != msg.sender) revert NotYourCredit(index, credit.recipient);
-            uint256 opensAt = uint256(credit.creditedAt) + ORIGIN_CANCEL_DELAY;
-            if (block.timestamp < opensAt) revert OriginCancelTooEarly(index, opensAt);
+        bool byOrigin = credit.recipient != msg.sender;
+        if (byOrigin && (credit.origin != msg.sender || credit.refund)) {
+            revert NotYourCredit(index, credit.recipient);
         }
         // Only the head ever moves. Zeroing a slot behind it would leave a hole every later
         // advance has to walk, and nothing bounds how many an attacker can leave.
         if (index != queueHead) revert CancelNotAtHead(index, queueHead);
+        if (byOrigin) {
+            uint256 opensAt = uint256(headSince) + ORIGIN_CANCEL_DELAY;
+            if (block.timestamp < opensAt) revert OriginCancelTooEarly(index, opensAt);
+        }
 
         return _cancel(index, credit);
     }
@@ -557,14 +573,9 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         returns (uint256 index)
     {
         index = queueTail;
-        queue[index] = Credit({
-            recipient: recipient,
-            origin: origin,
-            refund: refund,
-            creditedAt: uint64(block.timestamp),
-            amount: amount,
-            gross: gross
-        });
+        // Booked into an empty queue, it is the head from now.
+        if (index == queueHead) headSince = uint64(block.timestamp);
+        queue[index] = Credit({recipient: recipient, origin: origin, refund: refund, amount: amount, gross: gross});
         queueTail = index + 1;
         owed[recipient] += amount;
         totalOwed += gross;
@@ -579,18 +590,20 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     function _cancel(uint256 index, Credit memory credit) private returns (uint64 sequence) {
         queue[index].amount = 0;
         queueHead = index + 1;
+        headSince = uint64(block.timestamp);
         owed[credit.recipient] -= credit.amount;
         totalOwed -= credit.gross;
         principal += credit.gross;
 
         bytes32 hydrationRecipient = PsmPayload.fromAddress(credit.origin);
 
-        // Publishes instant like everything else here, which is the residual this route carries:
-        // this mints HOLLAR without locking anything new, so a Base reorg that unwound the
-        // cancellation while the message stood would leave the credit queued AND the HOLLAR
-        // reissued. Bounded on arrival by the inbound limit and the bucket, nothing narrower.
+        // At finality: this sends value back with nothing new locked, so a Base reorg that
+        // unwound the cancel after its message was signed would leave the credit queued AND the
+        // value re-issued.
         uint8 kind = credit.refund ? PsmPayload.KIND_MINT : PsmPayload.KIND_REMINT;
-        sequence = _publish(kind, hydrationRecipient, credit.gross, PsmPayload.fromAddress(credit.recipient));
+        sequence = _publish(
+            kind, hydrationRecipient, credit.gross, PsmPayload.fromAddress(credit.recipient), CONSISTENCY_FINALIZED
+        );
 
         emit RedemptionCancelled(index, credit.recipient, credit.gross, hydrationRecipient, sequence);
     }
@@ -609,6 +622,7 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
         queue[index].amount = 0;
         queueHead = index + 1;
+        headSince = uint64(block.timestamp);
 
         owed[recipient] -= amount;
         // Releases the fee to surplus, here and only here. A credit leaves the queue by payment or
@@ -714,17 +728,21 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         if (price < minUsdcPrice) revert UsdcBelowFloor(price, minUsdcPrice);
     }
 
-    /// @dev Always consistency 200. Safe and Finalized are available on both Base's and
-    ///      Hydration's guardian sets — this is a deliberate choice, not the only level the route
-    ///      can reach. The consequence is recorded rather than hidden: a Base reorg landing after
-    ///      a VAA is signed leaves that HOLLAR unbacked, bounded not by a slower consistency level
-    ///      but by the deposit rate limit and the facilitator's bucket.
-    function _publish(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin) private returns (uint64 sequence) {
+    /// @dev The level is chosen per call site, not per kind: KIND_MINT is both a deposit and a
+    ///      cancelled refund. Deposits go instant — a Base reorg after the VAA is signed leaves
+    ///      that HOLLAR unbacked, bounded by the deposit limit and the bucket, an accepted
+    ///      residual. Exits go finalized: they cost nothing, are not rate-limited and can be
+    ///      repeated with the same funds, so at instant one holder could keep a whole position
+    ///      exposed to any reorg.
+    function _publish(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin, uint8 consistency)
+        private
+        returns (uint64 sequence)
+    {
         uint256 fee = wormhole.messageFee();
         if (msg.value < fee) revert InsufficientMessageFee(msg.value, fee);
 
         sequence = wormhole.publishMessage{value: fee}(
-            0, PsmPayload.encode(kind, recipient, amount, origin), CONSISTENCY_INSTANT
+            0, PsmPayload.encode(kind, recipient, amount, origin), consistency
         );
 
         if (msg.value > fee) {

@@ -43,8 +43,9 @@ Holds the reserve. Inherits `MessageReceiver` (UUPS + Wormhole verification + re
   `claim` reverts instead, leaving the credit queued and the cancel below still open to them.
 - **`cancelQueuedRedemption(index)`** — the credit at the head is given up and its value goes back
   to the credit's `origin` — the Hydration account it came from — never to a caller's pick. The
-  credit's `recipient` may ask at any time; its `origin` only once the credit has waited 24 hours
-  unpaid. Head only, so the queue is only ever modified at the front. Gated by
+  credit's `recipient` may ask at any time; its `origin` only for a redemption, and only once it
+  has sat at the head unpaid for 24 hours. Head only, so the queue is only ever modified at the
+  front. Gated by
   `claimsPaused` like `claim` and `drain`: it mints on Hydration, so a pause meant to stop a bad
   payout must stop this path too. `cancelQueuedRedemptionFor(index)` is the admin's copy — same
   gate, same books — for a head its owner cannot clear.
@@ -102,10 +103,12 @@ CANCEL    (queued deposit)     Facilitator ──KIND_REFUND──▶ Vault ─�
 CANCEL    (queued re-mint)     Facilitator ──KIND_REDEEM──▶ Vault ──▶ FIFO queue, fee as on redeem
 ```
 
-Consistency: every message on this route publishes at 200 (immediate) — the chosen level, not the
-only one available. The Wormhole guardian set supports 201/safe and 202/finalized for both Base
-and Hydration on these contracts; this route does not use them. What bounds the instant-level risk
-is the facilitator bucket and the deposit rate limit, not a slower consistency level.
+Consistency is chosen per call site, not per kind — `KIND_MINT` and `KIND_REDEEM` each serve an
+entry and an exit. Deposits and redeems publish at 200 (instant): guardians sign on inclusion.
+Exits — a cancel on either side and a fee-limit return — publish finalized: Wormhole treats any
+level other than 200 and 201 as finalized, and the contracts use 1, the value its SDK names
+`Finalized`. Finality costs latency, about 17 minutes on Base (512 blocks) and well under that on
+Hydration, which an exit can afford.
 
 ## Payload encoding
 
@@ -177,11 +180,14 @@ unwind is paired with `setClaimsPaused(true)` — the guardian holds both levers
 release stalls the line, and the burn already happened. `cancelQueuedRedemption` returns `gross` to
 `principal` and re-mints the same figure, so the corridor lands exactly where it stood. It applies
 to the head only — which is where the stall is by definition — and everyone behind leaves in turn.
-The credit's `recipient` may ask at any time. Its `origin` may ask too, but only once the credit
-has waited `ORIGIN_CANCEL_DELAY` — 24 hours — unpaid; the value goes back to the origin either
-way. A redeemer who named a payment address they do not control — an off-ramp's — therefore has an
-exit from a real stall, and no way to recall a payment the queue is about to make: for its first
-day a credit is the recipient's alone, and a head the reserve can cover is paid within minutes.
+The credit's `recipient` may ask at any time. Its `origin` may ask too, under two limits; the
+value goes back to the origin either way. Only once the credit has sat at the head unpaid for
+`ORIGIN_CANCEL_DELAY` — 24 hours, counted from reaching the head (`headSince`), not from booking:
+a credit that queued behind a stall is about to be paid the moment the stall clears, and a head
+the reserve can cover is paid within minutes. And only for a redemption: a refund's origin is the
+deposit's recipient on Hydration, who put nothing in and has no claim on the depositor's refund.
+A redeemer who named a payment address they do not control — an off-ramp's — therefore has an
+exit from a real stall, and no way to recall a payment the queue is about to make.
 
 **A cancelled re-mint is a redemption.** The facilitator's queue remembers which kind an entry
 came as. Cancelling a queued deposit refunds fee-free (`KIND_REFUND`); cancelling a queued re-mint
@@ -220,14 +226,18 @@ into the pool the guardian had just left. The unwind therefore sets `investPause
 lock, attest and publish, they just stay idle until a guardian clears it — which re-supplies the
 idle balance at once.
 
-**A Base reorg is an accepted residual, not a bounded one.** Publishing at 200 means guardians sign
-on inclusion, so a reorg that unwinds a deposit after its VAA is signed leaves that HOLLAR unbacked.
-An earlier design gated deposits above a cap onto consistency 201. Safe (201) and Finalized (202)
-are available on both Base's and Hydration's guardian sets; the cap was removed because 200 is the
-deliberate choice for the whole route regardless of size, not because a slower level was
-unreachable. What bounds the instant-level risk is `DEPOSIT_LIMIT_CAPACITY` and the facilitator
-bucket — the corridor, not a slice of it — and the remedy for a breach is unchanged: burn the
-difference from treasury. Supersedes xchain#40.
+**A reorg is an accepted residual for deposits and redeems, and closed for exits.** Publishing at
+200 means guardians sign on inclusion, so a reorg that unwinds a deposit after its VAA is signed
+leaves that HOLLAR unbacked, and one that unwinds a redeem leaves a credit for HOLLAR that was never
+burned. An earlier design gated deposits above a cap onto consistency 201; the cap was removed
+because 200 is the deliberate choice for both, regardless of size. What bounds that is
+`DEPOSIT_LIMIT_CAPACITY`, the outbound limit and the facilitator bucket — each exposure needs fresh
+capital inside those limits — and the remedy for a breach is unchanged: burn the difference from
+treasury. Supersedes xchain#40. Exits are different. A cancel or a fee-limit return sends value
+back with nothing new locked or burned; it costs nothing, is not rate-limited and can be repeated
+with the same funds, so at 200 one holder could keep a whole position continuously exposed and
+collect on any reorg. A return is also triggered by a VAA that becomes deliverable again if its
+delivery is reorged out. Exits therefore publish finalized.
 
 **Payouts are sized by Aave's virtual balance.** `getVirtualUnderlyingBalance` is the figure
 `withdraw` decrements; the aToken's raw holding also counts donations Aave never releases (measured

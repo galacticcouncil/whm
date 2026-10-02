@@ -29,9 +29,8 @@ interface IHollarBaseVault {
         address origin;
         /// @dev Booked from a KIND_REFUND: a deposit that never minted. Cancelling it attests the
         ///      deposit again (KIND_MINT), so a second cancel on Hydration still refunds fee-free.
+        ///      Only its recipient may cancel it: its origin put nothing in.
         bool refund;
-        /// @dev When it was booked. The origin may cancel only `ORIGIN_CANCEL_DELAY` after this.
-        uint64 creditedAt;
         /// @dev What the recipient is paid, net of fee.
         uint256 amount;
         /// @dev What left `principal` to book this credit. Cancelling returns this, not `amount`:

@@ -181,6 +181,11 @@ async function main(): Promise<void> {
     //  the WETH-backed EVM balance. Gas still works; don't use it as the funding check.)
     console.log("   funded signer with WETH (asset 20) for gas");
 
+    // Hydration only lets whitelisted addresses CREATE (EnsureWhitelistedDeployer reads
+    // EVMAccounts.ContractDeployer); without the slot every deploy fails CreateOriginNotAllowed.
+    await net.setStorage({ EVMAccounts: { ContractDeployer: [[[me], {}]] } });
+    console.log("   whitelisted signer as a contract deployer");
+
         // Hydration charges the MAX of execution gas, PoV gas, and storage-growth gas at 366
     // gas/byte — so a deploy is storage-growth-dominated and a limit borrowed from another chain
     // silently OOGs. The block ceiling is ~15M (366 * 40 KB), so sit just under it.
