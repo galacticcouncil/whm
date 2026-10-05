@@ -232,6 +232,21 @@ contract GovernanceExecutorTest is Test {
         _deployExecutor(address(wormhole), SOURCE_DISPATCHER, address(safe), VETO_PERIOD, GRACE_PERIOD - 1);
     }
 
+    /// @notice The initial configuration cannot raise timing above the immutable v1 ceilings.
+    function testInitializationEnforcesTimingCeilings() public {
+        uint48 maxVeto = executor.MAX_VETO_PERIOD();
+        uint48 maxGrace = executor.MAX_EXECUTION_GRACE_PERIOD();
+
+        vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.VetoPeriodTooLong.selector, maxVeto + 1, maxVeto));
+        _deployExecutor(address(wormhole), SOURCE_DISPATCHER, address(safe), maxVeto + 1, GRACE_PERIOD);
+
+        vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.GracePeriodTooLong.selector, maxGrace + 1, maxGrace));
+        _deployExecutor(address(wormhole), SOURCE_DISPATCHER, address(safe), VETO_PERIOD, maxGrace + 1);
+
+        // Boundary values remain valid.
+        _deployExecutor(address(wormhole), SOURCE_DISPATCHER, address(safe), maxVeto, maxGrace);
+    }
+
     /// @notice Zero bootstrap authorities and a core reporting chain zero fail closed.
     function testInitializationRejectsZeroConfiguration() public {
         vm.expectRevert(IGovernanceExecutor.ZeroAddress.selector);
@@ -746,6 +761,30 @@ contract GovernanceExecutorTest is Test {
         executor.execute(committeeAction, committeePayload);
     }
 
+    /// @notice Trailing calldata bytes cannot strip a cancellation of its veto immunity.
+    function testPaddedCancellationKeepsVetoImmunity() public {
+        bytes memory committeePayload = _setNumberPayload(1, 42);
+        vm.prank(address(safe));
+        bytes32 committeeAction = executor.queueTechnicalCommitteeAction(committeePayload);
+
+        bytes32 reasonHash = keccak256("governance veto");
+        bytes memory paddedCall = bytes.concat(
+            abi.encodeCall(IGovernanceExecutor.vetoTechnicalCommitteeAction, (committeeAction, reasonHash)),
+            bytes32(0)
+        );
+        bytes memory vetoPayload = _oneCallPayload(1, address(executor), 0, paddedCall);
+        bytes32 vetoAction = _queue(vetoPayload, 10);
+
+        vm.prank(address(safe));
+        vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.GovernanceVetoProtected.selector, vetoAction));
+        executor.veto(vetoAction, bytes32(0));
+
+        // The padded cancellation cancels the committee action exactly like the canonical form.
+        vm.warp(executor.action(vetoAction).executableAt);
+        executor.execute(vetoAction, vetoPayload);
+        assertEq(uint256(executor.state(committeeAction)), uint256(IGovernanceExecutor.ActionState.Vetoed));
+    }
+
     /// @notice Cancellation cannot be invoked directly without an authenticated governance action.
     function testTechnicalCommitteeActionVetoIsOnlySelf() public {
         vm.expectRevert(abi.encodeWithSelector(IGovernanceExecutor.OnlySelf.selector, address(this)));
@@ -817,6 +856,22 @@ contract GovernanceExecutorTest is Test {
     function testQueuedActionCannotReduceTimingBelowFloors() public {
         bytes memory payload = _oneCallPayload(
             1, address(executor), 0, abi.encodeCall(IGovernanceExecutor.setTiming, (VETO_PERIOD - 1, GRACE_PERIOD))
+        );
+        bytes32 actionId = _queue(payload, 10);
+        vm.warp(executor.action(actionId).executableAt);
+
+        vm.expectRevert();
+        executor.execute(actionId, payload);
+
+        assertEq(executor.vetoPeriod(), VETO_PERIOD);
+        assertEq(uint256(executor.state(actionId)), uint256(IGovernanceExecutor.ActionState.Ready));
+    }
+
+    /// @notice Even a properly delayed self-call cannot raise timing above the v1 ceilings.
+    function testQueuedActionCannotRaiseTimingAboveCeilings() public {
+        uint48 maxVeto = executor.MAX_VETO_PERIOD();
+        bytes memory payload = _oneCallPayload(
+            1, address(executor), 0, abi.encodeCall(IGovernanceExecutor.setTiming, (maxVeto + 1, GRACE_PERIOD))
         );
         bytes32 actionId = _queue(payload, 10);
         vm.warp(executor.action(actionId).executableAt);
