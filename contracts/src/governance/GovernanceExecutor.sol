@@ -21,6 +21,11 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
     uint48 public constant MIN_EXECUTION_GRACE_PERIOD = 7 days;
     /// @notice Minimum notice before a Technical Committee recovery action can execute.
     uint48 public constant TECHNICAL_COMMITTEE_DELAY = 30 days;
+    /// @notice OpenGov must always have at least 7 days to land a cancellation before a committee
+    ///         action matures, so the veto period may never approach the committee delay.
+    uint48 public constant MAX_VETO_PERIOD = TECHNICAL_COMMITTEE_DELAY - 7 days;
+    /// @notice Keeps deadline arithmetic far below the uint48 ceiling so queueing cannot brick.
+    uint48 public constant MAX_EXECUTION_GRACE_PERIOD = 90 days;
 
     // Zero deliberately means "unknown", making an uninitialized mapping entry unambiguous.
     uint8 private constant STATUS_PENDING = 1;
@@ -418,10 +423,12 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
 
     /// @dev A governance action whose sole effect is canceling a committee action is immune from
     ///      committee veto. It still waits the ordinary governance delay and executes permissionlessly.
+    ///      Both parameters are fixed-size, so the decoder ignores trailing calldata: any length of
+    ///      at least 68 bytes performs the identical call and must keep the same immunity.
     function _isTechnicalCommitteeVeto(GovernanceCodec.GovernanceAction memory decoded) private view returns (bool) {
         if (decoded.calls.length != 1) return false;
         GovernanceCodec.Call memory call_ = decoded.calls[0];
-        if (call_.target != address(this) || call_.value != 0 || call_.data.length != 68) return false;
+        if (call_.target != address(this) || call_.value != 0 || call_.data.length < 68) return false;
         bytes4 selector;
         bytes memory data = call_.data;
         assembly ("memory-safe") {
@@ -465,13 +472,21 @@ contract GovernanceExecutor is Initializable, UUPSUpgradeable, IERC721Receiver, 
     }
 
     /// @dev Timing floors cannot be weakened through ordinary configuration. Changing the floors
-    ///      requires a separately reviewed and vetoable implementation upgrade.
+    ///      requires a separately reviewed and vetoable implementation upgrade. The ceilings keep
+    ///      OpenGov's cancellation window over committee actions open and keep deadline arithmetic
+    ///      far from the uint48 limit so neither queue lane can be bricked by a configuration call.
     function _validateTiming(uint48 vetoPeriod_, uint48 executionGracePeriod_) private pure {
         if (vetoPeriod_ < MIN_VETO_PERIOD) {
             revert VetoPeriodTooShort(vetoPeriod_, MIN_VETO_PERIOD);
         }
+        if (vetoPeriod_ > MAX_VETO_PERIOD) {
+            revert VetoPeriodTooLong(vetoPeriod_, MAX_VETO_PERIOD);
+        }
         if (executionGracePeriod_ < MIN_EXECUTION_GRACE_PERIOD) {
             revert GracePeriodTooShort(executionGracePeriod_, MIN_EXECUTION_GRACE_PERIOD);
+        }
+        if (executionGracePeriod_ > MAX_EXECUTION_GRACE_PERIOD) {
+            revert GracePeriodTooLong(executionGracePeriod_, MAX_EXECUTION_GRACE_PERIOD);
         }
     }
 

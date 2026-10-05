@@ -407,7 +407,10 @@ change because every action stores its own deadlines. `setVetoer` rejects zero a
 code. Hydration Wormhole chain ID 73 is immutable in v1; `setSourceDispatcher` rotates only the
 nonzero dispatcher address. `setTiming` enforces a minimum 24-hour execution delay and minimum 7-day grace
 period; governance may lengthen them but cannot weaken these v1 floors without a vetoable
-implementation upgrade.
+implementation upgrade. Ceilings bound the same call: the veto period must stay at least seven
+days below the 30-day committee delay, so OpenGov always retains a real cancellation window over
+committee actions, and the grace period may not exceed 90 days, keeping deadline arithmetic far
+from the uint48 limit so a configuration call cannot brick either queue lane.
 
 `setSourceDispatcher` replaces, rather than supplements, the authorized source. Before executing a
 source migration, operators must queue and reconcile every intended VAA from the old dispatcher; an
@@ -684,7 +687,8 @@ Independent parties can perform the same queue and execute calls.
 11. Deployment keys retain no authority after initialization and handover.
 12. Alternate or non-canonical ABI encodings cannot represent an executable action.
 13. No configuration call can reduce the ordinary execution delay below 24 hours or the grace period below 7
-    days in implementation v1.
+    days in implementation v1, raise the veto period to within seven days of the committee delay, or raise the
+    grace period above 90 days.
 14. Proxy initialization is atomic and neither implementation contract can be initialized directly.
 15. An implementation upgrade cannot be mixed with other calls in one action.
 16. An ordinary configuration action cannot authorize a source chain other than Hydration Wormhole

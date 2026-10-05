@@ -45,7 +45,9 @@ interface IGovernanceExecutor {
     error InvalidLocalWormholeChain();
     error InvalidSourceDispatcher();
     error VetoPeriodTooShort(uint48 supplied, uint48 minimum);
+    error VetoPeriodTooLong(uint48 supplied, uint48 maximum);
     error GracePeriodTooShort(uint48 supplied, uint48 minimum);
+    error GracePeriodTooLong(uint48 supplied, uint48 maximum);
     error InvalidVaa();
     error UnauthorizedEmitter(uint16 emitterChain, bytes32 emitterAddress);
     error WrongDestination(uint16 destinationChain, address destinationExecutor);
