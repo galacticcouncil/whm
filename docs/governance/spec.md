@@ -109,43 +109,46 @@ cannot be fast-tracked, and their OpenGov cancellation actions cannot be vetoed 
 
 ### Dispatcher
 
-The design adds a dedicated account and dispatchable to `pallet-dispatcher`:
+Root uses the existing generic dispatch machinery with a dedicated synthetic account:
 
 ```text
-CrossChainGovernanceOrigin
-    -> dispatch_as_cross_chain_governance(pallet_evm::Call::call)
+Root
+    -> Utility::dispatch_as(
+         Signed(CrossChainGovernanceAccount),
+         Dispatcher::dispatch_evm_call(EVM::call(...))
+       )
     -> CrossChainGovernanceAccount
        0xaa7e0000000000000000000000000000000aa7e2000000000000000000000000
     -> deterministic EVM msg.sender
        0xaa7e0000000000000000000000000000000aa7e2
 ```
 
-This follows the existing `AaveManagerAccount` (`...aa7e0`) and `EmergencyAdminAccount`
-(`...aa7e1`) pattern. The 32-byte account is a runtime constant and its first 20 bytes are the EVM
-address. It has no managed private key and is not configurable through storage.
+The account follows the existing synthetic `AaveManagerAccount` (`...aa7e0`) and
+`EmergencyAdminAccount` (`...aa7e1`) address convention, but does not require another dispatcher
+extrinsic or runtime constant. The Root proposal supplies the full 32-byte signed origin; its first
+20 bytes are the EVM address. It has no managed private key.
 
 Requirements:
 
-- Do not reuse the Aave manager or emergency-admin identities.
-- Accept only the Root OpenGov origin.
-- Accept only an EVM call as the inner call.
-- Dispatch from the fixed `CrossChainGovernanceAccount` above.
-- Clear any prior recorded EVM exit reason before dispatch.
-- Require the inner runtime dispatch to succeed and require a fresh EVM exit reason to be present.
-- Accept only `Returned` or `Stopped` as successful EVM exit reasons; treat `Reverted`, `Error`,
-  `Fatal`, out-of-gas, arithmetic failure, and a missing exit reason as dispatch errors.
-- Consume or clear the recorded exit reason after checking it so another call cannot reuse it.
-- Emit the inner call hash and result.
-- Benchmark the call and test both origin filtering and EVM failure propagation.
+- Use `pallet_utility::dispatch_as`, whose outer origin is already restricted to Root.
+- Dispatch as exactly the synthetic `CrossChainGovernanceAccount` above.
+- Nest the existing `pallet_dispatcher::dispatch_evm_call`, which accepts only an EVM call and
+  checks its EVM exit reason.
+- Require the `pallet_evm::Call::call.source` to match the synthetic signed origin.
+- Do not reuse the Aave manager or emergency-admin identities: doing so would also authorize the
+  Economic Parameters track or Technical Committee for immediate cross-chain publication.
+- Monitor `Utility::DispatchedAs`, the EVM result, and `ActionPublished`; absence of the Wormhole
+  publication event means the cross-chain action was not created.
 
 The fixed account holds only the native balance needed for Hydration EVM gas and the exact Wormhole
 message fee. It must not receive unrelated protocol roles, token approvals, or asset custody. It has
 no key; funding does not make it externally controllable. Insufficient balance fails the referendum
-call and must be visible through the propagated dispatcher error.
+inner call and must be visible in the utility dispatch result.
 
-The existing `dispatch_as_aave_manager` pattern is insufficient as-is: it belongs to the Economic
-Parameters authority domain and reports its inner dispatch result in an event while returning outer
-success.
+`Utility::dispatch_as` reports the inner result in `Utility::DispatchedAs` while returning outer
+success. Governance automation must therefore inspect that event and confirm `ActionPublished`
+rather than treating referendum enactment alone as proof of publication. This is the accepted cost
+of reusing the generic Root-only path instead of adding a protocol-specific dispatchable.
 
 ### Governance dispatcher
 
@@ -773,17 +776,16 @@ recognizes it as privileged.
 
 ### Hydration runtime tests
 
-- Only the configured OpenGov origin can use the dispatcher path.
-- Signed users and unrelated governance origins are rejected.
+- `Utility::dispatch_as` rejects signed users and non-Root governance origins.
 - Only EVM calls are accepted.
 - The EVM caller is the dedicated governance address.
 - An inner `pallet_evm::call` naming any other source address is rejected.
 - Successful publication produces the expected Wormhole event.
-- EVM revert and out-of-gas propagate as dispatcher failure.
-- Missing and stale EVM exit-reason state fail closed.
-- Weight and gas limits are sufficient and benchmarked.
-- The fixed AccountId maps to the expected EVM address, has no account binding or unrelated roles,
-  and ordinary signed origins cannot invoke the Root-only dispatcher path.
+- EVM revert and out-of-gas appear as failure in `Utility::DispatchedAs` and produce no
+  `ActionPublished` event.
+- Existing utility and dispatcher weights cover the nested call.
+- The synthetic AccountId maps to the expected EVM address and has no account binding or unrelated
+  roles.
 
 ### Fork and end-to-end tests
 
@@ -802,7 +804,8 @@ recognizes it as privileged.
 
 - [x] Select Root as the OpenGov origin.
 - [x] Assign the fixed `CrossChainGovernanceAccount` and `0xaa7e...aa7e2` EVM address.
-- [x] Make the deployment Root-only.
+- [x] Use the existing Root-only `Utility::dispatch_as` plus `Dispatcher::dispatch_evm_call` path;
+  add no protocol-specific runtime dispatchable.
 - [x] Allow the Technical Committee to veto or fast-track verified OpenGov actions.
 - [x] Allow TC recovery actions only after a fixed 30-day, OpenGov-vetoable delay.
 - [x] Prevent the TC from vetoing an OpenGov cancellation of a TC recovery action.
