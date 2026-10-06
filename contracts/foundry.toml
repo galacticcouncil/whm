@@ -14,3 +14,4 @@ wormhole-solidity-sdk = { version = "0.1.0", git = "https://github.com/wormhole-
 
 [rpc_endpoints]
 mainnet = "https://ethereum-rpc.publicnode.com"
+robinhood = "https://rpc.mainnet.chain.robinhood.com"
