@@ -1,0 +1,72 @@
+{
+  "migration": "near-ntt-near",
+  "environment": "testnet",
+  "startedAt": "2026-09-24T21:09:12.340Z",
+  "completedAt": "2026-09-24T21:10:16.282Z",
+  "steps": [
+    {
+      "name": "001-deploy-ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "9FYG8FU81dSQdK4wpQr1U4EgiNSWysxD8isBhUk5ugVJ",
+        "nttAccount": "ntt-near.whm-ntt-0bugdc.testnet",
+        "emitter": "34831e4dba0ea821cb7f0af0ce96f5efe4beb0db1fded12219e4329ff95a7213",
+        "owner": "whm-ntt-0bugdc.testnet",
+        "codeSha256": "0b1ee8842ac8514c8a5a094f7d5212a086f22427a914182b82e43d9fdf72d6a9",
+        "tokenDecimals": "24",
+        "registrationDeposit": "1250000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-09-24T21:09:12.341Z",
+      "completedAt": "2026-09-24T21:09:31.561Z"
+    },
+    {
+      "name": "002-register-emitter@core",
+      "status": "completed",
+      "output": {
+        "txHash": "7AXWJCnrvWMF2Ndr48Kdt5xJGang1jfsvu57qfocxK6C",
+        "emitter": "34831e4dba0ea821cb7f0af0ce96f5efe4beb0db1fded12219e4329ff95a7213"
+      },
+      "error": null,
+      "startedAt": "2026-09-24T21:09:31.562Z",
+      "completedAt": "2026-09-24T21:09:42.650Z"
+    },
+    {
+      "name": "003-register-storage@token",
+      "status": "completed",
+      "output": {
+        "txHash": "3GYZT9mWvZEoTUt8PkhAaxC9gcFXR261zShhhNkksbX9",
+        "deposit": "1250000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-09-24T21:09:42.651Z",
+      "completedAt": "2026-09-24T21:09:55.890Z"
+    },
+    {
+      "name": "004-set-peer@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "FsPNXPfN7gZz2HUbRzF4WjW4rk8rcJ6NtpqMC4zgDrtR",
+        "chainId": "73",
+        "manager": "0x0000000000000000000000005b1334885320cFd7158760256c7bD0Af58006b09",
+        "transceiver": "0x0000000000000000000000005e875F689EA8dd25e11a69cfb6C9f844C4b3B207",
+        "decimals": "24",
+        "inboundLimit": "100000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-09-24T21:09:55.892Z",
+      "completedAt": "2026-09-24T21:10:06.129Z"
+    },
+    {
+      "name": "005-transfer-ownership@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "6Z46QQcJyTbZ2evWgBAmbHe2iBWZq3vaq3VhFTM7BBk5",
+        "newOwner": "whm-ntt-0bugdc.testnet"
+      },
+      "error": null,
+      "startedAt": "2026-09-24T21:10:06.131Z",
+      "completedAt": "2026-09-24T21:10:16.280Z"
+    }
+  ]
+}

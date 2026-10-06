@@ -3,6 +3,7 @@ packages:
   - chopsticks
   - contracts
   - crates/solana
+  - crates/near
   - agents/broadcaster
   - agents/relayer
   - agents/scan

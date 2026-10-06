@@ -6,6 +6,7 @@
     ".": "./index.ts",
     "./evm": "./evm/index.ts",
     "./migration": "./migration/index.ts",
+    "./near": "./near/index.ts",
     "./wormhole": "./wormhole/index.ts"
   }
 }
