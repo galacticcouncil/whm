@@ -17,4 +17,5 @@ export const RETRIES = 8;
 export const FROM_SEQUENCE = {
   [WORMHOLE.solana]: fromSeq("solana"),
   [WORMHOLE.ethereum]: fromSeq("ethereum"),
+  [WORMHOLE.robinhood]: fromSeq("robinhood"),
 };

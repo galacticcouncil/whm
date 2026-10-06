@@ -4,7 +4,7 @@
 // `restoreNativeFetch` restores nothing, and viem dies on `response.body.getReader is not a function`.
 import { restoreNativeFetch } from "./fetch";
 
-import { registerHydration } from "./chains";
+import { registerHydration, registerRobinhood } from "./chains";
 import logger from "./logger";
 
 const BANNER = String.raw`
@@ -30,6 +30,7 @@ export function boot(name: string, start: () => Promise<void>): void {
   console.log(BANNER);
   restoreNativeFetch();
   registerHydration();
+  registerRobinhood();
   logger.info(`Relayer starting: ${name}`);
 
   start().catch((err) => {

@@ -1,6 +1,10 @@
+import type { Address } from "viem";
+
 import { boot } from "../../boot";
+import { WORMHOLE } from "../../chains";
 import { alerts, engineConfig, privateKey } from "../../config";
 import { createApp } from "../../engine/app";
+import { onEmitter } from "../../engine/emitter";
 import { hydrationClients, receiveMessage } from "../../engine/hydration";
 import { createQueue } from "../../engine/queue";
 import logger from "../../logger";
@@ -54,10 +58,13 @@ async function start(): Promise<void> {
   });
 
   for (const route of ROUTES) {
-    app
-      .chain(route.sourceChain as never)
-      .address(route.sourceEmitter, ((ctx: RelayerCtx, next: Next) =>
-        handle(route, ctx, next)) as never);
+    const handler = ((ctx: RelayerCtx, next: Next) => handle(route, ctx, next)) as never;
+    // The engine's SDK predates Robinhood, so `.address()` cannot encode its emitters.
+    if (route.sourceChain === WORMHOLE.robinhood) {
+      onEmitter(app, route.sourceChain, route.sourceEmitter as Address, handler);
+    } else {
+      app.chain(route.sourceChain as never).address(route.sourceEmitter, handler);
+    }
   }
 
   await app.listen();

@@ -7,6 +7,7 @@ export const WORMHOLE = {
   ethereum: 2,
   sui: 21,
   base: 30,
+  robinhood: 72,
   hydration: 73,
 } as const;
 
@@ -37,4 +38,17 @@ export const hydration = defineChain({
 export function registerHydration(): void {
   (CHAINS as Record<string, number>).hydration = WORMHOLE.hydration;
   (CHAIN_ID_TO_NAME as Record<number, string>)[WORMHOLE.hydration] = "hydration";
+}
+
+/**
+ * Teach relayer-engine's bundled `@certusone/wormhole-sdk` about chain 72, for the same reason as
+ * {@link registerHydration}: without it the missed-VAA worker sends `GetSignedVAA` with no
+ * `emitter_chain` and can never recover a Robinhood VAA. Call before anything reaches the SDK;
+ * `boot()` does.
+ *
+ * @remarks `isEVMChain(72)` stays false, so subscriptions go through `engine/emitter.ts`.
+ */
+export function registerRobinhood(): void {
+  (CHAINS as Record<string, number>).robinhood = WORMHOLE.robinhood;
+  (CHAIN_ID_TO_NAME as Record<number, string>)[WORMHOLE.robinhood] = "robinhood";
 }
