@@ -1,18 +1,7 @@
-import type { Address } from "viem";
+import type { EmitterRoute } from "../../evm/broadcaster.js";
 
 /** Ethereum mainnet — the chain the emitters below live on. */
 export const CHAIN_ID = 1;
-
-export interface EmitterRoute {
-  /** Namespaces this route's feeds in state, and prefixes them in logs. */
-  label: string;
-  /** OracleEmitter proxy. */
-  emitter: Address;
-  /** What to publish: assetId = keccak256(symbol), which needs no log scan. */
-  symbols: string[];
-  /** FeedRegistered scan floor, used only when `symbols` is empty. Needs an archive RPC. */
-  fromBlock: bigint;
-}
 
 /**
  * Mainnet routes, from deployments/prod/oracle-relay-ethereum.json.

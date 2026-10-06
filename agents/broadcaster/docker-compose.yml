@@ -44,6 +44,27 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
 
+  app-oracle-robinhood:
+    image: galacticcouncil/broadcaster:latest
+    command: [node, oracle-robinhood/app.js]
+    environment:
+      - PRIVKEY= # 0x-prefixed hex key
+      - RPC_ROBINHOOD=
+      - REFRESH_INTERVAL=
+      - CHANGE_THRESHOLD=
+    volumes:
+      - db:/app/.db
+    configs:
+      - source: thresholds
+        target: /app/thresholds.json
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
 networks:
   default:
     driver: overlay
