@@ -4,8 +4,8 @@ pragma solidity ^0.8.22;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {ChainlinkAdapter} from "../../src/oracles/ChainlinkAdapter.sol";
-import {OracleEmitter} from "../../src/oracles/OracleEmitter.sol";
+import {AggregatorV3Adapter} from "../../../src/oracles/adapters/AggregatorV3Adapter.sol";
+import {OracleEmitter} from "../../../src/oracles/OracleEmitter.sol";
 
 contract MockAggregator {
     uint8 public decimals;
@@ -30,8 +30,8 @@ contract MockAggregator {
     }
 }
 
-contract ChainlinkAdapterTest is Test {
-    ChainlinkAdapter public adapter;
+contract AggregatorV3AdapterTest is Test {
+    AggregatorV3Adapter public adapter;
     MockAggregator public agg;
 
     uint256 constant MAX_AGE = 26 hours;
@@ -43,7 +43,7 @@ contract ChainlinkAdapterTest is Test {
         vm.warp(1_800_000_000);
         agg = new MockAggregator(8);
         agg.set(SPY_8DEC, block.timestamp);
-        adapter = new ChainlinkAdapter(address(agg), MAX_AGE);
+        adapter = new AggregatorV3Adapter(address(agg), MAX_AGE);
     }
 
     // ─── Init ────────────────────────────────────────────────────
@@ -54,8 +54,8 @@ contract ChainlinkAdapterTest is Test {
     }
 
     function testZeroFeedReverts() public {
-        vm.expectRevert(abi.encodeWithSelector(ChainlinkAdapter.InvalidFeed.selector, address(0)));
-        new ChainlinkAdapter(address(0), MAX_AGE);
+        vm.expectRevert(abi.encodeWithSelector(AggregatorV3Adapter.InvalidFeed.selector, address(0)));
+        new AggregatorV3Adapter(address(0), MAX_AGE);
     }
 
     // ─── Scaling ─────────────────────────────────────────────────
@@ -78,7 +78,7 @@ contract ChainlinkAdapterTest is Test {
 
     function testDecimalsAbove18Revert() public {
         agg.setDecimals(19);
-        vm.expectRevert(abi.encodeWithSelector(ChainlinkAdapter.UnsupportedDecimals.selector, uint8(19)));
+        vm.expectRevert(abi.encodeWithSelector(AggregatorV3Adapter.UnsupportedDecimals.selector, uint8(19)));
         adapter.latestRate();
     }
 
@@ -86,13 +86,13 @@ contract ChainlinkAdapterTest is Test {
 
     function testZeroAnswerReverts() public {
         agg.set(0, block.timestamp);
-        vm.expectRevert(abi.encodeWithSelector(ChainlinkAdapter.InvalidAnswer.selector, int256(0)));
+        vm.expectRevert(abi.encodeWithSelector(AggregatorV3Adapter.InvalidAnswer.selector, int256(0)));
         adapter.latestRate();
     }
 
     function testNegativeAnswerReverts() public {
         agg.set(-1, block.timestamp);
-        vm.expectRevert(abi.encodeWithSelector(ChainlinkAdapter.InvalidAnswer.selector, int256(-1)));
+        vm.expectRevert(abi.encodeWithSelector(AggregatorV3Adapter.InvalidAnswer.selector, int256(-1)));
         adapter.latestRate();
     }
 
@@ -106,7 +106,7 @@ contract ChainlinkAdapterTest is Test {
     function testPastMaxAgeReverts() public {
         uint256 updatedAt = block.timestamp - MAX_AGE - 1;
         agg.set(SPY_8DEC, updatedAt);
-        vm.expectRevert(abi.encodeWithSelector(ChainlinkAdapter.StaleAnswer.selector, updatedAt, MAX_AGE));
+        vm.expectRevert(abi.encodeWithSelector(AggregatorV3Adapter.StaleAnswer.selector, updatedAt, MAX_AGE));
         adapter.latestRate();
     }
 
@@ -117,7 +117,7 @@ contract ChainlinkAdapterTest is Test {
     }
 
     function testZeroMaxAgeDisablesCheck() public {
-        ChainlinkAdapter unchecked_ = new ChainlinkAdapter(address(agg), 0);
+        AggregatorV3Adapter unchecked_ = new AggregatorV3Adapter(address(agg), 0);
         agg.set(SPY_8DEC, block.timestamp - 80 hours);
         assertEq(unchecked_.latestRate(), uint256(SPY_8DEC) * 1e10);
     }
@@ -142,7 +142,7 @@ contract ChainlinkAdapterTest is Test {
         OracleEmitter impl = new OracleEmitter();
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), abi.encodeCall(OracleEmitter.initialize, (address(this))));
         emitter = OracleEmitter(address(proxy));
-        emitter.registerFeed(keccak256("SPY"), address(adapter), abi.encodeCall(ChainlinkAdapter.latestRate, ()));
+        emitter.registerFeed(keccak256("SPY"), address(adapter), abi.encodeCall(AggregatorV3Adapter.latestRate, ()));
     }
 
     function testEmitterPublishesReceiverScalableRate() public {
