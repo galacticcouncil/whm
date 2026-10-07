@@ -1,5 +1,3 @@
-import { zeroAddress } from "viem";
-
 import type { EmitterRoute } from "../../evm/broadcaster.js";
 
 /** Robinhood Chain mainnet — the chain the emitters below live on. */
@@ -18,7 +16,7 @@ export const STALE_AFTER = 26 * 60 * 60;
 export const ROUTES: EmitterRoute[] = [
   {
     label: "oracle",
-    emitter: zeroAddress, // TODO: 001-deploy-emitter proxyAddress once oracle-relay-robinhood runs
+    emitter: "0x9fbd9f16ce7fa17097e91cc36dc1b7b47adca9de",
     symbols: ["SPY"],
     fromBlock: 0n,
   },

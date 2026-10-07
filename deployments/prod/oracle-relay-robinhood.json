@@ -1,0 +1,82 @@
+{
+  "migration": "oracle-relay-robinhood",
+  "environment": "prod",
+  "startedAt": "2026-10-06T23:59:00.165Z",
+  "completedAt": "2026-10-07T00:52:12.294Z",
+  "steps": [
+    {
+      "name": "001-deploy-emitter",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x95463202bbd705dd6d1f3cc6813099dfb2998115",
+        "proxyAddress": "0x9fbd9f16ce7fa17097e91cc36dc1b7b47adca9de",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2",
+        "wormholeCore": "0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB"
+      },
+      "error": null,
+      "startedAt": "2026-10-06T23:59:00.166Z",
+      "completedAt": "2026-10-06T23:59:04.964Z"
+    },
+    {
+      "name": "002-deploy-adapter",
+      "status": "completed",
+      "output": {
+        "address": "0xb01d3f4816c3fcbe7d66f3da4d46fa9282f43649",
+        "feed": "0x319724394D3A0e3669269846abE664Cd621f9f6A",
+        "maxAge": "0"
+      },
+      "error": null,
+      "startedAt": "2026-10-06T23:59:04.966Z",
+      "completedAt": "2026-10-06T23:59:06.805Z"
+    },
+    {
+      "name": "003-deploy-receiver",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x0d172fbdb1c3387985dce31ed8e1381fdaee7ceb",
+        "proxyAddress": "0x3b6e3469d8e64e306f235838e0fdf7b4d60a39ce",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
+      "error": null,
+      "startedAt": "2026-10-06T23:59:06.806Z",
+      "completedAt": "2026-10-06T23:59:18.736Z"
+    },
+    {
+      "name": "004-authorize-emitter@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0xefe72abafe3d12529e9d70430937649e68caa0022ae21b10e11330b0d1c33b94",
+        "emitterBytes32": "0x0000000000000000000000009fbd9f16ce7fa17097e91cc36dc1b7b47adca9de",
+        "sourceChain": "72"
+      },
+      "error": null,
+      "startedAt": "2026-10-06T23:59:18.738Z",
+      "completedAt": "2026-10-06T23:59:21.507Z"
+    },
+    {
+      "name": "005-register-spy@emitter",
+      "status": "completed",
+      "output": {
+        "assetId": "0xcea23e8f56b5ac447ac08d57e0808e35f468a65f29bb659b3d48934481e7c67a",
+        "source": "0xb01d3f4816c3fcbe7d66f3da4d46fa9282f43649",
+        "call": "0x9ef4ca08",
+        "txHash": "0x82b564532470263ac548fed252c9f6b75ee85389431dab6a32d54ded2b2fdfc8"
+      },
+      "error": null,
+      "startedAt": "2026-10-06T23:59:21.508Z",
+      "completedAt": "2026-10-06T23:59:23.811Z"
+    },
+    {
+      "name": "006-set-spy@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x61c1a73af5800d1e2131d8134f27f5b9e5025c33eb3f02203ce5252715023e54",
+        "assetId": "0xcea23e8f56b5ac447ac08d57e0808e35f468a65f29bb659b3d48934481e7c67a",
+        "oracle": "0x802893C9CDD5AaC833E52783DF39e572fe8f8538"
+      },
+      "error": null,
+      "startedAt": "2026-10-07T00:52:04.021Z",
+      "completedAt": "2026-10-07T00:52:12.292Z"
+    }
+  ]
+}
