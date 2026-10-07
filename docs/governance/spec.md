@@ -745,6 +745,25 @@ Each destination deployment has its own configuration and custody record. At min
 Production deployments use the repository's crash-safe migration framework and produce immutable
 state files under `deployments/prod/`.
 
+The first route is deployed by `governance-robinhood`. Its four independently persisted steps
+deploy the shared dispatcher implementation and atomically initialized proxy on Hydration, then the
+executor implementation and atomically initialized proxy on Robinhood. The migration verifies the
+ERC-1967 implementation slots, UUPS UUIDs, runtime code hashes, Wormhole chain IDs, initialized
+configuration, and the destination Safe's threshold and owner count. Run it against both forks
+before production:
+
+```text
+pnpm fork:hydration
+pnpm fork:robinhood
+pnpm migrate:governance-robinhood:fork
+pnpm migrate:governance-robinhood
+```
+
+Robinhood mainnet uses EVM chain ID `4663`, Wormhole chain ID `72`, and Wormhole core
+`0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB`. Later destination migrations reuse the Hydration
+dispatcher proxy recorded by the production `governance-robinhood` migration; they must not deploy
+another source dispatcher.
+
 Before the Hydration deployment, verify on-chain that the proposed `0xaa7e...aa7e2` identity has no
 EVM code, account binding, nonce history, approvals, or existing protocol roles. After deployment,
 monitor its native balance and assert that the governance dispatcher remains the only contract that
@@ -846,7 +865,7 @@ recognizes it as privileged.
 
 ### Integrations
 
-- [ ] Record Robinhood Chain IDs and Wormhole support status.
+- [x] Record Robinhood EVM chain ID 4663, Wormhole chain ID 72, and Wormhole core deployment.
 - [ ] Record canonical Uniswap v4 deployment addresses and interfaces.
 - [ ] Inventory all protocol-owned LP positions and required actions.
 - [ ] Inventory all EVM NTT contracts, proxies, and current role holders.
