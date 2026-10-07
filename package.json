@@ -23,6 +23,8 @@
     "migrate:oracle-relay-ethereum:fork": "bash sh/migrate-oracle-relay-ethereum.sh fork",
     "migrate:oracle-relay-robinhood": "bash sh/migrate-oracle-relay-robinhood.sh prod",
     "migrate:oracle-relay-robinhood:fork": "bash sh/migrate-oracle-relay-robinhood.sh fork",
+    "migrate:governance-robinhood": "bash sh/migrate-governance-robinhood.sh prod",
+    "migrate:governance-robinhood:fork": "bash sh/migrate-governance-robinhood.sh fork",
     "migrate:intent": "bash sh/migrate-intent.sh prod",
     "migrate:intent:fork": "bash sh/migrate-intent.sh fork",
     "migrate:intent-mpc": "bash sh/migrate-intent-mpc.sh prod",

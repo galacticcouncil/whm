@@ -91,6 +91,8 @@ pnpm migrate:oracle-relay-solana:fork
 pnpm migrate:oracle-relay-solana            # prod
 pnpm migrate:oracle-relay-ethereum:fork
 pnpm migrate:oracle-relay-ethereum          # prod
+pnpm migrate:governance-robinhood:fork
+pnpm migrate:governance-robinhood           # prod
 
 # Print MRL oracle state
 pnpm print:oracles
