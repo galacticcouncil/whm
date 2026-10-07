@@ -22,6 +22,14 @@ Relays oracle price and rate VAAs **into Hydration**. Each source chain has its 
 deployment ([routes.ts](src/apps/oracle/routes.ts)); a VAA goes to the receiver for its source, which
 verifies the emitter and writes the price in one call.
 
+### `oracle-robinhood`
+
+Relays oracle price VAAs **from Hydration to Robinhood Chain** — today the HDX price, the EMA
+oracle precompile published by Hydration's OracleEmitter. Same shape as `oracle`, other direction:
+each source has its own OracleReceiver on Robinhood ([routes.ts](src/apps/oracle-robinhood/routes.ts)),
+and the wallet pays gas in ETH there. Subscribes through `onEmitter`, because the engine's SDK
+predates Hydration (chain 73).
+
 ### `intent`
 
 Relays intents **from Hydration to Ethereum**. Hydration settles WETH over NTT and publishes a
@@ -59,6 +67,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `PRIVKEY`             | Signing key. Same name everywhere — **see below** | Required                              |
 | `RPC_HYDRATION`       | Hydration EVM RPC (chain `222222`)                | `https://hydration-rpc.n.dwellir.com` |
 | `RPC_ETHEREUM`        | Ethereum RPC (`intent` only)                      | `https://eth.llamarpc.com`            |
+| `RPC_ROBINHOOD`       | Robinhood Chain RPC (`oracle-robinhood` only)     | `https://rpc.mainnet.chain.robinhood.com` |
 | `SPY_ENDPOINT`        | Wormhole Spy endpoint                             | `localhost:7073`                      |
 | `REDIS_HOST`          | Redis host                                        | `localhost`                           |
 | `REDIS_PORT`          | Redis port                                        | `6379`                                |
@@ -84,7 +93,7 @@ pnpm --filter @whm/relayer mainnet-spy
 ## Production
 
 ```bash
-pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,intent,basejump}/app.js
+pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,oracle-robinhood,intent,basejump}/app.js
 pnpm --filter @whm/relayer start:oracle
 pnpm --filter @whm/relayer docker:up
 ```

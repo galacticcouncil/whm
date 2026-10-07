@@ -21,6 +21,16 @@ export const hydration = defineChain({
   rpcUrls: { default: { http: [] } },
 });
 
+/** Robinhood Chain's EVM chain id — asserted at startup so a misconfigured RPC fails loudly. */
+export const ROBINHOOD_EVM_CHAIN_ID = 4663;
+
+export const robinhood = defineChain({
+  id: ROBINHOOD_EVM_CHAIN_ID,
+  name: "Robinhood Chain",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: [] } },
+});
+
 /**
  * Teach relayer-engine's bundled `@certusone/wormhole-sdk` about chain 73.
  *

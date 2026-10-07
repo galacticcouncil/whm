@@ -4,6 +4,7 @@
   "scripts": {
     "start:ntt": "node dist/ntt/app.js",
     "start:oracle": "node dist/oracle/app.js",
+    "start:oracle-robinhood": "node dist/oracle-robinhood/app.js",
     "start:intent": "node dist/intent/app.js",
     "start:basejump": "node dist/basejump/app.js",
     "prebuild": "npm run clean",

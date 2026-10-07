@@ -43,6 +43,27 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: 'true'
 
+  app-oracle-robinhood:
+    image: galacticcouncil/relayer:latest
+    command: [node, oracle-robinhood/app.js]
+    environment:
+      # Writes to the Robinhood receivers; pays ETH on Robinhood, its own key and nonce.
+      PRIVKEY: FILL THIS KEY ALWAYS
+      RPC_ROBINHOOD: https://rpc.mainnet.chain.robinhood.com
+      # Optional: alert sink and the multiple of one submission's cost to warn below.
+      DISCORD_WEBHOOK_URL: MAYBE FILL THIS URL OR REMOVE IT
+      GAS_WARN_MULTIPLIER: '50'
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
+
   app-intent:
     image: galacticcouncil/relayer:latest
     command: [node, intent/app.js]

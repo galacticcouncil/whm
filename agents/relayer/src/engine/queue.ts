@@ -8,6 +8,7 @@ const MIN_GAS = 1_000_000n;
 
 const CHAIN_NAMES: Record<number, string> = {
   1: "ethereum",
+  4663: "robinhood",
   8453: "base",
   222222: "hydration",
   11155111: "sepolia",
