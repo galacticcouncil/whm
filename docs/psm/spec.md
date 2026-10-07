@@ -39,8 +39,9 @@ Holds the reserve. Inherits `MessageReceiver` (UUPS + Wormhole verification + re
   for want of liquidity. A redemption that lands above its own fee limit is not booked at all: the
   HOLLAR goes straight back.
 - **`drain(maxEntries)` / `claim()`** — pay the queue head-first. Permissionless (`drain`) so nobody
-  depends on us being online. A head USDC cannot reach is retired by `drain` only: their own
-  `claim` reverts instead, leaving the credit queued and the cancel below still open to them.
+  depends on us being online. A head Circle has blacklisted is retired by `drain` only: their own
+  `claim` reverts instead, leaving the credit queued and the cancel below still open to them. A
+  transfer refused for any other reason retires nobody — the call reverts.
 - **`cancelQueuedRedemption(index)`** — the credit at the head is given up and its value goes back
   to the credit's `origin` — the Hydration account it came from — never to a caller's pick. The
   credit's `recipient` may ask at any time; its `origin` only for a redemption, and only once it
@@ -83,7 +84,8 @@ by its own bucket.
   carries the kind that went
   back. Ids come from `MintQueued`; `pendingEntryOf(recipient, fromId, maxIds)` walks only that id
   window, since ids are never reclaimed. `maxRedeemable` / `mintHeadroom` read zero under their
-  pause, as the vault's `claimable` does under `claimsPaused`.
+  pause, as the vault's `claimable` does under `claimsPaused` and `depositAllowance` under
+  `depositsPaused`.
 - **`redeem(usdcAmount, baseRecipient, maxFeeBps)`** — burns HOLLAR and publishes `KIND_REDEEM`
   carrying the most the redeemer will pay.
 
@@ -103,12 +105,13 @@ CANCEL    (queued deposit)     Facilitator ──KIND_REFUND──▶ Vault ─�
 CANCEL    (queued re-mint)     Facilitator ──KIND_REDEEM──▶ Vault ──▶ FIFO queue, fee as on redeem
 ```
 
-Consistency is chosen per call site, not per kind — `KIND_MINT` and `KIND_REDEEM` each serve an
-entry and an exit. Deposits and redeems publish at 200 (instant): guardians sign on inclusion.
-Exits — a cancel on either side and a fee-limit return — publish finalized: Wormhole treats any
-level other than 200 and 201 as finalized, and the contracts use 1, the value its SDK names
-`Finalized`. Finality costs latency, about 17 minutes on Base (512 blocks) and well under that on
-Hydration, which an exit can afford.
+Deposits publish at 200 (instant): guardians sign on inclusion. Everything else publishes
+finalized — every message the facilitator sends, and the vault's exits, a cancel and a fee-limit
+return. On the vault the level is set per call site, not per kind: `KIND_MINT` is both a deposit
+and a cancelled refund. Wormhole treats any level other than 200 and 201 as finalized, and the
+contracts use 1, the value its SDK names `Finalized`. Finality takes about 17 minutes on Base (512
+blocks) and under a minute on Hydration (35–55 s, measured on live finalized messages), so only the
+deposit leg is spared it.
 
 ## Payload encoding
 
@@ -160,10 +163,13 @@ are independent and flushable by id. An unmintable one reverts its own flush and
 recipient waits for a bucket raise or leaves via `cancelPendingMint`.
 
 **A recipient who cannot be paid does not hold the line.** USDC on Base is blacklistable, so
-`transfer` to a sanctioned address reverts for the sender. The transfer is isolated: if it fails the
-entry retires into `unpayable` — still owed, still a liability, payable later via `claimUnpayable` —
-and the queue advances. Sourcing liquidity from Aave is *not* isolated: if Aave will not release the
-money that reverts and the claim stays queued, because that is a reserve problem, not a recipient one.
+`transfer` to a sanctioned address reverts for the sender. The transfer is isolated: if it fails
+because Circle has blacklisted the recipient (`isBlacklisted`), the entry retires into `unpayable` —
+still owed, still a liability, payable later via `claimUnpayable` — and the queue advances. Any
+other refusal, a token-wide pause, is not about the recipient: the call reverts and the credit stays
+queued with its cancel open. Sourcing liquidity from Aave is *not* isolated either: if Aave will not
+release the money that reverts and the claim stays queued, because that is a reserve problem, not a
+recipient one.
 
 A retired credit is senior to every live entry — it was ahead of all of them when it retired — so
 `claimUnpayable` draws on the reserve without regard to the queue. Retirement is terminal: the fee
@@ -172,9 +178,7 @@ has no exit short of an upgrade, which is accepted. The one path that retires so
 permissionless `drain`; a blacklisted head calling `claim` is refused with the credit intact, so a
 user cannot retire themselves by accident. `drain` sources every entry's liquidity from Aave inside
 one batch, so a later entry Aave refuses reverts the whole batch; `drain(1)` is the keeper fallback
-during an Aave pause, for what idle USDC covers. The mirror image: with the reserve idle (after an
-unwind) a token-wide USDC pause would let `drain` retire every head instead of reverting, so an
-unwind is paired with `setClaimsPaused(true)` — the guardian holds both levers.
+during an Aave pause, for what idle USDC covers.
 
 **The redeemer can leave, from the head.** Whole-fill means a head larger than the reserve can
 release stalls the line, and the burn already happened. `cancelQueuedRedemption` returns `gross` to
@@ -184,25 +188,28 @@ The credit's `recipient` may ask at any time. Its `origin` may ask too, under tw
 value goes back to the origin either way. Only once the credit has sat at the head unpaid for
 `ORIGIN_CANCEL_DELAY` — 24 hours, counted from reaching the head (`headSince`), not from booking:
 a credit that queued behind a stall is about to be paid the moment the stall clears, and a head
-the reserve can cover is paid within minutes. And only for a redemption: a refund's origin is the
-deposit's recipient on Hydration, who put nothing in and has no claim on the depositor's refund.
-A redeemer who named a payment address they do not control — an off-ramp's — therefore has an
-exit from a real stall, and no way to recall a payment the queue is about to make.
+the reserve can cover is paid within minutes. A claims pause restarts the wait when it lifts: the
+pause held the head, not the keeper. And only for a redemption: a refund's origin is the deposit's
+recipient on Hydration, who put nothing in and has no claim on the depositor's refund. A redeemer
+who named a payment address they do not control — an off-ramp's — therefore has an exit from a real
+stall, and no way to recall a payment the queue is about to make.
 
 **A cancelled re-mint is a redemption.** The facilitator's queue remembers which kind an entry
 came as. Cancelling a queued deposit refunds fee-free (`KIND_REFUND`); cancelling a queued re-mint
 — burned HOLLAR whose redemption was walked away from at the vault's head — goes back as
 `KIND_REDEEM`, and the vault books the same credit, fee included, that the cancellation undid.
-Without the distinction, redeem → cancel at the head → let the re-mint queue → cancel it was a
-fee-free redemption, reachable at will: whenever the day's inbound window is spent — as a
-full-window mint leaves it — the re-mint queues. Walking the loop again is a fixed point — the
-same credit comes back every time and the fee is paid once, on payout.
+Without the distinction, redeem → cancel at the head → let the re-mint queue → cancel it would be a
+fee-free redemption, reachable whenever the re-mint queues: behind a mint pause, a full bucket or a
+spent inbound window. Walking the loop again is a fixed point — the same credit comes back every
+time and the fee is paid once, on payout.
 
 **A cancelled refund is a deposit again.** The vault's queue remembers the same thing about its own
 entries. A refund credit is a deposit that never minted, so cancelling it at the head attests the
 deposit again (`KIND_MINT`) rather than re-minting — and a second cancel on Hydration refunds it in
 full. Value that burned travels as REDEEM / REMINT and value that never minted as MINT / REFUND,
 however often either is cancelled, so the fee is charged on every redemption and on nothing else.
+Being a deposit again, the cancel passes the deposit's price floor, the admin's included: below it
+the USDC is still the depositor's to take, and a refund head stalled on liquidity waits.
 
 **A redemption carries its own fee limit.** The fee is assessed on Base when the credit lands, not
 when the HOLLAR burns, so the burn names the most its redeemer will pay — `maxFeeBps`, the last
@@ -214,11 +221,22 @@ hidden. The return mints on Hydration, so while claims are paused such a deliver
 once they are not. It publishes from a non-payable delivery, which holds only while the Wormhole
 message fee is zero — it is on both chains; were that to change, the delivery reverts the same way
 and the VAA stays replayable, and lowering the fee to within its limit books it instead. And a
-limit set below the standing fee is a free round trip: it moves one Base transaction from the
-redeemer to the relayer and spends the two rate-limit windows — as a cancel at the head already
-could, but without needing the head, so one holder of the whole bucket can close both windows for
-a day for gas alone. A credit already booked can still be re-booked at
-the current fee by cancelling it, so fee changes are best made while the claim queue is empty.
+limit set below the standing fee is a round trip for gas alone, as a cancel at the head is; with
+the facilitator's limits netting (below), either holds a window down by what it cycles and no more.
+A credit already booked can still be re-booked at the current fee by cancelling it, so fee changes
+are best made while the claim queue is empty.
+
+**The facilitator's limits net; the deposit limit does not.** Each of the facilitator's two limits
+refills the other — a mint gives outbound back, a burn gives inbound back, each capped at capacity
+(`RateLimiter.refill`) — so the pair meters net flow. A round trip — a returned redemption, a cancel
+at the head, a deposit redeemed straight back out — therefore holds a window down by the capital it
+cycles and no more: shutting a window takes a window's worth. A cancelled pending mint touches
+neither: it never minted, and a re-mint's value already burned under outbound. The cost is the bound
+against a compromised vault: minting is held to inbound plus whatever burned in the same window,
+not to inbound alone — at launch the bucket, equal to the window, caps it regardless. The vault's
+deposit limit stays gross. It bounds how much a Base reorg can unwind from instant deposits, a bound
+that must hold inside a reorg window, so nothing refills it. The residual: a deposit → mint → redeem
+→ payout loop spends it at the redeem fee, about 5 USDC per window at launch.
 
 **An unwind is sticky.** `_investBestEffort` sweeps the whole idle balance after every deposit, so
 without a stop a deposit of any size after `emergencyUnwindAave` would put the entire reserve back
@@ -226,18 +244,26 @@ into the pool the guardian had just left. The unwind therefore sets `investPause
 lock, attest and publish, they just stay idle until a guardian clears it — which re-supplies the
 idle balance at once.
 
-**A reorg is an accepted residual for deposits and redeems, and closed for exits.** Publishing at
-200 means guardians sign on inclusion, so a reorg that unwinds a deposit after its VAA is signed
-leaves that HOLLAR unbacked, and one that unwinds a redeem leaves a credit for HOLLAR that was never
-burned. An earlier design gated deposits above a cap onto consistency 201; the cap was removed
-because 200 is the deliberate choice for both, regardless of size. What bounds that is
-`DEPOSIT_LIMIT_CAPACITY`, the outbound limit and the facilitator bucket — each exposure needs fresh
-capital inside those limits — and the remedy for a breach is unchanged: burn the difference from
-treasury. Supersedes xchain#40. Exits are different. A cancel or a fee-limit return sends value
-back with nothing new locked or burned; it costs nothing, is not rate-limited and can be repeated
-with the same funds, so at 200 one holder could keep a whole position continuously exposed and
-collect on any reorg. A return is also triggered by a VAA that becomes deliverable again if its
-delivery is reorged out. Exits therefore publish finalized.
+**A reorg is an accepted residual for deposits only.** Deposits publish at 200, so a Base reorg that
+unwinds a deposit after its VAA is signed leaves that HOLLAR unbacked. 200 is the deliberate choice
+for deposits regardless of size; what bounds the exposure is `DEPOSIT_LIMIT_CAPACITY` and the
+facilitator bucket — each exposure needs fresh capital inside them — and the remedy for a breach is
+to burn the difference from treasury. Supersedes xchain#40. Everything else publishes finalized. A
+redeem signed before its block finalized could be reorged out while its credit stood, and on
+Hydration finality costs it under a minute. An exit — a cancel or a fee-limit return — sends value
+back with nothing new locked or burned and can be repeated with the same funds, so at 200 one holder
+could keep a whole position continuously exposed and collect on any reorg; a return is also
+triggered by a VAA that becomes deliverable again if its delivery is reorged out.
+
+**A second signed copy is refused.** The inherited replay guard keys on the VAA hash, which covers
+the envelope timestamp, so a message re-included after a reorg is signed again under a new hash.
+Each PSM contract also records what it consumed by sequence and payload (`processedMessages`) and
+refuses the copy — the one a re-included deposit would otherwise mint from twice. Not by sequence
+alone: a reorg that reorders two messages swaps their sequences, and a sequence-only key would
+refuse the honest one. It catches a copy that kept its sequence; one whose sequence shifted because
+the same reorg dropped or reordered another vault message gets through, under the deposit residual
+above. Kept in the PSM contracts: `MessageReceiver` is shared with deployed basejump and oracle
+receivers.
 
 **Payouts are sized by Aave's virtual balance.** `getVirtualUnderlyingBalance` is the figure
 `withdraw` decrements; the aToken's raw holding also counts donations Aave never releases (measured
@@ -327,14 +353,15 @@ what the relayer itself delivered: anyone may deliver a VAA.
   — a payment address, an off-ramp's. Send it when the head is payable (`claimable(head) > 0`),
   with `maxEntries` around 10: measured on a Base fork, about 60k gas for a call that pays nothing
   and about 260k per entry paid out of Aave. If a batch reverts, fall back to `drain(1)`.
-- **It should not be what retires a head.** A head that is payable but whose simulated `drain(1)`
-  pays nothing has a transfer that is failing; draining it retires the credit, which takes the fee
-  and leaves no cancel. Alert instead — the admin's `cancelQueuedRedemptionFor` returns the gross.
-  Best effort only: `drain` is open to anyone.
+- **What it retires is a blacklisted head.** Any other failed transfer reverts the call. Retiring
+  takes the fee and leaves no cancel, so alert on a head whose simulated `drain(1)` would retire
+  it — the admin's `cancelQueuedRedemptionFor` returns the gross to the redeemer first. Best effort
+  only: `drain` is open to anyone. On a refund credit that cancel attests the deposit again to its
+  Hydration recipient, so it is for a refund head stalled on liquidity, not a blacklisted depositor.
 - **`flushPendingMint(id)` on Hydration.** Per entry, and it reverts on a shortfall, so simulate
   first. Take ids from `MintQueued` and schedule by its reason: a pause lifts on `PausedSet`, a
   full bucket on a redemption or a capacity raise, a spent window after
-  `amount ÷ (capacity ÷ window)` seconds.
+  `amount ÷ (capacity ÷ window)` seconds, or sooner as redemptions refill it.
 
 ## Deviations from the HSM spec
 
@@ -364,7 +391,7 @@ rebalancing. `min(1, HOLLAR market price)` redemption pricing is not implemented
 settles at a flat 1:1 less `redeemFeeBps`.
 
 Superseding decisions on record: section 8c's reorg mitigation (xchain#40) is not implemented — see
-"A Base reorg is an accepted residual" above; the flat 5 bps fee replaces the peg-band fee posture (xchain#41); there is no upgrade timelock, the
+"A reorg is an accepted residual for deposits only" above; the flat 5 bps fee replaces the peg-band fee posture (xchain#41); there is no upgrade timelock, the
 4-of-7 threshold standing in for it (xchain#42).
 
 ## Parameters
@@ -375,7 +402,7 @@ Launch values, `migrations/envs/<context>/psm-base.env`:
 |---|---|---|
 | bucket capacity | 10,000 HOLLAR | Total outstanding. Granted on Substrate, **not by this migration**. |
 | `DEPOSIT_LIMIT_CAPACITY` | 10,000 / 24 h | Inflow. Worst case over an arbitrary window is 2× capacity. |
-| `INBOUND_CAPACITY` / `OUTBOUND_CAPACITY` | 10,000 / 24 h | Mint / redeem velocity. Outbound deliberately not tighter — this is the primary redemption route. It bounds burns; a cancelled re-mint is not charged to it (that value burned under the limit already), nor stopped by `redeemPaused` — the vault's `claimsPaused` holds what it books. |
+| `INBOUND_CAPACITY` / `OUTBOUND_CAPACITY` | 10,000 / 24 h | Mint / redeem velocity, net: a mint refills outbound and a burn refills inbound, each capped at capacity. Outbound deliberately not tighter — this is the primary redemption route. It bounds burns; a cancelled re-mint is not charged to it (that value burned under the limit already), nor stopped by `redeemPaused` — the vault's `claimsPaused` holds what it books. |
 | `REDEEM_FEE_BPS` | 5 | Charged when USDC leaves: a redemption, or a cancelled re-mint. A cancelled deposit's refund carries none. Capped at 500. |
 | `SURPLUS_FLOOR_BPS` | 25 | Held back from the treasurer. Capped at 10,000. |
 | `MIN_USDC_PRICE` | $0.99 (8 dp) | Deposits refuse below it; redemption stays open. The whole mint gate, and fixed at init — there is no setter. |

@@ -1209,4 +1209,88 @@ contract HollarBaseVaultTest is Test, IHollarBaseVault {
         vm.expectRevert(ZeroAmount.selector);
         vault.receiveMessage(_cappedRedeemVaa(bob, bob, 0, 0, 2));
     }
+
+    // ─── Second signed copies ───────────────────────────────────
+
+    /// @dev A redeem re-included after a Hydration reorg is signed again under a new hash — same
+    ///      sequence, same payload. The salt's high bits stand in for the envelope that changed.
+    function test_receiveRedeem_secondSignedCopyIsRefused() public {
+        _deposit(alice, 1_000e6);
+        vault.receiveMessage(_cappedRedeemVaa(bob, bob, 400e6, type(uint16).max, 7));
+
+        vm.expectRevert(abi.encodeWithSelector(MessageAlreadyProcessed.selector, uint64(7)));
+        vault.receiveMessage(_cappedRedeemVaa(bob, bob, 400e6, type(uint16).max, 7 | (1 << 64)));
+
+        assertEq(vault.queueLength(), 1, "one burn, one credit");
+    }
+
+    /// @dev A reorg that reorders two redeems swaps their sequences: a payload signed under a
+    ///      sequence it does not share with the one already taken is not a copy.
+    function test_receiveRedeem_sameSequenceOtherPayloadIsNotACopy() public {
+        _deposit(alice, 1_000e6);
+        vault.receiveMessage(_cappedRedeemVaa(bob, bob, 400e6, type(uint16).max, 7));
+        vault.receiveMessage(_cappedRedeemVaa(alice, alice, 300e6, type(uint16).max, 7 | (1 << 64)));
+
+        assertEq(vault.queueLength(), 2);
+    }
+
+    // ─── Pauses and floors ──────────────────────────────────────
+
+    function test_depositAllowance_zeroWhileDepositsPaused() public {
+        assertGt(vault.depositAllowance(), 0);
+
+        vm.prank(guardian);
+        vault.setDepositsPaused(true);
+        assertEq(vault.depositAllowance(), 0);
+    }
+
+    /// @dev Cancelling a refund attests the deposit again, so below the price floor it is refused
+    ///      like a deposit, from the admin too — the USDC is still the depositor's to take. A
+    ///      redemption's cancel re-mints burned HOLLAR and is not gated.
+    function test_cancelQueuedRedemption_refundRefusedBelowTheFloor() public {
+        _deposit(alice, 2_000e6);
+        vault.receiveMessage(_redeemVaaSalted(bob, 400e6, PsmPayload.KIND_REFUND, 1));
+        vault.receiveMessage(_redeemVaaSalted(bob, 400e6, PsmPayload.KIND_REDEEM, 2));
+        aggregator.set(int256(98e6), block.timestamp);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(UsdcBelowFloor.selector, 98e6, MIN_PRICE));
+        vault.cancelQueuedRedemption(0);
+
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(UsdcBelowFloor.selector, 98e6, MIN_PRICE));
+        vault.cancelQueuedRedemptionFor(0);
+
+        vm.prank(bob);
+        vault.claim();
+        assertEq(usdc.balanceOf(bob), 1_000_000e6 + 400e6, "the refund is still theirs");
+
+        vm.prank(bob);
+        vault.cancelQueuedRedemption(1);
+        assertEq(vault.queueLength(), 0);
+    }
+
+    /// @dev A claims pause holds the head, not the keeper: the origin's wait restarts when it
+    ///      lifts, so a long pause cannot hand the origin a recall the keeper had no time to beat.
+    function test_unpausingClaimsRestartsTheOriginWait() public {
+        address paymentAddress = makeAddr("paymentAddress");
+        _deposit(alice, 10_000e6);
+        vault.receiveMessage(_redeemVaaWithOrigin(paymentAddress, alice, 1_000e6));
+
+        vm.prank(guardian);
+        vault.setClaimsPaused(true);
+        vm.warp(365 days + 3 days);
+        vm.prank(guardian);
+        vault.setClaimsPaused(false);
+
+        uint256 opensAt = 365 days + 3 days + vault.ORIGIN_CANCEL_DELAY();
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(OriginCancelTooEarly.selector, 0, opensAt));
+        vault.cancelQueuedRedemption(0);
+
+        vm.warp(opensAt);
+        vm.prank(alice);
+        vault.cancelQueuedRedemption(0);
+        assertEq(vault.owed(paymentAddress), 0);
+    }
 }

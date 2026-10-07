@@ -8,6 +8,7 @@ import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
 import {MessageReceiver} from "../MessageReceiver.sol";
 import {IAaveOracle, IPool, IPoolAddressesProvider} from "./interfaces/IAave.sol";
+import {IFiatToken} from "./interfaces/IFiatToken.sol";
 import {IHollarBaseVault} from "./interfaces/IHollarBaseVault.sol";
 import {PsmPayload} from "./lib/PsmPayload.sol";
 import {RateLimiter} from "./lib/RateLimiter.sol";
@@ -114,6 +115,11 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///         from booking: a credit that queued behind a stall is about to be paid once it clears.
     uint64 public headSince;
 
+    /// @notice Messages consumed, by sequence and payload. The inherited guard keys on the VAA
+    ///         hash, which also covers the envelope timestamp, so a message re-included after a
+    ///         reorg is signed again under a new hash; this is what refuses that copy.
+    mapping(bytes32 => bool) public processedMessages;
+
     // ─── Init ───────────────────────────────────────────────────
 
     function initializeVault(VaultInit calldata p) external initializer {
@@ -219,6 +225,7 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         // pinning the chain after it closes both without changing the shared base.
         if (!emitterFrozen) revert EmitterNotSet();
         if (vm.emitterChainId != hydrationChainId) revert UnexpectedEmitterChain(vm.emitterChainId);
+        _consume(vm);
 
         (uint8 kind, bytes32 rawRecipient, uint256 amount, bytes32 rawOrigin) = PsmPayload.decode(vm.payload);
         if (kind != PsmPayload.KIND_REDEEM && kind != PsmPayload.KIND_REFUND) revert UnexpectedKind(kind);
@@ -451,7 +458,9 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
 
 
+    /// @notice Zero while deposits are paused.
     function depositAllowance() external view returns (uint256) {
+        if (depositsPaused) return 0;
         return depositLimit.available();
     }
 
@@ -487,6 +496,8 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
     /// @notice Credits still land while paused. This stops payment, not accounting.
     function setClaimsPaused(bool paused) external onlyRole(GUARDIAN_ROLE) {
+        // The pause held the head, not the keeper: the origin's wait restarts when it lifts.
+        if (claimsPaused && !paused) headSince = uint64(block.timestamp);
         claimsPaused = paused;
         emit ClaimsPausedSet(paused);
     }
@@ -566,6 +577,14 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
     // ─── Internal ───────────────────────────────────────────────
 
+    /// @dev Keyed on the payload as well as the sequence: a reorg that reorders two messages swaps
+    ///      their sequences, and a key on the sequence alone would refuse the honest one.
+    function _consume(IWormhole.VM memory vm) private {
+        bytes32 id = keccak256(abi.encode(vm.sequence, keccak256(vm.payload)));
+        if (processedMessages[id]) revert MessageAlreadyProcessed(vm.sequence);
+        processedMessages[id] = true;
+    }
+
     /// @dev Callers guarantee `amount > 0`. Returns the slot, which is what the events carry and
     ///      what `cancelQueuedRedemption` takes.
     function _enqueue(address recipient, address origin, bool refund, uint256 amount, uint256 gross)
@@ -588,6 +607,10 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///      cancel is a fee-charged KIND_REDEEM; a refund credit, a deposit that never minted,
     ///      returns as the KIND_MINT it was, whose cancel is a fee-free KIND_REFUND.
     function _cancel(uint256 index, Credit memory credit) private returns (uint64 sequence) {
+        // A refund goes back as the deposit it was, so it passes the deposit's price floor. Its
+        // recipient can still take the USDC.
+        if (credit.refund) _checkOracle();
+
         queue[index].amount = 0;
         queueHead = index + 1;
         headSince = uint64(block.timestamp);
@@ -611,10 +634,11 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     /// @dev A recipient the reserve cannot pay must not hold the line. USDC on Base is
     ///      blacklistable, so `transfer` to a sanctioned address reverts for the sender — and with
     ///      the payment inside the same frame that advances `queueHead`, one such entry at the head
-    ///      froze every claim behind it permanently, with no admin lever to clear it. The transfer
-    ///      is therefore isolated: if it fails the whole entry retires into `unpayable`, still owed
-    ///      and still a liability, and the queue moves on. Effects land before the call, so a
-    ///      failure unwinds only the transfer.
+    ///      would freeze every claim behind it. The transfer is therefore isolated: if it fails
+    ///      because Circle has blacklisted the recipient, the whole entry retires into `unpayable`,
+    ///      still owed and still a liability, and the queue moves on. Any other refusal — a
+    ///      token-wide pause — is not about them and reverts, leaving the credit queued and its
+    ///      cancel open. Effects land before the call, so a failure unwinds only the transfer.
     function _settle(uint256 index) private returns (bool) {
         address recipient = queue[index].recipient;
         uint256 amount = queue[index].amount;
@@ -639,10 +663,21 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
             emit Claimed(recipient, amount);
             return true;
         } catch {
+            if (!_isBlacklisted(recipient)) revert PayoutFailed(recipient);
+
             unpayable[recipient] += amount;
             totalUnpayable += amount;
 
             emit CreditUnpayable(index, recipient, amount);
+            return false;
+        }
+    }
+
+    /// @dev A token without the read counts as not blacklisted, so nothing retires on it.
+    function _isBlacklisted(address account) private view returns (bool) {
+        try IFiatToken(address(usdc)).isBlacklisted(account) returns (bool listed) {
+            return listed;
+        } catch {
             return false;
         }
     }

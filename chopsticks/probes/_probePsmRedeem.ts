@@ -350,10 +350,10 @@ async function main(): Promise<void> {
     const bytes = (body.length - 2) / 2;
     const origin = getAddress(`0x${body.slice(2 + 66 * 2 + 24, 2 + 98 * 2)}`);
     const maxFeeBps = parseInt(body.slice(2 + 98 * 2), 16);
-    console.log(`   consistency ${consistency} (200 = publish immediately)`);
+    console.log(`   consistency ${consistency} (1 = finalized)`);
     console.log(`   published: kind ${kind} (2 = redeem), ${bytes} bytes, origin ${origin}, maxFeeBps ${maxFeeBps}`);
-    const wireOk = kind === 2 && bytes === 100 && origin === me && maxFeeBps === MAX_FEE_BPS;
-    console.log(`   ${wireOk ? "✅ outbound wire format correct" : "❌ wire mismatch"}`);
+    const wireOk = kind === 2 && bytes === 100 && origin === me && maxFeeBps === MAX_FEE_BPS && consistency === 1;
+    console.log(`   ${wireOk ? "✅ outbound message correct" : "❌ outbound message mismatch"}`);
     if (!wireOk) process.exitCode = 1;
   } finally {
     await teardownForks(nets);

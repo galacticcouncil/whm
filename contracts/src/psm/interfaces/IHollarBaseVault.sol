@@ -93,6 +93,8 @@ interface IHollarBaseVault {
     error InsufficientLiquidity(uint256 requested, uint256 available);
     error UnexpectedKind(uint8 kind);
     error UnexpectedEmitterChain(uint16 chainId);
+    error MessageAlreadyProcessed(uint64 sequence);
+    error PayoutFailed(address recipient);
     error FeeTooHigh(uint256 bps);
     error SurplusBelowFloor(uint256 requested, uint256 sweepable);
     error ProtectedToken(address token);

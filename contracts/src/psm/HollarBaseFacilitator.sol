@@ -33,9 +33,8 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     /// @notice Pauses either leg. Cannot move funds and cannot mint.
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
-    /// @notice Redeems publish immediately; exits wait for finality. Wormhole reads any level but
+    /// @notice Everything this contract publishes waits for finality. Wormhole reads any level but
     ///         200 and 201 as finalized; 1 is the value its SDK names `Finalized`.
-    uint8 internal constant CONSISTENCY_INSTANT = 200;
     uint8 internal constant CONSISTENCY_FINALIZED = 1;
 
     // ─── Config ─────────────────────────────────────────────────
@@ -54,6 +53,9 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     bool public mintPaused;
     bool public redeemPaused;
 
+    /// @dev Each refills the other — a mint gives outbound back, a burn gives inbound back — so the
+    ///      pair meters net flow. A cancelled pending mint touches neither: it never minted, and a
+    ///      re-mint's value already burned under outbound.
     RateLimiter.Limit internal inbound;
     RateLimiter.Limit internal outbound;
 
@@ -73,6 +75,11 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     ///         totals over the live entries above.
     mapping(address => uint256) public pendingOf;
     uint256 public totalPendingMint;
+
+    /// @notice Messages consumed, by sequence and payload. The inherited guard keys on the VAA
+    ///         hash, which also covers the envelope timestamp, so a message re-included after a
+    ///         reorg is signed again under a new hash; this is what refuses that copy.
+    mapping(bytes32 => bool) public processedMessages;
 
     // ─── Init ───────────────────────────────────────────────────
 
@@ -136,6 +143,7 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         // touching the shared base.
         if (!emitterFrozen) revert EmitterNotSet();
         if (vm.emitterChainId != baseChainId) revert UnexpectedEmitterChain(vm.emitterChainId);
+        _consume(vm);
 
         (uint8 kind, bytes32 rawRecipient, uint256 usdcAmount, bytes32 rawOrigin) = PsmPayload.decode(vm.payload);
         if (kind != PsmPayload.KIND_MINT && kind != PsmPayload.KIND_REMINT) revert UnexpectedKind(kind);
@@ -156,6 +164,7 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         if (!inbound.tryConsume(usdcAmount)) {
             return _queue(recipient, origin, usdcAmount, remint, QueueReason.RateLimited);
         }
+        outbound.refill(usdcAmount);
 
         hollar.mint(recipient, hollarAmount);
         emit Minted(recipient, usdcAmount, hollarAmount);
@@ -182,6 +191,7 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         uint256 headroom = _bucketHeadroom();
         if (hollarAmount > headroom) revert ExceedsBucketLevel(hollarAmount, headroom);
         inbound.consume(entry.amount);
+        outbound.refill(entry.amount);
 
         delete pendingMints[id];
 
@@ -255,6 +265,7 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         if (hollarAmount > level) revert ExceedsBucketLevel(hollarAmount, level);
 
         outbound.consume(usdcAmount);
+        inbound.refill(usdcAmount);
 
         hollar.safeTransferFrom(msg.sender, address(this), hollarAmount);
         hollar.burn(hollarAmount);
@@ -264,8 +275,7 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
             PsmPayload.fromAddress(baseRecipient),
             usdcAmount,
             PsmPayload.fromAddress(msg.sender),
-            maxFeeBps,
-            CONSISTENCY_INSTANT
+            maxFeeBps
         );
 
         emit RedeemInitiated(msg.sender, baseRecipient, usdcAmount, sequence);
@@ -363,6 +373,14 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
 
     // ─── Internal ───────────────────────────────────────────────
 
+    /// @dev Keyed on the payload as well as the sequence: a reorg that reorders two messages swaps
+    ///      their sequences, and a key on the sequence alone would refuse the honest one.
+    function _consume(IWormhole.VM memory vm) private {
+        bytes32 id = keccak256(abi.encode(vm.sequence, keccak256(vm.payload)));
+        if (processedMessages[id]) revert MessageAlreadyProcessed(vm.sequence);
+        processedMessages[id] = true;
+    }
+
     function _queue(address recipient, address origin, uint256 usdcAmount, bool remint, QueueReason reason)
         private
     {
@@ -391,9 +409,7 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         bytes32 baseRecipient = PsmPayload.fromAddress(entry.origin);
         uint8 kind = entry.remint ? PsmPayload.KIND_REDEEM : PsmPayload.KIND_REFUND;
 
-        sequence = _publish(
-            kind, baseRecipient, entry.amount, PsmPayload.fromAddress(entry.recipient), maxFeeBps, CONSISTENCY_FINALIZED
-        );
+        sequence = _publish(kind, baseRecipient, entry.amount, PsmPayload.fromAddress(entry.recipient), maxFeeBps);
 
         emit PendingMintCancelled(id, entry.recipient, entry.amount, baseRecipient, kind, sequence);
     }
@@ -403,24 +419,18 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
         return capacity > level ? capacity - level : 0;
     }
 
-    /// @dev The level is chosen per call site, not per kind: KIND_REDEEM is both a redemption
-    ///      and a cancelled re-mint. Redeems go instant — their reorg exposure is one Hydration
-    ///      block wide, bounded by the outbound limit, and falls on the protocol. A cancelled
-    ///      pending mint goes finalized: it sends value out with nothing new burned, costs nothing
-    ///      and can be repeated, so a reorg after signing would pay twice.
-    function _publish(
-        uint8 kind,
-        bytes32 recipient,
-        uint256 amount,
-        bytes32 origin,
-        uint16 maxFeeBps,
-        uint8 consistency
-    ) private returns (uint64 sequence) {
+    /// @dev Finalized throughout, at under a minute on Hydration. A redeem signed before its block
+    ///      finalized could be reorged out while its credit stood; a cancelled pending mint sends
+    ///      value out with nothing new burned, so a reorg after signing would pay twice.
+    function _publish(uint8 kind, bytes32 recipient, uint256 amount, bytes32 origin, uint16 maxFeeBps)
+        private
+        returns (uint64 sequence)
+    {
         uint256 fee = wormhole.messageFee();
         if (msg.value < fee) revert InsufficientMessageFee(msg.value, fee);
 
         sequence = wormhole.publishMessage{value: fee}(
-            0, PsmPayload.encode(kind, recipient, amount, origin, maxFeeBps), consistency
+            0, PsmPayload.encode(kind, recipient, amount, origin, maxFeeBps), CONSISTENCY_FINALIZED
         );
 
         if (msg.value > fee) {

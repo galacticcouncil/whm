@@ -22,6 +22,10 @@ contract RateLimiterHarness {
         return limit.tryConsume(amount);
     }
 
+    function refill(uint256 amount) external {
+        limit.refill(amount);
+    }
+
     function available() external view returns (uint256) {
         return limit.available();
     }
@@ -176,5 +180,50 @@ contract RateLimiterTest is Test {
 
         vm.warp(T0 + elapsed);
         assertLe(limiter.available(), capacity);
+    }
+
+    // ─── Refill ─────────────────────────────────────────────────
+
+    /// @dev Flow the other way gives budget back, never past capacity.
+    function test_refillIsCappedAtCapacity() public {
+        limiter.set(1_000, 1 days);
+        limiter.consume(600);
+        limiter.refill(400);
+        assertEq(limiter.available(), 800);
+        limiter.refill(10_000);
+        assertEq(limiter.available(), 1_000);
+    }
+
+    /// @dev A refill sits on paths that must not revert, so no amount overflows it.
+    function test_refillNeverOverflows() public {
+        limiter.set(1_000, 1 days);
+        limiter.consume(1);
+        limiter.refill(type(uint256).max);
+        assertEq(limiter.available(), 1_000);
+    }
+
+    /// @dev Refill cannot open what is closed.
+    function test_refillLeavesAClosedLimitClosed() public {
+        limiter.set(0, 1 days);
+        limiter.refill(1_000);
+        assertEq(limiter.available(), 0);
+        assertFalse(limiter.tryConsume(1));
+    }
+
+    function test_refillLeavesUnlimitedAlone() public {
+        limiter.set(RateLimiter.UNLIMITED, 0);
+        limiter.refill(1_000);
+        assertEq(limiter.available(), RateLimiter.UNLIMITED);
+    }
+
+    /// @dev A refill keeps the clock where the last whole unit accrued, like a spend does, so the
+    ///      fraction of a unit accrued before it is not thrown away.
+    function test_refillKeepsTheAccruedFraction() public {
+        limiter.set(1_000, 1 days);
+        limiter.consume(1_000);
+        vm.warp(T0 + 50); // 0.58 of a unit accrued
+        limiter.refill(10);
+        vm.warp(T0 + 100); // 1.16 units since the spend
+        assertEq(limiter.available(), 11);
     }
 }

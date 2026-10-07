@@ -13,7 +13,8 @@ pragma solidity ^0.8.24;
 ///      instantaneous burst is a further `capacity`, because a full bucket can be spent at the
 ///      start of a window and the refill spent at its end — so the true worst case over an
 ///      arbitrary window is `2 × capacity`, not `capacity`. Size the parameter against the burst,
-///      which is the number that bounds a single incident.
+///      which is the number that bounds a single incident. Where the opposite direction `refill`s
+///      a limit, the bound is on net flow: one direction may move that much more than the other did.
 ///
 /// @dev **Bounded.** A finite capacity is at most `MAX_CAPACITY`. `_sync` multiplies the capacity
 ///      by the elapsed seconds, and a value near the `uint256` ceiling overflows that product the
@@ -91,6 +92,17 @@ library RateLimiter {
         self.level = current - amount;
         self.lastUpdate = stamp;
         return true;
+    }
+
+    /// @notice Give budget back, capped at capacity. A closed or unlimited limit is left as it is.
+    /// @dev Never reverts, whatever the amount: it sits on paths that must not.
+    function refill(Limit storage self, uint256 amount) internal {
+        uint256 capacity = self.capacity;
+        if (capacity == 0 || capacity == UNLIMITED) return;
+
+        (uint256 current, uint256 stamp) = _sync(self);
+        self.level = amount >= capacity - current ? capacity : current + amount;
+        self.lastUpdate = stamp;
     }
 
     // ─── Views ──────────────────────────────────────────────────

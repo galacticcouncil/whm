@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {HollarBaseVault} from "../../../src/psm/HollarBaseVault.sol";
+import {IFiatToken} from "../../../src/psm/interfaces/IFiatToken.sol";
 import {IHollarBaseVault} from "../../../src/psm/interfaces/IHollarBaseVault.sol";
 import {PsmPayload} from "../../../src/psm/lib/PsmPayload.sol";
 import {RateLimiter} from "../../../src/psm/lib/RateLimiter.sol";
@@ -74,9 +75,39 @@ contract QueueHeadBlockTest is Test, IHollarBaseVault {
     }
 
     /// USDC on Base is blacklistable. Emulate Circle blacklisting `mallory` — every
-    /// usdc.transfer(mallory, ...) reverts from then on.
+    /// usdc.transfer(mallory, ...) reverts from then on, and `isBlacklisted(mallory)` says so.
     function _blacklist(address who) internal {
         vm.mockCallRevert(address(usdc), abi.encodeWithSelector(MockToken.transfer.selector, who), "Blacklistable: account is blacklisted");
+        vm.mockCall(address(usdc), abi.encodeWithSelector(IFiatToken.isBlacklisted.selector, who), abi.encode(true));
+    }
+
+    /// A token-wide pause refuses every transfer without being about any recipient. With the
+    /// reserve idle — the one case the transfer is reached — it must not retire the heads it covers.
+    function test_tokenWidePauseRetiresNobody() public {
+        vm.prank(alice);
+        vault.deposit(100_000e6, PsmPayload.fromAddress(alice));
+        vault.receiveMessage(_vaa(alice, 5_000e6, 1));
+        vault.receiveMessage(_vaa(bob, 5_000e6, 2));
+        uint256 credit = 5_000e6 - (5_000e6 * 5) / 10_000;
+
+        uint256 supplied = aUsdc.balanceOf(address(vault));
+        vm.prank(guardian);
+        vault.emergencyUnwindAave(supplied);
+
+        vm.mockCallRevert(address(usdc), abi.encodeWithSelector(MockToken.transfer.selector), "Pausable: paused");
+
+        vm.expectRevert(abi.encodeWithSelector(PayoutFailed.selector, alice));
+        vault.drain(10);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(PayoutFailed.selector, alice));
+        vault.claim();
+
+        assertEq(vault.queueHead(), 0, "nobody retired");
+        assertEq(vault.totalUnpayable(), 0);
+        assertEq(vault.owed(alice), credit, "still queued, cancel still open");
+
+        vm.clearMockedCalls();
+        assertEq(vault.drain(10), 2 * credit, "paid once the token resumes");
     }
 
     /// The bug this file was written for: a recipient USDC cannot reach used to sit at the head

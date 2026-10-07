@@ -62,6 +62,7 @@ interface IHollarBaseFacilitator {
     error NotYourPendingMint(uint256 id, address owner);
     error UnexpectedKind(uint8 kind);
     error UnexpectedEmitterChain(uint16 chainId);
+    error MessageAlreadyProcessed(uint64 sequence);
     error IncorrectDecimals();
     error InsufficientMessageFee(uint256 provided, uint256 required);
     error RefundFailed();

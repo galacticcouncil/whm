@@ -416,9 +416,9 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         assertEq(PsmPayload.toAddress(origin), alice, "the redeemer rides along as origin");
     }
 
-    /// @dev #40: the redeem leg is instant and uncapped — its reorg exposure is one block wide and
-    ///      falls on the protocol, not on holders.
-    function test_redeem_publishesInstant() public {
+    /// @dev A redeem reorged out after signing would leave its credit standing on Base, so it
+    ///      waits for finality like everything else this side publishes.
+    function test_redeem_publishesFinalized() public {
         facilitator.receiveMessage(_mintVaa(alice, 100e6));
 
         vm.startPrank(alice);
@@ -426,7 +426,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         facilitator.redeem(100e6, bob, type(uint16).max);
         vm.stopPrank();
 
-        assertEq(wormhole.lastPublished().consistencyLevel, 200);
+        assertEq(wormhole.lastPublished().consistencyLevel, 1);
     }
 
     /// @dev The whole solvency model in one test. The bucket, not our bookkeeping, is what stops
@@ -776,5 +776,107 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         (uint8 kind,,,) = PsmPayload.decode(wormhole.lastPublished().payload);
         assertEq(kind, PsmPayload.KIND_REDEEM);
         assertEq(wormhole.lastPublished().consistencyLevel, 1, "a cancelled re-mint's REDEEM");
+    }
+
+    // ─── Second signed copies ───────────────────────────────────
+
+    /// @dev A deposit re-included after a Base reorg is signed again under a new hash — same
+    ///      sequence, same payload. The salt's high bits stand in for the envelope that changed.
+    function test_receiveMint_secondSignedCopyIsRefused() public {
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, alice, 100e6, 7));
+
+        vm.expectRevert(abi.encodeWithSelector(MessageAlreadyProcessed.selector, uint64(7)));
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, alice, 100e6, 7 | (1 << 64)));
+
+        assertEq(hollar.balanceOf(alice), 100e18, "one deposit, one mint");
+    }
+
+    /// @dev A reorg that reorders two deposits swaps their sequences: a payload signed under a
+    ///      sequence it does not share with the one already taken is not a copy.
+    function test_receiveMint_sameSequenceOtherPayloadIsNotACopy() public {
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, alice, 100e6, 7));
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, bob, bob, 50e6, 7 | (1 << 64)));
+
+        assertEq(hollar.balanceOf(bob), 50e18);
+    }
+
+    // ─── Net limits ─────────────────────────────────────────────
+
+    function _limited() internal {
+        vm.prank(admin);
+        facilitator.setLimits(1_000e6, 1_000e6, 1 days);
+    }
+
+    function _limits() internal view returns (uint256 inAvail, uint256 outAvail) {
+        (, inAvail,, outAvail) = facilitator.limits();
+    }
+
+    /// @dev Alice mints 600 then burns all of it: outbound 400, inbound full again.
+    function _mintAndRedeemAll() internal {
+        facilitator.receiveMessage(_mintVaa(alice, 600e6));
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(600e6, bob, type(uint16).max);
+        vm.stopPrank();
+    }
+
+    function test_redeem_refillsInbound() public {
+        _limited();
+        facilitator.receiveMessage(_mintVaa(alice, 600e6));
+        (uint256 inAvail, uint256 outAvail) = _limits();
+        assertEq(inAvail, 400e6);
+        assertEq(outAvail, 1_000e6, "the refill stops at capacity");
+
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(500e6, bob, type(uint16).max);
+        vm.stopPrank();
+
+        (inAvail, outAvail) = _limits();
+        assertEq(inAvail, 900e6, "the burn gave inbound back");
+        assertEq(outAvail, 500e6);
+    }
+
+    function test_mint_refillsOutbound() public {
+        _limited();
+        _mintAndRedeemAll();
+
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, alice, 300e6, 2));
+
+        (uint256 inAvail, uint256 outAvail) = _limits();
+        assertEq(outAvail, 700e6, "the mint gave outbound back");
+        assertEq(inAvail, 700e6);
+    }
+
+    function test_flushPendingMint_refillsOutbound() public {
+        _limited();
+        _mintAndRedeemAll();
+
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+        facilitator.receiveMessage(_vaaOf(PsmPayload.KIND_MINT, alice, alice, 300e6, 2));
+        vm.prank(guardian);
+        facilitator.setPaused(false, false);
+        facilitator.flushPendingMint(0);
+
+        (uint256 inAvail, uint256 outAvail) = _limits();
+        assertEq(outAvail, 700e6, "the flush gave outbound back");
+        assertEq(inAvail, 700e6);
+    }
+
+    /// @dev Nothing minted, so nothing to give back or take.
+    function test_cancelPendingMint_touchesNeitherLimit() public {
+        _limited();
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+        facilitator.receiveMessage(_mintVaa(alice, 300e6));
+        (uint256 inBefore, uint256 outBefore) = _limits();
+
+        vm.prank(alice);
+        facilitator.cancelPendingMint(0, type(uint16).max);
+
+        (uint256 inAfter, uint256 outAfter) = _limits();
+        assertEq(inAfter, inBefore);
+        assertEq(outAfter, outBefore);
     }
 }

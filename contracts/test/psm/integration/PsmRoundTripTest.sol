@@ -6,6 +6,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {HollarBaseFacilitator} from "../../../src/psm/HollarBaseFacilitator.sol";
 import {HollarBaseVault} from "../../../src/psm/HollarBaseVault.sol";
+import {IHollarBaseFacilitator} from "../../../src/psm/interfaces/IHollarBaseFacilitator.sol";
 import {IHollarBaseVault} from "../../../src/psm/interfaces/IHollarBaseVault.sol";
 import {RateLimiter} from "../../../src/psm/lib/RateLimiter.sol";
 import {
@@ -19,6 +20,22 @@ import {
     MockToken,
     MockWormholeCore
 } from "../mocks/PsmMocks.sol";
+
+/// @dev A Base recipient that books its own credit and cancels it in the same transaction, so no
+///      keeper can pay it first.
+contract AtomicCanceller {
+    HollarBaseVault internal immutable vault;
+
+    constructor(HollarBaseVault _vault) {
+        vault = _vault;
+    }
+
+    function deliverAndCancel(bytes calldata vaa) external {
+        uint256 index = vault.queueTail();
+        vault.receiveMessage(vaa);
+        vault.cancelQueuedRedemption(index);
+    }
+}
 
 /// @title Both ends of the corridor, wired together
 /// @notice The unit suites test each side against a hand-built payload. This one lets the two
@@ -335,18 +352,15 @@ contract PsmRoundTripTest is Test {
 
     // ─── Cancelling a queued re-mint ────────────────────────────
 
-    /// @dev The cycle that used to be a free redemption: redeem (fee assessed on Base), cancel at
-    ///      the head (gross re-minted), the re-mint queues on the inbound limit — which it does by
-    ///      default on the day of the original mint — and is cancelled in turn. That second cancel
+    /// @dev The cycle a cancelled re-mint must not make free: redeem (fee assessed on Base), cancel
+    ///      at the head (gross re-minted), the re-mint queues — behind a mint pause here, a spent
+    ///      window or a full bucket just the same — and is cancelled in turn. That second cancel
     ///      goes back as a redemption, so the credit it produces is field-for-field the one the
     ///      first cancel undid, and the fee is paid exactly once.
     function test_roundTrip_cancelledRemintPaysTheRedeemFee() public {
-        vm.prank(admin);
-        facilitator.setLimits(10_000e6, RateLimiter.UNLIMITED, 1 days);
-
         vm.prank(alice);
         vault.deposit(10_000e6, _toBytes32(alice));
-        _relayBaseToHydration(); // spends the day's inbound window
+        _relayBaseToHydration();
 
         // Alice burns, naming bob on Base — so recipient and origin differ all the way round.
         vm.startPrank(alice);
@@ -358,11 +372,14 @@ contract PsmRoundTripTest is Test {
         uint256 fee = (10_000e6 * 5) / 10_000;
         assertEq(vault.owed(bob), 10_000e6 - fee);
 
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
+
         // 1 — bob walks away from the head: the gross is re-minted to alice...
         vm.prank(bob);
         vault.cancelQueuedRedemption(0);
         _relayBaseToHydration();
-        assertEq(facilitator.pendingOf(alice), 10_000e6, "...and queues on the spent inbound window");
+        assertEq(facilitator.pendingOf(alice), 10_000e6, "...and queues behind the pause");
         assertEq(hollar.balanceOf(alice), 0);
 
         // 2 — alice cancels the queued re-mint: back to Base as a redemption, not a refund.
@@ -387,9 +404,6 @@ contract PsmRoundTripTest is Test {
     /// @dev Walking that loop again changes nothing: the credit comes back identical every time,
     ///      and the fee is still paid once at the end.
     function test_roundTrip_cancelLoopIsAFixedPoint() public {
-        vm.prank(admin);
-        facilitator.setLimits(10_000e6, RateLimiter.UNLIMITED, 1 days);
-
         vm.prank(alice);
         vault.deposit(10_000e6, _toBytes32(alice));
         _relayBaseToHydration();
@@ -398,6 +412,9 @@ contract PsmRoundTripTest is Test {
         facilitator.redeem(10_000e6, alice, type(uint16).max);
         vm.stopPrank();
         _relayHydrationToBase();
+
+        vm.prank(guardian);
+        facilitator.setPaused(true, false);
 
         uint256 fee = (10_000e6 * 5) / 10_000;
         for (uint256 i = 0; i < 3; i++) {
@@ -551,6 +568,104 @@ contract PsmRoundTripTest is Test {
 
         assertEq(usdc.balanceOf(alice), usdcAfterDeposit + 1_000e6 - fee, "paid once");
         assertEq(hollar.balanceOf(alice), 1_000e18, "and that HOLLAR stays burned");
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    // ─── Net limits ─────────────────────────────────────────────
+
+    uint256 internal constant WINDOW = 10_000e6;
+
+    /// @dev Alice holds a window's worth of HOLLAR, and both windows are full again. The bucket is
+    ///      doubled so the limits are the only thing under test.
+    function _limitedWithAliceHolding() internal {
+        hollar.setFacilitatorBucketCapacity(address(facilitator), 2 * CAPACITY);
+        vm.prank(admin);
+        facilitator.setLimits(WINDOW, WINDOW, 1 days);
+        vm.prank(alice);
+        vault.deposit(WINDOW, _toBytes32(alice));
+        _relayBaseToHydration();
+        vm.warp(365 days + 1 days);
+
+        vm.prank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+    }
+
+    function _assertHeldDownOnlyByWhatWasCycled(uint256 cycled) internal view {
+        (, uint256 inAvail,, uint256 outAvail) = facilitator.limits();
+        assertEq(outAvail, WINDOW, "outbound untouched");
+        assertEq(inAvail, WINDOW - cycled, "inbound down by what was cycled, once");
+        assertEq(hollar.balanceOf(alice), WINDOW * SCALE, "for gas alone");
+    }
+
+    /// @dev A redemption returned over its fee limit costs only gas. With the limits netting, the
+    ///      most a holder holds a window down by is what they cycle: 300 HOLLAR, forty times over,
+    ///      leaves both windows open to everyone else.
+    function test_roundTrip_returnedRedeemsHoldAWindowDownOnlyByWhatTheyCycle() public {
+        _limitedWithAliceHolding();
+
+        for (uint256 i; i < 40; i++) {
+            vm.prank(alice);
+            facilitator.redeem(300e6, alice, 0);
+            _relayHydrationToBase();
+            _relayBaseToHydration();
+        }
+        _assertHeldDownOnlyByWhatWasCycled(300e6);
+
+        usdc.mint(bob, WINDOW);
+        vm.startPrank(bob);
+        usdc.approve(address(vault), type(uint256).max);
+        vault.deposit(WINDOW - 300e6, _toBytes32(bob));
+        vm.stopPrank();
+        _relayBaseToHydration();
+        assertEq(facilitator.totalPendingMint(), 0, "a depositor still mints at once");
+    }
+
+    /// @dev The same loop through the head: a contract recipient books its credit and cancels it in
+    ///      one transaction, ahead of any keeper. It nets the same way.
+    function test_roundTrip_atomicHeadCancelsHoldAWindowDownOnlyByWhatTheyCycle() public {
+        _limitedWithAliceHolding();
+        AtomicCanceller canceller = new AtomicCanceller(vault);
+
+        for (uint256 i; i < 40; i++) {
+            vm.prank(alice);
+            facilitator.redeem(300e6, address(canceller), type(uint16).max);
+            canceller.deliverAndCancel(
+                abi.encode(
+                    HYDRATION_CHAIN, _toBytes32(address(facilitator)), hydrationCore.lastPublished().payload, ++relaySequence
+                )
+            );
+            _relayBaseToHydration();
+        }
+        _assertHeldDownOnlyByWhatWasCycled(300e6);
+    }
+
+    // ─── Second signed copies ───────────────────────────────────
+
+    /// @dev A message re-included after a reorg is signed again under a new hash: same sequence,
+    ///      same payload. Each side takes it once. The salt's high bits stand in for the envelope.
+    function test_roundTrip_secondSignedCopyIsRefusedOnBothSides() public {
+        vm.prank(alice);
+        vault.deposit(1_000e6, _toBytes32(alice));
+        bytes memory mint = baseCore.lastPublished().payload;
+
+        facilitator.receiveMessage(abi.encode(BASE_CHAIN, _toBytes32(address(vault)), mint, uint256(5)));
+        vm.expectRevert(abi.encodeWithSelector(IHollarBaseFacilitator.MessageAlreadyProcessed.selector, uint64(5)));
+        facilitator.receiveMessage(abi.encode(BASE_CHAIN, _toBytes32(address(vault)), mint, uint256(5) | (1 << 64)));
+
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(1_000e6, alice, type(uint16).max);
+        vm.stopPrank();
+        bytes memory redemption = hydrationCore.lastPublished().payload;
+
+        vault.receiveMessage(abi.encode(HYDRATION_CHAIN, _toBytes32(address(facilitator)), redemption, uint256(6)));
+        vm.expectRevert(abi.encodeWithSelector(IHollarBaseVault.MessageAlreadyProcessed.selector, uint64(6)));
+        vault.receiveMessage(
+            abi.encode(HYDRATION_CHAIN, _toBytes32(address(facilitator)), redemption, uint256(6) | (1 << 64))
+        );
+
+        assertEq(vault.queueLength(), 1, "one burn, one credit");
         _assertBacked();
         _assertSolvent();
     }
