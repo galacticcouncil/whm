@@ -5,6 +5,7 @@
     "start:oracle-solana": "node dist/oracle-solana/app.js",
     "start:oracle-ethereum": "node dist/oracle-ethereum/app.js",
     "start:oracle-robinhood": "node dist/oracle-robinhood/app.js",
+    "start:oracle-hydration": "node dist/oracle-hydration/app.js",
     "prebuild": "npm run clean",
     "build": "node ./esbuild.dist.mjs",
     "clean": "rm -rf dist/",

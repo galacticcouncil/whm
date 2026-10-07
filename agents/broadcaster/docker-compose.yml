@@ -65,6 +65,27 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
 
+  app-oracle-hydration:
+    image: galacticcouncil/broadcaster:latest
+    command: [node, oracle-hydration/app.js]
+    environment:
+      - PRIVKEY= # 0x-prefixed hex key; holds WETH for Hydration EVM gas
+      - RPC_HYDRATION= # single node, not a load balancer — Hydration nodes disagree on tx hashes
+      - REFRESH_INTERVAL=6
+      - CHANGE_THRESHOLD=0.5
+    volumes:
+      - db:/app/.db
+    configs:
+      - source: thresholds
+        target: /app/thresholds.json
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
 networks:
   default:
     driver: overlay
