@@ -127,6 +127,7 @@ contract PsmRoundTripTest is Test {
         vm.startPrank(admin);
         vault.setHydrationEmitter(_toBytes32(address(facilitator)));
         vault.setDepositLimit(RateLimiter.UNLIMITED, 0);
+        vault.setPayoutLimit(RateLimiter.UNLIMITED, 0);
         facilitator.setBaseEmitter(_toBytes32(address(vault)));
         facilitator.setLimits(RateLimiter.UNLIMITED, RateLimiter.UNLIMITED, 0);
         vm.stopPrank();
@@ -666,6 +667,159 @@ contract PsmRoundTripTest is Test {
         );
 
         assertEq(vault.queueLength(), 1, "one burn, one credit");
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    // ─── Payout limit ───────────────────────────────────────────
+
+    /// @dev The launch sizing: the vault's payout limit equals the facilitator's outbound limit and
+    ///      the deposit limit, so the largest honest redemption, a whole outbound window, fits and is
+    ///      paid in one claim. Only the fee stays out of the spend.
+    function test_roundTrip_aFullWindowRedemptionFitsThePayoutLimit() public {
+        _limitedWithAliceHolding();
+        vm.prank(admin);
+        vault.setPayoutLimit(WINDOW, 1 days);
+
+        vm.prank(alice);
+        facilitator.redeem(WINDOW, bob, type(uint16).max);
+        _relayHydrationToBase();
+
+        uint256 credited = WINDOW - (WINDOW * 5) / 10_000;
+        assertEq(vault.owed(bob), credited);
+        assertEq(vault.payoutAllowance(), WINDOW, "nothing paid yet");
+
+        vm.prank(bob);
+        vault.claim();
+
+        assertEq(usdc.balanceOf(bob), credited);
+        assertEq(vault.payoutAllowance(), WINDOW - credited, "spent by what left");
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    /// @dev Over the limit nothing about the burn changes: the delivery lands and books like any
+    ///      other, and only payment waits. A credit above the capacity is never covered, so the
+    ///      redeemer takes the HOLLAR back, whole, through the cancel any stalled head has.
+    function test_roundTrip_aCreditAboveThePayoutLimitBooksAndTheRedeemerCancels() public {
+        _limitedWithAliceHolding();
+        vm.prank(admin);
+        vault.setPayoutLimit(WINDOW / 2, 1 days); // below an honest redemption, on purpose
+
+        vm.prank(alice);
+        facilitator.redeem(WINDOW, bob, type(uint16).max);
+        _relayHydrationToBase();
+
+        uint256 credited = WINDOW - (WINDOW * 5) / 10_000;
+        assertEq(vault.owed(bob), credited, "booked in full");
+        assertEq(vault.drain(10), 0, "but not payable");
+        vm.prank(bob);
+        vm.expectRevert(
+            abi.encodeWithSelector(IHollarBaseVault.InsufficientPayoutAllowance.selector, credited, WINDOW / 2)
+        );
+        vault.claim();
+
+        vm.prank(bob);
+        vault.cancelQueuedRedemption(0);
+        _relayBaseToHydration();
+
+        assertEq(hollar.balanceOf(alice), WINDOW * SCALE, "the burned HOLLAR is re-minted whole");
+        assertEq(vault.principal() * SCALE, _bucketLevel(), "equal at rest");
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    /// @dev Credits that fit the capacity but not what is left of it wait their turn and are paid
+    ///      as the window refills the allowance. Nothing is lost on the way.
+    function test_roundTrip_creditsBeyondThePayoutAllowanceWaitForTheWindow() public {
+        _limitedWithAliceHolding();
+        vm.prank(admin);
+        vault.setPayoutLimit(6_000e6, 1 days);
+        address carol = makeAddr("carol");
+
+        vm.prank(alice);
+        facilitator.redeem(4_000e6, bob, type(uint16).max);
+        _relayHydrationToBase();
+        vm.prank(alice);
+        facilitator.redeem(4_000e6, carol, type(uint16).max);
+        _relayHydrationToBase();
+
+        uint256 each = 4_000e6 - (4_000e6 * 5) / 10_000;
+        assertEq(vault.drain(10), each, "the first fits and the second does not fit what is left");
+        assertEq(vault.owed(carol), each, "booked, and waiting behind the limit");
+
+        vm.warp(365 days + 2 days);
+        vm.prank(carol);
+        vault.claim();
+
+        assertEq(usdc.balanceOf(carol), each, "paid once the window has refilled");
+        assertEq(vault.totalOwed(), 0);
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    /// @dev Honest two-way flow at launch values, inside the 10,000 bucket. The facilitator's
+    ///      outbound limit is net (a mint refills it) and the payout limit is gross, so one window
+    ///      books two full redemptions and the vault pays one. Each credit is within the capacity and
+    ///      both are paid, but the second waits about a window. The cycle costs its owner the 5 USDC
+    ///      fee.
+    function test_honestTwoWayFlow_secondCreditWaitsOnThePayoutLimit() public {
+        vm.startPrank(admin);
+        vault.setDepositLimit(WINDOW, 1 days);
+        vault.setPayoutLimit(WINDOW, 1 days);
+        facilitator.setLimits(WINDOW, WINDOW, 1 days);
+        vm.stopPrank();
+        address carol = makeAddr("carol");
+        usdc.mint(bob, WINDOW);
+        vm.prank(bob);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(carol);
+        hollar.approve(address(facilitator), type(uint256).max);
+
+        // Alice deposits a whole window, and a day later every window is full again.
+        vm.prank(alice);
+        vault.deposit(WINDOW, _toBytes32(alice));
+        _relayBaseToHydration();
+        vm.warp(365 days + 1 days);
+
+        // She redeems a whole outbound window.
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(WINDOW, alice, type(uint16).max);
+        vm.stopPrank();
+        _relayHydrationToBase();
+
+        // Bob deposits a whole deposit window and the mint gives outbound back. Carol holds that
+        // HOLLAR and redeems it.
+        vm.prank(bob);
+        vault.deposit(WINDOW, _toBytes32(bob));
+        _relayBaseToHydration();
+        (,,, uint256 outboundAvailable) = facilitator.limits();
+        assertEq(outboundAvailable, WINDOW, "the mint gave outbound back");
+        vm.prank(bob);
+        hollar.transfer(carol, WINDOW * SCALE);
+        vm.prank(carol);
+        facilitator.redeem(WINDOW, carol, type(uint16).max);
+        _relayHydrationToBase();
+        assertEq(_bucketLevel(), 0, "within the bucket throughout");
+
+        uint256 credited = WINDOW - (WINDOW * 5) / 10_000;
+        assertEq(vault.drain(10), credited, "alice is paid");
+        assertEq(vault.owed(carol), credited, "carol's honest credit is booked");
+        assertEq(vault.claimable(carol), 0, "and not payable");
+        vm.prank(carol);
+        vm.expectRevert(
+            abi.encodeWithSelector(IHollarBaseVault.InsufficientPayoutAllowance.selector, credited, 5e6)
+        );
+        vault.claim();
+
+        vm.warp(365 days + 1 days + 86_313);
+        assertEq(vault.claimable(carol), 0, "still waiting nearly a day later");
+        vm.warp(365 days + 1 days + 86_314);
+        vm.prank(carol);
+        vault.claim();
+        assertEq(usdc.balanceOf(carol), credited);
+        assertEq(WINDOW - usdc.balanceOf(carol), 5e6, "the cycle that filled the window cost 5 USDC");
         _assertBacked();
         _assertSolvent();
     }
