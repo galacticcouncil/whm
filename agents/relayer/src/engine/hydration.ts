@@ -32,12 +32,19 @@ import { chainFees } from "../utils/fees";
  * the wallet client itself, the same object every write already goes through, rather than as a
  * fourth field beside it.
  *
- * A mismatched pairing — Hydration's clients built against Base's chain, say — is prevented by
- * construction, not by convention: `hydrationClients` below is the only thing that builds a
- * `ChainClients`, and it builds `publicClient` and `wallet` from the same `hydration` chain object
- * in the same call, so there is no seam at which a caller could hand it one chain's clients and a
- * different chain's identity. A second factory (Base's, when #46 adds one) has the same shape:
- * both its clients built from its own chain object, in its own function, once.
+ * The loose `chain` argument the earlier draft carried is gone; there is no longer a fourth value
+ * a caller could pass alongside the wrong pair. `ChainClients` itself is still a plain exported
+ * structural interface, though, with `publicClient` and `wallet` typed against independent `Chain`
+ * generics — nothing in the type stops a hand-built value from pairing a `publicClient` built
+ * against one chain with a `wallet` built against another, and such a value still typechecks and
+ * still signs, silently, for whichever chain `wallet.chain` names (`scripts/verify-hydration-fees.ts`'s
+ * `genericClients()` builds a `ChainClients` by hand for exactly this reason — to exercise the
+ * generic branch and its E2/E3 mutants — and nothing there enforces the pairing either). The actual
+ * guard is procedural, not type-level: `hydrationClients` below is the only function in this repo
+ * that produces a `ChainClients`, and it builds `publicClient` and `wallet` from the same
+ * `hydration` chain object in the same call. A second factory (Base's, when #46 adds one) has to
+ * keep that same shape — both its clients built from its own chain object, in its own function —
+ * on its own; nothing here enforces it centrally across factories.
  */
 export interface ChainClients {
   account: Account;
@@ -94,10 +101,13 @@ export async function submit(clients: ChainClients, call: Call, nonce: number): 
 
   const fees = await chainFees(wallet.chain, publicClient);
 
-  // Every write sets its fee fields explicitly. viem's `getTransactionType` resolves the
-  // transaction type from whichever fields are present, so it is decided fresh on every call and
-  // never falls back to reading its per-client `eip1559NetworkCache` — the cache a long-lived
-  // client would otherwise carry from its first submission into every later one.
+  // Every write sets its fee fields explicitly, and `chainFees` above only ever returns a
+  // `FeeOverrides` whose fields are actually `bigint` — it validates that at runtime, not just by
+  // TS declaration, since viem's own fee estimator can return an unvalidated shape (see the doc
+  // comment on `chainFees`). So `getTransactionType` always resolves the transaction type from
+  // real fields present on this call, decided fresh every time, and never falls back to reading
+  // its per-client `eip1559NetworkCache` — the cache a long-lived client would otherwise carry
+  // from its first submission into every later one.
   const tx = { address, abi, functionName, args, nonce, account } as const;
   return fees.kind === "legacy"
     ? wallet.writeContract({ ...tx, gasPrice: fees.gasPrice })
