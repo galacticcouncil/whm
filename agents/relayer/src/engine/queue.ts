@@ -138,7 +138,9 @@ export function createQueue(deps: QueueDeps) {
       const message = (e as Error).message ?? String(e);
 
       if (isDone(name)) {
-        task.logger.info(`${task.label} already completed`);
+        // The name says which kind of done: a replayed VAA, or — on the PSM receivers — a second
+        // signed copy of a message they already consumed (see DONE_ERRORS in ./revert).
+        task.logger.info(`${task.label} already completed (${name})`);
         task.resolve();
       } else if (isDead(name)) {
         // Nothing was written and no retry can change that — drop it, but at warn: a VAA that aged

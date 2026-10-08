@@ -2,3 +2,8 @@
 
 node_modules/
 dist/
+
+# scripts/verify-psm-app.ts's runInSubprocess() writes these next to itself (so its probe's own
+# relative imports resolve) and removes them itself, success or interrupted — this is a backstop
+# in case one ever survives a hard crash.
+scripts/.probe-*
