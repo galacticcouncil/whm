@@ -11,10 +11,11 @@
  *   1. It compiles the contracts with forge and reads the compiler's own output, the AST and the
  *      ABI of each receiver. The errors a delivery can raise are found by walking the call graph
  *      from `receiveMessage`: every function, modifier and library call the AST resolves is
- *      followed (a call to a virtual function lands on the receiver's own override), and every
- *      custom error those bodies name is collected. Every error in `receiverAbi` is declared by
- *      the compiled ABI with the same name and parameter types, and the set is exactly what the
- *      walk finds, so a new error anywhere on that path fails here, in a helper or a library.
+ *      followed (a call to a virtual function is followed into the receiver's own override and
+ *      into the body it names, so an error behind `super` is found too), and every custom error
+ *      those bodies name is collected. Every error in `receiverAbi` is declared by the compiled
+ *      ABI with the same name and parameter types, and the set is exactly what the walk finds, so
+ *      a new error anywhere on that path fails here, in a helper or a library.
  *   2. Given the real revert data for each error, built from the compiled declarations rather than
  *      from `receiverAbi`, the real `receiveMessage()` and the real `createQueue()` resolve
  *      `MessageAlreadyProcessed` as done and hand every other named error back for retry, on both
@@ -229,6 +230,8 @@ interface Reach {
  * modifier with a body is followed, wherever it appears (a call, a modifier invocation, a library
  * function bound with `using`), and any node that refers to an error definition is an error the
  * path can raise. Calls through an interface have no body here and are other contracts' reverts.
+ * A reference is followed into the receiver's override of it and into the body it names, which is
+ * what makes a `super` call read the base body.
  */
 function reach(receiver: AstNode): Reach {
   const entry = (receiver.linearizedBaseContracts as number[])
@@ -255,7 +258,13 @@ function reach(receiver: AstNode): Reach {
         (target?.nodeType === "FunctionDefinition" || target?.nodeType === "ModifierDefinition") &&
         target.body
       ) {
-        todo.push(implementationIn(receiver, target));
+        // A reference can run two different bodies. A virtual call lands on the receiver's most
+        // derived override, but `super.f()` and `Base.f()` run the body they name, and the AST gives
+        // them that body's own id: mapped to the override alone, they would point back at a body
+        // already visited and the base body would never be read. Both are followed. The cost is
+        // that a base body which a full override replaces is read too, so an error only that body
+        // names is reported as reachable and has to be declared or listed in UNREACHABLE.
+        todo.push(implementationIn(receiver, target), target);
       }
     }
     for (const v of Object.values(n)) visit(v);
@@ -322,6 +331,17 @@ record(
       r.functions.has("PsmPayload.decode"),
   ),
   "the walk from receiveMessage reaches each receiver's _processMessage, the shared entry point and the payload decoder",
+  () => receivers.forEach((r) => console.log(`  ${r.name}: ${[...r.functions].sort().join(", ")}`)),
+);
+
+// Neither receiver calls `super._processMessage`: each overrides it completely. The base body is
+// therefore on the walk only because a reference's own body is followed as well as its override,
+// which is the property that lets an error behind a `super` call be seen. Once a receiver does
+// call super, the base body is on the walk either way and this check stops telling the two
+// behaviours apart.
+record(
+  receivers.every((r) => r.functions.has("MessageReceiver._processMessage")),
+  "the walk also reads the body a reference names, not only the receiver's override, so an error behind a super call is seen",
   () => receivers.forEach((r) => console.log(`  ${r.name}: ${[...r.functions].sort().join(", ")}`)),
 );
 
