@@ -28,6 +28,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  createPublicClient,
   createWalletClient,
   encodeErrorResult,
   http,
@@ -1134,7 +1135,9 @@ async function main() {
     }
     record(passes, "assertDestination passes for matching clients and a destination contract with code");
 
-    // A hand-built bundle whose wallet is on another chain than its public client.
+    // A hand-built bundle whose wallet is on another chain than its public client, each way round:
+    // the wallet signs for one chain and the public client simulates against the other, and either
+    // half alone is enough to refuse.
     const mixed = {
       ...pair,
       wallet: createWalletClient({ account: pair.account, chain: baseChain, transport: http("http://mock-rpc.invalid") }),
@@ -1147,8 +1150,24 @@ async function main() {
     }
     record(
       mixedMsg.includes("wallet is on chain 8453") && mixedMsg.includes("public client on chain 222222"),
-      "assertDestination refuses a hand-built bundle whose wallet and public client are on different chains",
+      "assertDestination refuses a hand-built bundle whose wallet is on another chain than the destination's",
       () => console.log(`  message: ${mixedMsg || "(did not throw)"}`),
+    );
+
+    const mixedPublic = {
+      ...pair,
+      publicClient: createPublicClient({ chain: baseChain, transport: http("http://mock-rpc.invalid") }),
+    } as unknown as ChainClients;
+    let mixedPublicMsg = "";
+    try {
+      await assertDestination(WORMHOLE.hydration, [mintRoute()], mixedPublic);
+    } catch (e) {
+      mixedPublicMsg = (e as Error).message;
+    }
+    record(
+      mixedPublicMsg.includes("wallet is on chain 222222") && mixedPublicMsg.includes("public client on chain 8453"),
+      "assertDestination refuses a hand-built bundle whose public client is on another chain than the destination's",
+      () => console.log(`  message: ${mixedPublicMsg || "(did not throw)"}`),
     );
 
     // A destination with no EVM chain id this app knows.
