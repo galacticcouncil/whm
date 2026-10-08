@@ -1,5 +1,6 @@
 import { CHAINS, CHAIN_ID_TO_NAME } from "@certusone/wormhole-sdk";
 import { defineChain } from "viem";
+import { base as viemBase } from "viem/chains";
 
 /** Wormhole chain ids. relayer-engine's SDK enum predates Hydration, so these are plain numbers. */
 export const WORMHOLE = {
@@ -18,6 +19,25 @@ export const hydration = defineChain({
   id: HYDRATION_EVM_CHAIN_ID,
   name: "Hydration",
   nativeCurrency: { name: "WETH", symbol: "WETH", decimals: 18 },
+  rpcUrls: { default: { http: [] } },
+});
+
+/** Base's EVM chain id — asserted at startup so a misconfigured RPC fails loudly (see `../engine/base`). */
+export const BASE_EVM_CHAIN_ID = viemBase.id;
+
+/**
+ * Base, from viem's built-in definition, with one override: `rpcUrls.default.http` emptied out to
+ * `[]`, same as `hydration` above.
+ *
+ * Without that override, `http(rpcUrl)` in `../engine/base` falls back to viem's built-in
+ * `https://mainnet.base.org` whenever `rpcUrl` is falsy (`http`'s own source:
+ * `const url_ = url || chain?.rpcUrls.default.http[0]`) — so a missing/empty `RPC_BASE` would
+ * silently start signing against a real public endpoint instead of failing at startup.
+ * `chain?.rpcUrls.default.http[0]` being `undefined` here is what turns that into viem's own
+ * `UrlRequiredError`, the same mechanism `hydrationClients("")` already fails by.
+ */
+export const base = defineChain({
+  ...viemBase,
   rpcUrls: { default: { http: [] } },
 });
 

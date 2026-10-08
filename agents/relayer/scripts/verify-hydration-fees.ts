@@ -1,11 +1,11 @@
 /**
- * Reproduction for issue #45 (relayer: chain-parameterise the VAA submission helper) and its fix
- * rounds, most recently the round that (a) replaced the `chain.fees.estimateFeesPerGas` viem hook
- * with an explicit `chainFees()` call inside `submit()` (review from Palo, Discord, 2026-09-03: pass
- * the chain through the clients, not as a separate argument; compute fees explicitly per call
- * instead of relying on viem's own per-client cache), and (b) made `chainFees` validate the runtime
- * shape of whatever a destination chain's own fee hook returns, rather than trusting viem's declared
- * return type (fresh-context review finding: a chain hook returning `{ gasPrice }` would otherwise
+ * Reproduction for chain-parameterising the VAA submission helper and its fix rounds, most
+ * recently the round that (a) replaced the `chain.fees.estimateFeesPerGas` viem hook with an
+ * explicit `chainFees()` call inside `submit()` (so the chain travels through the clients rather
+ * than as a separate argument, and fees are computed explicitly per call instead of relying on
+ * viem's own per-client cache), and (b) made `chainFees` validate the runtime shape of whatever a
+ * destination chain's own fee hook returns, rather than trusting viem's declared return type
+ * (fresh-context review finding: a chain hook returning `{ gasPrice }` would otherwise
  * come back through the generic branch typed as EIP-1559 with both max fields `undefined`, and
  * `submit` would sign a zero-fee EIP-1559 transaction from it). Runs the REAL `hydrationClients()` /
  * `submit()` / `receiveMessage()` from `../src/engine/hydration` against REAL viem clients, with
@@ -258,9 +258,10 @@ async function actualRawTx(scenario: Scenario): Promise<Hex> {
 
 /** Sections E/E2/E3: a non-Hydration `ChainClients`, built the same way `hydrationClients` builds
  * one, just against whichever `chain` is passed in — there is no factory for a non-Hydration chain
- * in `../src/engine/hydration` (Base is issue #46), so these tests build the pair directly. Both
- * clients come from the same `chain` object, so this helper does not construct a mismatched pair;
- * what it shows is only that `ChainClients` accepts a value no factory produced. */
+ * in `../src/engine/hydration` (Base's is `baseClients`, in `../src/engine/base`), so these tests
+ * build the pair directly. Both clients come from the same `chain` object, so this helper does not
+ * construct a mismatched pair; what it shows is only that `ChainClients` accepts a value no
+ * factory produced. */
 async function genericClients(chain: Chain): Promise<ChainClients> {
   const account = privateKeyToAccount(TEST_KEY);
   const publicClient = createPublicClient({ chain, transport: http("http://mock-rpc.invalid") });

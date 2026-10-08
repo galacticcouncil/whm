@@ -17,12 +17,12 @@ import { hydration, HYDRATION_EVM_CHAIN_ID } from "../chains";
 import { chainFees } from "../utils/fees";
 
 /**
- * STATUS (issue #45): `submit` below takes its destination chain from `ChainClients` rather than
- * hardcoding Hydration, so the same function can in principle submit to Base or another EVM
- * chain. Only Hydration is wired up, built, and exercised in this repo today: `hydrationClients`
- * is the only factory, `ntt`/`oracle` are its only callers, and `scripts/verify-hydration-fees.ts`
- * exercises the generic branch only against offline chain objects over a mocked transport. A Base
- * client/chain and its own exercise is issue #46; nothing in this file builds or runs against Base.
+ * `submit` below takes its destination chain from `ChainClients` rather than hardcoding Hydration,
+ * so one function serves every EVM chain this relayer delivers to. Two factories build a
+ * `ChainClients` today: `hydrationClients` below, behind ntt, oracle and basejump, and
+ * `baseClients` (`./base`), which no app uses yet. `scripts/verify-hydration-fees.ts` exercises the
+ * generic fee branch against offline chain objects over a mocked transport, and
+ * `scripts/verify-base-clients.ts` exercises it through `baseClients`.
  */
 
 /**
@@ -40,11 +40,11 @@ import { chainFees } from "../utils/fees";
  * still signs, silently, for whichever chain `wallet.chain` names (`scripts/verify-hydration-fees.ts`'s
  * `genericClients()` builds a `ChainClients` by hand to exercise the generic branch; it happens to
  * build both clients from one chain object, but nothing in the type required it to). The actual
- * guard is procedural, not type-level: `hydrationClients` below is the only function in this repo
- * that produces a `ChainClients`, and it builds `publicClient` and `wallet` from the same
- * `hydration` chain object in the same call. A second factory (Base's, when #46 adds one) has to
- * keep that same shape — both its clients built from its own chain object, in its own function —
- * on its own; nothing here enforces it centrally across factories.
+ * guard is procedural, not type-level: `hydrationClients` below and `baseClients` (`./base`) are the
+ * only functions in this repo that produce a `ChainClients`, and each builds `publicClient` and
+ * `wallet` from its own chain object in the same call. A further factory has to keep that same
+ * shape — both its clients built from its own chain object, in its own function — on its own;
+ * nothing here enforces it centrally across factories.
  */
 export interface ChainClients {
   account: Account;
