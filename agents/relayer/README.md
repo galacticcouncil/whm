@@ -81,13 +81,28 @@ routes, and the code check proves a contract is there, not that it is the PSM co
 route's source emitter.
 
 Reverts are named by [abi.ts](src/apps/psm/abi.ts). A second signed copy of a message a receiver
-already consumed (`MessageAlreadyProcessed`, which a source-chain reorg can cause) is done; everything
-else is retried, and the budget is about five days, because a delivery can fail for as long as a
-claims pause lasts and the contracts keep the VAA replayable through it.
+already consumed (`MessageAlreadyProcessed`, which a source-chain reorg can cause) is done;
+everything else is retried. That includes a delivery that simulated clean and then mined as
+reverted, which the queue alone counts as done once the transaction is broadcast: the handler reads
+each receipt and throws on a revert, so the engine retries the job.
+
+The retry budget is 250 attempts with a backoff of 2^attempt x 60 s capped at 30 min, about 5.1 days,
+because a delivery can fail for as long as a claims pause lasts and the contracts keep the VAA
+replayable through it. A refusal that outlasts it leaves the job in the engine's failed set, and
+nothing re-queues it, a restart included: the spy does not replay, the missed-VAA worker already
+counts the sequence as seen, and the job id exists. Recover by submitting the VAA bytes to
+`receiveMessage` yourself (the call is permissionless), or by retrying the failed job in Redis.
 
 `psm-hydration` signs with `PRIVKEY`, a key of its own like every other Hydration app's; `psm-base`
-signs with `PRIVKEY_BASE`, which never falls back to `PRIVKEY`. Namespaces are `psm-hydration-relayer`
-and `psm-base-relayer`, overridden by `APP_NAME_PSM_HYDRATION` and `APP_NAME_PSM_BASE`.
+signs with `PRIVKEY_BASE`, which never falls back to `PRIVKEY`. Nothing compares the keys across
+services, so each is deployed with its own. Namespaces are `psm-hydration-relayer` and
+`psm-base-relayer`, overridden by `APP_NAME_PSM_HYDRATION` and `APP_NAME_PSM_BASE`.
+
+Both processes must be running and subscribed before the facilitator's redeem and the vault's
+deposits are unpaused. A floor of `0` does not reach an emitter's sequence `0`: the missed-VAA
+worker's look-ahead considers only sequences above the floor, and a later scan only the gaps between
+sequences it has seen. The first message each emitter publishes is therefore delivered only if the
+process was already listening.
 
 The two keeper calls the spec assigns to the relayer (`drain` on Base, `flushPendingMint` on
 Hydration) are not part of this app yet.

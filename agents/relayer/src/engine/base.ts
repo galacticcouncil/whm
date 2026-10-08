@@ -29,9 +29,8 @@ import type { ChainClients } from "./hydration";
  * Connect to Base's EVM and assert the RPC is the chain we think it is.
  *
  * @param rpcUrl Base EVM RPC.
- * @param key Base's own signing key (see `privateKeyBase` in `../config`). Distinct from `PRIVKEY`
- *   so a process that also holds a client for another chain never ends up submitting Base
- *   transactions from that same account.
+ * @param key Base's own signing key (see `privateKeyBase` in `../config`). Kept apart from `PRIVKEY`
+ *   so the Base wallet's funds and key are not those of a Hydration wallet.
  * @returns Account, public client, and wallet client, all built against Base.
  * @throws When the RPC reports a different chain id.
  */

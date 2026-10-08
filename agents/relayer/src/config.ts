@@ -85,11 +85,12 @@ export function privateKey(): `0x${string}` {
 }
 
 /**
- * Base's own signing key, from `PRIVKEY_BASE` — a name distinct from `PRIVKEY` so that a process
- * holding both a Base client and a client for another chain (built via `privateKey()`) never signs
- * both from the same account, which is exactly what Base's client has to stay off of. It does not
- * fall back to `PRIVKEY` when unset: a silent fallback here would defeat the isolation this
- * variable exists for.
+ * Base's own signing key, from `PRIVKEY_BASE` — a name distinct from `PRIVKEY`, so that a process
+ * holding both a Base client and a client for another chain (built via `privateKey()`) does not
+ * sign both from one account unless both variables are given the same key; nothing compares the
+ * two values. The separation is for funds and blast radius: the Base wallet's balance and key are
+ * not a Hydration wallet's. A nonce has nothing to do with it, since nonces are per chain. It does
+ * not fall back to `PRIVKEY` when unset: a silent fallback here would defeat that.
  *
  * @returns The key, 0x-prefixed.
  * @throws When unset, or not 32 bytes of hex.

@@ -138,9 +138,10 @@ services:
     command: [node, psm-base/app.js]
     environment:
       # PRIVKEY_BASE, not PRIVKEY — this process reads privateKeyBase() (agents/relayer/src/config.ts),
-      # a name distinct from every Hydration-destination process's PRIVKEY, so this wallet can never
-      # end up being the same account as app-ntt's, app-oracle's, app-basejump's or
-      # app-psm-hydration's.
+      # which never falls back to PRIVKEY. A distinct name does not make a distinct value, and
+      # nothing compares them: this must hold a key different from the PRIVKEY of app-ntt,
+      # app-oracle, app-basejump and app-psm-hydration, so the Base wallet's funds and key are not
+      # a Hydration wallet's.
       PRIVKEY_BASE: FILL THIS KEY ALWAYS
       RPC_BASE: https://mainnet.base.org
       # Optional: alert sink and the multiple of one submission's cost to warn below.

@@ -31,10 +31,14 @@ export const BASE_EVM_CHAIN_ID = viemBase.id;
  *
  * Without that override, `http(rpcUrl)` in `../engine/base` falls back to viem's built-in
  * `https://mainnet.base.org` whenever `rpcUrl` is falsy (`http`'s own source:
- * `const url_ = url || chain?.rpcUrls.default.http[0]`) — so a missing/empty `RPC_BASE` would
- * silently start signing against a real public endpoint instead of failing at startup.
- * `chain?.rpcUrls.default.http[0]` being `undefined` here is what turns that into viem's own
- * `UrlRequiredError`, the same mechanism `hydrationClients("")` already fails by.
+ * `const url_ = url || chain?.rpcUrls.default.http[0]`), so `baseClients("")` would silently sign
+ * against a real public endpoint instead of failing. `chain?.rpcUrls.default.http[0]` being
+ * `undefined` here is what turns that into viem's own `UrlRequiredError`, the same mechanism
+ * `hydrationClients("")` already fails by.
+ *
+ * That protects the factory, not the app: `apps/psm/config.ts` resolves an unset or empty `RPC_BASE`
+ * to `https://mainnet.base.org` itself, as it does `RPC_HYDRATION` to a public endpoint, so psm-base
+ * started without one still signs against that endpoint.
  */
 export const base = defineChain({
   ...viemBase,
