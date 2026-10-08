@@ -13,14 +13,19 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 
 import { hydration, HYDRATION_EVM_CHAIN_ID } from "../chains";
-import type { FeeStrategy } from "../utils/fees";
 
-/** Account plus read/write clients for a submission. Not chain-specific: only the shape needed to
- *  simulate and send a contract call. */
-export interface Clients {
+/**
+ * Account, clients, and the chain they were built against, returned together so a caller can never
+ * assemble the triple wrongly: there is no separate `chain` (or fee-strategy) argument to pass
+ * alongside a mismatched set of clients, because the factory that builds the clients is the same
+ * factory that names the chain. A destination chain's fee handling lives on `chain` itself (see
+ * `../chains`), not here.
+ */
+export interface ChainClients {
   account: Account;
   publicClient: PublicClient;
   wallet: WalletClient;
+  chain: Chain;
 }
 
 /**
@@ -28,10 +33,10 @@ export interface Clients {
  *
  * @param rpcUrl Hydration EVM RPC.
  * @param key Signing key.
- * @returns Account plus read and write clients.
+ * @returns Account, clients, and the Hydration chain object, paired.
  * @throws When the RPC reports a different chain id.
  */
-export async function hydrationClients(rpcUrl: string, key: `0x${string}`): Promise<Clients> {
+export async function hydrationClients(rpcUrl: string, key: `0x${string}`): Promise<ChainClients> {
   const account = privateKeyToAccount(key);
   const publicClient = createPublicClient({ chain: hydration, transport: http(rpcUrl) });
   const wallet = createWalletClient({ account, chain: hydration, transport: http(rpcUrl) });
@@ -41,22 +46,17 @@ export async function hydrationClients(rpcUrl: string, key: `0x${string}`): Prom
     throw new Error(`RPC_HYDRATION returned chain ${chainId}; expected ${HYDRATION_EVM_CHAIN_ID}`);
   }
 
-  return { account, publicClient, wallet };
+  return { account, publicClient, wallet, chain: hydration };
 }
 
 /**
  * Submit `receiveMessage(vaa)` to a contract under a caller-owned nonce, on whichever destination
- * chain the caller passes in.
+ * chain `clients` was built against.
  *
  * Simulated first so a revert surfaces as a named error before a nonce is spent — the queue then
  * classifies it rather than burning gas.
  *
- * @param clients Account and clients for the destination chain.
- * @param chain The destination chain, e.g. `hydration` from `../chains` or viem's `base`.
- * @param feeStrategy How to price the submission on that chain. Pass `hydrationFees` for
- *   Hydration (no priority fee, and some compatible RPCs omit `eth_maxPriorityFeePerGas`) or
- *   `defaultFees` (`../utils/fees`) for an ordinary EVM chain, which lets `writeContract` estimate
- *   fees itself.
+ * @param clients Account, clients, and chain for the destination (see `ChainClients`).
  * @param abi ABI carrying `receiveMessage(bytes)`.
  * @param to Contract that consumes the VAA.
  * @param vaaBytes The guardian-signed VAA.
@@ -64,15 +64,13 @@ export async function hydrationClients(rpcUrl: string, key: `0x${string}`): Prom
  * @returns The transaction hash.
  */
 export async function receiveMessage(
-  clients: Clients,
-  chain: Chain,
-  feeStrategy: FeeStrategy,
+  clients: ChainClients,
   abi: Abi,
   to: Address,
   vaaBytes: Buffer,
   nonce: number,
 ): Promise<Hash> {
-  const { account, publicClient, wallet } = clients;
+  const { account, publicClient, wallet, chain } = clients;
   const args = [`0x${vaaBytes.toString("hex")}`] as const;
 
   await publicClient.simulateContract({
@@ -83,8 +81,7 @@ export async function receiveMessage(
     account,
   });
 
-  const fees = await feeStrategy(publicClient);
-  const call = {
+  return wallet.writeContract({
     address: to,
     abi,
     functionName: "receiveMessage",
@@ -92,17 +89,5 @@ export async function receiveMessage(
     nonce,
     chain,
     account,
-  } as const;
-
-  if (!fees) {
-    return wallet.writeContract(call);
-  }
-
-  return fees.kind === "legacy"
-    ? wallet.writeContract({ ...call, gasPrice: fees.gasPrice })
-    : wallet.writeContract({
-        ...call,
-        maxFeePerGas: fees.maxFeePerGas,
-        maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
-      });
+  });
 }
