@@ -53,8 +53,8 @@
  *      `chain (N)` fallback instead, so the assertion is shown able to fail before it is trusted to
  *      pass.
  *
- * Manual source mutants run during this fix round (not reproduced in-script, since each mutates a
- * checked-in file rather than an in-memory copy — restored after each check):
+ * Manual source mutants (not reproduced in-script, since each mutates a checked-in file rather
+ * than an in-memory copy; each is restored after its check):
  *   - Remove the chain-id assertion from `baseClients` (`../src/engine/base.ts`). Check 1 alone
  *     goes red: the mismatched-RPC scenario resolves instead of throwing (both its sub-assertions
  *     fail), while every other check is unaffected.

@@ -9,15 +9,15 @@
  * branches on which physical chain a route's `destinationChain` happens to be: it only ever reads
  * that field off the route.
  *
- * Round 2 (adversarial review response) adds: distinct `APP_NAME` env vars per process (checked by
- * spawning real subprocesses — module-level `opt()` calls cannot be re-probed in-process); chain-id
+ * It also covers: distinct `APP_NAME` env vars per process (checked by spawning real
+ * subprocesses — module-level `opt()` calls cannot be re-probed in-process); chain-id
  * validation, including the destination-chain-typo silent-drop case reproduced against a
  * deliberately unfixed reimplementation so the regression it closes is evidence, not assertion;
  * the corridor closure invariant and the duplicate-source guard; an adaptive shipped-table check
  * that stays green across the address fill (plus a synthetic filled table exercised today); Base's
  * key isolation (composition check on the entry files, plus a functional proof that `makeApp`
  * forwards whatever key it is given rather than resolving one itself); and an EVM-only second-route
- * fixture (the previous one used an impossible Solana route — an H160 emitter cannot exist there).
+ * fixture (a Solana source with an H160 emitter cannot exist, so the second route uses an EVM one).
  *
  * Run with: pnpm --filter @whm/relayer verify:psm-app
  * (or `npx tsx agents/relayer/scripts/verify-psm-app.ts` from the repo root).
@@ -306,14 +306,14 @@ async function main() {
   // that state, rather than hardcoding "it must be blank" (see section 1b below for the dedicated
   // blank-vs-filled coverage).
   //
-  // R2 regression: the branch predicate (`isBlank(mint) || isBlank(redeem)`) is table-wide, but an
-  // earlier version of this check hardcoded the assertion to `"mint"` — correct only by
-  // coincidence, since mint happens to be first in table order and the shipped table is either
-  // fully blank or (eventually) fully filled. Half-filled (mint filled, redeem still blank) is a
-  // real intermediate deploy state — nothing stops an operator filling one contract's address
-  // before the other's migration step runs — and under it `routesFor` correctly names "redeem" as
-  // the blank one, while the hardcoded assertion claimed "mint" was blank. Fixed by asserting
-  // against the actual FIRST blank route in table order, whatever its name is.
+  // The branch predicate (`isBlank(mint) || isBlank(redeem)`) is table-wide, so asserting `"mint"`
+  // inside the blank branch would be correct only by coincidence: mint happens to be first in
+  // table order, and the shipped table is either fully blank or (eventually) fully filled.
+  // Half-filled (mint filled, redeem still blank) is a real intermediate deploy state — nothing
+  // stops an operator filling one contract's address before the other's migration step runs — and
+  // under it `routesFor` correctly names "redeem" as the blank one, which a hardcoded `"mint"`
+  // would contradict. So the check asserts against the actual FIRST blank route in table order,
+  // whatever its name is.
   function isBlank(r: PsmRoute): boolean {
     return (r.sourceEmitter as string) === "" || (r.destinationContract as string) === "";
   }

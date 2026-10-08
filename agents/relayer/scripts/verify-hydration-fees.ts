@@ -1,13 +1,12 @@
 /**
- * Reproduction for chain-parameterising the VAA submission helper and its fix rounds, most
- * recently the round that (a) replaced the `chain.fees.estimateFeesPerGas` viem hook with an
- * explicit `chainFees()` call inside `submit()` (so the chain travels through the clients rather
- * than as a separate argument, and fees are computed explicitly per call instead of relying on
- * viem's own per-client cache), and (b) made `chainFees` validate the runtime shape of whatever a
- * destination chain's own fee hook returns, rather than trusting viem's declared return type
- * (fresh-context review finding: a chain hook returning `{ gasPrice }` would otherwise
- * come back through the generic branch typed as EIP-1559 with both max fields `undefined`, and
- * `submit` would sign a zero-fee EIP-1559 transaction from it). Runs the REAL `hydrationClients()` /
+ * Reproduction and check for chain-parameterising the VAA submission helper. `submit()` calls
+ * `chainFees()` explicitly on every call instead of using the `chain.fees.estimateFeesPerGas` viem
+ * hook (so the chain travels through the clients rather than as a separate argument, and fees are
+ * computed per call instead of relying on viem's own per-client cache), and `chainFees` validates
+ * the runtime shape of whatever a destination chain's own fee hook returns, rather than trusting
+ * viem's declared return type (a chain hook returning `{ gasPrice }` would otherwise come back
+ * through the generic branch typed as EIP-1559 with both max fields `undefined`, and `submit`
+ * would sign a zero-fee EIP-1559 transaction from it). Runs the REAL `hydrationClients()` /
  * `submit()` / `receiveMessage()` from `../src/engine/hydration` against REAL viem clients, with
  * only the HTTP transport mocked (`globalThis.fetch` intercepted, not the viem client objects), so
  * the actual signing path runs: real ABI encoding, a real local account (`viem/accounts`), real
@@ -42,22 +41,24 @@
  *              like (A).
  *        - E2: a `Chain` whose own `fees.estimateFeesPerGas` hook returns a legacy `{ gasPrice }`
  *              shape unconditionally. `chainFees` must read that as `kind: "legacy"` and sign a
- *              legacy transaction with that `gasPrice` — this is the fresh-context reviewer's exact
- *              construction, and the check this file did not have before this round.
+ *              legacy transaction with that `gasPrice`. This is the construction that shows why
+ *              `chainFees` checks the hook's actual shape instead of trusting viem's declared type.
  *        - E3: a `Chain` whose hook returns neither the legacy nor the EIP-1559 shape. `chainFees`
  *              must throw its named error and `submit` must send nothing, rather than pass a
  *              half-set `FeeOverrides` through.
- *      E/E2/E3 use a hand-built `ChainClients` (`genericClients`) because this repo has no
- *      non-Hydration factory. It builds both clients from the same chain object, so it does not
- *      itself construct a mismatched pair; it only shows the type accepts a value no factory made
- *      (see the doc comment on `ChainClients` in `../src/engine/hydration.ts` for that bound).
+ *      E/E2/E3 use a hand-built `ChainClients` (`genericClients`) so one helper can build clients
+ *      for any chain object, including the test chains whose fee hooks are the thing under test;
+ *      no factory does that (`hydrationClients` is Hydration's, `baseClients` is Base's). It
+ *      builds both clients from the same chain object, so it does not itself construct a
+ *      mismatched pair; it only shows the type accepts a value no factory made (see the doc
+ *      comment on `ChainClients` in `../src/engine/hydration.ts` for that bound).
  *
  * Run with: npx tsx agents/relayer/scripts/verify-hydration-fees.ts
  * (from the repo root, or from agents/relayer/; either resolves node_modules), or
  * `pnpm --filter @whm/relayer verify:hydration-fees`.
  *
- * Manual source mutants run during this fix round (not re-run automatically, since each mutates a
- * checked-in file rather than an in-memory copy — restored after each check):
+ * Manual source mutants (not re-run automatically, since each mutates a checked-in file rather
+ * than an in-memory copy; each is restored after its check):
  *   - Drop the explicit fee fields from both `wallet.writeContract` branches in `submit()`
  *     (`../src/engine/hydration.ts`). Exit code 1: all three (A) scenarios go red (byte mismatch —
  *     the Hydration branch no longer runs on every call the way the pinned transactions were
@@ -74,8 +75,8 @@
  *   - Remove `chainFees`'s runtime shape validation on the generic branch (return
  *     `{ kind: "eip1559", maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas }`
  *     straight from `client.estimateFeesPerGas()`, trusting the declared type), rerun. (E2) and (E3)
- *     both go red: (E2) signs a zero-fee EIP-1559 transaction instead of a legacy one (the exact
- *     defect the fresh-context review named), and (E3) signs a transaction instead of throwing.
+ *     both go red: (E2) signs a zero-fee EIP-1559 transaction instead of a legacy one (the defect
+ *     the shape validation exists to prevent), and (E3) signs a transaction instead of throwing.
  *     (A)-(D) are unaffected, since none of them exercise the generic branch's hook path.
  */
 import {
@@ -148,7 +149,7 @@ const BASE_SCENARIO: Scenario = {
  * body makes about the Hydration path), rather than this file's own producer agreeing with itself.
  * Recipe, exact and repeatable: `git show origin/master:agents/relayer/src/chains.ts`,
  * `.../src/utils/fees.ts`, and `.../src/engine/hydration.ts` into a scratch directory (any path;
- * this round used `/tmp/master-fee-check/src/{chains.ts,utils/fees.ts,engine/hydration.ts}`) with a
+ * for example `/tmp/master-fee-check/src/{chains.ts,utils/fees.ts,engine/hydration.ts}`) with a
  * symlinked `node_modules` (pnpm workspaces hoist to the repo root, so `agents/relayer/node_modules`
  * resolves everything master's files import) and a small runner script that installs the same
  * fetch mock as `installMock` below, keyed on the same TEST_KEY / TO / ABI / VAA_BYTES / NONCE /
@@ -527,8 +528,8 @@ async function main() {
   }
 
   // E2: a chain whose hook returns `{ gasPrice }` must produce a LEGACY tx carrying that
-  // gasPrice, not a zero-fee EIP-1559 tx. This is the exact construction the reviewer used to show
-  // `chainFees` trusting viem's declared return type instead of its actual runtime shape.
+  // gasPrice, not a zero-fee EIP-1559 tx. This construction shows what `chainFees` would do if it
+  // trusted viem's declared return type instead of its actual runtime shape.
   {
     const { raw, error } = await submitViaChain(
       HOOK_GAS_PRICE_CHAIN,
