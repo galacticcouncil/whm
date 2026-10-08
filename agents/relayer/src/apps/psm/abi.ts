@@ -15,7 +15,8 @@ import { parseAbi } from "viem";
  * Declared against `contracts/src/psm` and `contracts/src/MessageReceiver.sol`. A viem ABI decodes a
  * custom error by its selector, so a signature that drifts here stops matching without a sound: the
  * revert falls back to unnamed, and the queue retries what it should have recognised.
- * `scripts/verify-psm-reverts.ts` checks every entry against those sources.
+ * `scripts/verify-psm-reverts.ts` checks every entry against the compiled contracts, and that the
+ * list is exactly what a delivery can raise.
  */
 export const receiverAbi = parseAbi([
   "function receiveMessage(bytes vaa) external",

@@ -136,11 +136,15 @@ and exit non-zero on a failed check:
 pnpm --filter @whm/relayer verify:hydration-fees  # fee pricing through submit(), per chain
 pnpm --filter @whm/relayer verify:base-clients    # Base client: chain id, key isolation, fees
 pnpm --filter @whm/relayer verify:psm-app         # psm routes: refuse-to-start, destination keying
-pnpm --filter @whm/relayer verify:psm-reverts <path to contracts/src>
+pnpm --filter @whm/relayer verify:psm-reverts <path to contracts>
 ```
 
-`verify:psm-reverts` checks the psm app's revert handling against the PSM contracts' source, so it
-takes the path to a `contracts/src` (or `PSM_CONTRACTS_SRC`) and exits 1 rather than skip without one.
+`verify:psm-reverts` checks the psm app's revert handling against the PSM contracts as compiled. It
+builds them with forge into a temporary directory (a few seconds), walks the call graph from
+`receiveMessage` in the compiler's AST to find every custom error a delivery can raise, and compares
+that set, and each signature, with `receiverAbi`. It takes the path to a `contracts` directory (or
+`PSM_CONTRACTS_DIR`), needs Foundry and the contracts' installed dependencies, and exits 1 rather than
+skip without them.
 The type check is `tsc -p agents/relayer --noEmit` from the repo root; it covers `src/`, not `scripts/`.
 
 ## Production
