@@ -1,5 +1,3 @@
-import { zeroAddress } from "viem";
-
 import type { EmitterRoute } from "../../evm/broadcaster.js";
 
 /** Hydration EVM — the chain the emitters below live on. */
@@ -12,7 +10,7 @@ export const CHAIN_ID = 222222;
 export const ROUTES: EmitterRoute[] = [
   {
     label: "oracle",
-    emitter: zeroAddress, // TODO: 001-deploy-emitter proxyAddress once oracle-relay-hydration runs
+    emitter: "0x3f5cc44141a52529323f9be42dbb98fda7c1d066",
     symbols: ["HDX"],
     fromBlock: 0n,
   },

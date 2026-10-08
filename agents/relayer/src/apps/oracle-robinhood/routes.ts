@@ -1,4 +1,4 @@
-import { zeroAddress, type Address } from "viem";
+import type { Address } from "viem";
 
 import { WORMHOLE } from "../../chains";
 import type { ChainId } from "../../types";
@@ -19,7 +19,7 @@ export const ROUTES: OracleRoute[] = [
   {
     source: "hydration",
     sourceChain: WORMHOLE.hydration,
-    sourceEmitter: zeroAddress, // TODO: 001-deploy-emitter proxyAddress once oracle-relay-hydration runs
-    receiver: zeroAddress, // TODO: 003-deploy-receiver proxyAddress
+    sourceEmitter: "0x3f5cc44141a52529323f9be42dbb98fda7c1d066",
+    receiver: "0x060f1ef6bb1c7ab31d2bbc3d2ae47e590952b958",
   },
 ];

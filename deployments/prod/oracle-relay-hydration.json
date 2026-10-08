@@ -1,0 +1,81 @@
+{
+  "migration": "oracle-relay-hydration",
+  "environment": "prod",
+  "startedAt": "2026-10-07T23:13:33.243Z",
+  "completedAt": "2026-10-07T23:30:11.232Z",
+  "steps": [
+    {
+      "name": "001-deploy-emitter",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xc9dfb9f1f34bc6796d17eb35e3e226f3b223f8ba",
+        "proxyAddress": "0x3f5cc44141a52529323f9be42dbb98fda7c1d066",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0",
+        "wormholeCore": "0x3792a6d63c31941b2805181771795d9176fa82a1"
+      },
+      "error": null,
+      "startedAt": "2026-10-07T23:13:50.713Z",
+      "completedAt": "2026-10-07T23:14:02.010Z"
+    },
+    {
+      "name": "002-deploy-adapter",
+      "status": "completed",
+      "output": {
+        "address": "0xbc6758319ecacf59142de0d6e9d945ab0ac0856f",
+        "feed": "0x0000010200000000000000000000000a00000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-07T23:14:02.011Z",
+      "completedAt": "2026-10-07T23:14:09.137Z"
+    },
+    {
+      "name": "003-deploy-receiver",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xac043013096ebe3b8cc44c7709581028740783e6",
+        "proxyAddress": "0x060f1ef6bb1c7ab31d2bbc3d2ae47e590952b958",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-10-07T23:14:09.138Z",
+      "completedAt": "2026-10-07T23:14:13.880Z"
+    },
+    {
+      "name": "004-authorize-emitter@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x5ab1c2ab9067cc0a848064e0f3dedccfafa36abe3fa0510755adfc592e5de420",
+        "emitterBytes32": "0x0000000000000000000000003f5cc44141a52529323f9be42dbb98fda7c1d066",
+        "sourceChain": "73"
+      },
+      "error": null,
+      "startedAt": "2026-10-07T23:14:13.880Z",
+      "completedAt": "2026-10-07T23:14:15.897Z"
+    },
+    {
+      "name": "005-register-hdx@emitter",
+      "status": "completed",
+      "output": {
+        "assetId": "0x8f515bbfa43ff773ef7c6c53cb11b1c7ead38052b30f6a928cc96c552714ca38",
+        "source": "0xbc6758319ecacf59142de0d6e9d945ab0ac0856f",
+        "call": "0x9ef4ca08",
+        "txHash": "0x451c8cc6ae88ab3c369469c167f79bc3764a84756a4267795c4a5bac9acdd07f"
+      },
+      "error": null,
+      "startedAt": "2026-10-07T23:14:15.898Z",
+      "completedAt": "2026-10-07T23:14:18.949Z"
+    },
+    {
+      "name": "006-set-hdx@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x0fbfa0a6f5225db36586dfdbfe0f7b87c52b3f66aca6741bd38e97818dd50cdf",
+        "assetId": "0x8f515bbfa43ff773ef7c6c53cb11b1c7ead38052b30f6a928cc96c552714ca38",
+        "oracle": "0xD1a2198CBbC7cbfB602DF581D8614eD31682901D"
+      },
+      "error": null,
+      "startedAt": "2026-10-07T23:30:08.743Z",
+      "completedAt": "2026-10-07T23:30:11.232Z"
+    }
+  ]
+}
