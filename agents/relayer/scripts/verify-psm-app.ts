@@ -27,15 +27,26 @@ import { rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { encodeErrorResult, isAddress, pad, parseTransaction, type Address, type Hex } from "viem";
+import {
+  createWalletClient,
+  encodeErrorResult,
+  http,
+  isAddress,
+  pad,
+  parseTransaction,
+  zeroAddress,
+  type Address,
+  type Hex,
+} from "viem";
 
 import { onEmitter } from "../src/engine/emitter";
+import { baseClients } from "../src/engine/base";
 import { hydrationClients, receiveMessage, type ChainClients } from "../src/engine/hydration";
 import { createQueue } from "../src/engine/queue";
 import { receiverAbi } from "../src/apps/psm/abi";
-import { makeApp, wireRoutes, type ClientFactory } from "../src/apps/psm/app";
-import { ROUTE_TABLE, routesFor, type PsmRoute } from "../src/apps/psm/routes";
-import { WORMHOLE } from "../src/chains";
+import { assertDestination, makeApp, wireRoutes, type ClientFactory } from "../src/apps/psm/app";
+import { ROUTE_TABLE, routesFor, servedRoutes, type PsmRoute } from "../src/apps/psm/routes";
+import { base as baseChain, WORMHOLE } from "../src/chains";
 import logger from "../src/logger";
 import type { Next, RelayerApp, RelayerCtx } from "../src/types";
 
@@ -71,6 +82,7 @@ process.on("SIGTERM", () => {
 // verify-hydration-fees.ts, which uses the same key the same way.
 const TEST_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 const HYDRATION_CHAIN_ID = 222222;
+const BASE_CHAIN_ID = 8453;
 
 // VAULT and FACILITATOR are the two real corridor contracts — the same address plays both an
 // emitter role and a destination-contract role, on its own chain, across the two routes. Fixtures
@@ -349,6 +361,23 @@ function runInSubprocess(code: string, env: Record<string, string>): Promise<str
   });
 }
 
+/**
+ * What `run` is refused with, or why it was not: a `makeApp` whose boot checks are gone does not
+ * reject, it goes on to the engine and hangs there, so the wait is bounded and a start that was not
+ * refused reads as a failed check rather than as a stuck script.
+ */
+async function startupError(run: () => Promise<void>): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve("(not refused within 5 s)"), 5_000);
+  });
+  try {
+    return await Promise.race([run().then(() => "(started)", (e: Error) => e.message), limit]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function main() {
   // One mock, installed for the whole run: `hydrationClients()` itself calls `getChainId()` over
   // the transport, so the mock has to be live before the very first client is built, not just
@@ -520,6 +549,24 @@ async function main() {
     record(restoredOk, `refuse-to-start: restoring ${field} starts clean again`);
   }
 
+  // 1d. The zero address is a valid address, and a call to it succeeds, so it would pass every later
+  // check and deliver nothing: each address field refuses it, named, in its own words.
+  for (const field of ["sourceEmitter", "destinationContract"] as const) {
+    const table = [validRoute()];
+    table[0]![field] = zeroAddress;
+    let msg = "";
+    try {
+      routesFor(WORMHOLE.hydration, table);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    record(
+      msg.includes('"synthetic"') && msg.includes(field) && msg.includes("zero address"),
+      `refuse-to-start on a zero ${field}, named, worded as "the zero address"`,
+      () => console.log(`  message: ${msg || "(did not throw)"}`),
+    );
+  }
+
   // ─── 2. Chain-id validation ─────────────────────────────────────────────────
 
   // 2a. A typo'd sourceChain on a route that IS served: caught, named, with the bad value.
@@ -606,6 +653,30 @@ async function main() {
       "the destinationChain typo also stops the OTHER destination's process, not just the one it would have matched",
       () => console.log(`  message: ${baseMsg || "(did not throw)"}`),
     );
+  }
+
+  // 2c. A route from a chain to itself. A destinationChain that typo'd into another KNOWN id is
+  // valid by the check above, has no mirror to close against, and serves the wrong route from the
+  // wrong process (psm-base would deliver the vault's mint messages to the facilitator's address on
+  // Base). Refused for both destinations, because the whole table is validated up front.
+  {
+    const typo = [{ ...mintRoute(), destinationChain: WORMHOLE.base }, redeemRoute()];
+    for (const [chainLabel, chain] of [
+      ["hydration", WORMHOLE.hydration],
+      ["base", WORMHOLE.base],
+    ] as const) {
+      let msg = "";
+      try {
+        routesFor(chain, typo);
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      record(
+        msg.includes('"mint"') && msg.includes("sourceChain and destinationChain are both 30"),
+        `a route whose destinationChain typo'd into its own sourceChain is refused for ${chainLabel}, naming the route`,
+        () => console.log(`  message: ${msg || "(did not throw)"}`),
+      );
+    }
   }
 
   // ─── 3. Corridor closure + duplicate-source guard ──────────────────────────
@@ -709,6 +780,43 @@ async function main() {
       restoredOk = false;
     }
     record(restoredOk, "duplicate-source: distinct sourceEmitters (no mutation applied) still serve cleanly");
+  }
+
+  // 3d. Return routes. A chain id that typo'd into a THIRD known chain leaves a route that nothing
+  // mirrors: `routesFor` lets it through (a table built for one direction is legitimate for the
+  // checks that drive it), `servedRoutes`, which every process uses, refuses it.
+  {
+    const healthy = [mintRoute(), redeemRoute()];
+    record(
+      servedRoutes(WORMHOLE.hydration, healthy).length === 1 && servedRoutes(WORMHOLE.base, healthy).length === 1,
+      "return-route baseline: the healthy mint/redeem pair is served by both destinations",
+    );
+
+    const typo = [mintRoute(), { ...redeemRoute(), sourceChain: WORMHOLE.ethereum }];
+    let lenient = true;
+    try {
+      routesFor(WORMHOLE.hydration, typo);
+    } catch {
+      lenient = false;
+    }
+    record(lenient, "documented: routesFor alone accepts a route with no mirror (the typo to Ethereum passes it)");
+
+    for (const [chainLabel, chain, route] of [
+      ["hydration", WORMHOLE.hydration, "mint"],
+      ["base", WORMHOLE.base, "redeem"],
+    ] as const) {
+      let msg = "";
+      try {
+        servedRoutes(chain, typo);
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      record(
+        msg.includes(`"${route}"`) && msg.includes("no route runs back"),
+        `servedRoutes refuses a served route with no return route for ${chainLabel}, naming "${route}"`,
+        () => console.log(`  message: ${msg || "(did not throw)"}`),
+      );
+    }
   }
 
   // ─── 4. Destination-keying: no direction hardcoded ─────────────────────────
@@ -958,10 +1066,101 @@ async function main() {
         stoppedAsExpected && capturedKey === testKey && capturedRpc === "http://mock-rpc.invalid",
         "makeApp forwards its own key and rpcUrl arguments to clientFactory unchanged (no internal key resolution)",
       );
+
+      // 6c. A destination contract with no code takes the call, mines, and spends gas for nothing
+      // (a call to an address with no code succeeds), so it is refused at boot, naming the route.
+      mock.state.noCode.add(FACILITATOR.toLowerCase());
+      const noCodeMsg = await startupError(() =>
+        makeApp("psm-verify-no-code", WORMHOLE.hydration, hydrationClients, "http://mock-rpc.invalid", TEST_KEY),
+      );
+      mock.state.noCode.clear();
+      record(
+        noCodeMsg.includes('"mint"') && noCodeMsg.includes(FACILITATOR) && noCodeMsg.includes("has no code"),
+        "makeApp refuses to start when a served route's destination contract has no code, naming the route and the address",
+        () => console.log(`  message: ${noCodeMsg || "(did not throw)"}`),
+      );
+
+      // 6d. Swapped entry wiring: a client factory for one chain paired with the other chain's
+      // destination, in either direction, builds clients cleanly (each factory asserts only that its
+      // own RPC is its own chain) and would serve routes through the wrong wallet.
+      mock.state.chainId = BASE_CHAIN_ID;
+      const swapMsg = await startupError(() =>
+        makeApp("psm-verify-swapped", WORMHOLE.hydration, baseClients, "http://mock-rpc.invalid", TEST_KEY),
+      );
+      mock.state.chainId = HYDRATION_CHAIN_ID;
+      record(
+        swapMsg.includes("destination chain 73") && swapMsg.includes("222222") && swapMsg.includes("8453"),
+        "makeApp refuses Base's clients for the Hydration destination, naming both chains",
+        () => console.log(`  message: ${swapMsg || "(did not throw)"}`),
+      );
+      const swapReverseMsg = await startupError(() =>
+        makeApp("psm-verify-swapped-2", WORMHOLE.base, hydrationClients, "http://mock-rpc.invalid", TEST_KEY),
+      );
+      record(
+        swapReverseMsg.includes("destination chain 30") && swapReverseMsg.includes("8453") && swapReverseMsg.includes("222222"),
+        "makeApp refuses Hydration's clients for the Base destination, naming both chains",
+        () => console.log(`  message: ${swapReverseMsg || "(did not throw)"}`),
+      );
+
+      // 6h. makeApp itself serves routes through the stricter lookup: with redeem's sourceChain
+      // typo'd into a third known chain, no route mirrors mint, and the process refuses to start.
+      Object.assign(ROUTE_TABLE[1]!, { ...redeemRoute(), sourceChain: WORMHOLE.ethereum });
+      const noReturnMsg = await startupError(() =>
+        makeApp("psm-verify-no-return", WORMHOLE.hydration, hydrationClients, "http://mock-rpc.invalid", TEST_KEY),
+      );
+      Object.assign(ROUTE_TABLE[1]!, redeemRoute());
+      record(
+        noReturnMsg.includes('"mint"') && noReturnMsg.includes("no route runs back"),
+        "makeApp refuses to start when a served route has no return route, naming it",
+        () => console.log(`  message: ${noReturnMsg || "(did not throw)"}`),
+      );
     } finally {
       Object.assign(ROUTE_TABLE[0]!, originalMint);
       Object.assign(ROUTE_TABLE[1]!, originalRedeem);
     }
+  }
+
+  // 6e-6g. `assertDestination` driven directly: the passing path of `makeApp` goes on to build the
+  // engine app (Redis), so it cannot be run to completion here.
+  {
+    const pair = await buildClients();
+    let passes = true;
+    try {
+      await assertDestination(WORMHOLE.hydration, [mintRoute()], pair);
+    } catch {
+      passes = false;
+    }
+    record(passes, "assertDestination passes for matching clients and a destination contract with code");
+
+    // A hand-built bundle whose wallet is on another chain than its public client.
+    const mixed = {
+      ...pair,
+      wallet: createWalletClient({ account: pair.account, chain: baseChain, transport: http("http://mock-rpc.invalid") }),
+    } as unknown as ChainClients;
+    let mixedMsg = "";
+    try {
+      await assertDestination(WORMHOLE.hydration, [mintRoute()], mixed);
+    } catch (e) {
+      mixedMsg = (e as Error).message;
+    }
+    record(
+      mixedMsg.includes("wallet is on chain 8453") && mixedMsg.includes("public client on chain 222222"),
+      "assertDestination refuses a hand-built bundle whose wallet and public client are on different chains",
+      () => console.log(`  message: ${mixedMsg || "(did not throw)"}`),
+    );
+
+    // A destination with no EVM chain id this app knows.
+    let unknownMsg = "";
+    try {
+      await assertDestination(WORMHOLE.ethereum, [mintRoute()], pair);
+    } catch (e) {
+      unknownMsg = (e as Error).message;
+    }
+    record(
+      unknownMsg.includes("no EVM chain id is known") && unknownMsg.includes("destination chain 2"),
+      "assertDestination refuses a destination chain with no known EVM chain id",
+      () => console.log(`  message: ${unknownMsg || "(did not throw)"}`),
+    );
   }
 
   // Composition check (not a behavioral proof — see note): hydration.ts and base.ts each boot()
@@ -987,6 +1186,59 @@ async function main() {
     record(
       /\bprivateKeyBase\(\)/.test(baseSrc) && !/(?<!Base)\bprivateKey\(\)/.test(baseSrc),
       "composition: base.ts's code calls privateKeyBase(), never privateKey()",
+    );
+
+    // The key getters by their own names: `import { privateKey as privateKeyBase }` would make the
+    // calls above read right while resolving PRIVKEY.
+    const squash = (src: string) => src.replace(/\s+/g, " ");
+    record(
+      squash(baseSrc).includes('import { privateKeyBase } from "../../config";'),
+      "composition: base.ts imports privateKeyBase from ../../config under its own name, and nothing else from it",
+    );
+    record(
+      squash(hydrationSrc).includes('import { privateKey } from "../../config";'),
+      "composition: hydration.ts imports privateKey from ../../config under its own name, and nothing else from it",
+    );
+
+    // The client factory by its own name from its own module (an alias would let one chain's
+    // factory answer to the other's, and the call below would still read right).
+    record(
+      squash(baseSrc).includes('import { baseClients } from "../../engine/base";'),
+      "composition: base.ts imports baseClients from ../../engine/base under its own name",
+    );
+    record(
+      squash(hydrationSrc).includes('import { hydrationClients } from "../../engine/hydration";'),
+      "composition: hydration.ts imports hydrationClients from ../../engine/hydration under its own name",
+    );
+
+    // The wiring itself. makeApp is driven above with arguments chosen here, so an entry point that
+    // hands it the wrong namespace, destination, client factory or floors passes every functional
+    // check; only the entry's own text can show it.
+    record(
+      squash(baseSrc).includes(
+        "makeApp(APP_NAME_BASE, WORMHOLE.base, baseClients, RPC_BASE, key, FROM_SEQUENCE_FROM_HYDRATION)",
+      ),
+      "composition: base.ts hands makeApp Base's own namespace, destination, client factory, RPC and floors",
+    );
+    record(
+      squash(hydrationSrc).includes(
+        "makeApp(APP_NAME_HYDRATION, WORMHOLE.hydration, hydrationClients, RPC_HYDRATION, key, FROM_SEQUENCE_FROM_BASE)",
+      ),
+      "composition: hydration.ts hands makeApp Hydration's own namespace, destination, client factory, RPC and floors",
+    );
+
+    // The route table is checked first, through the lookup that also requires return routes.
+    const checksRoutesFirst = (src: string, chain: string, getter: string) => {
+      const at = src.indexOf(`servedRoutes(WORMHOLE.${chain})`);
+      return at !== -1 && at < src.indexOf(`${getter}()`);
+    };
+    record(
+      checksRoutesFirst(baseSrc, "base", "privateKeyBase"),
+      "composition: base.ts checks servedRoutes(WORMHOLE.base) before it resolves its key",
+    );
+    record(
+      checksRoutesFirst(hydrationSrc, "hydration", "privateKey"),
+      "composition: hydration.ts checks servedRoutes(WORMHOLE.hydration) before it resolves its key",
     );
   }
 

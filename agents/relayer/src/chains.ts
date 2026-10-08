@@ -52,6 +52,17 @@ export const robinhood = defineChain({
 });
 
 /**
+ * The EVM chain id behind each Wormhole chain id a PSM process delivers to. `makeApp` checks the
+ * clients it is handed against this, so an entry point that pairs the wrong client factory with a
+ * destination refuses to start instead of delivering to the wrong chain. A chain gets an entry here
+ * together with its entry point.
+ */
+export const EVM_CHAIN_ID: Record<number, number> = {
+  [WORMHOLE.base]: BASE_EVM_CHAIN_ID,
+  [WORMHOLE.hydration]: HYDRATION_EVM_CHAIN_ID,
+};
+
+/**
  * Teach relayer-engine's bundled `@certusone/wormhole-sdk` about chain 73.
  *
  * The SDK predates Hydration, so `coalesceChainId(73)` returns `undefined`. Everything downstream

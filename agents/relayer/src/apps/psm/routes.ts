@@ -1,4 +1,4 @@
-import { isAddress, type Address } from "viem";
+import { isAddress, isAddressEqual, zeroAddress, type Address } from "viem";
 
 import { WORMHOLE } from "../../chains";
 import type { ChainId } from "../../types";
@@ -118,9 +118,10 @@ const ADDRESS_FIELDS = ["sourceEmitter", "destinationContract"] as const;
 /**
  * Validate one address field, naming exactly which route and field is wrong, and distinguishing
  * "never filled in" from "filled in with something that isn't an address" — the two have different
- * fixes, and conflating them under one message ("is not set") was misleading for the second case.
+ * fixes — and from the zero address, which is a valid address and a call to it succeeds, so it
+ * would pass every later check and never deliver anything.
  *
- * @throws When the field is blank (never filled in) or present but not a valid address.
+ * @throws When the field is blank (never filled in), present but not a valid address, or zero.
  */
 function validateAddressField(route: PsmRoute, field: (typeof ADDRESS_FIELDS)[number]): void {
   const value = route[field];
@@ -134,19 +135,35 @@ function validateAddressField(route: PsmRoute, field: (typeof ADDRESS_FIELDS)[nu
       `psm route "${route.name}" ${field} "${value}" is not a valid address — fix it in apps/psm/routes.ts`,
     );
   }
+  if (isAddressEqual(value, zeroAddress)) {
+    throw new Error(
+      `psm route "${route.name}" ${field} is the zero address — fill it in apps/psm/routes.ts`,
+    );
+  }
 }
 
 /**
  * Validate one route's chain ids and addresses, naming exactly which route and which field is
  * wrong.
  *
+ * A route whose source and destination are the same chain is refused outright: it carries a message
+ * from a chain to itself, which no corridor does, and the usual way to write one is a chain id that
+ * typo'd into another known id — which passes the check above and, with no mirror to close against,
+ * the closure check as well.
+ *
  * @param route Route to check.
  * @returns The same route, for chaining in a `.map`.
- * @throws See `validateChainId` and `validateAddressField`.
+ * @throws See `validateChainId` and `validateAddressField`, or when both chains are the same.
  */
 function validateRoute(route: PsmRoute): PsmRoute {
   validateChainId(route, "sourceChain");
   validateChainId(route, "destinationChain");
+  if (route.sourceChain === route.destinationChain) {
+    throw new Error(
+      `psm route "${route.name}" sourceChain and destinationChain are both ${route.sourceChain} — ` +
+        `a route crosses chains — fix it in apps/psm/routes.ts`,
+    );
+  }
   for (const field of ADDRESS_FIELDS) {
     validateAddressField(route, field);
   }
@@ -241,6 +258,39 @@ export function routesFor(destinationChain: ChainId, table: PsmRoute[] = ROUTE_T
 
   const served = table.filter((route) => route.destinationChain === destinationChain);
   assertNoDuplicateSources(served);
+  return served;
+}
+
+/**
+ * `routesFor`, and every route it returns must have its return route in the table.
+ *
+ * Each PSM contract is both the receiver and the emitter of its own side, so a corridor is two
+ * routes that mirror each other: the same two chains, opposite directions. `routesFor` leaves a
+ * route with no mirror alone, because a table built for one direction is legitimate for the checks
+ * that drive it, but a process that serves the shipped table must refuse one: a chain id that
+ * typo'd into a third known chain leaves a route that no other row answers, subscribes under a
+ * chain nothing publishes on, and relays nothing, with no error. The entry points and `makeApp`
+ * use this one.
+ *
+ * @param destinationChain Wormhole chain id the calling process's wallet delivers to.
+ * @param table Route table, as for `routesFor`.
+ * @returns The routes landing on `destinationChain`, each with a mirror in `table`.
+ * @throws Whatever `routesFor` throws, or naming the route that has no return route.
+ */
+export function servedRoutes(destinationChain: ChainId, table: PsmRoute[] = ROUTE_TABLE): PsmRoute[] {
+  const served = routesFor(destinationChain, table);
+  for (const route of served) {
+    const back = table.find(
+      (r) => r !== route && r.sourceChain === route.destinationChain && r.destinationChain === route.sourceChain,
+    );
+    if (!back) {
+      throw new Error(
+        `psm route "${route.name}" runs from chain ${route.sourceChain} to chain ${route.destinationChain} ` +
+          `but no route runs back from ${route.destinationChain} to ${route.sourceChain} — a corridor needs ` +
+          `both directions — fix apps/psm/routes.ts`,
+      );
+    }
+  }
   return served;
 }
 

@@ -5,7 +5,7 @@ import { baseClients } from "../../engine/base";
 
 import { makeApp } from "./app";
 import { APP_NAME_BASE, FROM_SEQUENCE_FROM_HYDRATION, RPC_BASE } from "./config";
-import { routesFor } from "./routes";
+import { servedRoutes } from "./routes";
 
 /**
  * Entry point for the process that owns Base's wallet: submits every PSM route landing on Base
@@ -26,7 +26,7 @@ import { routesFor } from "./routes";
  * `PRIVKEY_BASE` nor the address fill set yet, so the route table is checked first.
  */
 boot("psm-base", async () => {
-  routesFor(WORMHOLE.base);
+  servedRoutes(WORMHOLE.base);
   const key = privateKeyBase();
   return makeApp(APP_NAME_BASE, WORMHOLE.base, baseClients, RPC_BASE, key, FROM_SEQUENCE_FROM_HYDRATION);
 });

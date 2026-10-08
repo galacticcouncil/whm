@@ -1,5 +1,6 @@
 import type { Hash } from "viem";
 
+import { EVM_CHAIN_ID } from "../../chains";
 import { alerts, engineConfig } from "../../config";
 import { createApp } from "../../engine/app";
 import { onEmitter } from "../../engine/emitter";
@@ -11,7 +12,7 @@ import type { ChainId, Next, RelayerApp, RelayerCtx } from "../../types";
 
 import { receiverAbi } from "./abi";
 import { RETRIES, RETRY_BASE_MS, RETRY_MAX_MS } from "./config";
-import { routesFor, type PsmRoute } from "./routes";
+import { servedRoutes, type PsmRoute } from "./routes";
 
 /**
  * Builds `{ account, publicClient, wallet }` for the destination this process owns, and asserts
@@ -21,6 +22,53 @@ import { routesFor, type PsmRoute } from "./routes";
  * how many destination chains exist.
  */
 export type ClientFactory = (rpcUrl: string, key: `0x${string}`) => Promise<ChainClients>;
+
+/**
+ * Refuse to start when the clients, or the routes' destination contracts on their chain, are not
+ * what the routes name. Each case below delivered nothing, silently, before this check existed:
+ * an entry point that paired the wrong client factory with its destination serves routes through
+ * another chain's wallet; a destination address with no code takes the call, mines, and spends gas
+ * for nothing, because a call to an address with no code succeeds.
+ *
+ * Both clients must be on the EVM chain the destination's Wormhole id stands for — the wallet
+ * signs for one and the public client simulates against the other, if a bundle was built by hand —
+ * and every served route's destination contract must have code on it. That a contract has code is
+ * all this proves: that it is the PSM contract bound to the route's source emitter needs a read of
+ * its `authorizedEmitters`, which fails legitimately before the bind.
+ *
+ * @param destinationChain Wormhole chain id this process delivers to.
+ * @param routes The routes it serves.
+ * @param clients The destination chain's account and clients.
+ * @throws Naming the chain ids or the route, when a client is on another chain, the destination
+ *   has no EVM chain id this app knows, or a served route's destination contract has no code.
+ */
+export async function assertDestination(
+  destinationChain: ChainId,
+  routes: PsmRoute[],
+  clients: ChainClients,
+): Promise<void> {
+  const expected = EVM_CHAIN_ID[destinationChain];
+  if (expected === undefined) {
+    throw new Error(`psm: no EVM chain id is known for destination chain ${destinationChain} (see EVM_CHAIN_ID in chains.ts)`);
+  }
+  const walletChain = clients.wallet.chain.id;
+  const publicChain = clients.publicClient.chain.id;
+  if (walletChain !== expected || publicChain !== expected) {
+    throw new Error(
+      `psm: destination chain ${destinationChain} is EVM chain ${expected}, but the wallet is on chain ${walletChain} ` +
+        `and the public client on chain ${publicChain} — the entry point wires the wrong client factory`,
+    );
+  }
+  for (const route of routes) {
+    const code = await clients.publicClient.getCode({ address: route.destinationContract });
+    if (!code || code === "0x") {
+      throw new Error(
+        `psm route "${route.name}" destinationContract ${route.destinationContract} has no code on chain ` +
+          `${destinationChain} — check apps/psm/routes.ts and the RPC`,
+      );
+    }
+  }
+}
 
 /**
  * Subscribe every route landing on `clients`'s chain, submitting each through the same queue and
@@ -89,7 +137,7 @@ export function wireRoutes(app: RelayerApp, routes: PsmRoute[], clients: ChainCl
  *
  * This is the whole reason a corridor addition can be "a route entry plus a funded wallet, no new
  * process": adding a route whose `destinationChain` already has a process just changes what
- * `routesFor` returns here, on the next deploy of that same process. A destination this process
+ * `servedRoutes` returns here, on the next deploy of that same process. A destination this process
  * does not yet cover is a new call site (see `hydration.ts` / `base.ts`) with its own
  * `ClientFactory`, RPC, and namespace — never a change to this function.
  *
@@ -104,8 +152,9 @@ export function wireRoutes(app: RelayerApp, routes: PsmRoute[], clients: ChainCl
  *   CALLER resolved this from; this function stays agnostic to that so it never has an opinion on
  *   which chain gets which key name.
  * @param startingSequence Cold-start floor per source chain this process subscribes to.
- * @throws When `routesFor` finds no route for `destinationChain`, or a matching route carries a
- *   blank or malformed address (see `./routes`).
+ * @throws When `servedRoutes` finds no route for `destinationChain` or refuses the table (a blank,
+ *   malformed or zero address, a route from a chain to itself, a route with no return route; see
+ *   `./routes`), or when `assertDestination` refuses the clients or a destination contract.
  */
 export async function makeApp(
   name: string,
@@ -115,12 +164,13 @@ export async function makeApp(
   key: `0x${string}`,
   startingSequence?: Record<ChainId, bigint>,
 ): Promise<void> {
-  const routes = routesFor(destinationChain);
+  const routes = servedRoutes(destinationChain);
   if (routes.length === 0) {
     throw new Error(`psm: no routes configured for destination chain ${destinationChain}`);
   }
 
   const clients = await clientFactory(rpcUrl, key);
+  await assertDestination(destinationChain, routes, clients);
   const { account, publicClient } = clients;
 
   const queue = createQueue({ publicClient, account, ...alerts() });

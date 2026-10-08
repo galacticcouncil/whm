@@ -72,9 +72,13 @@ Both read one route table ([routes.ts](src/apps/psm/routes.ts)), keyed by destin
 names a source emitter and chain and a destination contract and chain; nothing about direction is
 built in, so a corridor whose destinations are already served is more rows, not more code. The table
 ships blank — the addresses come from the `psm-base` migration — and both processes refuse to start
-while any address is blank or malformed, a chain id is unknown, the two routes' contracts do not pair
-up, or two routes share a source. The pairing check is relative: it cannot tell the two real
-addresses from each other swapped consistently across both routes.
+while any address is blank, malformed or zero, a chain id is unknown, a route runs from a chain to
+itself, a served route has no return route, the two routes' contracts do not pair up, or two routes
+share a source. Once the clients exist they refuse again if either client is on another chain than
+the destination's, or if a served route's destination contract has no code. The pairing check is
+relative: it cannot tell the two real addresses from each other swapped consistently across both
+routes, and the code check proves a contract is there, not that it is the PSM contract bound to the
+route's source emitter.
 
 Reverts are named by [abi.ts](src/apps/psm/abi.ts). A second signed copy of a message a receiver
 already consumed (`MessageAlreadyProcessed`, which a source-chain reorg can cause) is done; everything

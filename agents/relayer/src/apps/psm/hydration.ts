@@ -5,7 +5,7 @@ import { hydrationClients } from "../../engine/hydration";
 
 import { makeApp } from "./app";
 import { APP_NAME_HYDRATION, FROM_SEQUENCE_FROM_BASE, RPC_HYDRATION } from "./config";
-import { routesFor } from "./routes";
+import { servedRoutes } from "./routes";
 
 /**
  * Entry point for the process that owns Hydration's wallet: submits every PSM route landing on
@@ -40,7 +40,7 @@ import { routesFor } from "./routes";
  * one error that actually shows up first is the one worth acting on first.
  */
 boot("psm-hydration", async () => {
-  routesFor(WORMHOLE.hydration);
+  servedRoutes(WORMHOLE.hydration);
   const key = privateKey();
   return makeApp(APP_NAME_HYDRATION, WORMHOLE.hydration, hydrationClients, RPC_HYDRATION, key, FROM_SEQUENCE_FROM_BASE);
 });
