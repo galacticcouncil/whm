@@ -19,8 +19,24 @@ export const APP_NAME_BASE = opt("APP_NAME_PSM_BASE", "psm-base-relayer");
 export const RPC_HYDRATION = rpc("hydration", "https://hydration-rpc.n.dwellir.com");
 export const RPC_BASE = rpc("base", "https://mainnet.base.org");
 
-/** Total attempts per VAA before the engine gives up. Same policy as ntt/oracle. */
-export const RETRIES = 8;
+/**
+ * Some failures here are transient by design, and the contracts keep the VAA replayable through
+ * them: the vault refuses to send back a redemption that landed above its fee limit while claims
+ * are paused (`ClaimsPaused`) and expects the delivery to land once they resume
+ * (`docs/psm/spec.md`, "A redemption carries its own fee limit"); neither receiver takes a message
+ * before its emitter is bound (`EmitterNotSet`). So the budget spans an incident, as basejump's
+ * does, not a blip.
+ *
+ * It takes both numbers. Without a backoff the engine adds no delay between attempts —
+ * relayer-engine's `redis-storage` gives a job BullMQ's custom backoff only when `retryBackoffOptions`
+ * is set, and a BullMQ job without one is retried at once — so ntt's and oracle's 8 attempts are
+ * spent in seconds. Here the backoff is min(2^attempt * base, max), attempt from 1: 2, 4, 8, 16, 30,
+ * 30, … min — 250 attempts is about five days. A job that exhausts it parks in `failed` and nothing
+ * replays it.
+ */
+export const RETRIES = 250;
+export const RETRY_BASE_MS = 60_000;
+export const RETRY_MAX_MS = 30 * 60_000;
 
 /**
  * Cold-start floor per source chain — missed-VAA cursors are keyed by (source chain, source

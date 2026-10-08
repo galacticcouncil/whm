@@ -1,7 +1,19 @@
 import { BaseError, ContractFunctionRevertedError } from "viem";
 
-/** Custom-error names meaning the work is already done — ours and NTT's. Matched whole. */
-const DONE_ERRORS = new Set(["AlreadyRedeemed", "TransferAlreadyCompleted", "StalePriceUpdate"]);
+/**
+ * Custom-error names meaning the work is already done — ours and NTT's. Matched whole.
+ *
+ * `MessageAlreadyProcessed` is the PSM receivers': they record each message they consume by
+ * sequence and payload, because the inherited replay guard keys on the VAA hash, and the guardians
+ * sign a message again under a new hash when a source-chain reorg re-includes it. The effect of the
+ * first copy stands, so the second has nothing left to do.
+ */
+const DONE_ERRORS = new Set([
+  "AlreadyRedeemed",
+  "TransferAlreadyCompleted",
+  "StalePriceUpdate",
+  "MessageAlreadyProcessed",
+]);
 
 /**
  * Require-string reverts meaning the same. The token bridge and NTT revert with strings, which

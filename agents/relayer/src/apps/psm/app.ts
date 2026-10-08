@@ -1,5 +1,3 @@
-import { parseAbi } from "viem";
-
 import { alerts, engineConfig } from "../../config";
 import { createApp } from "../../engine/app";
 import { onEmitter } from "../../engine/emitter";
@@ -9,7 +7,8 @@ import { receiveMessage } from "../../engine/hydration";
 import logger from "../../logger";
 import type { ChainId, Next, RelayerApp, RelayerCtx } from "../../types";
 
-import { RETRIES } from "./config";
+import { receiverAbi } from "./abi";
+import { RETRIES, RETRY_BASE_MS, RETRY_MAX_MS } from "./config";
 import { routesFor, type PsmRoute } from "./routes";
 
 /**
@@ -20,8 +19,6 @@ import { routesFor, type PsmRoute } from "./routes";
  * how many destination chains exist.
  */
 export type ClientFactory = (rpcUrl: string, key: `0x${string}`) => Promise<ChainClients>;
-
-const receiverAbi = parseAbi(["function receiveMessage(bytes vaa) external"]);
 
 /**
  * Subscribe every route landing on `clients`'s chain, submitting each through the same queue and
@@ -116,7 +113,12 @@ export async function makeApp(
     logger.info(`  ${route.name}: ${route.sourceEmitter} @ ${route.sourceChain} -> ${route.destinationContract}`);
   }
 
-  const app = createApp(engineConfig(), { name, retries: RETRIES, startingSequence });
+  const app = createApp(engineConfig(), {
+    name,
+    retries: RETRIES,
+    backoff: { baseMs: RETRY_BASE_MS, maxMs: RETRY_MAX_MS },
+    startingSequence,
+  });
 
   wireRoutes(app, routes, clients, queue);
 

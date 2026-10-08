@@ -59,6 +59,14 @@ export interface PsmRoute {
  *     HollarBaseFacilitator.redeem, and from the facilitator's cancel of a re-mint-derived pending
  *     mint. Kind 3 comes from its cancel of a deposit-derived pending mint (cancelPendingMint,
  *     cancelPendingMintFor).
+ *
+ * Consistency, which sets when each message exists as a VAA at all. The vault chooses it per call
+ * site (`_publish`): a deposit goes at 200, instant, and everything else it sends at 1, finalized —
+ * its cancels and a returned redemption. The facilitator publishes every message it sends at 1,
+ * redemptions included. The spec puts finality at about 17 minutes on Base and under a minute on
+ * Hydration (docs/psm/spec.md, "Flow"), so only a deposit is signed on inclusion. Nothing here
+ * depends on that: the engine hands a handler a VAA once the guardians have signed it, at
+ * whatever level, and the body it carries is 100 bytes (`PsmPayload`) that this app never reads.
  */
 const ROUTE_TABLE: PsmRoute[] = [
   {

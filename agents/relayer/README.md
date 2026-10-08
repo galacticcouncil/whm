@@ -76,6 +76,11 @@ while any address is blank or malformed, a chain id is unknown, the two routes' 
 up, or two routes share a source. The pairing check is relative: it cannot tell the two real
 addresses from each other swapped consistently across both routes.
 
+Reverts are named by [abi.ts](src/apps/psm/abi.ts). A second signed copy of a message a receiver
+already consumed (`MessageAlreadyProcessed`, which a source-chain reorg can cause) is done; everything
+else is retried, and the budget is about five days, because a delivery can fail for as long as a
+claims pause lasts and the contracts keep the VAA replayable through it.
+
 `psm-hydration` signs with `PRIVKEY`, a key of its own like every other Hydration app's; `psm-base`
 signs with `PRIVKEY_BASE`, which never falls back to `PRIVKEY`. Namespaces are `psm-hydration-relayer`
 and `psm-base-relayer`, overridden by `APP_NAME_PSM_HYDRATION` and `APP_NAME_PSM_BASE`.
@@ -120,15 +125,18 @@ pnpm --filter @whm/relayer mainnet-spy
 
 ## Verification
 
-There is no test suite. Three scripts run offline against a mocked JSON-RPC transport, need no secrets,
+There is no test suite. Four scripts run offline against a mocked JSON-RPC transport, need no secrets,
 and exit non-zero on a failed check:
 
 ```bash
 pnpm --filter @whm/relayer verify:hydration-fees  # fee pricing through submit(), per chain
 pnpm --filter @whm/relayer verify:base-clients    # Base client: chain id, key isolation, fees
 pnpm --filter @whm/relayer verify:psm-app         # psm routes: refuse-to-start, destination keying
+pnpm --filter @whm/relayer verify:psm-reverts <path to contracts/src>
 ```
 
+`verify:psm-reverts` checks the psm app's revert handling against the PSM contracts' source, so it
+takes the path to a `contracts/src` (or `PSM_CONTRACTS_SRC`) and exits 1 rather than skip without one.
 The type check is `tsc -p agents/relayer --noEmit` from the repo root; it covers `src/`, not `scripts/`.
 
 ## Production
