@@ -336,9 +336,10 @@ record(
 
 // Neither receiver calls `super._processMessage`: each overrides it completely. The base body is
 // therefore on the walk only because a reference's own body is followed as well as its override,
-// which is the property that lets an error behind a `super` call be seen. Once a receiver does
-// call super, the base body is on the walk either way and this check stops telling the two
-// behaviours apart.
+// which is the property that lets an error behind a `super` call be seen. A walk that followed the
+// override alone would lose the base body whether or not a receiver calls super, because the
+// compiler resolves a `super` call to the base body's id and the override mapping sends that back
+// to the override. So this check goes red for that walk in both cases.
 record(
   receivers.every((r) => r.functions.has("MessageReceiver._processMessage")),
   "the walk also reads the body a reference names, not only the receiver's override, so an error behind a super call is seen",

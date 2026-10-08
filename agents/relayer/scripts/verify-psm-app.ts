@@ -135,7 +135,8 @@ interface MockState {
   chainId: number;
   /**
    * What `eth_getTransactionReceipt` serves: a mined success, a mined revert, nothing yet, or a
-   * success for another transaction (what viem hands back once it sees the delivery replaced).
+   * success for another transaction (what viem hands back once it sees the delivery replaced; a
+   * node never answers the original hash with another transaction's receipt).
    */
   receipt: "success" | "reverted" | "replaced" | "absent";
   /** When set, `eth_call` reverts with this data instead of succeeding. */
@@ -1379,6 +1380,8 @@ async function main() {
     // Replaced: another transaction from the same key took the delivery's nonce and mined. viem
     // follows the replacement and returns that transaction's receipt, which says success, so the
     // handler has to check whose receipt it holds. It rejects for a retry, which simulates again.
+    // The mock hands that receipt back for the original hash, which a node never does, so this
+    // exercises the comparison and not viem's replacement detection.
     mock.state.receipt = "replaced";
     const replaced = await run(13n);
     const replacedMsg = replaced.error instanceof Error ? replaced.error.message : "";
