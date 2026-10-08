@@ -84,7 +84,10 @@ Reverts are named by [abi.ts](src/apps/psm/abi.ts). A second signed copy of a me
 already consumed (`MessageAlreadyProcessed`, which a source-chain reorg can cause) is done;
 everything else is retried. That includes a delivery that simulated clean and then mined as
 reverted, which the queue alone counts as done once the transaction is broadcast: the handler reads
-each receipt and throws on a revert, so the engine retries the job.
+each receipt and throws on a revert, so the engine retries the job. The receipt has to be for the
+transaction the delivery sent. viem's receipt wait follows a transaction replaced at the same nonce
+and returns the replacement's receipt, which the handler refuses, so a replaced delivery is retried
+rather than counted as landed.
 
 The retry budget is 250 attempts with a backoff of 2^attempt x 60 s capped at 30 min, about 5.1 days,
 because a delivery can fail for as long as a claims pause lasts and the contracts keep the VAA
@@ -92,6 +95,28 @@ replayable through it. A refusal that outlasts it leaves the job in the engine's
 nothing re-queues it, a restart included: the spy does not replay, the missed-VAA worker already
 counts the sequence as seen, and the job id exists. Recover by submitting the VAA bytes to
 `receiveMessage` yourself (the call is permissionless), or by retrying the failed job in Redis.
+
+A receipt that does not appear within viem's 180 s default fails the attempt, and the engine retries
+the job while the first transaction may still be pending. What the retry does then depends on the
+node, because viem simulates it against the latest block but sends `eth_estimateGas` with no block
+tag, so the node's own default decides:
+
+- If that default is the latest block, the retry broadcasts a duplicate. It reverts once the first
+  transaction lands (the duplicate pays for the core's signature check, then fails at the replay
+  guard), so the cost is one reverted transaction's gas per retry that ran in that window. Nothing
+  is delivered twice: the receivers refuse a message they already consumed.
+- If that default is the pending block (anvil's is), the estimate sees the first transaction and
+  reverts as already processed, so the retry counts the job done with nothing mined. Should that
+  transaction be evicted from the pool afterwards, the delivery is lost and its job is complete;
+  recover it as a parked job is recovered, by submitting the VAA to `receiveMessage`.
+- A transaction that leaves the pool without mining leaves a gap in the wallet's nonce. The shared
+  queue reads the nonce at start and reloads it only on "nonce too low", so the gap holds back every
+  later transaction from that wallet until the process restarts. This is in the shared queue, not
+  in the psm app, and every app on the queue has it.
+
+Closing this takes two changes: the handler remembering each message's in-flight transaction, so a
+retry checks that transaction before it sends another, and the queue resynchronising its nonce when a
+sent transaction disappears from the pool.
 
 `psm-hydration` signs with `PRIVKEY`, a key of its own like every other Hydration app's; `psm-base`
 signs with `PRIVKEY_BASE`, which never falls back to `PRIVKEY`. Nothing compares the keys across
@@ -156,8 +181,8 @@ pnpm --filter @whm/relayer verify:psm-reverts <path to contracts>
 
 `verify:psm-reverts` checks the psm app's revert handling against the PSM contracts as compiled. It
 builds them with forge into a temporary directory (a few seconds), walks the call graph from
-`receiveMessage` in the compiler's AST to find every custom error a delivery can raise, and compares
-that set, and each signature, with `receiverAbi`. It takes the path to a `contracts` directory (or
+`receiveMessage` in the compiler's AST (virtual, `super` and library calls included) to find every
+custom error a delivery can raise, and compares that set, and each signature, with `receiverAbi`. It takes the path to a `contracts` directory (or
 `PSM_CONTRACTS_DIR`), needs Foundry and the contracts' installed dependencies, and exits 1 rather than
 skip without them.
 The type check is `tsc -p agents/relayer --noEmit` from the repo root; it covers `src/`, not `scripts/`.
