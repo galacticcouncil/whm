@@ -571,8 +571,8 @@ async function main() {
         () => console.log("  ", unnamed),
       );
 
-      // Construct the failure the declarations prevent. Same revert data, simulated with an ABI
-      // that has no error entries — what this app used before: the refused copy is not recognised.
+      // Construct the failure the declarations prevent: the same revert data, simulated with an ABI
+      // that has no error entries, is not recognised as a refused copy.
       const bare = parseAbi(["function receiveMessage(bytes vaa) external"]);
       const sig = [...declared.get("MessageAlreadyProcessed")!][0]!;
       outcome = { kind: "revert", data: revertData(sig) };

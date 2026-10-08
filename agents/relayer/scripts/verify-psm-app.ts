@@ -11,8 +11,8 @@
  *
  * It also covers: distinct `APP_NAME` env vars per process (checked by spawning real
  * subprocesses — module-level `opt()` calls cannot be re-probed in-process); chain-id
- * validation, including the destination-chain-typo silent-drop case reproduced against a
- * deliberately unfixed reimplementation so the regression it closes is evidence, not assertion;
+ * validation, including the destination-chain-typo silent-drop case, reproduced against a
+ * reimplementation without the chain-id check so the failure it prevents is evidence, not assertion;
  * the corridor closure invariant and the duplicate-source guard; an adaptive shipped-table check
  * that stays green across the address fill (plus a synthetic filled table exercised today); Base's
  * key isolation (composition check on the entry files, plus a functional proof that `makeApp`
@@ -295,9 +295,9 @@ async function invoke(
 }
 
 /**
- * The pre-fix shape of `routesFor`: filters and validates addresses on the SERVED subset only,
- * with no chain-id check at all. Used once, below, to reproduce — not assert — that a typo'd
- * `destinationChain` used to vanish silently rather than refuse to start.
+ * A `routesFor` without the chain-id check: it filters and validates addresses on the SERVED subset
+ * only. Used once, below, to reproduce — not assert — that a typo'd `destinationChain` then vanishes
+ * silently instead of refusing to start.
  */
 function legacyRoutesForNoChainCheck(destinationChain: number, table: PsmRoute[]): PsmRoute[] {
   return table
@@ -410,10 +410,9 @@ async function main() {
 
   /**
    * The adaptive shipped-table check: asserts the right thing for whichever state `table` is
-   * actually in. Exercised against the real `ROUTE_TABLE` below, and — to prove the fix, not just
-   * apply it — against four synthetic states covering both half-filled orientations plus the
-   * fully-blank and fully-filled ends, none of which depend on `ROUTE_TABLE`'s real (currently
-   * fully-blank) state.
+   * actually in. Exercised against the real `ROUTE_TABLE` below, and against four synthetic states
+   * covering both half-filled orientations plus the fully-blank and fully-filled ends, none of which
+   * depend on `ROUTE_TABLE`'s real (currently fully-blank) state.
    */
   function checkAdaptiveTableState(table: PsmRoute[], label: string): void {
     const mint = table.find((r) => r.name === "mint")!;
@@ -459,8 +458,8 @@ async function main() {
   checkAdaptiveTableState(ROUTE_TABLE, "shipped ROUTE_TABLE");
   record(ROUTE_TABLE.length === 2, "shipped ROUTE_TABLE carries exactly the two launch routes");
 
-  // The four states, independent of ROUTE_TABLE's real state — proves the fix, not just the live
-  // table's current (fully-blank) case.
+  // The four states, independent of ROUTE_TABLE's real state: the check holds for each of them, not
+  // only for the live table's current (fully-blank) case.
   const blankMint = { ...mintRoute(), sourceEmitter: "" as Address, destinationContract: "" as Address };
   const blankRedeem = { ...redeemRoute(), sourceEmitter: "" as Address, destinationContract: "" as Address };
   checkAdaptiveTableState([blankMint, blankRedeem], "synthetic table, fully blank");
@@ -604,9 +603,9 @@ async function main() {
     record(restoredOk, "chain-id: restoring sourceChain to a real chain starts clean again");
   }
 
-  // 2b. A typo'd destinationChain used to silently drop the route and let the survivor start —
-  // reproduce that against the pre-fix reimplementation, then show the real routesFor refuses
-  // instead.
+  // 2b. Without the chain-id check, a typo'd destinationChain silently drops the route and lets the
+  // survivor start. Reproduce that against a reimplementation without the check, then show the real
+  // routesFor refuses instead.
   {
     const healthy = [mintRoute(), redeemRoute()];
     const corrupted = [mintRoute(), { ...redeemRoute(), destinationChain: 424_242 }];
@@ -617,10 +616,10 @@ async function main() {
       "chain-id baseline: the healthy mint/redeem pair serves both destinations cleanly",
     );
 
-    // Reproduce the bug this closes: the pre-fix routesFor (no chain-id pre-pass) never even looks
-    // at "redeem"'s destinationChain unless something asks for chain 424242 — which nothing ever
-    // does — so it just vanishes from both processes' filters, and the survivor (mint) looks like a
-    // complete, healthy 1-route table.
+    // Reproduce the failure the check prevents: a routesFor with no chain-id pre-pass never even
+    // looks at "redeem"'s destinationChain unless something asks for chain 424242 — which nothing
+    // ever does — so the route vanishes from both processes' filters, and the survivor (mint) looks
+    // like a complete, healthy 1-route table.
     const legacyServed = legacyRoutesForNoChainCheck(WORMHOLE.hydration, corrupted);
     record(
       legacyServed.length === 1 && legacyServed[0]!.name === "mint",
@@ -884,8 +883,8 @@ async function main() {
     );
   }
 
-  // Mutation: reintroduce the exact defect this section guards against — a wireRoutes that
-  // subscribes every route under one hardcoded chain instead of reading route.sourceChain.
+  // Mutation: a wireRoutes that subscribes every route under one hardcoded chain instead of reading
+  // route.sourceChain, the defect this section guards against.
   function brokenWireRoutesHardcodesHydrationAsSource(
     app: RelayerApp,
     routes: PsmRoute[],
@@ -893,7 +892,7 @@ async function main() {
     queue: { add(task: CapturedTask): Promise<void> },
   ): void {
     for (const route of routes) {
-      onEmitter(app, WORMHOLE.hydration /* BUG: ignores route.sourceChain */, route.sourceEmitter, (async (
+      onEmitter(app, WORMHOLE.hydration /* the mutant: ignores route.sourceChain */, route.sourceEmitter, (async (
         ctx: RelayerCtx,
         next: Next,
       ) => {
@@ -977,8 +976,8 @@ async function main() {
     record(to?.toLowerCase() === ADDR_C.toLowerCase(), "second route submits to its own destinationContract (C)");
   }
 
-  // Mutation: the classic "forgot to loop" bug — a wireRoutes that only ever wires the first
-  // route in the list. A second-route addition would silently do nothing.
+  // Mutation: a wireRoutes that only ever wires the first route in the list, so a second-route
+  // addition would silently do nothing.
   function brokenWireRoutesFirstOnly(
     app: RelayerApp,
     routes: PsmRoute[],
@@ -1277,9 +1276,9 @@ async function main() {
       () => console.log("  got:", bothSet),
     );
 
-    // Mutation sanity: reproduce the OLD bug (both reading the literal "APP_NAME") against the
-    // real `opt()` helper, and confirm it really does collapse the two — proving this check can
-    // tell the fixed shape from the broken one.
+    // Mutation sanity: both processes reading the literal "APP_NAME" through the real `opt()` helper
+    // really do collapse onto one namespace, which shows this check can tell the per-process shape
+    // from a shared one.
     const legacyProbe = `
       import { opt } from "../src/config";
       console.log(JSON.stringify({
