@@ -132,8 +132,11 @@ type JsonRpcRequest = { jsonrpc: "2.0"; id: number; method: string; params?: unk
 interface MockState {
   /** Answer to `eth_chainId`. */
   chainId: number;
-  /** What `eth_getTransactionReceipt` serves: a mined success, a mined revert, or nothing yet. */
-  receipt: "success" | "reverted" | "absent";
+  /**
+   * What `eth_getTransactionReceipt` serves: a mined success, a mined revert, nothing yet, or a
+   * success for another transaction (what viem hands back once it sees the delivery replaced).
+   */
+  receipt: "success" | "reverted" | "replaced" | "absent";
   /** When set, `eth_call` reverts with this data instead of succeeding. */
   callRevert: Hex | undefined;
   /** Lowercased addresses that `eth_getCode` reports as having no code. */
@@ -201,9 +204,9 @@ function installMock() {
                   gasUsed: "0x5208",
                   logs: [],
                   logsBloom: `0x${"00".repeat(256)}`,
-                  status: state.receipt === "success" ? "0x1" : "0x0",
+                  status: state.receipt === "reverted" ? "0x0" : "0x1",
                   to: `0x${"22".repeat(20)}`,
-                  transactionHash: (params as [Hex])[0],
+                  transactionHash: state.receipt === "replaced" ? `0x${"33".repeat(32)}` : (params as [Hex])[0],
                   transactionIndex: "0x0",
                   type: "0x2",
                 },
@@ -1352,6 +1355,22 @@ async function main() {
         revertedMsg.includes("reverted on chain"),
       "receipt: a delivery that mines and reverts rejects the handler for a retry, naming the route, and never calls next()",
       () => console.log("  ", { ...reverted, message: revertedMsg || "(did not throw)" }),
+    );
+
+    // Replaced: another transaction from the same key took the delivery's nonce and mined. viem
+    // follows the replacement and returns that transaction's receipt, which says success, so the
+    // handler has to check whose receipt it holds. It rejects for a retry, which simulates again.
+    mock.state.receipt = "replaced";
+    const replaced = await run(13n);
+    const replacedMsg = replaced.error instanceof Error ? replaced.error.message : "";
+    record(
+      replaced.sent === 1 &&
+        replaced.nexted === 0 &&
+        replacedMsg.includes("mint") &&
+        replacedMsg.includes("was replaced by") &&
+        replacedMsg.includes("33".repeat(32)),
+      "receipt: a delivery whose receipt is for another transaction (a replacement) rejects the handler for a retry, naming the route",
+      () => console.log("  ", { ...replaced, message: replacedMsg || "(did not throw)" }),
     );
 
     // Already done: nothing is sent, so there is no receipt to read, and the job resolves.

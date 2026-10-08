@@ -120,6 +120,14 @@ export function wireRoutes(app: RelayerApp, routes: PsmRoute[], clients: ChainCl
       });
       if (sent.hash) {
         const receipt = await clients.publicClient.waitForTransactionReceipt({ hash: sent.hash });
+        // viem follows a replacement at the same nonce and returns the replacing transaction's
+        // receipt, so a success here can belong to some other transaction. Only a receipt for this
+        // delivery's own hash counts. After a replacement the retry simulates again: when the
+        // replacement carried this same delivery (a gas bump), the message reads as processed and
+        // the retry resolves; when it carried anything else, the retry delivers.
+        if (receipt.transactionHash.toLowerCase() !== sent.hash.toLowerCase()) {
+          throw new Error(`psm ${route.name}: delivery ${sent.hash} was replaced by ${receipt.transactionHash}`);
+        }
         if (receipt.status !== "success") {
           throw new Error(`psm ${route.name}: delivery ${sent.hash} reverted on chain`);
         }
