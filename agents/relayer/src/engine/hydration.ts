@@ -21,8 +21,8 @@ import { chainFees } from "../utils/fees";
  * hardcoding Hydration, so the same function can in principle submit to Base or another EVM
  * chain. Only Hydration is wired up, built, and exercised in this repo today: `hydrationClients`
  * is the only factory, `ntt`/`oracle` are its only callers, and `scripts/verify-hydration-fees.ts`
- * only tests the Hydration path. A Base client/chain and its own exercise is issue #46; nothing in
- * this file builds or runs against Base.
+ * exercises the generic branch only against offline chain objects over a mocked transport. A Base
+ * client/chain and its own exercise is issue #46; nothing in this file builds or runs against Base.
  */
 
 /**
@@ -38,8 +38,8 @@ import { chainFees } from "../utils/fees";
  * generics — nothing in the type stops a hand-built value from pairing a `publicClient` built
  * against one chain with a `wallet` built against another, and such a value still typechecks and
  * still signs, silently, for whichever chain `wallet.chain` names (`scripts/verify-hydration-fees.ts`'s
- * `genericClients()` builds a `ChainClients` by hand for exactly this reason — to exercise the
- * generic branch and its E2/E3 mutants — and nothing there enforces the pairing either). The actual
+ * `genericClients()` builds a `ChainClients` by hand to exercise the generic branch; it happens to
+ * build both clients from one chain object, but nothing in the type required it to). The actual
  * guard is procedural, not type-level: `hydrationClients` below is the only function in this repo
  * that produces a `ChainClients`, and it builds `publicClient` and `wallet` from the same
  * `hydration` chain object in the same call. A second factory (Base's, when #46 adds one) has to
@@ -123,7 +123,7 @@ export async function submit(clients: ChainClients, call: Call, nonce: number): 
  * chain `clients` was built against. A thin wrapper around `submit` for this repo's one call
  * shape.
  *
- * @param clients Account, clients, and chain for the destination (see `ChainClients`).
+ * @param clients Account and clients for the destination (see `ChainClients`).
  * @param abi ABI carrying `receiveMessage(bytes)`.
  * @param to Contract that consumes the VAA.
  * @param vaaBytes The guardian-signed VAA.
