@@ -299,12 +299,12 @@ async function invoke(
  * only. Used once, below, to reproduce — not assert — that a typo'd `destinationChain` then vanishes
  * silently instead of refusing to start.
  */
-function legacyRoutesForNoChainCheck(destinationChain: number, table: PsmRoute[]): PsmRoute[] {
+function routesForWithoutChainCheck(destinationChain: number, table: PsmRoute[]): PsmRoute[] {
   return table
     .filter((r) => r.destinationChain === destinationChain)
     .map((route) => {
       for (const field of ["sourceEmitter", "destinationContract"] as const) {
-        if (!isAddress(route[field])) throw new Error(`legacy: blank/malformed ${field}`);
+        if (!isAddress(route[field])) throw new Error(`without the chain check: blank or malformed ${field}`);
       }
       return route;
     });
@@ -620,10 +620,10 @@ async function main() {
     // looks at "redeem"'s destinationChain unless something asks for chain 424242 — which nothing
     // ever does — so the route vanishes from both processes' filters, and the survivor (mint) looks
     // like a complete, healthy 1-route table.
-    const legacyServed = legacyRoutesForNoChainCheck(WORMHOLE.hydration, corrupted);
+    const servedWithoutCheck = routesForWithoutChainCheck(WORMHOLE.hydration, corrupted);
     record(
-      legacyServed.length === 1 && legacyServed[0]!.name === "mint",
-      "mutation sanity: the pre-fix routesFor (no chain-id check) really did silently drop the corrupted route and start on the survivor",
+      servedWithoutCheck.length === 1 && servedWithoutCheck[0]!.name === "mint",
+      "mutation sanity: a routesFor without the chain-id check silently drops the corrupted route and starts on the survivor",
     );
 
     // The real routesFor refuses instead, naming the corrupted route and field.
@@ -1279,18 +1279,18 @@ async function main() {
     // Mutation sanity: both processes reading the literal "APP_NAME" through the real `opt()` helper
     // really do collapse onto one namespace, which shows this check can tell the per-process shape
     // from a shared one.
-    const legacyProbe = `
+    const sharedNameProbe = `
       import { opt } from "../src/config";
       console.log(JSON.stringify({
         hydration: opt("APP_NAME", "psm-hydration-relayer"),
         base: opt("APP_NAME", "psm-base-relayer"),
       }));
     `;
-    const legacyCollapsed = JSON.parse(await runInSubprocess(legacyProbe, { APP_NAME: "collapsed" }));
+    const sharedNameResult = JSON.parse(await runInSubprocess(sharedNameProbe, { APP_NAME: "collapsed" }));
     record(
-      legacyCollapsed.hydration === "collapsed" && legacyCollapsed.base === "collapsed",
-      "mutation sanity: the pre-fix shape (both reading APP_NAME) really does collapse both processes onto one value",
-      () => console.log("  got:", legacyCollapsed),
+      sharedNameResult.hydration === "collapsed" && sharedNameResult.base === "collapsed",
+      "mutation sanity: two processes reading one APP_NAME really do collapse onto one value",
+      () => console.log("  got:", sharedNameResult),
     );
   }
 
