@@ -27,10 +27,12 @@ import { rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isAddress, pad, parseTransaction, type Address, type Hex } from "viem";
+import { encodeErrorResult, isAddress, pad, parseTransaction, type Address, type Hex } from "viem";
 
 import { onEmitter } from "../src/engine/emitter";
 import { hydrationClients, receiveMessage, type ChainClients } from "../src/engine/hydration";
+import { createQueue } from "../src/engine/queue";
+import { receiverAbi } from "../src/apps/psm/abi";
 import { makeApp, wireRoutes, type ClientFactory } from "../src/apps/psm/app";
 import { ROUTE_TABLE, routesFor, type PsmRoute } from "../src/apps/psm/routes";
 import { WORMHOLE } from "../src/chains";
@@ -114,28 +116,86 @@ function redeemRoute(): PsmRoute {
 
 type JsonRpcRequest = { jsonrpc: "2.0"; id: number; method: string; params?: unknown[] };
 
+/** What the mock answers. A scenario changes it between calls; `requests` records what was asked. */
+interface MockState {
+  /** Answer to `eth_chainId`. */
+  chainId: number;
+  /** What `eth_getTransactionReceipt` serves: a mined success, a mined revert, or nothing yet. */
+  receipt: "success" | "reverted" | "absent";
+  /** When set, `eth_call` reverts with this data instead of succeeding. */
+  callRevert: Hex | undefined;
+  /** Lowercased addresses that `eth_getCode` reports as having no code. */
+  noCode: Set<string>;
+  /** Every method requested, in order. */
+  requests: string[];
+}
+
 function installMock() {
   const original = globalThis.fetch;
   const rawTxs: Hex[] = [];
+  const state: MockState = {
+    chainId: HYDRATION_CHAIN_ID,
+    receipt: "success",
+    callRevert: undefined,
+    noCode: new Set(),
+    requests: [],
+  };
 
   function answer(req: JsonRpcRequest) {
     const { id, method, params } = req;
+    state.requests.push(method);
     switch (method) {
       case "eth_chainId":
-        return { jsonrpc: "2.0" as const, id, result: `0x${HYDRATION_CHAIN_ID.toString(16)}` };
+        return { jsonrpc: "2.0" as const, id, result: `0x${state.chainId.toString(16)}` };
       case "eth_call":
-        return { jsonrpc: "2.0" as const, id, result: "0x" };
+        return state.callRevert
+          ? { jsonrpc: "2.0" as const, id, error: { code: 3, message: "execution reverted", data: state.callRevert } }
+          : { jsonrpc: "2.0" as const, id, result: "0x" };
+      case "eth_getCode":
+        return {
+          jsonrpc: "2.0" as const,
+          id,
+          result: state.noCode.has(String((params as [string])[0]).toLowerCase()) ? "0x" : "0x6001600155",
+        };
       case "eth_estimateGas":
         return { jsonrpc: "2.0" as const, id, result: "0x30d40" }; // 200_000
       case "eth_getBlockByNumber":
         return { jsonrpc: "2.0" as const, id, result: { number: "0x1", baseFeePerGas: undefined } };
       case "eth_gasPrice":
         return { jsonrpc: "2.0" as const, id, result: "0x12a05f200" }; // 5 gwei
+      case "eth_getBalance":
+        return { jsonrpc: "2.0" as const, id, result: `0x${(10n ** 18n).toString(16)}` };
+      case "eth_getTransactionCount":
+        return { jsonrpc: "2.0" as const, id, result: "0x0" };
       case "eth_maxPriorityFeePerGas":
         return { jsonrpc: "2.0" as const, id, error: { code: -32601, message: "Method not found" } };
       case "eth_sendRawTransaction":
         rawTxs.push((params as [Hex])[0]);
         return { jsonrpc: "2.0" as const, id, result: `0x${"22".repeat(32)}` };
+      case "eth_getTransactionReceipt":
+        return {
+          jsonrpc: "2.0" as const,
+          id,
+          result:
+            state.receipt === "absent"
+              ? null
+              : {
+                  blockHash: `0x${"ab".repeat(32)}`,
+                  blockNumber: "0x2",
+                  contractAddress: null,
+                  cumulativeGasUsed: "0x5208",
+                  effectiveGasPrice: "0x12a05f200",
+                  from: `0x${"11".repeat(20)}`,
+                  gasUsed: "0x5208",
+                  logs: [],
+                  logsBloom: `0x${"00".repeat(256)}`,
+                  status: state.receipt === "success" ? "0x1" : "0x0",
+                  to: `0x${"22".repeat(20)}`,
+                  transactionHash: (params as [Hex])[0],
+                  transactionIndex: "0x0",
+                  type: "0x2",
+                },
+        };
       default:
         return { jsonrpc: "2.0" as const, id, error: { code: -32601, message: `mock: unhandled ${method}` } };
     }
@@ -155,6 +215,7 @@ function installMock() {
       globalThis.fetch = original;
     },
     rawTxs,
+    state,
   };
 }
 
@@ -980,6 +1041,91 @@ async function main() {
       "mutation sanity: the pre-fix shape (both reading APP_NAME) really does collapse both processes onto one value",
       () => console.log("  got:", legacyCollapsed),
     );
+  }
+
+  // ─── 8. Receipts: a delivery that reverts on chain is handed back ───────────
+  // The queue resolves a task as soon as its transaction is broadcast, so it cannot tell a
+  // delivery that landed from one that mined and reverted — a pause or a spent limit landing first
+  // in the same block, or a gas limit estimated on the other path. The handler reads the receipt
+  // itself. This drives the real handler through the real queue over the mocked transport.
+  {
+    logger.silent = true;
+    const clients = await buildClients();
+    const realQueue = createQueue({
+      publicClient: clients.publicClient,
+      account: clients.account,
+      warnMultiplier: 50n,
+    });
+    await realQueue.init();
+    const dest = fakeApp();
+    wireRoutes(dest.app, [mintRoute()], clients, realQueue);
+
+    const receiptReads = () => mock.state.requests.filter((m) => m === "eth_getTransactionReceipt").length;
+    async function run(sequence: bigint) {
+      const handler = dest.routers.get(WORMHOLE.base)![emitterKey(VAULT)] as (
+        ctx: RelayerCtx,
+        next: Next,
+      ) => Promise<void>;
+      const sentBefore = mock.rawTxs.length;
+      const readsBefore = receiptReads();
+      let nexted = 0;
+      let error: unknown;
+      try {
+        await handler(fakeCtx(sequence), () => {
+          nexted++;
+        });
+      } catch (e) {
+        error = e;
+      }
+      return { error, nexted, sent: mock.rawTxs.length - sentBefore, reads: receiptReads() - readsBefore };
+    }
+
+    // Control: a delivery that lands resolves the handler, after its receipt was read.
+    mock.state.receipt = "success";
+    const landed = await run(10n);
+    record(
+      landed.error === undefined && landed.nexted === 1 && landed.sent === 1 && landed.reads === 1,
+      "receipt: a delivery that lands resolves the handler, after one broadcast and one receipt read",
+      () => console.log("  ", landed),
+    );
+
+    // The case this section exists for: broadcast, mined, reverted. The queue has already resolved
+    // the task, so only the handler's own receipt read can reject it for the engine to retry.
+    mock.state.receipt = "reverted";
+    const reverted = await run(11n);
+    const revertedMsg = reverted.error instanceof Error ? reverted.error.message : "";
+    record(
+      reverted.sent === 1 &&
+        reverted.nexted === 0 &&
+        revertedMsg.includes("mint") &&
+        revertedMsg.includes("reverted on chain"),
+      "receipt: a delivery that mines and reverts rejects the handler for a retry, naming the route, and never calls next()",
+      () => console.log("  ", { ...reverted, message: revertedMsg || "(did not throw)" }),
+    );
+
+    // Already done: nothing is sent, so there is no receipt to read, and the job resolves.
+    mock.state.receipt = "success";
+    mock.state.callRevert = encodeErrorResult({
+      abi: receiverAbi,
+      errorName: "MessageAlreadyProcessed",
+      args: [12n],
+    });
+    const done = await run(12n);
+    record(
+      done.error === undefined && done.nexted === 1 && done.sent === 0 && done.reads === 0,
+      "receipt: a delivery that is already done sends nothing, reads no receipt, and resolves",
+      () => console.log("  ", done),
+    );
+    mock.state.callRevert = undefined;
+
+    // The retry the engine would make for the reverted job simulates again and lands.
+    const retried = await run(11n);
+    record(
+      retried.error === undefined && retried.nexted === 1 && retried.sent === 1,
+      "receipt: the retry of the job that reverted simulates again and lands",
+      () => console.log("  ", retried),
+    );
+    logger.silent = false;
   }
 
   mock.restore();

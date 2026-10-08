@@ -1,3 +1,5 @@
+import type { Hash } from "viem";
+
 import { alerts, engineConfig } from "../../config";
 import { createApp } from "../../engine/app";
 import { onEmitter } from "../../engine/emitter";
@@ -53,11 +55,27 @@ export function wireRoutes(app: RelayerApp, routes: PsmRoute[], clients: ChainCl
         sequence: vaa.sequence.toString(),
       });
 
+      // The queue resolves a task once its transaction is broadcast, or once the work turns out to
+      // be done already, and never reads a receipt. A delivery that simulated clean can still
+      // revert on chain: a pause or a spent limit landing first in the same block, or a gas limit
+      // estimated on the other path. So keep the hash, read the receipt once the queue lets go of
+      // the task, and throw on a revert: the engine then retries the job with backoff, and the
+      // retry simulates again, so a pause is named and waited out and a delivery that someone else
+      // made reads as done. No hash means nothing was sent (the work was already done), so there
+      // is no receipt to read.
+      const sent: { hash?: Hash } = {};
       await queue.add({
         label: route.name,
         logger: log,
-        submit: (n) => receiveMessage(clients, receiverAbi, route.destinationContract, vaa.bytes, n),
+        submit: async (n) =>
+          (sent.hash = await receiveMessage(clients, receiverAbi, route.destinationContract, vaa.bytes, n)),
       });
+      if (sent.hash) {
+        const receipt = await clients.publicClient.waitForTransactionReceipt({ hash: sent.hash });
+        if (receipt.status !== "success") {
+          throw new Error(`psm ${route.name}: delivery ${sent.hash} reverted on chain`);
+        }
+      }
       return next();
     }
 
