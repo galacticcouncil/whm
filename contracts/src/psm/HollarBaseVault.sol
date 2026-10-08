@@ -120,6 +120,34 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///         reorg is signed again under a new hash; this is what refuses that copy.
     mapping(bytes32 => bool) public processedMessages;
 
+    /// @notice The most USDC the vault pays against credits per window. It bounds the USDC a
+    ///         forged or faulty credit can be paid: the facilitator's outbound limit sits on
+    ///         Hydration, and a message that skips it lands here. It does not meter a credit's
+    ///         cancel or a fee-limit return. Those leave as a re-mint, which the facilitator's
+    ///         inbound limit and its bucket bound on Hydration.
+    /// @dev Gross: nothing refills it, deposits included. If a deposit refilled it, whoever could
+    ///      forge a payout message could deposit first and raise their own ceiling by what they
+    ///      deposit. The deposit limit is gross too, for its reorg bound.
+    ///
+    ///      Booking is untouched, so every credit still lands and the burn on Hydration never
+    ///      fails for want of allowance. Only payment waits. It is spent when USDC actually leaves
+    ///      for a credit: `drain`, `claim` and `claimUnpayable`. Retiring a credit into
+    ///      `unpayable` moves no money and spends nothing.
+    ///
+    ///      Every honest credit fits by sizing, though two-way flow can make one wait about a
+    ///      window. The facilitator's outbound limit and the deposit limit are both 10,000 per
+    ///      24 h at launch, so no honest credit is larger than this capacity, and the capacity
+    ///      must not be set below either. Revisit it when the bucket is raised past 10,000. The
+    ///      window must not exceed `ORIGIN_CANCEL_DELAY`, or the origin's cancel can open before a
+    ///      waiting head is payable. A credit larger than the capacity can never be paid and
+    ///      stalls the head, as a head larger than the reserve can release does. The cancel is the
+    ///      exit. Retired credits merge per recipient and have no cancel, so a merged `unpayable`
+    ///      balance above the capacity waits for a raise.
+    ///
+    ///      Ships closed, like `depositLimit`: zero is closed, never unlimited, and nothing is paid
+    ///      until `setPayoutLimit` has set it.
+    RateLimiter.Limit internal payoutLimit;
+
     // ─── Init ───────────────────────────────────────────────────
 
     function initializeVault(VaultInit calldata p) external initializer {
@@ -149,7 +177,8 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         surplusFloorBps = 25;
 
         // Ships with deposits paused and the deposit limit closed, so the route cannot carry
-        // value before governance has set its budget.
+        // value before governance has set its budget. The payout limit ships closed the same way:
+        // credits book, and nothing is paid until its budget is set.
         depositsPaused = true;
 
         _grantRole(DEFAULT_ADMIN_ROLE, p.admin);
@@ -296,6 +325,9 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///      waiting on, so a steady trickle would keep the line stationary and permanently busy.
     ///      The cost is that a head larger than the reserve can release stalls the queue — which is
     ///      why the redeemer can walk away from it via `cancelQueuedRedemption`.
+    ///
+    ///      The payout limit holds a head the same way: one the allowance cannot cover reverts and
+    ///      stays queued, cancel open, and pays once the window has refilled the allowance.
     function claim() external {
         if (claimsPaused) revert ClaimsPaused();
 
@@ -306,6 +338,8 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         uint256 entry = queue[index].amount;
         uint256 available = _reserveLiquidity();
         if (entry > available) revert InsufficientLiquidity(entry, available);
+        uint256 allowance = payoutLimit.available();
+        if (entry > allowance) revert InsufficientPayoutAllowance(entry, allowance);
 
         // A recipient the reserve cannot pay is retired by `drain`, never by their own call: a
         // revert here leaves the credit queued and `cancelQueuedRedemption` open to them, where a
@@ -317,10 +351,15 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     /// @dev The only path that pays a non-empty queue, and permissionless so no one depends on us
     ///      to run it. Whole-fill and strictly in order: a head the reserve cannot cover stops the
     ///      loop rather than being part-paid, and nothing behind it is reached.
+    ///
+    ///      The payout limit stops the loop the same way, without reverting: the head waits for the
+    ///      window to refill the allowance. It is checked against the whole entry before the
+    ///      transfer is tried, because only `_settle` finds out whether the recipient can receive.
     function drain(uint256 maxEntries) external returns (uint256 paid) {
         if (claimsPaused) revert ClaimsPaused();
 
         uint256 available = _reserveLiquidity();
+        uint256 allowance = payoutLimit.available();
 
         for (uint256 i = 0; i < maxEntries; i++) {
             uint256 index = queueHead;
@@ -328,11 +367,13 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
             uint256 entry = queue[index].amount;
             if (entry > available) break;
+            if (entry > allowance) break;
 
-            // A retired entry moved no money, so it consumes no liquidity and is not `paid`. The
-            // loop still advances, which is the whole point of retiring it.
+            // A retired entry moved no money, so it consumes no liquidity or allowance and is not
+            // `paid`. The loop still advances, which is the whole point of retiring it.
             if (_settle(index)) {
                 available -= entry;
+                allowance -= entry;
                 paid += entry;
             }
         }
@@ -405,6 +446,10 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     /// @dev Goes only to `recipient`, so a third party calling this can hand them their money but
     ///      never redirect it. Reverts while they are still unpayable, which costs the caller gas
     ///      and nothing else.
+    ///
+    ///      This pays a credit, so it spends the payout limit like `claim` does, whole or not at
+    ///      all. A recipient's retired credits are one balance, so a balance above the limit's
+    ///      capacity cannot be paid until the capacity is raised.
     function claimUnpayable(address recipient) external {
         if (claimsPaused) revert ClaimsPaused();
 
@@ -413,10 +458,13 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
 
         uint256 available = _reserveLiquidity();
         if (amount > available) revert InsufficientLiquidity(amount, available);
+        uint256 allowance = payoutLimit.available();
+        if (amount > allowance) revert InsufficientPayoutAllowance(amount, allowance);
 
         unpayable[recipient] = 0;
         totalUnpayable -= amount;
 
+        payoutLimit.consume(amount);
         _release(recipient, amount);
 
         emit UnpayableClaimed(recipient, amount);
@@ -444,6 +492,7 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///         not by our aUSDC balance, by their position in the queue, and by the pause.
     /// @dev Says nothing about whether USDC can reach them, nor whether Aave will release it: a
     ///      blacklisted head or a paused pool reads as payable here and is refused by `claim`.
+    ///      Bounded by the payout allowance too: a head it cannot cover reads as nothing payable.
     function claimable(address recipient) external view returns (uint256) {
         if (claimsPaused) return 0;
 
@@ -453,7 +502,7 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         // Whole-fill: below the entry's full size nothing is payable, so reporting a part would
         // promise a payout `claim` refuses.
         uint256 entry = queue[index].amount;
-        return entry <= _reserveLiquidity() ? entry : 0;
+        return entry <= _reserveLiquidity() && entry <= payoutLimit.available() ? entry : 0;
     }
 
 
@@ -462,6 +511,12 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     function depositAllowance() external view returns (uint256) {
         if (depositsPaused) return 0;
         return depositLimit.available();
+    }
+
+    /// @notice Zero while claims are paused.
+    function payoutAllowance() external view returns (uint256) {
+        if (claimsPaused) return 0;
+        return payoutLimit.available();
     }
 
     function queueLength() external view returns (uint256) {
@@ -553,6 +608,14 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     function setDepositLimit(uint256 capacity, uint256 window) external onlyRole(DEFAULT_ADMIN_ROLE) {
         depositLimit.set(capacity, window);
         emit DepositLimitSet(capacity, window);
+    }
+
+    /// @notice A finite raise does not grant the difference at once and a cut applies at once, as
+    ///         for the deposit limit. `UNLIMITED` opens payment at once, and a finite limit set
+    ///         after it starts full. Zero closes payment, and cancels stay open.
+    function setPayoutLimit(uint256 capacity, uint256 window) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        payoutLimit.set(capacity, window);
+        emit PayoutLimitSet(capacity, window);
     }
 
     function setFees(uint256 _redeemFeeBps, uint256 _surplusFloorBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -660,6 +723,10 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         _sourceIdle(amount);
 
         try this.payExternal(recipient, amount) {
+            // Spent here, where USDC has left for a credit. The retirement below moves none and
+            // spends nothing. The callers checked the whole entry against the allowance first, so
+            // this does not revert on its own.
+            payoutLimit.consume(amount);
             emit Claimed(recipient, amount);
             return true;
         } catch {

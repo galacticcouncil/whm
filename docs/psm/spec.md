@@ -42,6 +42,12 @@ Holds the reserve. Inherits `MessageReceiver` (UUPS + Wormhole verification + re
   depends on us being online. A head Circle has blacklisted is retired by `drain` only: their own
   `claim` reverts instead, leaving the credit queued and the cancel below still open to them. A
   transfer refused for any other reason retires nobody — the call reverts.
+  Payment is also held to the vault's payout limit: `drain` stops at a head the allowance cannot
+  cover, `claim` reverts, and the credit pays once the window has refilled it. The allowance is
+  checked before the transfer is tried, so a blacklisted head the allowance cannot cover is not
+  retired until the allowance covers it, though retiring it spends nothing, and the credits behind
+  it wait too. The wait is at most a window for credits within the capacity, unless something else
+  spends the refill first: a `claimUnpayable` or a capacity cut.
 - **`cancelQueuedRedemption(index)`** — the credit at the head is given up and its value goes back
   to the credit's `origin` — the Hydration account it came from — never to a caller's pick. The
   credit's `recipient` may ask at any time; its `origin` only for a redemption, and only once it
@@ -51,7 +57,7 @@ Holds the reserve. Inherits `MessageReceiver` (UUPS + Wormhole verification + re
   payout must stop this path too. `cancelQueuedRedemptionFor(index)` is the admin's copy — same
   gate, same books — for a head its owner cannot clear.
 - **`claimUnpayable(recipient)`** — pays out a credit that was retired because its recipient could
-  not receive USDC, once that clears.
+  not receive USDC, once that clears. It spends the payout limit like any other payment.
 - **`emergencyUnwindAave(amount)`** — guardian; pulls the reserve out of Aave and stops deposits
   from re-supplying it until `setInvestPaused(false)`.
 
@@ -84,8 +90,8 @@ by its own bucket.
   carries the kind that went
   back. Ids come from `MintQueued`; `pendingEntryOf(recipient, fromId, maxIds)` walks only that id
   window, since ids are never reclaimed. `maxRedeemable` / `mintHeadroom` read zero under their
-  pause, as the vault's `claimable` does under `claimsPaused` and `depositAllowance` under
-  `depositsPaused`.
+  pause, as the vault's `claimable` and `payoutAllowance` do under `claimsPaused` and
+  `depositAllowance` under `depositsPaused`.
 - **`redeem(usdcAmount, baseRecipient, maxFeeBps)`** — burns HOLLAR and publishes `KIND_REDEEM`
   carrying the most the redeemer will pay.
 
@@ -172,7 +178,9 @@ release the money that reverts and the claim stays queued, because that is a res
 recipient one.
 
 A retired credit is senior to every live entry — it was ahead of all of them when it retired — so
-`claimUnpayable` draws on the reserve without regard to the queue. Retirement is terminal: the fee
+`claimUnpayable` draws on the reserve without regard to the queue. It competes with the queue for
+the payout allowance, and pays whole, so a retired balance waits while queue payments spend each
+refill. Retirement is terminal: the fee
 is released then, and there is no cancel back from `unpayable` — a recipient Circle never clears
 has no exit short of an upgrade, which is accepted. The one path that retires someone is the
 permissionless `drain`; a blacklisted head calling `claim` is refused with the credit intact, so a
@@ -188,11 +196,15 @@ The credit's `recipient` may ask at any time. Its `origin` may ask too, under tw
 value goes back to the origin either way. Only once the credit has sat at the head unpaid for
 `ORIGIN_CANCEL_DELAY` — 24 hours, counted from reaching the head (`headSince`), not from booking:
 a credit that queued behind a stall is about to be paid the moment the stall clears, and a head
-the reserve can cover is paid within minutes. A claims pause restarts the wait when it lifts: the
+the reserve can cover is paid once the payout allowance covers it, which can take up to a payout
+window. A claims pause restarts the wait when it lifts: the
 pause held the head, not the keeper. And only for a redemption: a refund's origin is the deposit's
 recipient on Hydration, who put nothing in and has no claim on the depositor's refund. A redeemer
 who named a payment address they do not control — an off-ramp's — therefore has an exit from a real
-stall, and no way to recall a payment the queue is about to make.
+stall, and no way to recall a payment the queue is about to make, to within the payout window. The
+delay and the window are both 24 h at launch. A head the allowance cannot cover becomes payable at
+most a window after reaching the head. Any other spend during that wait lets the origin's cancel
+open first: a `claimUnpayable`, which anyone may call, or a capacity cut. So does a longer window.
 
 **A cancelled re-mint is a redemption.** The facilitator's queue remembers which kind an entry
 came as. Cancelling a queued deposit refunds fee-free (`KIND_REFUND`); cancelling a queued re-mint
@@ -236,7 +248,41 @@ against a compromised vault: minting is held to inbound plus whatever burned in 
 not to inbound alone — at launch the bucket, equal to the window, caps it regardless. The vault's
 deposit limit stays gross. It bounds how much a Base reorg can unwind from instant deposits, a bound
 that must hold inside a reorg window, so nothing refills it. The residual: a deposit → mint → redeem
-→ payout loop spends it at the redeem fee, about 5 USDC per window at launch.
+→ payout loop spends it at the redeem fee, about 5 USDC per window at launch, and spends the payout
+window too, holding later credits back by up to a window.
+
+**The vault limits its own payouts, and that limit is gross.** The facilitator's outbound limit is
+the withdrawal bound and it sits on Hydration, so a forged message or a facilitator fault reaches
+the vault past it. The vault therefore holds a limit of its own on USDC paid against credits
+(`PAYOUT_LIMIT_CAPACITY`). It meters payment only. A forged credit can also leave by its own
+cancel, or as a fee-limit return, and both go back as a re-mint. Those are bounded on Hydration
+by the inbound limit and the bucket, as for a compromised vault above. `drain`, `claim` and
+`claimUnpayable` spend the payout limit, and only when USDC actually leaves: retiring a credit
+into `unpayable` moves no money and spends nothing. Nothing refills it. Were a deposit to refill
+it, whoever could forge a payout message could deposit first and raise their own ceiling by what
+they deposit. The deposit limit is gross too, for the reorg bound above. Booking is not limited,
+so every credit still lands and the burn on Hydration never fails for want of allowance. Only
+payment waits. `drain` stops at a head the allowance cannot cover, in order and without
+reverting. `claim` and `claimUnpayable` revert with `InsufficientPayoutAllowance`, and
+`claimable` reads zero for such a head. The overflow pays as the window refills the allowance.
+
+The sizing condition is that the capacity sits at or above both the facilitator's outbound capacity
+and the deposit limit, 10,000 per 24 h each at launch, because no honest credit is larger than
+either. That makes every honest credit payable. It does not keep honest credits from waiting.
+Outbound is net and this limit is gross, so in one window redemptions can book the outbound
+capacity plus what deposits minted, twice this capacity at launch, and the excess waits about a
+window. The wait is bounded: redemptions cannot exceed what is outstanding plus what deposits
+mint, and the deposit limit is no larger than this one. Revisit this capacity when the bucket is
+raised past 10,000, since what is outstanding is bounded by the bucket. The capacity moves with
+the other two: raising either without it strands the larger credits. The window sits at or below
+`ORIGIN_CANCEL_DELAY`, or the origin's cancel can open before a waiting head is payable. A credit
+above the capacity is never covered and stalls the head, as a head larger than the reserve can
+release does, and the exit is the same: `cancelQueuedRedemption`, or the admin's copy. The
+residual: a recipient's retired credits merge into one `unpayable` balance with no cancel, so a
+balance above the capacity cannot be claimed until the admin raises it. A finite raise grants
+nothing at once, as the level refills toward the new capacity. `UNLIMITED` opens payment at once,
+and a finite limit set after it starts full. Closing the limit and reopening it starts the
+allowance at zero, refilling over a full window, so emergencies use `setClaimsPaused`.
 
 **An unwind is sticky.** `_investBestEffort` sweeps the whole idle balance after every deposit, so
 without a stop a deposit of any size after `emergencyUnwindAave` would put the entire reserve back
@@ -319,7 +365,10 @@ would have meant, given the count is unbounded.
 admin could void a forged one, restoring `principal` and leaving everyone else paid. That mechanism
 was removed: its threshold was evaded by splitting one redemption into several, and it defended a
 forged attestation — which needs a Wormhole guardian compromise, a threat excluded everywhere else
-here. The remaining lever is `setClaimsPaused`, which differs in two ways worth stating plainly. It
+here. Two levers remain. The payout limit holds payment against any credit, forged included, to
+`PAYOUT_LIMIT_CAPACITY` per window, twice that over an arbitrary window, without anyone acting. It
+is aimed at a facilitator fault, and it holds a forged attestation's USDC to the same bound.
+`setClaimsPaused` stops payment outright, and differs in two ways worth stating plainly. It
 is **collective**: stopping a forged payout stops every payout, and also every `cancelQueuedRedemption`
 — a paused incident must not let a queued entry convert into a fresh mint on Hydration instead of a
 Base payout. And it **refuses to pay rather than erasing** — the credit stays a liability, so
@@ -353,6 +402,10 @@ what the relayer itself delivered: anyone may deliver a VAA.
   — a payment address, an off-ramp's. Send it when the head is payable (`claimable(head) > 0`),
   with `maxEntries` around 10: measured on a Base fork, about 60k gas for a call that pays nothing
   and about 260k per entry paid out of Aave. If a batch reverts, fall back to `drain(1)`.
+  Send it as soon as `claimable(head) > 0`: a head waiting on the payout allowance is payable after
+  `(entry - payoutAllowance()) / (capacity / window)` seconds, rounded up, with `capacity` and
+  `window` from the last `PayoutLimitSet`. Its origin's cancel opens a day after it reached the
+  head, so a late call can find it recalled.
 - **What it retires is a blacklisted head.** Any other failed transfer reverts the call. Retiring
   takes the fee and leaves no cancel, so alert on a head whose simulated `drain(1)` would retire
   it — the admin's `cancelQueuedRedemptionFor` returns the gross to the redeemer first. Best effort
@@ -402,6 +455,7 @@ Launch values, `migrations/envs/<context>/psm-base.env`:
 |---|---|---|
 | bucket capacity | 10,000 HOLLAR | Total outstanding. Granted on Substrate, **not by this migration**. |
 | `DEPOSIT_LIMIT_CAPACITY` | 10,000 / 24 h | Inflow. Worst case over an arbitrary window is 2× capacity. |
+| `PAYOUT_LIMIT_CAPACITY` | 10,000 / 24 h | Outflow against credits. Gross: nothing refills it, and only USDC that leaves is charged, so a retirement is not. Worst case over an arbitrary window is 2× capacity. Ships closed, like the deposit limit: step 003 sets it and `setPayoutLimit` changes it. Not below `OUTBOUND_CAPACITY` or `DEPOSIT_LIMIT_CAPACITY`: a credit above it is never paid. `PAYOUT_LIMIT_WINDOW <= ORIGIN_CANCEL_DELAY`: a longer window lets the origin's cancel open before a waiting head is payable. |
 | `INBOUND_CAPACITY` / `OUTBOUND_CAPACITY` | 10,000 / 24 h | Mint / redeem velocity, net: a mint refills outbound and a burn refills inbound, each capped at capacity. Outbound deliberately not tighter — this is the primary redemption route. It bounds burns; a cancelled re-mint is not charged to it (that value burned under the limit already), nor stopped by `redeemPaused` — the vault's `claimsPaused` holds what it books. |
 | `REDEEM_FEE_BPS` | 5 | Charged when USDC leaves: a redemption, or a cancelled re-mint. A cancelled deposit's refund carries none. Capped at 500. |
 | `SURPLUS_FLOOR_BPS` | 25 | Held back from the treasurer. Capped at 10,000. |
