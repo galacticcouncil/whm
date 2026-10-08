@@ -19,8 +19,8 @@ import { chainFees } from "../utils/fees";
 /**
  * `submit` below takes its destination chain from `ChainClients` rather than hardcoding Hydration,
  * so one function serves every EVM chain this relayer delivers to. Two factories build a
- * `ChainClients` today: `hydrationClients` below, behind ntt, oracle and basejump, and
- * `baseClients` (`./base`), which no app uses yet. `scripts/verify-hydration-fees.ts` exercises the
+ * `ChainClients` today: `hydrationClients` below, behind ntt, oracle, basejump and psm-hydration,
+ * and `baseClients` (`./base`), behind psm-base. `scripts/verify-hydration-fees.ts` exercises the
  * generic fee branch against offline chain objects over a mocked transport, and
  * `scripts/verify-base-clients.ts` exercises it through `baseClients`.
  */

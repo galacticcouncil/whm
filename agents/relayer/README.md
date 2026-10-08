@@ -57,6 +57,32 @@ A landing revert unwinds the VAA, so a retry is always safe; a pool shortfall qu
 reverting, so the only failures are transient and the retry budget is sized in hours. Latency is the
 point, so it does not wait on Wormholescan for the source tx hash.
 
+### `psm-hydration` and `psm-base`
+
+Relays the HOLLAR peg stability module's two legs (`docs/psm/spec.md`). The corridor has a
+destination on each chain, so this is the one app with two entry points, each its own process and
+wallet:
+
+- `psm-hydration` delivers **Base to Hydration**: the vault's deposits, cancels and returned
+  redemptions go to `HollarBaseFacilitator.receiveMessage`, which mints.
+- `psm-base` delivers **Hydration to Base**: the facilitator's redemptions and refunds go to
+  `HollarBaseVault.receiveMessage`, which books a credit and moves no money.
+
+Both read one route table ([routes.ts](src/apps/psm/routes.ts)), keyed by destination chain. A route
+names a source emitter and chain and a destination contract and chain; nothing about direction is
+built in, so a corridor whose destinations are already served is more rows, not more code. The table
+ships blank — the addresses come from the `psm-base` migration — and both processes refuse to start
+while any address is blank or malformed, a chain id is unknown, the two routes' contracts do not pair
+up, or two routes share a source. The pairing check is relative: it cannot tell the two real
+addresses from each other swapped consistently across both routes.
+
+`psm-hydration` signs with `PRIVKEY`, a key of its own like every other Hydration app's; `psm-base`
+signs with `PRIVKEY_BASE`, which never falls back to `PRIVKEY`. Namespaces are `psm-hydration-relayer`
+and `psm-base-relayer`, overridden by `APP_NAME_PSM_HYDRATION` and `APP_NAME_PSM_BASE`.
+
+The two keeper calls the spec assigns to the relayer (`drain` on Base, `flushPendingMint` on
+Hydration) are not part of this app yet.
+
 ## Configuration
 
 Env holds only what changes between deployments. Routes, addresses, retry policy, backoff and age
@@ -68,6 +94,8 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `RPC_HYDRATION`       | Hydration EVM RPC (chain `222222`)                | `https://hydration-rpc.n.dwellir.com` |
 | `RPC_ETHEREUM`        | Ethereum RPC (`intent` only)                      | `https://eth.llamarpc.com`            |
 | `RPC_ROBINHOOD`       | Robinhood Chain RPC (`oracle-robinhood` only)     | `https://rpc.mainnet.chain.robinhood.com` |
+| `RPC_BASE`            | Base RPC (`psm-base` only)                        | `https://mainnet.base.org`            |
+| `PRIVKEY_BASE`        | Base signing key (`psm-base` only)                | Required                              |
 | `SPY_ENDPOINT`        | Wormhole Spy endpoint                             | `localhost:7073`                      |
 | `REDIS_HOST`          | Redis host                                        | `localhost`                           |
 | `REDIS_PORT`          | Redis port                                        | `6379`                                |
@@ -79,7 +107,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `APP_NAME`            | Engine namespace override — **see below**         | per-app                               |
 
 `PRIVKEY` is one name across every app, and the services still hold **different keys** — that is what
-keeps the NTT, oracle, intent and basejump wallets off each other's nonce.
+keeps the NTT, oracle, intent, basejump and psm-hydration wallets off each other's nonce.
 
 ## Development
 
@@ -90,10 +118,23 @@ pnpm --filter @whm/relayer redis        # local Redis
 pnpm --filter @whm/relayer mainnet-spy
 ```
 
+## Verification
+
+There is no test suite. Three scripts run offline against a mocked JSON-RPC transport, need no secrets,
+and exit non-zero on a failed check:
+
+```bash
+pnpm --filter @whm/relayer verify:hydration-fees  # fee pricing through submit(), per chain
+pnpm --filter @whm/relayer verify:base-clients    # Base client: chain id, key isolation, fees
+pnpm --filter @whm/relayer verify:psm-app         # psm routes: refuse-to-start, destination keying
+```
+
+The type check is `tsc -p agents/relayer --noEmit` from the repo root; it covers `src/`, not `scripts/`.
+
 ## Production
 
 ```bash
-pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,oracle-robinhood,intent,basejump}/app.js
+pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,oracle-robinhood,intent,basejump,psm-hydration,psm-base}/app.js
 pnpm --filter @whm/relayer start:oracle
 pnpm --filter @whm/relayer docker:up
 ```
@@ -122,8 +163,9 @@ safe sequence  {name}:missedVaasV3:safeSequence:{chain}:{emitter}
 Renaming orphans that state. The missed-VAA worker then falls back to the `FROM_SEQUENCE` floors and
 rescans — replaying a backlog, or silently skipping everything before the floor. Each app's
 `config.ts` carries the name already in Redis (`hydration-ntt-relayer`, `oracle-relayer`,
-`intent-relayer`, `basejump-relayer`); `APP_NAME` overrides it, which is only for running a second deployment beside the
-live one. Do not rename to tidy up.
+`intent-relayer`, `basejump-relayer`, `psm-hydration-relayer`, `psm-base-relayer`); `APP_NAME`
+overrides it, which is only for running a second deployment beside the live one. Do not rename to
+tidy up.
 
 The `FROM_SEQUENCE` floors only matter on a cold start. Once a `safeSequence` exists the engine reads
 from there, which is why they can sit at `0`. Each entry defaults from `FROM_SEQ_<CHAIN>`
