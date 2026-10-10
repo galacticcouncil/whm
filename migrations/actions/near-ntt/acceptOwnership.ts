@@ -24,12 +24,13 @@ export type AcceptOwnershipResult = {
 export async function acceptOwnership(params: AcceptOwnershipParams): Promise<AcceptOwnershipResult> {
   const { account, provider, nttAccount, newOwner } = params;
 
-  if ((await view<string>(provider, nttAccount, "owner")) === newOwner) {
+  // Owner already, and not still proposed — a custodian that is the deployer is both until it accepts.
+  const pending = await view<string | null>(provider, nttAccount, "pending_owner");
+  if ((await view<string>(provider, nttAccount, "owner")) === newOwner && pending !== newOwner) {
     return { txHash: "", owner: newOwner };
   }
 
   if (newOwner !== account.accountId) {
-    const pending = await view<string | null>(provider, nttAccount, "pending_owner");
     throw new Error(
       `Waiting for ${newOwner} to call accept_ownership on ${nttAccount} (1 yocto; pending_owner: ${pending}) — re-run once it has`,
     );
