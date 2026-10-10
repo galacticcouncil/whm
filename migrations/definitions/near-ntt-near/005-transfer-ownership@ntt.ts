@@ -3,7 +3,7 @@ import { transferOwnership } from "../../actions/near-ntt/transferOwnership";
 
 const step: MigrationStep = {
   name: "005-transfer-ownership@ntt",
-  description: "Transfer the NTT contract's ownership to the NEAR custodian",
+  description: "Propose the NEAR custodian as the NTT contract's owner",
   action: async (ctx) => {
     const required = (k: string) => {
       if (!ctx.env[k]) throw new Error(`Missing ${k}`);

@@ -687,6 +687,14 @@ async fn with_no_keys_left_the_owner_still_upgrades() -> anyhow::Result<()> {
         .transact()
         .await?;
     assert!(handover.is_success(), "{:?}", handover.failures());
+    let accept = custodian
+        .call(env.ntt.id(), "accept_ownership")
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await?;
+    assert!(accept.is_success(), "{:?}", accept.failures());
+    let owner: String = view(&env.ntt, "owner", json!({})).await?;
+    assert_eq!(owner, custodian.id().as_str());
     env.ntt
         .as_account()
         .batch(env.ntt.id())
