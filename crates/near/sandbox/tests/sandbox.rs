@@ -335,6 +335,32 @@ async fn failed_publish_refunds_the_sender() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn failed_publish_refunds_refund_to() -> anyhow::Result<()> {
+    // As `failed_publish_refunds_the_sender`, from a sender whose balance credits no one.
+    let env = setup(false).await?;
+    let carol = subaccount(&env.worker, "carol", 5).await?;
+    storage_deposit(&env.token, &carol).await?;
+    let before = balance(&env.token, env.alice.id().as_str()).await?;
+
+    let msg = json!({ "recipient_chain": HYDRATION, "recipient": HYDRATION_RECIPIENT, "refund_to": carol.id() }).to_string();
+    let result = env
+        .alice
+        .call(env.token.id(), "ft_transfer_call")
+        .args_json(json!({ "receiver_id": env.ntt.id(), "amount": 10u128.pow(24).to_string(), "msg": msg }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(MAX_GAS)
+        .transact()
+        .await?;
+    let failed = event(&events(&result), "whm-ntt", "transfer_failed").expect("transfer_failed").clone();
+    assert_eq!(failed["data"][0]["refund_to"], carol.id().as_str());
+
+    assert_eq!(before - balance(&env.token, env.alice.id().as_str()).await?, 10u128.pow(24));
+    assert_eq!(balance(&env.token, carol.id().as_str()).await?, 10u128.pow(24));
+    assert_eq!(balance(&env.token, env.ntt.id().as_str()).await?, 0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn inbound_verifies_registers_and_pays() -> anyhow::Result<()> {
     let env = setup(true).await?;
     // Custody first: alice locks 5 NEAR.
