@@ -14,6 +14,8 @@ use sha3::{Digest, Keccak256};
 
 const CORE_WASM: &[u8] = include_bytes!("wasm/contract.wormhole_crypto.near.wasm");
 const WRAP_WASM: &[u8] = include_bytes!("wasm/wrap.near.wasm");
+/// Near-One `nbtc` at `e5666ea`, as deployed on `zec.omft.near` (code hash `2akS4vNt…`).
+const ZEC_WASM: &[u8] = include_bytes!("wasm/zec.omft.near.wasm");
 
 const HYDRATION: u16 = 73;
 const MANAGER: &str = "000000000000000000000000FCaF4aA069C565d25539028970703F01e47D3E0B";
@@ -49,24 +51,54 @@ impl Guardian {
 
     /// A v1 VAA from guardian set 0, signed by this guardian alone.
     fn sign(&self, emitter_chain: u16, emitter: [u8; 32], sequence: u64, payload: &[u8]) -> String {
-        let mut body = Vec::new();
-        body.extend_from_slice(&0u32.to_be_bytes()); // timestamp
-        body.extend_from_slice(&0u32.to_be_bytes()); // nonce
-        body.extend_from_slice(&emitter_chain.to_be_bytes());
-        body.extend_from_slice(&emitter);
-        body.extend_from_slice(&sequence.to_be_bytes());
-        body.push(200);
-        body.extend_from_slice(payload);
+        vaa(&[self], emitter_chain, emitter, sequence, payload)
+    }
+}
 
-        let digest = keccak(&keccak(&body));
-        let (sig, recovery) = self.0.sign_prehash_recoverable(&digest).unwrap();
+/// Guardian set 0 of `n` keys, signing with the core's quorum — 13 of 19, as on mainnet.
+struct Guardians(Vec<Guardian>);
 
-        let mut vaa = vec![1, 0, 0, 0, 0, 1, 0];
+impl Guardians {
+    fn new(n: usize) -> Self {
+        Self((0..n).map(|i| Guardian::new(0x11 + i as u8)).collect())
+    }
+
+    fn addresses(&self) -> Vec<String> {
+        self.0.iter().map(Guardian::address).collect()
+    }
+
+    /// The core's own quorum formula (`GuardianSetInfo::quorum`).
+    fn quorum(&self) -> usize {
+        ((self.0.len() * 10 / 3) * 2) / 10 + 1
+    }
+
+    fn sign(&self, emitter_chain: u16, emitter: [u8; 32], sequence: u64, payload: &[u8]) -> String {
+        let signers: Vec<&Guardian> = self.0.iter().take(self.quorum()).collect();
+        vaa(&signers, emitter_chain, emitter, sequence, payload)
+    }
+}
+
+/// A v1 VAA from guardian set 0, signed by `signers` — guardian indexes 0, 1, … in order.
+fn vaa(signers: &[&Guardian], emitter_chain: u16, emitter: [u8; 32], sequence: u64, payload: &[u8]) -> String {
+    let mut body = Vec::new();
+    body.extend_from_slice(&0u32.to_be_bytes()); // timestamp
+    body.extend_from_slice(&0u32.to_be_bytes()); // nonce
+    body.extend_from_slice(&emitter_chain.to_be_bytes());
+    body.extend_from_slice(&emitter);
+    body.extend_from_slice(&sequence.to_be_bytes());
+    body.push(200);
+    body.extend_from_slice(payload);
+
+    let digest = keccak(&keccak(&body));
+    let mut vaa = vec![1, 0, 0, 0, 0, signers.len() as u8];
+    for (index, guardian) in signers.iter().enumerate() {
+        let (sig, recovery) = guardian.0.sign_prehash_recoverable(&digest).unwrap();
+        vaa.push(index as u8);
         vaa.extend_from_slice(&sig.to_bytes());
         vaa.push(recovery.to_byte());
-        vaa.extend_from_slice(&body);
-        hex::encode(vaa)
     }
+    vaa.extend_from_slice(&body);
+    hex::encode(vaa)
 }
 
 /// What Hydration's manager would send `amount` (8 dp) of to `account` on NEAR.
@@ -89,6 +121,32 @@ fn hydration_transfer(ntt: &Contract, account: &str, amount: u64, id: u64) -> Ve
     .unwrap()
 }
 
+/// The token the contract locks, on its deployed mainnet code.
+#[derive(Clone, Copy, PartialEq)]
+enum Token {
+    /// `wrap.near`: 24 dp, peered at 18; alice wraps NEAR.
+    Wrap,
+    /// `zec.omft.near` (Near-One `nbtc`): 8 dp, peered at 8; only its bridge mints — the Zcash
+    /// connector on mainnet, `env.bridge` here.
+    Zec,
+}
+
+impl Token {
+    fn decimals(self) -> u32 {
+        match self {
+            Token::Wrap => 24,
+            Token::Zec => 8,
+        }
+    }
+
+    fn peer_decimals(self) -> u8 {
+        match self {
+            Token::Wrap => 18,
+            Token::Zec => 8,
+        }
+    }
+}
+
 struct Env {
     worker: Worker<Sandbox>,
     core: Contract,
@@ -96,7 +154,11 @@ struct Env {
     ntt: Contract,
     alice: Account,
     relayer: Account,
-    guardian: Guardian,
+    guardian: Guardians,
+    /// `zec.omft.near`'s bridge — the only account that mints it.
+    bridge: Option<Account>,
+    /// One whole token, in its units.
+    unit: u128,
 }
 
 async fn subaccount(worker: &Worker<Sandbox>, name: &str, near: u128) -> anyhow::Result<Account> {
@@ -110,19 +172,47 @@ async fn subaccount(worker: &Worker<Sandbox>, name: &str, near: u128) -> anyhow:
 }
 
 async fn setup(register_emitter: bool) -> anyhow::Result<Env> {
+    setup_with(Token::Wrap, register_emitter, 1).await
+}
+
+/// `setup` on `token`, with a guardian set of `guardians` keys.
+async fn setup_with(token_kind: Token, register_emitter: bool, guardians: usize) -> anyhow::Result<Env> {
     let worker = near_workspaces::sandbox().await?;
-    let guardian = Guardian::new(0x11);
+    let guardian = Guardians::new(guardians);
+    let unit = 10u128.pow(token_kind.decimals());
 
     let core = subaccount(&worker, "wormhole", 50).await?.deploy(CORE_WASM).await?.into_result()?;
     // `Default` takes the first signer's key as owner; booting is that first call.
     core.call("boot_wormhole")
-        .args_json(json!({ "gset": 0, "addresses": [guardian.address()] }))
+        .args_json(json!({ "gset": 0, "addresses": guardian.addresses() }))
         .transact()
         .await?
         .into_result()?;
 
-    let token = subaccount(&worker, "wrap", 50).await?.deploy(WRAP_WASM).await?.into_result()?;
-    token.call("new").transact().await?.into_result()?;
+    let (token, bridge) = match token_kind {
+        Token::Wrap => {
+            let token = subaccount(&worker, "wrap", 50).await?.deploy(WRAP_WASM).await?.into_result()?;
+            token.call("new").transact().await?.into_result()?;
+            (token, None)
+        }
+        Token::Zec => {
+            let bridge = subaccount(&worker, "bridge", 50).await?;
+            let token = subaccount(&worker, "zec", 50).await?.deploy(ZEC_WASM).await?.into_result()?;
+            token
+                .call("new")
+                .args_json(json!({
+                    "controller": bridge.id(),
+                    "bridge_id": bridge.id(),
+                    "name": "Zcash",
+                    "symbol": "ZEC",
+                    "decimals": 8,
+                }))
+                .transact()
+                .await?
+                .into_result()?;
+            (token, Some(bridge))
+        }
+    };
 
     let wasm = ntt_wasm().await?;
     let ntt = subaccount(&worker, "ntt", 50).await?.deploy(&wasm).await?.into_result()?;
@@ -130,10 +220,10 @@ async fn setup(register_emitter: bool) -> anyhow::Result<Env> {
         .args_json(json!({
             "owner": ntt.id(),
             "token": token.id(),
-            "token_decimals": 24,
+            "token_decimals": token_kind.decimals(),
             "registration_deposit": REGISTRATION.to_string(),
             "core": core.id(),
-            "outbound_limit": (1_000u128 * 10u128.pow(24)).to_string(),
+            "outbound_limit": (1_000 * unit).to_string(),
         }))
         .transact()
         .await?
@@ -143,8 +233,8 @@ async fn setup(register_emitter: bool) -> anyhow::Result<Env> {
             "chain_id": HYDRATION,
             "manager": MANAGER,
             "transceiver": TRANSCEIVER,
-            "decimals": 18,
-            "inbound_limit": (1_000u128 * 10u128.pow(24)).to_string(),
+            "decimals": token_kind.peer_decimals(),
+            "inbound_limit": (1_000 * unit).to_string(),
         }))
         .deposit(NearToken::from_yoctonear(1))
         .transact()
@@ -162,17 +252,32 @@ async fn setup(register_emitter: bool) -> anyhow::Result<Env> {
     }
     storage_deposit(&token, ntt.as_account()).await?;
 
+    // alice holds 10 tokens.
     let alice = subaccount(&worker, "alice", 50).await?;
     storage_deposit(&token, &alice).await?;
-    alice
-        .call(token.id(), "near_deposit")
-        .deposit(NearToken::from_near(10))
-        .transact()
-        .await?
-        .into_result()?;
+    match &bridge {
+        None => alice
+            .call(token.id(), "near_deposit")
+            .deposit(NearToken::from_near(10))
+            .transact()
+            .await?
+            .into_result()?,
+        Some(bridge) => bridge
+            .call(token.id(), "mint")
+            .args_json(json!({
+                "mint_account_id": alice.id(),
+                "mint_amount": (10 * unit).to_string(),
+                "protocol_fee": "0",
+                "relayer_account_id": bridge.id(),
+                "relayer_fee": "0",
+            }))
+            .transact()
+            .await?
+            .into_result()?,
+    };
 
     let relayer = subaccount(&worker, "relayer", 50).await?;
-    Ok(Env { worker, core, token, ntt, alice, relayer, guardian })
+    Ok(Env { worker, core, token, ntt, alice, relayer, guardian, bridge, unit })
 }
 
 /// `NTT_WASM` if set — a prebuilt contract — else `cargo near build` through near-workspaces.
@@ -764,5 +869,200 @@ async fn with_no_keys_left_the_owner_still_upgrades() -> anyhow::Result<()> {
     let result = upgrade(&custodian, &env, &ntt_wasm().await?).await?;
     assert!(result.is_success(), "{:?}", result.failures());
     assert!(event(&events(&send_to_hydration(&env, 10u128.pow(24)).await?), "whm-ntt", "transfer_sent").is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failed_complete_at_the_minimum_gas_refunds() -> anyhow::Result<()> {
+    // A forged VAA fails `on_verified`; `on_complete_settled` must still refund the whole deposit at
+    // the least gas the precheck accepts.
+    let env = setup(true).await?;
+    let bob = format!("bob.{}", env.worker.root_account()?.id());
+    let payload = hydration_transfer(&env.ntt, &bob, 150_000_000, 1);
+    let forged = Guardian::new(0x22).sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+
+    for tgas in 85..=130 {
+        let relayer_before = env.relayer.view_account().await?.balance;
+        let ntt_before = env.ntt.view_account().await?.balance;
+        let result = complete_with(&env, &env.relayer, &forged, &bob, NearToken::from_millinear(10), Gas::from_tgas(tgas)).await?;
+        if !result.outcomes().iter().any(|o| o.executor_id == *env.core.id()) {
+            continue;
+        }
+        println!("failed complete accepted at {tgas} TGas");
+        let (kept, _) = settle(&env, relayer_before, ntt_before, &result).await?;
+        assert!(kept < NearToken::from_millinear(1), "at {tgas} TGas: deposit not refunded, kept {kept}");
+        return Ok(());
+    }
+    anyhow::bail!("complete never accepted up to 130 TGas")
+}
+
+#[tokio::test]
+async fn a_mainnet_quorum_vaa_at_the_minimum_gas_delivers() -> anyhow::Result<()> {
+    // Mainnet VAAs carry 13 of 19 signatures, not 1: `verify_vaa` and the re-parse cost more.
+    let env = setup_with(Token::Wrap, true, 19).await?;
+    assert_eq!(env.guardian.quorum(), 13);
+    assert!(send_to_hydration(&env, 5 * env.unit).await?.is_success());
+
+    let bob = format!("bob.{}", env.worker.root_account()?.id());
+    let payload = hydration_transfer(&env.ntt, &bob, 150_000_000, 1);
+    let vaa = env.guardian.sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+
+    for tgas in 85..=150 {
+        let result = complete_with(&env, &env.relayer, &vaa, &bob, NearToken::from_millinear(10), Gas::from_tgas(tgas)).await?;
+        if !result.outcomes().iter().any(|o| o.executor_id == *env.core.id()) {
+            continue;
+        }
+        println!("13-signature complete accepted at {tgas} TGas");
+        assert!(result.failures().is_empty(), "at {tgas} TGas: {:?}", result.failures());
+        assert_eq!(balance(&env.token, &bob).await?, 1_500_000_000_000_000_000_000_000);
+        return Ok(());
+    }
+    anyhow::bail!("complete never accepted up to 150 TGas")
+}
+
+// =============== zec.omft.near ===============================================================
+//
+// The same flows on the token's own mainnet code — 8 dp, peered at 8, so no trim.
+
+#[tokio::test]
+async fn zec_outbound_locks_and_publishes() -> anyhow::Result<()> {
+    let env = setup_with(Token::Zec, true, 1).await?;
+    let before = balance(&env.token, env.alice.id().as_str()).await?;
+
+    let result = send_to_hydration(&env, env.unit).await?;
+    gas("zec outbound", &result);
+    assert!(result.failures().is_empty(), "{:?}", result.failures());
+    assert_eq!(before - balance(&env.token, env.alice.id().as_str()).await?, env.unit);
+    assert_eq!(balance(&env.token, env.ntt.id().as_str()).await?, env.unit);
+
+    let events = events(&result);
+    let publish = event(&events, "wormhole", "publish").expect("core publish event");
+    let payload = hex::decode(publish["data"].as_str().unwrap())?;
+    let tm = TransceiverMessage::parse(&payload).unwrap();
+    let mm = NttManagerMessage::parse(&tm.manager_payload).unwrap();
+    let ntt = NativeTokenTransfer::parse(&mm.payload).unwrap();
+    assert_eq!(ntt.amount, TrimmedAmount { amount: 100_000_000, decimals: 8 });
+    assert_eq!(ntt.source_token, sha256(env.token.id().as_bytes()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn zec_failed_publish_refunds_the_sender() -> anyhow::Result<()> {
+    let env = setup_with(Token::Zec, false, 1).await?;
+    let before = balance(&env.token, env.alice.id().as_str()).await?;
+
+    let result = send_to_hydration(&env, env.unit).await?;
+    assert!(event(&events(&result), "whm-ntt", "transfer_failed").is_some());
+    assert_eq!(balance(&env.token, env.alice.id().as_str()).await?, before);
+    assert_eq!(balance(&env.token, env.ntt.id().as_str()).await?, 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn zec_inbound_registers_and_pays() -> anyhow::Result<()> {
+    let env = setup_with(Token::Zec, true, 1).await?;
+    assert!(send_to_hydration(&env, 5 * env.unit).await?.is_success());
+
+    let bob = format!("bob.{}", env.worker.root_account()?.id());
+    let payload = hydration_transfer(&env.ntt, &bob, 150_000_000, 1);
+    let vaa = env.guardian.sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+    let result = complete(&env, &vaa, &bob).await?;
+    gas("zec inbound, registering", &result);
+    assert!(result.failures().is_empty(), "{:?}", result.failures());
+    assert_eq!(balance(&env.token, &bob).await?, 150_000_000);
+    Ok(())
+}
+
+#[tokio::test]
+async fn zec_failed_unlock_is_claimable() -> anyhow::Result<()> {
+    // No custody: the pay-out's ft_transfer fails, the credit lands in `claimable`.
+    let env = setup_with(Token::Zec, true, 1).await?;
+    let bob = env.worker.root_account()?.create_subaccount("bob").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+
+    let payload = hydration_transfer(&env.ntt, bob.id().as_str(), 150_000_000, 1);
+    let vaa = env.guardian.sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+    let result = complete(&env, &vaa, bob.id().as_str()).await?;
+    assert!(ntt_failures(&env, &result).is_empty(), "{:?}", result.failures());
+    let claimable: String = view(&env.ntt, "claimable_of", json!({ "account_id": bob.id() })).await?;
+    assert_eq!(claimable, "150000000");
+
+    assert!(send_to_hydration(&env, 5 * env.unit).await?.is_success());
+    let claim = bob.call(env.ntt.id(), "claim").deposit(NearToken::from_yoctonear(1)).gas(MAX_GAS).transact().await?;
+    assert!(claim.failures().is_empty(), "{:?}", claim.failures());
+    assert_eq!(balance(&env.token, bob.id().as_str()).await?, 150_000_000);
+    Ok(())
+}
+
+#[tokio::test]
+async fn zec_complete_at_the_minimum_gas_delivers() -> anyhow::Result<()> {
+    let env = setup_with(Token::Zec, true, 1).await?;
+    assert!(send_to_hydration(&env, 5 * env.unit).await?.is_success());
+
+    let bob = format!("bob.{}", env.worker.root_account()?.id());
+    let payload = hydration_transfer(&env.ntt, &bob, 150_000_000, 1);
+    let vaa = env.guardian.sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+
+    for tgas in 85..=130 {
+        let result = complete_with(&env, &env.relayer, &vaa, &bob, NearToken::from_millinear(10), Gas::from_tgas(tgas)).await?;
+        if !result.outcomes().iter().any(|o| o.executor_id == *env.core.id()) {
+            continue;
+        }
+        println!("zec complete accepted at {tgas} TGas");
+        assert!(result.failures().is_empty(), "at {tgas} TGas: {:?}", result.failures());
+        assert_eq!(balance(&env.token, &bob).await?, 150_000_000);
+        return Ok(());
+    }
+    anyhow::bail!("complete never accepted up to 130 TGas")
+}
+
+#[tokio::test]
+async fn zec_outbound_at_the_minimum_gas_publishes() -> anyhow::Result<()> {
+    let env = setup_with(Token::Zec, true, 1).await?;
+    let msg = json!({ "recipient_chain": HYDRATION, "recipient": HYDRATION_RECIPIENT }).to_string();
+
+    for tgas in 50..=150 {
+        let before = balance(&env.token, env.ntt.id().as_str()).await?;
+        let result = env
+            .alice
+            .call(env.token.id(), "ft_transfer_call")
+            .args_json(json!({ "receiver_id": env.ntt.id(), "amount": env.unit.to_string(), "msg": msg }))
+            .deposit(NearToken::from_yoctonear(1))
+            .gas(Gas::from_tgas(tgas))
+            .transact()
+            .await?;
+        if balance(&env.token, env.ntt.id().as_str()).await? == before {
+            continue;
+        }
+        println!("zec outbound accepted at {tgas} TGas");
+        assert!(result.failures().is_empty(), "at {tgas} TGas: {:?}", result.failures());
+        assert!(event(&events(&result), "whm-ntt", "transfer_sent").is_some());
+        return Ok(());
+    }
+    anyhow::bail!("outbound never accepted up to 150 TGas")
+}
+
+#[tokio::test]
+async fn zec_connector_safe_mint_publishes() -> anyhow::Result<()> {
+    // The Zcash deposit route: the connector calls `safe_mint(ntt, amount, msg)` with 90 TGas and
+    // 1 yocto (`GAS_FOR_MINT_CALL`); the token mints to its bridge, then `ft_transfer_call`s into the
+    // manager. The manager must publish within that gas and use the whole amount — `safe_mint`
+    // returning 0 would make the connector burn the mint and refund on Zcash.
+    let env = setup_with(Token::Zec, true, 1).await?;
+    let bridge = env.bridge.as_ref().unwrap();
+    let msg = json!({ "recipient_chain": HYDRATION, "recipient": HYDRATION_RECIPIENT }).to_string();
+
+    let result = bridge
+        .call(env.token.id(), "safe_mint")
+        .args_json(json!({ "account_id": env.ntt.id(), "amount": env.unit.to_string(), "msg": msg }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(90))
+        .transact()
+        .await?;
+    gas("zec safe_mint", &result);
+    assert!(result.failures().is_empty(), "{:?}", result.failures());
+    assert!(event(&events(&result), "whm-ntt", "transfer_sent").is_some());
+    assert_eq!(balance(&env.token, env.ntt.id().as_str()).await?, env.unit);
+    let used: String = result.json()?;
+    assert_eq!(used, env.unit.to_string(), "safe_mint must report the whole amount used");
     Ok(())
 }

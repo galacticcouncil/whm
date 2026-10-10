@@ -109,14 +109,16 @@ never also by `btc.omft.near`.
 | --- | --- | --- |
 | Registered on the token | `safe_mint` burns the mint if the receiver is not | Step 003 |
 | **Panic or return 0** from `ft_on_transfer` | the connector counts a partial "unused" as success and strands the rest **[V]** | Holds: both tokens are 8 dp, so trim dust is 0 — the Hydration assets must have ≥ 8 dp |
-| Fit the gas `safe_mint` forwards | a `NotEnoughGas` panic burns the mint → refund after 2 days | **To verify**, per connector: the manager needs ~55 TGas; `safe_mint` gets 90 TGas on ZEC |
+| Fit the gas `safe_mint` forwards | a `NotEnoughGas` panic burns the mint → refund after 2 days | **ZEC verified** in the sandbox on `zec.omft.near`'s mainnet code: `safe_mint` at the connector's 90 TGas (`GAS_FOR_MINT_CALL`) publishes and reports the whole amount used (`zec_connector_safe_mint_publishes`). BTC: to measure |
 | A failed publish refunds someone reachable | the publish runs after `ft_on_transfer` returned 0, so the connector has counted the mint as consumed — its `request_refund` path does not fire, and a plain `ft_transfer` back to the connector credits no one | `TransferMsg.refund_to` exists — it must be registered on the token, or the refund is credited to the sender's (the connector's) `claimable`; which account the order names is open (Open 7) |
 
 ## Open
 
 1. **Omni's relayer finalizes safe deposits automatically** — **[I]**, confirm with Omni.
 2. **Our `ntt` relayer: a NEAR → Hydration route** — not built.
-3. **`safe_mint` gas forwarded to `ft_on_transfer`** — measure per connector.
+3. **`safe_mint` gas forwarded to `ft_on_transfer`** — ZEC done (see the table); BTC to measure.
+   The connector rewrites `msg` only where it has a `utxo_id` key (`inject_utxo_id_in_msg`);
+   `TransferMsg` has none, so it arrives as sent.
 4. **BTC deployment** — `near-ntt-btc` migration (token `nbtc.bridge.near`), Hydration asset +
    BURNING manager, `set_ntt_minter` referendum.
 5. **Bridge fee on BTC safe deposits** — read the fee path for BTC.

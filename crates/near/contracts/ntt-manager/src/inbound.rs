@@ -154,8 +154,10 @@ impl NttManager {
         // measurable after it.
         self.inbound_queue.flush();
 
-        // An unreadable balance is treated as unregistered. Registering an account that already is
-        // succeeds and refunds — to this contract, the predecessor: the documented residual.
+        // A failed balance view is treated as unregistered; an answer that is not a NEP-145
+        // `StorageBalance` panics this receipt instead — VAA unconsumed, deposit refunded. Registering
+        // an account that already is succeeds and refunds — to this contract, the predecessor: the
+        // documented residual.
         let registered = matches!(storage, Ok(Some(_)));
         let registration = if registered { None } else { Some(self.registration_deposit) };
 

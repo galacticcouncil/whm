@@ -24,7 +24,7 @@ contracts/ntt-manager/     the contract (near-sdk 5)
   src/vaa.rs               VAA body parser
   tests/fixtures/          real mainnet NTT VAAs — golden vectors
 sandbox/                   end-to-end tests on a NEAR sandbox (near-workspaces)
-  tests/wasm/              mainnet code of the Wormhole core and wrap.near
+  tests/wasm/              mainnet code of the Wormhole core, wrap.near and zec.omft.near
   forge/                   EVM check: a NEAR-published payload through the real TransceiverStructs
 scripts/ntt-manager/       user scripts + local fork
 ```

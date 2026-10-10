@@ -342,13 +342,17 @@ and `claimable_of` stayed 0. On a successful transfer the redeemer's net cost is
 | Check | Result |
 | ----- | ------ |
 | `cargo test -p ntt-manager` | 75 passed |
-| Sandbox | 17 passed — + a failed unlock and claim on a contract with no free balance, `refund_to`, a refund `refund_to` cannot take (fails on the first `refund_to` code), a failed unlock at the minimum gas (92 TGas) |
+| Sandbox | 26 passed — + a failed unlock and claim on a contract with no free balance, `refund_to`, a refund `refund_to` cannot take (fails on the first `refund_to` code), a failed unlock and a failed `complete` at the minimum gas (92 TGas), a 13-of-19 VAA (93 TGas), and the token flows on `zec.omft.near`'s mainnet code — `safe_mint` from the Zcash connector at its 90 TGas publishes |
 | Testnet | redeployed on the same account; NEAR → Hydration transfer (sequence 6) delivered on a Hydration fork, replay rejected |
 
 **Re-review** of the fixes (`/near-audit`, 6 reviewers, `audit-2026-10-10.md`, gitignored): 0 findings,
 20 leads. Taken: the `refund_to` credit above; a minimum-gas test for a failed unlock; spec notes on
 pooled held funds, callback-arg compatibility and the 006 → 007 window. Both prior reports' fixes
 hold.
+
+**Full re-audit** (`/near-audit`, all 8 agents incl. the 75-row prior-findings pass,
+`audit-2026-10-10-full.md`, gitignored): 0 findings, 17 leads. Taken: the ZEC token suite, the 13-of-19
+VAA and failed-`complete` minimum-gas tests, and a corrected `on_verified` comment.
 
 The sandbox binary has no darwin-x86_64 build: from a Rosetta shell, run it as
 `CARGO_TARGET_DIR=target/arm64 arch -arm64 rustup run stable-aarch64-apple-darwin cargo test -p ntt-sandbox -- --test-threads=1`
