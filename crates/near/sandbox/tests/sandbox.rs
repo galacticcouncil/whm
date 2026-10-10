@@ -459,6 +459,7 @@ async fn failed_unlock_is_claimable() -> anyhow::Result<()> {
         .await?;
     gas("claim", &claim);
     assert!(claim.is_success(), "{:?}", claim.failures());
+    assert!(event(&events(&claim), "whm-ntt", "claimed").is_some());
     assert_eq!(balance(&env.token, bob.id().as_str()).await?, 1_500_000_000_000_000_000_000_000);
     let claimable: String = view(&env.ntt, "claimable_of", json!({ "account_id": bob.id() })).await?;
     assert_eq!(claimable, "0");

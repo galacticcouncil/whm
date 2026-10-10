@@ -49,6 +49,8 @@ pub struct InboundTransfer {
     pub amount: U128,
     pub source_chain: u16,
     pub queued_at: u64,
+    /// The VAA's, for the `transfer_received` a release logs.
+    pub wormhole_sequence: u64,
 }
 
 /// A transfer checked against config — not yet against the guardians.
@@ -144,6 +146,7 @@ impl NttManager {
                     amount: U128(inbound.amount),
                     source_chain: inbound.source_chain,
                     queued_at: now,
+                    wormhole_sequence: inbound.wormhole_sequence,
                 },
             );
         }
@@ -214,6 +217,7 @@ impl NttManager {
             "account": transfer.account,
             "amount": transfer.amount,
             "source_chain": transfer.source_chain,
+            "wormhole_sequence": transfer.wormhole_sequence,
         }));
         // Registered at `complete`; if that failed, the transfer fails into `claimable`.
         self.pay_out(transfer.account, transfer.amount.0, None, None)
@@ -483,6 +487,9 @@ mod tests {
         set_ctx_with("anyone.near", RATE_LIMIT_DURATION, 0);
         let _ = c.release_inbound(digest(&o));
         assert!(c.get_queued_inbound(digest(&o)).is_none());
+        // The release joins back to its VAA.
+        let log = near_sdk::test_utils::get_logs().pop().unwrap();
+        assert!(log.contains("\"transfer_received\"") && log.contains("\"wormhole_sequence\":42"), "{log}");
     }
 
     #[test]

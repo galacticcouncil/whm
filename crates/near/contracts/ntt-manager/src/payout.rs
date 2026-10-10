@@ -68,6 +68,8 @@ impl NttManager {
         // Zeroed, not removed: a failed transfer goes back into the same entry, with no new storage.
         let amount = self.claimable.get_mut(&account).map(core::mem::take).unwrap_or(0);
         require!(amount > 0, "NothingToClaim");
+        // Like `transfer_received`: logged as it leaves; a failure follows with `payout_failed`.
+        emit("claimed", near_sdk::serde_json::json!({ "account": account, "amount": U128(amount) }));
         self.pay_out(account, amount, None, None)
     }
 
@@ -225,6 +227,15 @@ mod tests {
         c.on_paid(BOB.parse().unwrap(), U128(400), None, Err(PromiseError::Failed));
         assert_eq!(env::storage_usage(), storage_before, "a failed claim took new storage");
         assert_eq!(claimable(&c), 400);
+    }
+
+    #[test]
+    fn a_claim_is_logged() {
+        let mut c = contract_with(8, 1_000);
+        paid(&mut c, None, Err(PromiseError::Failed));
+        claim_as_bob(&mut c);
+        let log = near_sdk::test_utils::get_logs().pop().unwrap();
+        assert!(log.contains("\"claimed\"") && log.contains("\"amount\":\"400\""), "{log}");
     }
 
     #[test]
