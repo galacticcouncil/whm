@@ -440,6 +440,58 @@ async fn failed_unlock_is_claimable() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The contract's balance above its storage stake.
+async fn free(ntt: &Contract) -> anyhow::Result<NearToken> {
+    let account = ntt.view_account().await?;
+    let stake = NearToken::from_yoctonear(account.storage_usage as u128 * 10u128.pow(19));
+    Ok(account.balance.saturating_sub(stake))
+}
+
+/// Sends the contract's free balance away down to about `target` — a deployment funded thin. The
+/// transfer prepays its own gas from that balance, so ~0.3 mN of it is held back.
+async fn thin(env: &Env, target: NearToken) -> anyhow::Result<NearToken> {
+    let excess = free(&env.ntt).await?.saturating_sub(target).saturating_sub(NearToken::from_micronear(300));
+    env.ntt.as_account().transfer_near(env.relayer.id(), excess).await?.into_result()?;
+    free(&env.ntt).await
+}
+
+/// Failed receipts on the contract itself — the token's failed `ft_transfer` is the one expected.
+fn ntt_failures<'a>(env: &Env, result: &'a ExecutionFinalResult) -> Vec<&'a near_workspaces::result::ExecutionOutcome> {
+    result.failures().into_iter().filter(|o| o.executor_id == *env.ntt.id()).collect()
+}
+
+#[tokio::test]
+async fn a_failed_unlock_on_a_thin_contract_is_still_claimable() -> anyhow::Result<()> {
+    // No custody, as in `failed_unlock_is_claimable` — but with no free balance left to fund the
+    // `claimable` entry. The `complete` deposit must.
+    let env = setup(true).await?;
+    let bob = env.worker.root_account()?.create_subaccount("bob").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+    let left = thin(&env, NearToken::from_yoctonear(0)).await?;
+    println!("thin: {} yocto free", left.as_yoctonear());
+
+    let payload = hydration_transfer(&env.ntt, bob.id().as_str(), 150_000_000, 1);
+    let vaa = env.guardian.sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+    let result = complete(&env, &vaa, bob.id().as_str()).await?;
+    assert!(ntt_failures(&env, &result).is_empty(), "{:?}", result.failures());
+    assert!(event(&events(&result), "whm-ntt", "payout_failed").is_some());
+
+    let claimable: String = view(&env.ntt, "claimable_of", json!({ "account_id": bob.id() })).await?;
+    assert_eq!(claimable, "1500000000000000000000000");
+
+    // Still no custody: the claim fails too, back into the entry it came from.
+    let claim = bob
+        .call(env.ntt.id(), "claim")
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(MAX_GAS)
+        .transact()
+        .await?;
+    assert!(ntt_failures(&env, &claim).is_empty(), "{:?}", claim.failures());
+    assert!(event(&events(&claim), "whm-ntt", "payout_failed").is_some());
+    let claimable: String = view(&env.ntt, "claimable_of", json!({ "account_id": bob.id() })).await?;
+    assert_eq!(claimable, "1500000000000000000000000");
+    Ok(())
+}
+
 #[tokio::test]
 async fn over_the_limit_reverts_and_refunds() -> anyhow::Result<()> {
     let env = setup(true).await?;

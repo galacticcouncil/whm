@@ -120,7 +120,7 @@ impl NttManager {
                 self.outbound.backflow(transfer.amount.0, now);
                 self.inbound_limit(transfer.recipient_chain).debit(transfer.inbound_backflow.0, now);
                 emit("transfer_failed", transfer_json(&transfer));
-                Some(self.pay_out(transfer.sender, transfer.amount.0, None))
+                Some(self.pay_out(transfer.sender, transfer.amount.0, None, None))
             }
         }
     }
