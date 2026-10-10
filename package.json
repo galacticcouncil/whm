@@ -33,7 +33,8 @@
     "migrate:near-ntt-near": "bash sh/migrate-near-ntt-near.sh prod",
     "migrate:near-ntt-near:fork": "bash sh/migrate-near-ntt-near.sh fork",
     "migrate:near-ntt-near:testnet": "bash sh/migrate-near-ntt-near.sh testnet",
-    "print:oracles": "bash sh/print-oracles.sh"
+    "print:oracles": "bash sh/print-oracles.sh",
+    "print:agents": "bash sh/print-agents.sh"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
