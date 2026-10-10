@@ -176,7 +176,9 @@ token.ft_transfer_call(
 
 `refund_to` is optional: who a failed publish pays back, `sender_id` if absent. It is for senders
 whose plain token balance credits no one — `intents.near.ft_withdraw`, an Omni connector — see
-[omft-routing.md](omft-routing.md).
+[omft-routing.md](omft-routing.md). It must be registered on the token: a refund it cannot take is
+credited to the **sender**'s `claimable`, never to `refund_to` — otherwise anyone could name a fresh,
+unregistered account per transfer and make the contract pay a new entry for each.
 
 `ft_on_transfer(sender_id, amount, msg)`:
 
@@ -195,7 +197,7 @@ whose plain token balance credits no one — `intents.near.ft_withdraw`, an Omni
 7. Detached: `publish_message(hex(message), 0)` on core, then `on_published(transfer)`. Success →
    `transfer_sent` event. Failure → return the outbound capacity, take back only the inbound
    backflow step 4 actually added, and pay `refund_to` back through `ft_transfer`; if that fails
-   too, credit `claimable[refund_to]`. The message names the real sender either way.
+   too, credit `claimable[sender]`. The message names the real sender either way.
 
 **Why detached.** Chaining the publish into `ft_on_transfer`'s return value (so a failure refunds
 through the unused amount) opens a double spend: if `publish_message` succeeds and `on_published`
@@ -292,8 +294,11 @@ entry before it can be needed:
 | `release_inbound`   | the queue entry it removes — larger than any `claimable` entry                      |
 | Failed publish      | **the contract's free balance** — `ft_on_transfer` cannot take a deposit            |
 
-The last is only reachable if the core's `message_fee` turns non-zero. Keep the contract's free
-balance monitored — before a failure, not after. Zeroed entries stay: their storage was paid by the
+The last is only reachable if the core's `message_fee` turns non-zero, and costs at most one entry
+per sender account — the credit is the sender's, whoever `refund_to` names. It draws on the same
+balance a held excess sits in until its `on_paid`, so enough of them could leave an unlock's
+`on_paid` short. Keep the contract's free balance monitored — before a failure, not after — and pause
+if `transfer_failed` starts appearing. Zeroed entries stay: their storage was paid by the
 deposit that created them.
 
 ## Hub
@@ -353,7 +358,9 @@ the code, and no key can speak as the emitter. `crates/near/scripts/ntt-manager/
 
 `migrate` is `#[init(ignore_state)]` and today reads the state as it is. A release that changes a
 stored layout (`Peer`, `RateLimit`, `InboundTransfer`, the contract struct) converts it there;
-`StorageKey` is append-only. Every release keeps `migrate`.
+`StorageKey` is append-only. Every release keeps `migrate`. Callback arguments (`OutboundTransfer`,
+`Held`) are JSON in receipts already in flight when an upgrade lands: a field added to them must be
+an `Option`, or those callbacks fail to parse.
 
 ## Invariants
 
@@ -362,9 +369,9 @@ stored layout (`Peer`, `RateLimit`, `InboundTransfer`, the contract struct) conv
    — publishing is detached from `ft_on_transfer`'s return value.
 2. **Bound recipient.** Inbound tokens only ever reach the account whose `sha256` the VAA names.
 3. **No loss on failed pay-out.** Every `ft_transfer` out of custody — inbound unlock, outbound
-   refund, claim, release — credits `claimable` if it fails. Unconditional for unlock, claim and
-   release, which pay for their entry; a failed publish's refund needs the contract's free balance
-   to cover one ([Who pays](#inbound--hydration--near)).
+   refund, claim, release — credits `claimable` if it fails. Unlock, claim and release pay for
+   their entry; a failed publish's refund needs the contract's free balance to cover one, and only
+   failed publishes can drain it below what unlocks hold ([Who pays](#inbound--hydration--near)).
 4. **Replay-safe.** One execution per NTT digest.
 5. **Single hub.** Custody lives only on NEAR; Hydration only burns and mints.
 6. **Conservation.** `locked == Hydration supply + outbound not yet minted + inbound not yet
@@ -439,7 +446,7 @@ relayer gate, no `5kx8…` admin with mint power.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | Codec            | golden vectors from `TransceiverStructs.sol`, both directions                                                                                                                                                                                                                               | forge script + `cargo test`                                       |
 | Unit             | trim, rate limits + backflow, inbound queue, replay, peers, pause, held deposit + `claimable` funding, `refund_to`, two-step ownership                                                                                                                                                      | `cargo test`                                                      |
-| Async            | publish failure → refund (limits restored exactly); `ft_transfer` failure → claimable; unregistered storage; a refund larger than the contract's free balance; a failed unlock and claim on a contract with no free balance; `refund_to`; `complete` / outbound at the minimum accepted gas | `near-workspaces` sandbox                                         |
+| Async            | publish failure → refund (limits restored exactly); `ft_transfer` failure → claimable; unregistered storage; a refund larger than the contract's free balance; a failed unlock and claim on a contract with no free balance; `refund_to`, and a refund it cannot take credited to the sender; a failed unlock at the minimum gas; `complete` / outbound at the minimum accepted gas | `near-workspaces` sandbox                                         |
 | Upgrade          | owner upgrade keeps state; non-owner refused; failed `migrate` keeps the old code; propose + accept, then upgrade with no account keys left                                                                                                                                                 | `near-workspaces` sandbox                                         |
 | Core integration | real Wormhole NEAR core wasm with a test guardian set signing VAAs                                                                                                                                                                                                                          | `near-workspaces` + `wormhole/near/contracts/wormhole`            |
 | Hydration side   | NEAR-emitted VAA into the real manager / transceiver / `set_ntt_minter`                                                                                                                                                                                                                     | chopsticks, guardian set substituted — the Basejump probe pattern |

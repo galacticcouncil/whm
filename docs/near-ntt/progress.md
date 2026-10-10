@@ -328,7 +328,7 @@ Critical or High; 2 findings, 13 leads.
 | Report item | Fix |
 | ----------- | --- |
 | F1 a failed pay-out's `claimable` entry unfunded — on a thin contract `on_paid` fails `LackBalanceForState`, credit lost, VAA consumed | Not the report's threshold reserve: a pay-out **holds** the `complete` deposit's excess (`Held`, ≥ `CLAIM_RESERVE` 0.002 NEAR) until `on_paid`, which pays the entry from it and refunds the rest. `claim` zeroes its entry instead of removing it. Each failure funds itself, however many land together. Minimum deposit unchanged. `9f618fa` |
-| F2 failed-publish refund to a routing contract strands | Optional `TransferMsg.refund_to`. `76db612` |
+| F2 failed-publish refund to a routing contract strands | Optional `TransferMsg.refund_to`. `76db612`. As first written it **credited a failed refund to `refund_to`**, so a fresh unregistered account per transfer made the contract pay a new `claimable` entry each — caught by the re-review; a refund `refund_to` cannot take now credits the sender |
 | L1 unguarded `new` | Checked: `deployNtt` creates, funds, deploys and inits in one transaction. No change |
 | L3 single-step ownership | `transfer_ownership` proposes, `accept_ownership` takes over; migration step `007-accept-ownership@ntt`. `b4bd889` |
 | L5 no event on a successful claim | `claimed`, logged as the tokens leave (`payout_failed` follows a failure). `23cda8e` |
@@ -342,7 +342,13 @@ and `claimable_of` stayed 0. On a successful transfer the redeemer's net cost is
 | Check | Result |
 | ----- | ------ |
 | `cargo test -p ntt-manager` | 75 passed |
-| Sandbox | 15 passed — + a failed unlock and claim on a contract with no free balance, `refund_to` |
+| Sandbox | 17 passed — + a failed unlock and claim on a contract with no free balance, `refund_to`, a refund `refund_to` cannot take (fails on the first `refund_to` code), a failed unlock at the minimum gas (92 TGas) |
+| Testnet | redeployed on the same account; NEAR → Hydration transfer (sequence 6) delivered on a Hydration fork, replay rejected |
+
+**Re-review** of the fixes (`/near-audit`, 6 reviewers, `audit-2026-10-10.md`, gitignored): 0 findings,
+20 leads. Taken: the `refund_to` credit above; a minimum-gas test for a failed unlock; spec notes on
+pooled held funds, callback-arg compatibility and the 006 → 007 window. Both prior reports' fixes
+hold.
 
 The sandbox binary has no darwin-x86_64 build: from a Rosetta shell, run it as
 `CARGO_TARGET_DIR=target/arm64 arch -arm64 rustup run stable-aarch64-apple-darwin cargo test -p ntt-sandbox -- --test-threads=1`

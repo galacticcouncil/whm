@@ -37,7 +37,8 @@ pub struct TransferMsg {
     /// Hex: a 20-byte EVM address, or the same left-padded to 32 bytes.
     pub recipient: String,
     /// Who a failed publish refunds; `sender_id` if absent. For a sender whose plain token balance
-    /// credits no one — `intents.near`, an Omni connector.
+    /// credits no one — `intents.near`, an Omni connector. Must be registered on the token: a refund
+    /// it cannot take is credited to the sender's `claimable`, not to it.
     pub refund_to: Option<AccountId>,
 }
 
@@ -127,7 +128,8 @@ impl NttManager {
                 self.outbound.backflow(transfer.amount.0, now);
                 self.inbound_limit(transfer.recipient_chain).debit(transfer.inbound_backflow.0, now);
                 emit("transfer_failed", transfer_json(&transfer));
-                Some(self.pay_out(transfer.refund_to, transfer.amount.0, None, None))
+                // A refund `refund_to` cannot take lands in the sender's `claimable`.
+                Some(self.pay_out_crediting(transfer.refund_to, transfer.sender, transfer.amount.0, None, None))
             }
         }
     }
@@ -418,19 +420,25 @@ mod tests {
 
         as_self();
         let _ = c.on_published(transfer, Err(PromiseError::Failed));
-        let refund = near_sdk::test_utils::get_created_receipts()
+        assert_eq!(call_args("ft_transfer")["receiver_id"], accounts(2).as_str());
+        // A refund it cannot take is credited to the sender, never to it.
+        assert_eq!(call_args("on_paid")["account"], accounts(1).as_str());
+    }
+
+    /// The JSON args of the first `method` call the last call created.
+    fn call_args(method: &str) -> serde_json::Value {
+        near_sdk::test_utils::get_created_receipts()
             .into_iter()
             .flat_map(|r| r.actions)
             .find_map(|a| match a {
                 near_sdk::mock::MockAction::FunctionCallWeight { method_name, args, .. }
-                    if method_name == b"ft_transfer" =>
+                    if method_name == method.as_bytes() =>
                 {
-                    Some(serde_json::from_slice::<serde_json::Value>(&args).unwrap())
+                    Some(serde_json::from_slice(&args).unwrap())
                 }
                 _ => None,
             })
-            .expect("ft_transfer");
-        assert_eq!(refund["receiver_id"], accounts(2).as_str());
+            .unwrap_or_else(|| panic!("no {method} call"))
     }
 
     #[test]

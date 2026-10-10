@@ -361,6 +361,38 @@ async fn failed_publish_refunds_refund_to() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn a_refund_refund_to_cannot_take_is_credited_to_the_sender() -> anyhow::Result<()> {
+    // An unregistered refund_to, then the contract itself: neither can take the refund. Both land in
+    // alice's one `claimable` entry — naming fresh accounts must not grow the contract's storage.
+    let env = setup(false).await?;
+    let dave = subaccount(&env.worker, "dave", 5).await?;
+    let send = |refund_to: String| {
+        let msg = json!({ "recipient_chain": HYDRATION, "recipient": HYDRATION_RECIPIENT, "refund_to": refund_to }).to_string();
+        env.alice
+            .call(env.token.id(), "ft_transfer_call")
+            .args_json(json!({ "receiver_id": env.ntt.id(), "amount": 10u128.pow(24).to_string(), "msg": msg }))
+            .deposit(NearToken::from_yoctonear(1))
+            .gas(MAX_GAS)
+            .transact()
+    };
+    let claimable = |account: String| view::<String>(&env.ntt, "claimable_of", json!({ "account_id": account }));
+
+    let first = send(dave.id().to_string()).await?;
+    assert!(ntt_failures(&env, &first).is_empty(), "{:?}", first.failures());
+    assert!(event(&events(&first), "whm-ntt", "payout_failed").is_some());
+    assert_eq!(claimable(env.alice.id().to_string()).await?, 10u128.pow(24).to_string());
+    assert_eq!(claimable(dave.id().to_string()).await?, "0");
+    let storage = env.ntt.view_account().await?.storage_usage;
+
+    let second = send(env.ntt.id().to_string()).await?;
+    assert!(ntt_failures(&env, &second).is_empty(), "{:?}", second.failures());
+    assert_eq!(claimable(env.alice.id().to_string()).await?, (2 * 10u128.pow(24)).to_string());
+    assert_eq!(claimable(env.ntt.id().to_string()).await?, "0");
+    assert_eq!(env.ntt.view_account().await?.storage_usage, storage, "a second entry was created");
+    Ok(())
+}
+
+#[tokio::test]
 async fn inbound_verifies_registers_and_pays() -> anyhow::Result<()> {
     let env = setup(true).await?;
     // Custody first: alice locks 5 NEAR.
@@ -584,6 +616,30 @@ async fn complete_at_the_minimum_gas_delivers() -> anyhow::Result<()> {
         println!("complete accepted at {tgas} TGas");
         assert!(result.failures().is_empty(), "at {tgas} TGas: {:?}", result.failures());
         assert_eq!(balance(&env.token, &bob).await?, 1_500_000_000_000_000_000_000_000);
+        return Ok(());
+    }
+    anyhow::bail!("complete never accepted up to 130 TGas")
+}
+
+#[tokio::test]
+async fn a_failed_unlock_at_the_minimum_gas_is_claimable() -> anyhow::Result<()> {
+    // As above, but with no custody: the heaviest `on_paid` — a new `claimable` entry, then the held
+    // excess refunded — must still fit the static gas.
+    let env = setup(true).await?;
+    let bob = format!("bob.{}", env.worker.root_account()?.id());
+    let payload = hydration_transfer(&env.ntt, &bob, 150_000_000, 1);
+    let vaa = env.guardian.sign(HYDRATION, bytes32(TRANSCEIVER), 1, &payload);
+
+    for tgas in 85..=130 {
+        let result = complete_with(&env, &env.relayer, &vaa, &bob, NearToken::from_millinear(10), Gas::from_tgas(tgas)).await?;
+        if !result.outcomes().iter().any(|o| o.executor_id == *env.core.id()) {
+            continue;
+        }
+        println!("failed unlock accepted at {tgas} TGas");
+        assert!(ntt_failures(&env, &result).is_empty(), "at {tgas} TGas: {:?}", result.failures());
+        assert!(event(&events(&result), "whm-ntt", "payout_failed").is_some());
+        let claimable: String = view(&env.ntt, "claimable_of", json!({ "account_id": bob })).await?;
+        assert_eq!(claimable, "1500000000000000000000000");
         return Ok(());
     }
     anyhow::bail!("complete never accepted up to 130 TGas")

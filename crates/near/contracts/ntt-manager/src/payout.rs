@@ -10,7 +10,8 @@
 //! - **Release** — removing the queue entry frees more than any `claimable` entry takes.
 //!
 //! A failed publish's refund is the exception: `ft_on_transfer` cannot take a deposit, so its entry
-//! comes from the contract's free balance.
+//! comes from the contract's free balance. It is credited to the sender, never to `refund_to`, so
+//! it costs at most one entry per sender account.
 
 use near_sdk::json_types::U128;
 use near_sdk::{env, ext_contract, near, require, AccountId, Gas, NearToken, Promise, PromiseError};
@@ -119,6 +120,20 @@ impl NttManager {
         register: Option<NearToken>,
         held: Option<Held>,
     ) -> Promise {
+        self.pay_out_crediting(account.clone(), account, amount, register, held)
+    }
+
+    /// `pay_out` to `account`, but a failed transfer credits `credit` instead. For a refund to an
+    /// account the sender named: crediting it would let anyone name a fresh, unregistered one per
+    /// transfer, each a new `claimable` entry on the contract's balance.
+    pub(crate) fn pay_out_crediting(
+        &mut self,
+        account: AccountId,
+        credit: AccountId,
+        amount: u128,
+        register: Option<NearToken>,
+        held: Option<Held>,
+    ) -> Promise {
         let transfer = ext_ft::ext(self.token.clone())
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(GAS_FOR_FT_TRANSFER)
@@ -136,7 +151,7 @@ impl NttManager {
         first.then(
             Self::ext(env::current_account_id())
                 .with_static_gas(GAS_FOR_ON_PAID)
-                .on_paid(account, U128(amount), held),
+                .on_paid(credit, U128(amount), held),
         )
     }
 }
