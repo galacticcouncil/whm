@@ -110,6 +110,7 @@ never also by `btc.omft.near`.
 | Registered on the token | `safe_mint` burns the mint if the receiver is not | Step 003 |
 | **Panic or return 0** from `ft_on_transfer` | the connector counts a partial "unused" as success and strands the rest **[V]** | Holds: both tokens are 8 dp, so trim dust is 0 — the Hydration assets must have ≥ 8 dp |
 | Fit the gas `safe_mint` forwards | a `NotEnoughGas` panic burns the mint → refund after 2 days | **To verify**, per connector: the manager needs ~55 TGas; `safe_mint` gets 90 TGas on ZEC |
+| A failed publish refunds someone reachable | the publish runs after `ft_on_transfer` returned 0, so the connector has counted the mint as consumed — its `request_refund` path does not fire, and a plain `ft_transfer` back to the connector credits no one | `TransferMsg.refund_to` exists; which account the order names is open (Open 7) |
 
 ## Open
 
@@ -120,6 +121,9 @@ never also by `btc.omft.near`.
    BURNING manager, `set_ntt_minter` referendum.
 5. **Bridge fee on BTC safe deposits** — read the fee path for BTC.
 6. **Deposit screen** in the app, calling the Omni API.
+7. **`refund_to` for a deposit-address user.** They have no NEAR account, so the order's `msg` can
+   only name an account we run, refunded by hand. Only reachable if the Wormhole `message_fee`
+   becomes non-zero; without `refund_to` the refund strands at the connector.
 
 ## Other omft tokens
 
@@ -136,6 +140,7 @@ Not a one-transfer route today:
   manager cannot register itself there.
 - **[V]** Decimals follow the native asset (SOL 9, ETH 18, XRP 6): > 8 dp means trim dust, returned
   as unused — fine through `ft_withdraw` (credited back), not through the connectors.
-- A failed publish refunds by plain `ft_transfer` to `sender_id`. From `intents.near` that is
-  stranded (a plain transfer there credits no one). Only reachable if the Wormhole `message_fee`
-  becomes non-zero; the fix would be an optional `refund_to` in `TransferMsg`.
+- A failed publish refunds by plain `ft_transfer` to `refund_to`, or `sender_id` without one. From
+  `intents.near` a refund to the sender is stranded (a plain transfer there credits no one), so the
+  `ft_withdraw` `msg` must name the user's own NEAR account in `refund_to`. Only reachable if the
+  Wormhole `message_fee` becomes non-zero.

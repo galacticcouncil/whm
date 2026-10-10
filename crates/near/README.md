@@ -140,8 +140,10 @@ pnpm migrate:near-ntt-zec             # or :near — PK_NEAR, env in migrations/
 
 `001` deploy (create + fund + deploy + init in one transaction) · `002` register emitter on the core ·
 `003` register storage on the token · `004` peer with the Hydration manager + transceiver · `005`
-transfer ownership to the NEAR multisig · `006` delete the contract account's keys — from then on
-only the owner upgrades it (`upgrade`). Before it: the Hydration manager + transceiver from
+propose the NEAR multisig as owner · `006` delete the contract account's keys — from then on only
+the owner upgrades it (`upgrade`) · `007` accept the ownership — sent by the step if the custodian is
+the deployer; otherwise the multisig calls `accept_ownership` (1 yocto) and a re-run continues.
+Before it: the Hydration manager + transceiver from
 hydration-ntt, their addresses in the env. After it: hydration-ntt peers them back with `001`'s
 emitter, the `set_ntt_minter` referendum, and an `ntt` relayer route (NEAR → Hydration). Details in
 [`migrations/definitions/near-ntt-zec/index.ts`](../../migrations/definitions/near-ntt-zec/index.ts).

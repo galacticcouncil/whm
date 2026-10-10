@@ -319,3 +319,34 @@ into the manager: [omft-routing.md](omft-routing.md).
 
 The testnet contract (`ntt-near.whm-ntt-0bugdc.testnet`) runs pre-stage-6 code: step 006 refuses on
 it (code hash ≠ `NTT_WASM`). Redeploy it with the deployer key first.
+
+## Stage 7 — second audit
+
+External review of `dc15b04` (manual + pashov 12-agent pass, `audit-2026-09-29.md`, gitignored): no
+Critical or High; 2 findings, 13 leads.
+
+| Report item | Fix |
+| ----------- | --- |
+| F1 a failed pay-out's `claimable` entry unfunded — on a thin contract `on_paid` fails `LackBalanceForState`, credit lost, VAA consumed | Not the report's threshold reserve: a pay-out **holds** the `complete` deposit's excess (`Held`, ≥ `CLAIM_RESERVE` 0.002 NEAR) until `on_paid`, which pays the entry from it and refunds the rest. `claim` zeroes its entry instead of removing it. Each failure funds itself, however many land together. Minimum deposit unchanged. `9f618fa` |
+| F2 failed-publish refund to a routing contract strands | Optional `TransferMsg.refund_to`. `76db612` |
+| L1 unguarded `new` | Checked: `deployNtt` creates, funds, deploys and inits in one transaction. No change |
+| L3 single-step ownership | `transfer_ownership` proposes, `accept_ownership` takes over; migration step `007-accept-ownership@ntt`. `b4bd889` |
+| L5 no event on a successful claim | `claimed`, logged as the tokens leave (`payout_failed` follows a failure). `23cda8e` |
+| L7 queued release event lacks `wormhole_sequence` | Stored on `InboundTransfer`, logged on release. `23cda8e` |
+| L2, L4, L6, L8–L13 | Not taken — hardening or documented tradeoffs |
+
+F1 reproduced first against the old wasm: with 0.05 mN free, `on_paid` failed `LackBalanceForState`
+and `claimable_of` stayed 0. On a successful transfer the redeemer's net cost is the same as before
+(1.98 mN in the sandbox: registration + replay entry).
+
+| Check | Result |
+| ----- | ------ |
+| `cargo test -p ntt-manager` | 75 passed |
+| Sandbox | 15 passed — + a failed unlock and claim on a contract with no free balance, `refund_to` |
+
+The sandbox binary has no darwin-x86_64 build: from a Rosetta shell, run it as
+`CARGO_TARGET_DIR=target/arm64 arch -arm64 rustup run stable-aarch64-apple-darwin cargo test -p ntt-sandbox -- --test-threads=1`
+(with `NTT_WASM` set as in `test:sandbox`).
+
+`pending_owner` changes the contract struct, so no deployed contract upgrades to this code: none is
+on mainnet, and testnet is redeployed from scratch on the same account.
