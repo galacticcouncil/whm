@@ -56,21 +56,47 @@ export function optNum(name: string, fallback: number): number {
 }
 
 /**
+ * Parse and validate a 32-byte hex private key read from `name`, normalizing the `0x` prefix.
+ *
+ * @param name Env var the raw value came from, for the error message only.
+ * @param raw The env var's raw value.
+ * @returns The key, 0x-prefixed, lowercased.
+ * @throws When not 32 bytes of hex.
+ * @remarks viem requires the prefix where ethers did not, so bare-hex keys carried over from an
+ *          earlier deployment are accepted and normalized rather than rejected at startup.
+ */
+function parsePrivateKey(name: string, raw: string): `0x${string}` {
+  const hex = raw.startsWith("0x") || raw.startsWith("0X") ? raw.slice(2) : raw;
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+    throw new Error(`${name} is not a 32-byte hex private key (got ${hex.length} hex chars)`);
+  }
+  return `0x${hex.toLowerCase()}`;
+}
+
+/**
  * The process's signing key. One name across every app — services differ by the value, which is
  * what keeps the NTT and oracle wallets on separate nonces.
  *
  * @returns The key, 0x-prefixed.
  * @throws When unset, or not 32 bytes of hex.
- * @remarks viem requires the prefix where ethers did not, so bare-hex keys carried over from an
- *          earlier deployment are accepted and normalized rather than rejected at startup.
  */
 export function privateKey(): `0x${string}` {
-  const raw = req("PRIVKEY").trim();
-  const hex = raw.startsWith("0x") || raw.startsWith("0X") ? raw.slice(2) : raw;
-  if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
-    throw new Error(`PRIVKEY is not a 32-byte hex private key (got ${hex.length} hex chars)`);
-  }
-  return `0x${hex.toLowerCase()}`;
+  return parsePrivateKey("PRIVKEY", req("PRIVKEY").trim());
+}
+
+/**
+ * Base's own signing key, from `PRIVKEY_BASE` — a name distinct from `PRIVKEY`, so that a process
+ * holding both a Base client and a client for another chain (built via `privateKey()`) does not
+ * sign both from one account unless both variables are given the same key; nothing compares the
+ * two values. The separation is for funds and blast radius: the Base wallet's balance and key are
+ * not a Hydration wallet's. A nonce has nothing to do with it, since nonces are per chain. It does
+ * not fall back to `PRIVKEY` when unset: a silent fallback here would defeat that.
+ *
+ * @returns The key, 0x-prefixed.
+ * @throws When unset, or not 32 bytes of hex.
+ */
+export function privateKeyBase(): `0x${string}` {
+  return parsePrivateKey("PRIVKEY_BASE", req("PRIVKEY_BASE").trim());
 }
 
 /**
