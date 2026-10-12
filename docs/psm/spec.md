@@ -266,15 +266,24 @@ payment waits. `drain` stops at a head the allowance cannot cover, in order and 
 reverting. `claim` and `claimUnpayable` revert with `InsufficientPayoutAllowance`, and
 `claimable` reads zero for such a head. The overflow pays as the window refills the allowance.
 
+It bounds the cash, not the books. A forged or faulty credit still books at once and takes
+`principal`, as it did before the limit, so once such credits have taken it, honest redemptions
+arriving after them land in `disputed`. Nor is a cancel the answer: `cancelQueuedRedemptionFor`
+re-mints a forged credit's gross to its `origin`, whoever forged it, bounded on Hydration by the
+inbound limit and the bucket. The response to a forged credit is `setClaimsPaused` and an upgrade.
+
 The sizing condition is that the capacity sits at or above both the facilitator's outbound capacity
 and the deposit limit, 10,000 per 24 h each at launch, because no honest credit is larger than
 either. That makes every honest credit payable. It does not keep honest credits from waiting.
 Outbound is net and this limit is gross, so in one window redemptions can book the outbound
 capacity plus what deposits minted, twice this capacity at launch, and the excess waits about a
 window. The wait is bounded: redemptions cannot exceed what is outstanding plus what deposits
-mint, and the deposit limit is no larger than this one. Revisit this capacity when the bucket is
-raised past 10,000, since what is outstanding is bounded by the bucket. The capacity moves with
-the other two: raising either without it strands the larger credits. The window sits at or below
+mint, and the deposit limit is no larger than this one. Revisit that bound when the bucket is
+raised past 10,000, since what is outstanding is bounded by the bucket; the capacity itself tracks
+the largest honest credit, not the bucket. It protects only what is outstanding above it: at
+launch the two are equal, so a first window of forged credits is still paid up to the capacity,
+about the whole reserve, and raising the capacity with the bucket would keep it from ever binding.
+The capacity moves with the other two: raising either without it strands the larger credits. The window sits at or below
 `ORIGIN_CANCEL_DELAY`, or the origin's cancel can open before a waiting head is payable. A credit
 above the capacity is never covered and stalls the head, as a head larger than the reserve can
 release does, and the exit is the same: `cancelQueuedRedemption`, or the admin's copy. The
@@ -403,9 +412,9 @@ what the relayer itself delivered: anyone may deliver a VAA.
   with `maxEntries` around 10: measured on a Base fork, about 60k gas for a call that pays nothing
   and about 260k per entry paid out of Aave. If a batch reverts, fall back to `drain(1)`.
   Send it as soon as `claimable(head) > 0`: a head waiting on the payout allowance is payable after
-  `(entry - payoutAllowance()) / (capacity / window)` seconds, rounded up, with `capacity` and
-  `window` from the last `PayoutLimitSet`. Its origin's cancel opens a day after it reached the
-  head, so a late call can find it recalled.
+  `ceil((entry - payoutAllowance()) * window / capacity)` seconds, with `capacity` and `window`
+  from `limits()`. Its origin's cancel opens a day after it reached the head, so a late call can
+  find it recalled.
 - **What it retires is a blacklisted head.** Any other failed transfer reverts the call. Retiring
   takes the fee and leaves no cancel, so alert on a head whose simulated `drain(1)` would retire
   it — the admin's `cancelQueuedRedemptionFor` returns the gross to the redeemer first. Best effort

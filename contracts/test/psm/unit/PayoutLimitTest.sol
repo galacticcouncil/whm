@@ -369,6 +369,42 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
         _assertSolvent();
     }
 
+    /// @dev The bound is inclusive: a head exactly equal to the allowance pays, by `claim` and by
+    ///      `drain`, and leaves nothing.
+    function test_aHeadExactlyEqualToTheAllowancePays() public {
+        vm.prank(admin);
+        vault.setPayoutLimit(_net(4_000e6), WINDOW);
+        _deposit(alice, 100_000e6);
+
+        _credit(bob, 4_000e6, 1);
+        assertEq(vault.claimable(bob), _net(4_000e6));
+        vm.prank(bob);
+        vault.claim();
+        assertEq(usdc.balanceOf(bob), _net(4_000e6), "paid by claim");
+        assertEq(vault.payoutAllowance(), 0);
+
+        vm.warp(T0 + WINDOW);
+        _credit(carol, 4_000e6, 2);
+        assertEq(vault.drain(10), _net(4_000e6), "paid by drain");
+        assertEq(vault.payoutAllowance(), 0);
+    }
+
+    function test_limits_reportsBothLimits() public {
+        vm.prank(admin);
+        vault.setDepositLimit(20_000e6, 12 hours);
+        _deposit(alice, 5_000e6);
+        _credit(bob, 2_000e6, 1);
+        vault.drain(10);
+
+        (uint256 dc, uint256 dw, uint256 da, uint256 pc, uint256 pw, uint256 pa) = vault.limits();
+        assertEq(dc, 20_000e6);
+        assertEq(dw, 12 hours);
+        assertEq(da, 20_000e6 - 5_000e6);
+        assertEq(pc, CAPACITY);
+        assertEq(pw, WINDOW);
+        assertEq(pa, CAPACITY - _net(2_000e6));
+    }
+
     function test_claim_revertsWhenTheAllowanceCannotCoverTheHead() public {
         _deposit(alice, 100_000e6);
         _credit(bob, 6_000e6, 1);

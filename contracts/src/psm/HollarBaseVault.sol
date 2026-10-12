@@ -519,6 +519,29 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         return payoutLimit.available();
     }
 
+    /// @notice Both limits as set, and what each has left regardless of the pauses.
+    function limits()
+        external
+        view
+        returns (
+            uint256 depositCapacity,
+            uint256 depositWindow,
+            uint256 depositAvailable,
+            uint256 payoutCapacity,
+            uint256 payoutWindow,
+            uint256 payoutAvailable
+        )
+    {
+        return (
+            depositLimit.capacity,
+            depositLimit.window,
+            depositLimit.available(),
+            payoutLimit.capacity,
+            payoutLimit.window,
+            payoutLimit.available()
+        );
+    }
+
     function queueLength() external view returns (uint256) {
         return queueTail - queueHead;
     }
