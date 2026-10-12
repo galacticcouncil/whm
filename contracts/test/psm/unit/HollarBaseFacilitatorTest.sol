@@ -23,6 +23,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
     uint16 internal constant HYDRATION_CHAIN = 73;
     bytes32 internal constant BASE_EMITTER = bytes32(uint256(0xbaa5e));
     uint256 internal constant SCALE = 1e12;
+    uint64 internal constant NO_DEADLINE = type(uint64).max;
 
     address internal admin = makeAddr("admin");
     address internal guardian = makeAddr("guardian");
@@ -402,7 +403,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), 100e18);
-        facilitator.redeem(40e6, bob, type(uint16).max);
+        facilitator.redeem(40e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
 
         assertEq(hollar.balanceOf(alice), 60e18);
@@ -423,7 +424,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), 100e18);
-        facilitator.redeem(100e6, bob, type(uint16).max);
+        facilitator.redeem(100e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
 
         assertEq(wormhole.lastPublished().consistencyLevel, 1);
@@ -439,7 +440,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
         vm.expectRevert(abi.encodeWithSelector(ExceedsBucketLevel.selector, 200e18, 100e18));
-        facilitator.redeem(200e6, bob, type(uint16).max);
+        facilitator.redeem(200e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
     }
 
@@ -453,7 +454,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
         vm.expectRevert();
-        facilitator.redeem(redeemed, bob, type(uint16).max);
+        facilitator.redeem(redeemed, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
     }
 
@@ -461,7 +462,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
     function test_redeem_rejectsZeroRecipient() public {
         vm.expectRevert(ZeroAddress.selector);
         vm.prank(alice);
-        facilitator.redeem(100e6, address(0), type(uint16).max);
+        facilitator.redeem(100e6, address(0), type(uint16).max, NO_DEADLINE, bytes32(0));
     }
 
     function test_redeem_respectsPause() public {
@@ -470,7 +471,64 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.expectRevert(RedeemPaused.selector);
         vm.prank(alice);
-        facilitator.redeem(100e6, bob, type(uint16).max);
+        facilitator.redeem(100e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
+    }
+
+    /// @dev A prepared redeem has no nonce of its own, so a copy signed after its quote expired
+    ///      must burn nothing and publish nothing.
+    function test_redeem_revertsPastDeadline() public {
+        facilitator.receiveMessage(_mintVaa(alice, 100e6));
+        uint64 deadline = uint64(block.timestamp) + 30 minutes;
+        vm.warp(uint256(deadline) + 1);
+
+        uint256 publishedBefore = wormhole.publishedCount();
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), 100e18);
+        vm.expectRevert(abi.encodeWithSelector(RedeemExpired.selector, deadline));
+        facilitator.redeem(40e6, bob, type(uint16).max, deadline, bytes32(0));
+        vm.stopPrank();
+
+        assertEq(hollar.balanceOf(alice), 100e18, "nothing burned");
+        assertEq(_bucketLevel(), 100e18);
+        assertEq(wormhole.publishedCount(), publishedBefore, "nothing published");
+    }
+
+    /// @dev The deadline is inclusive: a call landing in the deadline's own second goes through.
+    function test_redeem_acceptsAtDeadline() public {
+        facilitator.receiveMessage(_mintVaa(alice, 100e6));
+
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), 100e18);
+        facilitator.redeem(40e6, bob, type(uint16).max, uint64(block.timestamp), bytes32(0));
+        vm.stopPrank();
+
+        assertEq(hollar.balanceOf(alice), 60e18);
+    }
+
+    /// @dev An encoder that forgets the field sends zero. That is refused, not read as "no limit".
+    function test_redeem_rejectsZeroDeadline() public {
+        facilitator.receiveMessage(_mintVaa(alice, 100e6));
+
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), 100e18);
+        vm.expectRevert(abi.encodeWithSelector(RedeemExpired.selector, uint64(0)));
+        facilitator.redeem(40e6, bob, type(uint16).max, 0, bytes32(0));
+        vm.stopPrank();
+    }
+
+    /// @dev The ref is emitted as given and indexed, and stays off the wire.
+    function test_redeem_emitsRef() public {
+        facilitator.receiveMessage(_mintVaa(alice, 100e6));
+        bytes32 ref = keccak256("cash-out 1");
+
+        vm.startPrank(alice);
+        hollar.approve(address(facilitator), 100e18);
+        vm.expectEmit(true, true, true, true);
+        emit RedeemInitiated(alice, bob, 40e6, 0, ref);
+        facilitator.redeem(40e6, bob, type(uint16).max, NO_DEADLINE, ref);
+        vm.stopPrank();
+
+        assertEq(wormhole.lastPublished().payload.length, PsmPayload.LENGTH, "the ref does not ride the wire");
     }
 
     // ─── Authority ──────────────────────────────────────────────
@@ -738,7 +796,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), 100e18);
-        facilitator.redeem(40e6, bob, 7);
+        facilitator.redeem(40e6, bob, 7, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
 
         assertEq(PsmPayload.feeCap(wormhole.lastPublished().payload), 7);
@@ -816,7 +874,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
         facilitator.receiveMessage(_mintVaa(alice, 600e6));
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(600e6, bob, type(uint16).max);
+        facilitator.redeem(600e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
     }
 
@@ -829,7 +887,7 @@ contract HollarBaseFacilitatorTest is Test, IHollarBaseFacilitator {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(500e6, bob, type(uint16).max);
+        facilitator.redeem(500e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
 
         (inAvail, outAvail) = _limits();

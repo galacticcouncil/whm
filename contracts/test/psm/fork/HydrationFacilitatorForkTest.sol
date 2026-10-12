@@ -38,6 +38,7 @@ contract HydrationFacilitatorForkTest is Test {
     uint16 internal constant BASE_CHAIN = 30;
     bytes32 internal constant VAULT_EMITTER = bytes32(uint256(0xBA5E));
     uint256 internal constant SCALE = 1e12;
+    uint64 internal constant NO_DEADLINE = type(uint64).max;
     uint256 internal constant CAPACITY = 250_000e18;
 
     HollarBaseFacilitator internal facilitator;
@@ -123,7 +124,7 @@ contract HydrationFacilitatorForkTest is Test {
         deal(HOLLAR, address(facilitator), IGhoToken(HOLLAR).balanceOf(address(facilitator)) + usdcAmount * SCALE);
         vm.mockCall(HOLLAR, abi.encodeWithSelector(bytes4(keccak256("transferFrom(address,address,uint256)"))), abi.encode(true));
         vm.prank(from);
-        facilitator.redeem(usdcAmount, baseRecipient, type(uint16).max);
+        facilitator.redeem(usdcAmount, baseRecipient, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.clearMockedCalls();
     }
 
@@ -182,7 +183,7 @@ contract HydrationFacilitatorForkTest is Test {
             abi.encodeWithSelector(IHollarBaseFacilitator.ExceedsBucketLevel.selector, 20_000e18, 6_000e18)
         );
         vm.prank(alice);
-        facilitator.redeem(20_000e6, makeAddr("baseRecipient"), type(uint16).max);
+        facilitator.redeem(20_000e6, makeAddr("baseRecipient"), type(uint16).max, NO_DEADLINE, bytes32(0));
 
         assertEq(_level(), 6_000e18, "bucket untouched by the refusal");
     }
