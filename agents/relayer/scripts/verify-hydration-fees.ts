@@ -1,83 +1,14 @@
 /**
- * Reproduction and check for chain-parameterising the VAA submission helper. `submit()` calls
- * `chainFees()` explicitly on every call instead of using the `chain.fees.estimateFeesPerGas` viem
- * hook (so the chain travels through the clients rather than as a separate argument, and fees are
- * computed per call instead of relying on viem's own per-client cache), and `chainFees` validates
- * the runtime shape of whatever a destination chain's own fee hook returns, rather than trusting
- * viem's declared return type (a chain hook returning `{ gasPrice }` would otherwise come back
- * through the generic branch typed as EIP-1559 with both max fields `undefined`, and `submit`
- * would sign a zero-fee EIP-1559 transaction from it). Runs the REAL `hydrationClients()` /
- * `submit()` / `receiveMessage()` from `../src/engine/hydration` against REAL viem clients, with
- * only the HTTP transport mocked (`globalThis.fetch` intercepted, not the viem client objects), so
- * the actual signing path runs: real ABI encoding, a real local account (`viem/accounts`), real
- * RLP/EIP-1559 serialization and signature.
+ * Runs the real `hydrationClients()` / `submit()` / `receiveMessage()` against real viem clients
+ * with only `fetch` mocked, so ABI encoding, serialization and signing all execute.
  *
- * Five groups are checked:
+ *   A. Each Hydration fee scenario signs its pinned transaction.
+ *   C. One long-lived client prices each submission off its own block across a base-fee flip.
+ *   D. The same flip with no explicit fee fields: viem reuses its first transaction-type guess.
+ *   E. Non-Hydration chains take viem's estimate: a plain chain signs its pinned EIP-1559 tx (E), a
+ *      fee hook returning `{ gasPrice }` signs legacy (E2), a hook returning neither throws (E3).
  *
- *   A. Fresh-client scenarios for the Hydration path: legacy (a contract check only — Hydration's
- *      `pallet-dynamic-evm-fee` makes this branch unreachable there today, see `../src/utils/fees`
- *      for the sourced claim), eip1559 with a priority-fee-reporting RPC, eip1559 with an RPC that
- *      rejects `eth_maxPriorityFeePerGas`. Each is compared against a PINNED_RAW_TX record below.
- *   B. A comparator sanity check: corrupting the pinned expectation must make (A) go red, so a
- *      clean run is not evidence of a vacuous "always equal" comparison.
- *   C. A SINGLE long-lived client (matching how `ntt`/`oracle` actually use `hydrationClients()`,
- *      once per process, not once per submission) across a `baseFeePerGas` flip between two real
- *      `receiveMessage()` calls, both directions (legacy -> eip1559 and eip1559 -> legacy). Because
- *      `submit()` calls `chainFees()` fresh on every call rather than letting viem infer a type
- *      from absent fee fields, each submission prices correctly off its own block; neither
- *      direction throws or mis-prices.
- *   D. The defect (C) no longer has, reproduced in memory by going around `submit()`: the same
- *      persistent client's `wallet.writeContract()` called directly, with no explicit fee fields,
- *      across the same kind of flip. This is viem's own `eip1559NetworkCache` (keyed by
- *      `client.uid`, written once per client lifetime — see
- *      `node_modules/viem/actions/wallet/prepareTransactionRequest.ts`) doing what it does when
- *      nothing overrides it: legacy -> eip1559 silently keeps signing legacy transactions after the
- *      block has moved on; eip1559 -> legacy throws `Eip1559FeesNotSupportedError` instead of
- *      falling back. This is the construction that shows why `submit()` sets fee fields explicitly
- *      on every call.
- *   E. `chainFees`'s generic (non-Hydration) branch, three ways:
- *        - E:  a plain `Chain` (viem's `base`, `rpcUrls` emptied) with no fee hook of its own —
- *              confirms the branch runs at all and signs a well-formed EIP-1559 transaction, pinned
- *              like (A).
- *        - E2: a `Chain` whose own `fees.estimateFeesPerGas` hook returns a legacy `{ gasPrice }`
- *              shape unconditionally. `chainFees` must read that as `kind: "legacy"` and sign a
- *              legacy transaction with that `gasPrice`. This is the construction that shows why
- *              `chainFees` checks the hook's actual shape instead of trusting viem's declared type.
- *        - E3: a `Chain` whose hook returns neither the legacy nor the EIP-1559 shape. `chainFees`
- *              must throw its named error and `submit` must send nothing, rather than pass a
- *              half-set `FeeOverrides` through.
- *      E/E2/E3 use a hand-built `ChainClients` (`genericClients`) so one helper can build clients
- *      for any chain object, including the test chains whose fee hooks are the thing under test;
- *      no factory does that (`hydrationClients` is Hydration's, `baseClients` is Base's). It
- *      builds both clients from the same chain object, so it does not itself construct a
- *      mismatched pair; it only shows the type accepts a value no factory made (see the doc
- *      comment on `ChainClients` in `../src/engine/hydration.ts` for that bound).
- *
- * Run with: npx tsx agents/relayer/scripts/verify-hydration-fees.ts
- * (from the repo root, or from agents/relayer/; either resolves node_modules), or
- * `pnpm --filter @whm/relayer verify:hydration-fees`.
- *
- * Manual source mutants (not re-run automatically, since each mutates a checked-in file rather
- * than an in-memory copy; each is restored after its check):
- *   - Drop the explicit fee fields from both `wallet.writeContract` branches in `submit()`
- *     (`../src/engine/hydration.ts`). Exit code 1: all three (A) scenarios go red (byte mismatch —
- *     the Hydration branch no longer runs on every call the way the pinned transactions were
- *     captured), and the (C) run itself aborts with an uncaught `Eip1559FeesNotSupportedError` on
- *     its eip1559 -> legacy leg — the same stale-cache failure (D) demonstrates deliberately, hit
- *     here by accident, which is why the process exits before printing PASS/FAIL for whatever (C),
- *     (D), (E) would have checked after it.
- *   - Change `block.baseFeePerGas * 2n` to `* 3n` in `chainFees` (`../src/utils/fees.ts`), rerun.
- *     Both eip1559 (A) scenarios go red; the legacy (A) scenario and (E) are unaffected.
- *   - Make `chainFees` ignore `chain.id` so Hydration always takes the generic
- *     `client.estimateFeesPerGas()` branch, rerun. Both eip1559 (A) scenarios go red — viem's
- *     default base-fee multiplier is 1.2x, not this repo's 2x, so `maxFeePerGas` differs even when
- *     the RPC reports a priority fee; the legacy (A) scenario and (E) are unaffected.
- *   - Remove `chainFees`'s runtime shape validation on the generic branch (return
- *     `{ kind: "eip1559", maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas }`
- *     straight from `client.estimateFeesPerGas()`, trusting the declared type), rerun. (E2) and (E3)
- *     both go red: (E2) signs a zero-fee EIP-1559 transaction instead of a legacy one (the defect
- *     the shape validation exists to prevent), and (E3) signs a transaction instead of throwing.
- *     (A)-(D) are unaffected, since none of them exercise the generic branch's hook path.
+ * Run: pnpm --filter @whm/relayer verify:hydration-fees
  */
 import {
   createPublicClient,
@@ -95,8 +26,7 @@ import { base } from "viem/chains";
 import { HYDRATION_EVM_CHAIN_ID } from "../src/chains";
 import { hydrationClients, receiveMessage, submit, type ChainClients } from "../src/engine/hydration";
 
-// Anvil/Hardhat's well-known default account #0 key. Public, funds-free, used only to sign a
-// throwaway transaction that is never broadcast to a real chain.
+// Anvil's public default account #0; signs only mocked transactions.
 const TEST_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 
 const TO = getAddress("0x00000000000000000000000000000000000000bb");
@@ -107,8 +37,7 @@ const GAS = 200_000n;
 const GAS_PRICE = 5_000_000_000n; // legacy branch and eth_gasPrice fallback
 const PRIORITY_FEE = 1_000_000_000n; // when the RPC reports one
 
-// `base` (viem/chains) with its RPCs stripped so nothing here can reach the real network — the
-// transport is always the mocked `http("http://mock-rpc.invalid")` below regardless.
+// viem's `base` with its RPCs stripped; the transport is mocked regardless.
 const OFFLINE_BASE: Chain = { ...base, rpcUrls: { default: { http: [] } } };
 
 type Scenario = {
@@ -141,33 +70,7 @@ const BASE_SCENARIO: Scenario = {
   priorityFeeSupported: true,
 };
 
-/**
- * `legacy` / `eip1559-with-priority-rpc` / `eip1559-no-priority-rpc` are captured from
- * `origin/master`'s OWN `hydrationClients()` / `receiveMessage()` (`src/chains.ts`,
- * `src/utils/fees.ts`, `src/engine/hydration.ts` as they stand on `master`), not from the producer
- * in this PR — that is what actually evidences "byte-identical to master" (the claim this repo's PR
- * body makes about the Hydration path), rather than this file's own producer agreeing with itself.
- * Recipe, exact and repeatable: `git show origin/master:agents/relayer/src/chains.ts`,
- * `.../src/utils/fees.ts`, and `.../src/engine/hydration.ts` into a scratch directory (any path;
- * for example `/tmp/master-fee-check/src/{chains.ts,utils/fees.ts,engine/hydration.ts}`) with a
- * symlinked `node_modules` (pnpm workspaces hoist to the repo root, so `agents/relayer/node_modules`
- * resolves everything master's files import) and a small runner script that installs the same
- * fetch mock as `installMock` below, keyed on the same TEST_KEY / TO / ABI / VAA_BYTES / NONCE /
- * GAS / GAS_PRICE / PRIORITY_FEE fixture, calling master's own `hydrationClients()` +
- * `receiveMessage()` once per scenario and logging the captured raw transaction. Run with
- * `<repo>/agents/relayer/node_modules/.bin/tsx scratch/scripts/pin-capture.ts`. The three values
- * below are exactly what that produced, confirmed byte-for-byte against what this PR's own
- * `chainFees`-based `submit()` produces for the same three scenarios (sections A run both — this
- * file's producer is what section A actually calls; master's producer is what the pins were
- * derived from).
- *
- * `base-eip1559` has no master equivalent — the generic (non-Hydration) branch is new in this PR —
- * so it is captured from this file's own producer instead, the same way section E always compared.
- *
- * All four are pinned as literal strings rather than re-derived from the fee formula, so a change
- * to that formula cannot make the comparison pass by construction, and rather than fetched with
- * `git show` at run time, so this file keeps working as `master` moves.
- */
+/** Expected signed transaction per scenario under this mock. */
 const PINNED_RAW_TX: Record<string, Hex> = {
   legacy:
     "0xf8cd2a85012a05f20083030d409400000000000000000000000000000000000000bb80b864f953cec700000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000004cafebabe000000000000000000000000000000000000000000000000000000008306c83fa0ef5e3066c11ba691a3b6f67bc10ae16c1d8fabb19b4a61191cf7f8c8830d8ee5a019ef4c7715b0775cb9e08180101afbf40c49c98c1328c7fd63babb18e2a95e94",
@@ -182,11 +85,9 @@ const PINNED_RAW_TX: Record<string, Hex> = {
 type JsonRpcRequest = { jsonrpc: "2.0"; id: number; method: string; params?: unknown[] };
 
 /**
- * Installs a fetch mock answering the JSON-RPC calls a submission provokes. `feed` is read on
- * every call, not captured once, so a persistent client (sections C/D) can have the block flip
- * between two submissions without reinstalling the mock. Any method this mock does not name comes
- * back as `-32601 Method not found`, which is also what makes `eth_fillTransaction` fall through to
- * viem's per-field path (the real behaviour, since no mock RPC here implements it).
+ * Answers a submission's JSON-RPC calls; `feed` is read per call so a test can flip the block.
+ * Unknown methods get -32601, which also sends viem's eth_fillTransaction attempt down its
+ * per-field path.
  */
 function installMock(feed: () => Scenario) {
   const original = globalThis.fetch;
@@ -257,12 +158,7 @@ async function actualRawTx(scenario: Scenario): Promise<Hex> {
   }
 }
 
-/** Sections E/E2/E3: a non-Hydration `ChainClients`, built the same way `hydrationClients` builds
- * one, just against whichever `chain` is passed in — there is no factory for a non-Hydration chain
- * in `../src/engine/hydration` (Base's is `baseClients`, in `../src/engine/base`), so these tests
- * build the pair directly. Both clients come from the same `chain` object, so this helper does not
- * construct a mismatched pair; what it shows is only that `ChainClients` accepts a value no
- * factory produced. */
+/** A `ChainClients` for any chain, built the way `hydrationClients` builds Hydration's. */
 async function genericClients(chain: Chain): Promise<ChainClients> {
   const account = privateKeyToAccount(TEST_KEY);
   const publicClient = createPublicClient({ chain, transport: http("http://mock-rpc.invalid") });
@@ -270,9 +166,7 @@ async function genericClients(chain: Chain): Promise<ChainClients> {
   return { account, publicClient, wallet };
 }
 
-/** Runs `submit()` against `chain` under `scenario`, returning whichever of a raw transaction or a
- * thrown error actually happened — used by E (expects a raw tx), E2 (expects a raw tx of a
- * different shape than `chain.id` would suggest), and E3 (expects a throw and nothing sent). */
+/** Runs `submit()` on `chain`, returning the raw transaction sent or the error thrown. */
 async function submitViaChain(
   chain: Chain,
   scenario: Scenario,
@@ -287,7 +181,8 @@ async function submitViaChain(
     );
     return { raw: mock.rawTxs()[0] };
   } catch (error) {
-    return { error };
+    // Read what was sent before the throw, or "sends nothing" below checks nothing.
+    return { error, raw: mock.rawTxs()[0] };
   } finally {
     mock.restore();
   }
@@ -301,11 +196,7 @@ async function actualBaseRawTx(): Promise<Hex> {
 
 const HOOK_GAS_PRICE = 7_000_000_000n;
 
-/** E2: a chain whose own `fees.estimateFeesPerGas` hook returns a legacy `{ gasPrice }` shape,
- * unconditionally — this is what `chainFees`'s generic branch (`client.estimateFeesPerGas()`)
- * actually hands back verbatim when a chain object defines this hook (see the doc comment on
- * `chainFees`), and it is typed by viem as the EIP-1559 shape regardless of what it really
- * contains. */
+/** A chain whose own fee hook returns a legacy `{ gasPrice }`. */
 const HOOK_GAS_PRICE_CHAIN: Chain = {
   id: 999_001,
   name: "HookReturnsGasPrice",
@@ -314,17 +205,12 @@ const HOOK_GAS_PRICE_CHAIN: Chain = {
   fees: { estimateFeesPerGas: async () => ({ gasPrice: HOOK_GAS_PRICE }) },
 };
 
-/** E3: a chain whose hook returns neither shape — the case `chainFees` cannot honestly resolve,
- * and must throw on rather than silently pass through as a half-set `FeeOverrides`. */
+/** A chain whose fee hook returns neither shape; the cast is the point, viem does not check it. */
 const HOOK_INVALID_CHAIN: Chain = {
   id: 999_002,
   name: "HookReturnsNeitherShape",
   nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
   rpcUrls: { default: { http: [] } },
-  // Deliberately violates viem's own `fees.estimateFeesPerGas` return type — that is the point of
-  // this fixture: viem does not validate the hook's return value at the boundary `chainFees` reads
-  // it from, so this is a legitimate runtime shape even though no legitimate chain config would
-  // declare a hook typed to produce it.
   fees: { estimateFeesPerGas: async () => ({}) as never },
 };
 
@@ -335,8 +221,7 @@ const HOOK_SCENARIO = (chainId: number): Scenario => ({
   priorityFeeSupported: true,
 });
 
-/** One client, used for two `receiveMessage` submissions, with the block flipping in between —
- * the shape production actually runs in (`hydrationClients()` is called once at process start). */
+/** One long-lived client, two `receiveMessage` submissions, the block flipping in between. */
 async function persistentClientFlip(
   first: Scenario,
   second: Scenario,
@@ -364,9 +249,7 @@ async function persistentClientFlip(
   };
 }
 
-/** Section D's mutant: same shape as `persistentClientFlip`, but calls `wallet.writeContract`
- * directly with no fee fields, going around `submit()` (and so around `chainFees`) entirely. This
- * is what a hypothetical `submit()` that forgot to set fee fields would produce. */
+/** As `persistentClientFlip`, but writing directly with no fee fields, around `submit()`. */
 async function mutantPersistentFlip(
   first: Scenario,
   second: Scenario,
@@ -411,8 +294,7 @@ async function mutantPersistentFlip(
   };
 }
 
-/** True when a parsed transaction has all the fields its own `type` requires and none of the
- * other shape's, i.e. it is not a half-set legacy/EIP-1559 hybrid. */
+/** True when a parsed transaction carries the fee fields its type requires. */
 function isWellFormed(tx: ReturnType<typeof parseTransaction>): boolean {
   if (tx.type === "legacy") {
     return typeof (tx as { gasPrice?: bigint }).gasPrice === "bigint";
@@ -431,9 +313,7 @@ async function main() {
     }
   };
 
-  // A: pinned byte comparison, fresh client per scenario. `legacy` is a contract check only —
-  // Hydration's dynamic-evm-fee pallet makes this branch unreachable there today (see
-  // ../src/utils/fees).
+  // A: pinned bytes, fresh client per scenario.
   for (const scenario of SCENARIOS) {
     const actual = await actualRawTx(scenario);
     const label =
@@ -447,19 +327,7 @@ async function main() {
     });
   }
 
-  // B: comparator sanity check. Corrupt the pinned expectation, confirm (A)'s comparison would
-  // have gone red. Demonstrates only that the comparator can tell two transactions apart; the
-  // mutants that matter are the manual source ones in the header and the constructed mutant in D.
-  {
-    const scenario = SCENARIOS[1]!; // eip1559-with-priority-rpc
-    const actual = await actualRawTx(scenario);
-    const corruptedExpected = (PINNED_RAW_TX[scenario.name]!.slice(0, -1) + "0") as Hex;
-    record(actual !== corruptedExpected, "comparator sanity check (corrupted pinned hex by one nibble)");
-  }
-
-  // C: the fixed behaviour, by construction. One client, block flips between submissions. Each
-  // `receiveMessage` call runs `chainFees` fresh, so both directions price correctly off their own
-  // block — neither throws, and neither carries the previous submission's fee shape forward.
+  // C: one long-lived client across a base-fee flip, both directions.
   {
     const legacyScenario = SCENARIOS[0]!;
     const eipScenario = SCENARIOS[1]!;
@@ -483,9 +351,7 @@ async function main() {
     );
   }
 
-  // D: the defect (C) no longer has, reproduced by going around `submit()`. Same persistent
-  // client, but `wallet.writeContract` called directly with no fee fields, so viem's own
-  // `eip1559NetworkCache` (written once per client) makes the decision instead of `chainFees`.
+  // D: the same flip, writing with no fee fields.
   {
     const legacyScenario = SCENARIOS[0]!;
     const eipScenario = SCENARIOS[1]!;
@@ -510,8 +376,7 @@ async function main() {
     );
   }
 
-  // E: `submit()` against a non-Hydration chain goes through `chainFees`'s generic branch —
-  // viem's own `client.estimateFeesPerGas()` — and signs a well-formed EIP-1559 transaction.
+  // E: a plain non-Hydration chain signs its pinned EIP-1559 tx via viem's estimate.
   {
     const actual = await actualBaseRawTx();
     const parsed = parseTransaction(actual);
@@ -527,9 +392,7 @@ async function main() {
     );
   }
 
-  // E2: a chain whose hook returns `{ gasPrice }` must produce a LEGACY tx carrying that
-  // gasPrice, not a zero-fee EIP-1559 tx. This construction shows what `chainFees` would do if it
-  // trusted viem's declared return type instead of its actual runtime shape.
+  // E2: a fee hook returning { gasPrice } signs legacy with that gasPrice.
   {
     const { raw, error } = await submitViaChain(
       HOOK_GAS_PRICE_CHAIN,
@@ -548,8 +411,7 @@ async function main() {
     );
   }
 
-  // E3: a chain whose hook returns neither shape must make submit() throw the named error from
-  // chainFees and sign nothing — not silently sign a half-set transaction.
+  // E3: a fee hook returning neither shape makes submit() throw chainFees's named error.
   {
     const { raw, error } = await submitViaChain(
       HOOK_INVALID_CHAIN,

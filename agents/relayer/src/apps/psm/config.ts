@@ -2,16 +2,8 @@ import { fromSeq, opt, rpc } from "../../config";
 import { WORMHOLE } from "../../chains";
 
 /**
- * Two processes, one per destination chain, each its own engine namespace — see `../../boot`'s
- * "dist/<app>/app.js is the app" rule. Each reads its OWN env var, not a shared `APP_NAME` — that
- * is load-bearing, not a style choice: every other app in this codebase has exactly one process, so
- * `opt("APP_NAME", ...)` only ever had one reader. With two processes reading the same name, the one
- * documented use of `APP_NAME` (running a second deployment beside the live one) would collapse
- * both PSM processes onto the SAME engine namespace instead of giving each its own — same Redis
- * queue key, same missed-VAA cursors, both processes' handlers competing under one namespace whose
- * `ChainRouter` only ever holds one process's routes. A VAA the OTHER process's route would have
- * handled arrives with no registered handler and the engine throws un-actionably rather than routing
- * it nowhere obvious. Distinct names keep an override of one from ever reaching the other.
+ * Engine namespaces. LOAD-BEARING — every Redis key derives from them, and the two processes must
+ * not share one: a shared name puts both on one queue and one set of missed-VAA cursors.
  */
 export const APP_NAME_HYDRATION = opt("APP_NAME_PSM_HYDRATION", "psm-hydration-relayer");
 export const APP_NAME_BASE = opt("APP_NAME_PSM_BASE", "psm-base-relayer");

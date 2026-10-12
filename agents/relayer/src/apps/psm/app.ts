@@ -25,16 +25,12 @@ export type ClientFactory = (rpcUrl: string, key: `0x${string}`) => Promise<Chai
 
 /**
  * Refuse to start when the clients, or the routes' destination contracts on their chain, are not
- * what the routes name. Each case below delivered nothing, silently, before this check existed:
- * an entry point that paired the wrong client factory with its destination serves routes through
- * another chain's wallet; a destination address with no code takes the call, mines, and spends gas
- * for nothing, because a call to an address with no code succeeds.
+ * what the routes name: an entry point that pairs the wrong client factory with its destination
+ * serves routes through another chain's wallet, and a call to an address with no code succeeds,
+ * mines, and spends gas for nothing.
  *
- * Both clients must be on the EVM chain the destination's Wormhole id stands for — the wallet
- * signs for one and the public client simulates against the other, if a bundle was built by hand —
- * and every served route's destination contract must have code on it. That a contract has code is
- * all this proves: that it is the PSM contract bound to the route's source emitter needs a read of
- * its `authorizedEmitters`, which fails legitimately before the bind.
+ * That a contract has code is all this proves: that it is the PSM contract bound to the route's
+ * source emitter needs a read of its `authorizedEmitters`, which fails legitimately before the bind.
  *
  * @param destinationChain Wormhole chain id this process delivers to.
  * @param routes The routes it serves.
@@ -72,20 +68,11 @@ export async function assertDestination(
 
 /**
  * Subscribe every route landing on `clients`'s chain, submitting each through the same queue and
- * clients.
+ * clients. Reads only the route's source (what to subscribe to) and destination contract (what to
+ * submit to), so either direction runs through the same code.
  *
- * Pulled out of `makeApp` so it can be driven directly, with a fake `app` and a fake `queue`, no
- * engine and no network — that is how `scripts/verify-psm-app.ts` proves destination-keying and the
- * second-route claim: this function does not read `clients`'s destination identity anywhere, only
- * `route.sourceChain` / `route.sourceEmitter` (what to subscribe to) and
- * `route.destinationContract` (what to submit to). A route whose fields happen to describe the
- * opposite direction runs through the exact same code.
- *
- * Always registers through `onEmitter` rather than `app.chain(id).address(...)` — `onEmitter`
- * bypasses relayer-engine's SDK-chain lookup entirely (see its own doc comment), which
- * `.address()` cannot do for a source chain the bundled SDK predates. Hydration (73) is one such
- * source (the redeem/refund route), so a uniform subscription path is what keeps a route's shape
- * identical regardless of which chain it names as source.
+ * Registers through `onEmitter`, not `app.chain(id).address(...)`: the latter looks the source chain
+ * up in relayer-engine's bundled SDK, which predates Hydration (73).
  *
  * @param app Engine app to register the subscriptions on.
  * @param routes Routes to serve — every one is wired, none is skipped or treated as default.

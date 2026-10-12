@@ -5,17 +5,12 @@ import type { ChainId } from "../../types";
 
 /**
  * A route names a source emitter and its chain, and a destination contract and its chain. The
- * corridor's two directions are two routes rather than two concepts — nothing here says which
- * direction is "forward": a route between two chains where neither is Hydration has exactly the
- * same shape.
+ * corridor's two directions are two routes rather than two concepts: nothing here says which
+ * direction is "forward".
  *
- * `sourceEmitter` is typed `Address` (a 20-byte EVM address), not `string` — that restricts every
- * corridor this table can express to an EVM source. `ntt`'s routes.ts types the same field `string`
- * for exactly this reason: its Solana routes carry a base58 program id, which `onEmitter`'s
- * `pad(emitter, { size: 32 })` cannot accept, and which relayer-engine derives an emitter PDA from
- * rather than padding directly (see `ntt`'s own doc comment). Adding a non-EVM source here is a
- * type change on this field plus a registration-path change in `app.ts`'s `wireRoutes` (it would
- * need to branch on how to derive the subscription key), not one table entry.
+ * `sourceEmitter` is an EVM `Address`: `onEmitter` pads it to 32 bytes, which a Solana program id
+ * cannot take, so a non-EVM source needs a type change here and a registration branch in
+ * `wireRoutes`, not a table entry.
  */
 export interface PsmRoute {
   /** Short label for logs — not read by any relaying logic. */
@@ -42,10 +37,8 @@ export interface PsmRoute {
  * Each contract plays both roles on its own chain: HollarBaseVault is the source emitter for
  * "mint" AND the destination contract for "redeem"; HollarBaseFacilitator is the destination
  * contract for "mint" AND the source emitter for "redeem". `routesFor` enforces that as a closure
- * invariant across the table (see `assertCorridorClosure`) — filling these two rows with two
- * addresses that are individually valid but do not close the corridor (the classic mistake: pasting
- * a route's emitter and contract into each other's column) is rejected, named, rather than accepted
- * on trust.
+ * invariant across the table (see `assertCorridorClosure`): two addresses that are each valid but
+ * do not close the corridor are refused by name.
  *
  * Kinds, for context (the relayer never parses the payload, it only moves VAA bytes; the only
  * VAA fields read are its sequence and its raw bytes). The route names are historical labels for
