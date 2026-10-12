@@ -2,7 +2,7 @@
   "migration": "near-ntt-near",
   "environment": "prod",
   "startedAt": "2026-10-10T22:30:14.155Z",
-  "completedAt": null,
+  "completedAt": "2026-10-12T14:43:13.076Z",
   "steps": [
     {
       "name": "001-deploy-ntt",
@@ -59,27 +59,38 @@
     },
     {
       "name": "005-transfer-ownership@ntt",
-      "status": "failed",
-      "output": null,
-      "error": "Missing NTT_NEW_OWNER",
-      "startedAt": "2026-10-10T22:31:06.100Z",
-      "completedAt": null
+      "status": "completed",
+      "output": {
+        "txHash": "9Ev7jAtA2WZHYroH2HRhtpmWe82YKuc9LDTgqBCRuVsE",
+        "newOwner": "hydration.sputnik-dao.near"
+      },
+      "error": null,
+      "startedAt": "2026-10-12T12:14:53.874Z",
+      "completedAt": "2026-10-12T12:15:04.223Z"
     },
     {
       "name": "006-delete-keys@ntt",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "txHash": "HSzz6M1eENrxmbE11nBUDhnDVUVV4fDm6257jWAciTGn",
+        "deletedKeys": "ed25519:9hziFbfcBtkDvWuKJXxqZGM1EXKHUQn1bcAF8M4NxCxQ",
+        "owner": "hydration-whm.near",
+        "codeSha256": "a3137c9e1f5e96b3d1b2b7a823835c7dad54ab72d47e9b977b94c8e062186303"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-10-12T12:15:04.225Z",
+      "completedAt": "2026-10-12T12:15:27.497Z"
     },
     {
       "name": "007-accept-ownership@ntt",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "txHash": "",
+        "owner": "hydration.sputnik-dao.near"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-10-12T14:43:05.350Z",
+      "completedAt": "2026-10-12T14:43:13.073Z"
     }
   ]
 }
