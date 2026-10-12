@@ -82,6 +82,7 @@ contract BaseAaveForkTest is Test, IHollarBaseVault {
         vm.startPrank(admin);
         vault.setHydrationEmitter(bytes32(uint256(0x4bd7a)));
         vault.setDepositLimit(RateLimiter.UNLIMITED, 0);
+        vault.setPayoutLimit(RateLimiter.UNLIMITED, 0);
         vm.stopPrank();
 
         vm.prank(guardian);
@@ -235,6 +236,25 @@ contract BaseAaveForkTest is Test, IHollarBaseVault {
         assertEq(vault.owed(alice), 0, "no longer queued");
         assertEq(vault.totalOwed(), 0);
         assertEq(vault.principal(), principalAfterCredit + deposited, "gross returns to backing");
+    }
+
+    /// @dev The cases above run with the payout limit open. Under a finite one, a payout out of the
+    ///      real reserve is charged for exactly what reached the recipient.
+    function test_finitePayoutLimitIsChargedForWhatTheRealReservePays() public onFork {
+        vm.prank(admin);
+        vault.setPayoutLimit(10_000e6, 1 days);
+
+        vm.prank(alice);
+        vault.deposit(10_000e6, PsmPayload.fromAddress(alice));
+        _creditViaVaa(alice, 10_000e6);
+
+        uint256 credited = 10_000e6 - (10_000e6 * 5) / 10_000;
+        uint256 before = IERC20(USDC).balanceOf(alice);
+        vm.prank(alice);
+        vault.claim();
+
+        assertEq(IERC20(USDC).balanceOf(alice) - before, credited, "paid out of the real reserve");
+        assertEq(vault.payoutAllowance(), 10_000e6 - credited, "and charged for exactly that");
     }
 
     /// @dev Feeds a redeem message in as the Hydration emitter would.

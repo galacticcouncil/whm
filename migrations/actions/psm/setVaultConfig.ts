@@ -46,3 +46,24 @@ export async function setDepositLimit(params: SetDepositLimitParams): Promise<Tx
 
   return { txHash, contract };
 }
+
+export type SetPayoutLimitParams = WalletContext & {
+  contract: `0x${string}`;
+  capacity: bigint;
+  window: bigint;
+};
+
+export async function setPayoutLimit(params: SetPayoutLimitParams): Promise<TxResult> {
+  const { publicClient, walletClient, contract, capacity, window } = params;
+  const { abi } = vaultJson as ifs.ContractArtifact;
+
+  const txHash = await walletClient.writeContract({
+    address: contract,
+    abi,
+    functionName: "setPayoutLimit",
+    args: [capacity, window],
+  });
+  await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+  return { txHash, contract };
+}

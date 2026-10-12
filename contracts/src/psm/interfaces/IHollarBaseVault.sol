@@ -65,6 +65,7 @@ interface IHollarBaseVault {
 
     event HydrationEmitterSet(bytes32 emitter);
     event DepositLimitSet(uint256 capacity, uint256 window);
+    event PayoutLimitSet(uint256 capacity, uint256 window);
     event FeesSet(uint256 redeemFeeBps, uint256 surplusFloorBps);
     event DepositsPausedSet(bool paused);
     event ClaimsPausedSet(bool paused);
@@ -91,6 +92,7 @@ interface IHollarBaseVault {
     error NotQueued(uint256 index);
     error NothingUnpayable(address recipient);
     error InsufficientLiquidity(uint256 requested, uint256 available);
+    error InsufficientPayoutAllowance(uint256 requested, uint256 available);
     error UnexpectedKind(uint8 kind);
     error UnexpectedEmitterChain(uint16 chainId);
     error MessageAlreadyProcessed(uint64 sequence);

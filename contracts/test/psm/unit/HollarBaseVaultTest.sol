@@ -94,6 +94,7 @@ contract HollarBaseVaultTest is Test, IHollarBaseVault {
         vm.startPrank(admin);
         vault.setHydrationEmitter(HYDRATION_EMITTER);
         vault.setDepositLimit(RateLimiter.UNLIMITED, 0);
+        vault.setPayoutLimit(RateLimiter.UNLIMITED, 0);
         vm.stopPrank();
 
         vm.prank(guardian);
