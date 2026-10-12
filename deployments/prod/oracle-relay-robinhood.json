@@ -2,7 +2,7 @@
   "migration": "oracle-relay-robinhood",
   "environment": "prod",
   "startedAt": "2026-10-06T23:59:00.165Z",
-  "completedAt": "2026-10-07T23:29:53.238Z",
+  "completedAt": "2026-10-12T16:48:42.085Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -77,6 +77,30 @@
       "error": null,
       "startedAt": "2026-10-07T00:52:04.021Z",
       "completedAt": "2026-10-07T00:52:12.292Z"
+    },
+    {
+      "name": "007-renounce@emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0xe715acfb425fe9f792ef01a6c70ef0566f57cc19f96698bec12ba655b7b57e9f",
+        "contract": "0x9fbd9f16ce7fa17097e91cc36dc1b7b47adca9de",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-12T16:48:31.570Z",
+      "completedAt": "2026-10-12T16:48:34.019Z"
+    },
+    {
+      "name": "008-renounce@receiver",
+      "status": "completed",
+      "output": {
+        "txHash": "0x38ce09e72b77a42088f5e08d6aac195b51a63971382b3212cf2a8952064d9462",
+        "contract": "0x3b6e3469d8e64e306f235838e0fdf7b4d60a39ce",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-12T16:48:34.020Z",
+      "completedAt": "2026-10-12T16:48:42.084Z"
     }
   ]
 }
