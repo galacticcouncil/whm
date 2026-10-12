@@ -16,7 +16,8 @@ Implementation log for [spec.md](spec.md), one entry per stage. Branch: `feat/ne
 
 **Docs**
 
-- [../near/](../near/) — the Omni → Solana → NTT corridor, kept as the fallback.
+- [../near-omni/](../near-omni/) — the Omni → Solana → NTT corridor, kept as the fallback (never
+  built; superseded once NEAR NTT went live).
 - [spec.md](spec.md) — NEAR as a LOCKING hub, Hydration BURNING; manager + transceiver in one
   contract per token; `sha256(account_id)` addressing with no registry; fail-closed outbound;
   claimable fallback inbound; single-hub rule against the fallback.

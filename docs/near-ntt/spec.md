@@ -13,8 +13,8 @@ guardians observe every message it publishes.
 
 The Hydration side is an unmodified NTT deployment. Only the NEAR contract is new.
 
-The two-hop Omni → Solana → NTT corridor in [../near/spec.md](../near/spec.md) is the fallback if
-this slips. The two cannot feed the same Hydration token — see [Hub](#hub).
+The two-hop Omni → Solana → NTT corridor in [../near-omni/spec.md](../near-omni/spec.md) was the
+alternative; it was never built. The two cannot feed the same Hydration token — see [Hub](#hub).
 
 ## Scope
 

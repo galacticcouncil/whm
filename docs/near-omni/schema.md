@@ -1,5 +1,7 @@
 # NEAR → Hydration Schema
 
+> **Superseded — not built.** See [../near-ntt/spec.md](../near-ntt/spec.md).
+
 Data flow, account layouts, and the `forward` CPI sequence. Design rationale lives in
 [spec.md](spec.md).
 

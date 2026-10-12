@@ -1,5 +1,8 @@
 # NEAR → Hydration
 
+> **Superseded — not built.** ZEC and NEAR reach Hydration through the native NEAR NTT contract
+> instead: [../near-ntt/spec.md](../near-ntt/spec.md). Kept as the record of the Omni route.
+
 ## Abstract
 
 Hydration wants ZEC and NEAR. Both live on NEAR as NEP-141 tokens (`zec.omft.near`, `wrap.near`),
