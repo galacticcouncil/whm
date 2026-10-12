@@ -250,11 +250,19 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     /// @param maxFeeBps The most the redeemer will pay. The fee is assessed on Base when the
     ///        message lands; above this the vault books nothing and the HOLLAR is re-minted to the
     ///        caller. `PsmPayload.NO_FEE_CAP` sets no limit.
-    function redeem(uint256 usdcAmount, address baseRecipient, uint16 maxFeeBps)
+    /// @param deadline The last block timestamp this call may land in. A prepared redeem carries
+    ///        no nonce of its own, so without this a copy signed late burns long after its quote
+    ///        expired. Zero is refused like any past time; `type(uint64).max` sets no limit. It
+    ///        bounds the burn only: a credit queued on Base still pays whenever the queue reaches it.
+    /// @param ref Opaque to this contract and emitted as given, so the caller can tie each burn to
+    ///        its own record without the transaction hash. Not on the wire.
+    function redeem(uint256 usdcAmount, address baseRecipient, uint16 maxFeeBps, uint64 deadline, bytes32 ref)
         external
         payable
         returns (uint64 sequence)
     {
+        // First, so an expired call costs as little as it can and touches nothing.
+        if (block.timestamp > deadline) revert RedeemExpired(deadline);
         if (redeemPaused) revert RedeemPaused();
         if (baseRecipient == address(0)) revert ZeroAddress();
 
@@ -278,7 +286,7 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
             maxFeeBps
         );
 
-        emit RedeemInitiated(msg.sender, baseRecipient, usdcAmount, sequence);
+        emit RedeemInitiated(msg.sender, baseRecipient, usdcAmount, sequence, ref);
     }
 
     // ─── Views ──────────────────────────────────────────────────

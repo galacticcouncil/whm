@@ -92,8 +92,11 @@ by its own bucket.
   window, since ids are never reclaimed. `maxRedeemable` / `mintHeadroom` read zero under their
   pause, as the vault's `claimable` and `payoutAllowance` do under `claimsPaused` and
   `depositAllowance` under `depositsPaused`.
-- **`redeem(usdcAmount, baseRecipient, maxFeeBps)`** — burns HOLLAR and publishes `KIND_REDEEM`
-  carrying the most the redeemer will pay.
+- **`redeem(usdcAmount, baseRecipient, maxFeeBps, deadline, ref)`** — burns HOLLAR and publishes
+  `KIND_REDEEM` carrying the most the redeemer will pay. It reverts, burning nothing, once
+  `block.timestamp` is past `deadline`; zero is refused the same way and `type(uint64).max` sets no
+  limit. `ref` is the caller's own and is emitted, indexed, in `RedeemInitiated`; it is not on the
+  wire. The deadline bounds the burn only: a credit queued on Base pays whenever the queue reaches it.
 
 The solvency model is not in this contract. `GhoToken.burn` computes `bucketLevel - amount` with no
 floor, so 0.8 underflow means this facilitator can never redeem past what it minted — including

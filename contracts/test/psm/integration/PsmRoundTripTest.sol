@@ -62,6 +62,7 @@ contract PsmRoundTripTest is Test {
     uint16 internal constant BASE_CHAIN = 30;
     uint16 internal constant HYDRATION_CHAIN = 73;
     uint256 internal constant SCALE = 1e12;
+    uint64 internal constant NO_DEADLINE = type(uint64).max;
     uint256 internal constant CAPACITY = 10_000e18;
 
     address internal admin = makeAddr("admin");
@@ -207,7 +208,7 @@ contract PsmRoundTripTest is Test {
         // 3 — burn on Hydration
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(1_000e6, bob, type(uint16).max);
+        facilitator.redeem(1_000e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
         assertEq(_bucketLevel(), 0, "the burn released the whole bucket");
 
@@ -283,7 +284,7 @@ contract PsmRoundTripTest is Test {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(10_000e6, alice, type(uint16).max);
+        facilitator.redeem(10_000e6, alice, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
 
         // Borrowers drain the reserve before the credit lands.
@@ -323,7 +324,7 @@ contract PsmRoundTripTest is Test {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(10_000e6, alice, type(uint16).max);
+        facilitator.redeem(10_000e6, alice, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
 
         assertEq(hollar.balanceOf(alice), 0, "HOLLAR burned, irreversibly");
@@ -366,7 +367,7 @@ contract PsmRoundTripTest is Test {
         // Alice burns, naming bob on Base — so recipient and origin differ all the way round.
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(10_000e6, bob, type(uint16).max);
+        facilitator.redeem(10_000e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
         _relayHydrationToBase();
 
@@ -410,7 +411,7 @@ contract PsmRoundTripTest is Test {
         _relayBaseToHydration();
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(10_000e6, alice, type(uint16).max);
+        facilitator.redeem(10_000e6, alice, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
         _relayHydrationToBase();
 
@@ -473,7 +474,7 @@ contract PsmRoundTripTest is Test {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(10_000e6, bob, 5); // quoted 5 bps
+        facilitator.redeem(10_000e6, bob, 5, NO_DEADLINE, bytes32(0)); // quoted 5 bps
         vm.stopPrank();
         assertEq(hollar.balanceOf(alice), 0);
 
@@ -538,7 +539,7 @@ contract PsmRoundTripTest is Test {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(1_000e6, alice, type(uint16).max);
+        facilitator.redeem(1_000e6, alice, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
         _relayHydrationToBase(); // credit 0
 
@@ -556,7 +557,7 @@ contract PsmRoundTripTest is Test {
 
         // Payment lands first: the cancel then finds nothing, and nothing is re-minted.
         vm.prank(alice);
-        facilitator.redeem(1_000e6, alice, type(uint16).max);
+        facilitator.redeem(1_000e6, alice, type(uint16).max, NO_DEADLINE, bytes32(0));
         _relayHydrationToBase(); // credit 1
         uint256 fee = (1_000e6 * 5) / 10_000;
         assertEq(vault.drain(10), 1_000e6 - fee, "paid");
@@ -607,7 +608,7 @@ contract PsmRoundTripTest is Test {
 
         for (uint256 i; i < 40; i++) {
             vm.prank(alice);
-            facilitator.redeem(300e6, alice, 0);
+            facilitator.redeem(300e6, alice, 0, NO_DEADLINE, bytes32(0));
             _relayHydrationToBase();
             _relayBaseToHydration();
         }
@@ -630,7 +631,7 @@ contract PsmRoundTripTest is Test {
 
         for (uint256 i; i < 40; i++) {
             vm.prank(alice);
-            facilitator.redeem(300e6, address(canceller), type(uint16).max);
+            facilitator.redeem(300e6, address(canceller), type(uint16).max, NO_DEADLINE, bytes32(0));
             canceller.deliverAndCancel(
                 abi.encode(
                     HYDRATION_CHAIN, _toBytes32(address(facilitator)), hydrationCore.lastPublished().payload, ++relaySequence
@@ -656,7 +657,7 @@ contract PsmRoundTripTest is Test {
 
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(1_000e6, alice, type(uint16).max);
+        facilitator.redeem(1_000e6, alice, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
         bytes memory redemption = hydrationCore.lastPublished().payload;
 
@@ -682,7 +683,7 @@ contract PsmRoundTripTest is Test {
         vault.setPayoutLimit(WINDOW, 1 days);
 
         vm.prank(alice);
-        facilitator.redeem(WINDOW, bob, type(uint16).max);
+        facilitator.redeem(WINDOW, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         _relayHydrationToBase();
 
         uint256 credited = WINDOW - (WINDOW * 5) / 10_000;
@@ -707,7 +708,7 @@ contract PsmRoundTripTest is Test {
         vault.setPayoutLimit(WINDOW / 2, 1 days); // below an honest redemption, on purpose
 
         vm.prank(alice);
-        facilitator.redeem(WINDOW, bob, type(uint16).max);
+        facilitator.redeem(WINDOW, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         _relayHydrationToBase();
 
         uint256 credited = WINDOW - (WINDOW * 5) / 10_000;
@@ -738,10 +739,10 @@ contract PsmRoundTripTest is Test {
         address carol = makeAddr("carol");
 
         vm.prank(alice);
-        facilitator.redeem(4_000e6, bob, type(uint16).max);
+        facilitator.redeem(4_000e6, bob, type(uint16).max, NO_DEADLINE, bytes32(0));
         _relayHydrationToBase();
         vm.prank(alice);
-        facilitator.redeem(4_000e6, carol, type(uint16).max);
+        facilitator.redeem(4_000e6, carol, type(uint16).max, NO_DEADLINE, bytes32(0));
         _relayHydrationToBase();
 
         uint256 each = 4_000e6 - (4_000e6 * 5) / 10_000;
@@ -785,7 +786,7 @@ contract PsmRoundTripTest is Test {
         // She redeems a whole outbound window.
         vm.startPrank(alice);
         hollar.approve(address(facilitator), type(uint256).max);
-        facilitator.redeem(WINDOW, alice, type(uint16).max);
+        facilitator.redeem(WINDOW, alice, type(uint16).max, NO_DEADLINE, bytes32(0));
         vm.stopPrank();
         _relayHydrationToBase();
 
@@ -799,7 +800,7 @@ contract PsmRoundTripTest is Test {
         vm.prank(bob);
         hollar.transfer(carol, WINDOW * SCALE);
         vm.prank(carol);
-        facilitator.redeem(WINDOW, carol, type(uint16).max);
+        facilitator.redeem(WINDOW, carol, type(uint16).max, NO_DEADLINE, bytes32(0));
         _relayHydrationToBase();
         assertEq(_bucketLevel(), 0, "within the bucket throughout");
 

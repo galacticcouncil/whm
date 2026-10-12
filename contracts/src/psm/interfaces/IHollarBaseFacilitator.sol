@@ -42,7 +42,10 @@ interface IHollarBaseFacilitator {
         uint8 kind,
         uint64 sequence
     );
-    event RedeemInitiated(address indexed from, address indexed baseRecipient, uint256 usdcAmount, uint64 sequence);
+    /// @dev `ref` is the caller's own, indexed so a watcher can filter on it.
+    event RedeemInitiated(
+        address indexed from, address indexed baseRecipient, uint256 usdcAmount, uint64 sequence, bytes32 indexed ref
+    );
 
     event BaseEmitterSet(bytes32 emitter);
     event LimitsSet(uint256 inboundCapacity, uint256 outboundCapacity, uint256 window);
@@ -52,6 +55,7 @@ interface IHollarBaseFacilitator {
 
     error MintPausedError();
     error RedeemPaused();
+    error RedeemExpired(uint64 deadline);
     error EmitterAlreadySet();
     error EmitterNotSet();
     error ZeroAddress();

@@ -80,7 +80,7 @@ const facilitatorAbi = parseAbi([
   "function setLimits(uint256,uint256,uint256)",
   "function setPaused(bool,bool)",
   "function receiveMessage(bytes)",
-  "function redeem(uint256,address,uint16) payable returns (uint64)",
+  "function redeem(uint256,address,uint16,uint64,bytes32) payable returns (uint64)",
   "function outstanding() view returns (uint256)",
   "function maxRedeemable() view returns (uint256)",
   "function scale() view returns (uint256)",
@@ -96,6 +96,10 @@ function truncatedEvmAccount(h160: Hex): Hex {
 /** Fee limit the probe redeems with, and the value a body without one carries. */
 const MAX_FEE_BPS = 5;
 const NO_FEE_CAP = 0xffff;
+
+/** The probe sets no deadline (the type's maximum) and tags its burn with a fixed ref. */
+const NO_DEADLINE = 2n ** 64n - 1n;
+const PROBE_REF = `0x${"00".repeat(31)}01` as Hex;
 
 /** The 100-byte PSM body: version | kind | recipient | amount | origin | maxFeeBps. */
 function psmPayload(kind: number, recipient: Hex, amount: bigint, origin: Hex, maxFeeBps = NO_FEE_CAP): Hex {
@@ -290,7 +294,7 @@ async function main(): Promise<void> {
       encodeFunctionData({
         abi: facilitatorAbi,
         functionName: "redeem",
-        args: [REDEEM_USDC, me, MAX_FEE_BPS],
+        args: [REDEEM_USDC, me, MAX_FEE_BPS, NO_DEADLINE, PROBE_REF],
       }),
     );
     await assertSucceeded(net, res, "redeem");
