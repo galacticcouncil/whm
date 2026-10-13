@@ -6,6 +6,7 @@ import { base as viemBase } from "viem/chains";
 export const WORMHOLE = {
   solana: 1,
   ethereum: 2,
+  near: 15,
   sui: 21,
   base: 30,
   robinhood: 72,

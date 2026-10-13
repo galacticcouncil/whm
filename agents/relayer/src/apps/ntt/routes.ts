@@ -9,7 +9,8 @@ export interface NttRoute {
   sourceChain: ChainId;
   /**
    * Origin transceiver, as the Wormhole emitter. Solana routes give the NTT program address —
-   * relayer-engine derives the emitter PDA before subscribing.
+   * relayer-engine derives the emitter PDA before subscribing. NEAR routes give the emitter itself,
+   * `sha256(account_id)` as 32-byte hex.
    */
   sourceEmitter: string;
   /** Destination NttManager on Hydration — what the settlement must be addressed to. */
@@ -99,5 +100,21 @@ export const ROUTES: NttRoute[] = [
     sourceEmitter: "0x6afb4a6a9c4e5b6eeed568381ce95a79590f0c17ab8d0c59295826f2775bf832",
     manager: "0x978443f00cAB6b09445140321EC73a221ebFF5F8",
     transceiver: "0xA224D6f4e0E276b34D91bfE6c3A5fE6838322AF7",
+  },
+  {
+    token: "NEAR",
+    sourceChain: WORMHOLE.near,
+    // ntt-near.hydration-whm.near — deployments/prod/near-ntt-near.json.
+    sourceEmitter: "0xd473056b88c2062503ea1425bdea8e87609e3d499b3b4d1809e440df2d7cb9e3",
+    manager: "0x374E5239a2342Be6Bf31B410EC03984D03A8b7dE",
+    transceiver: "0xc74BcE0b4bC1b06D6e31d8EfAf55e7e148f281d1",
+  },
+  {
+    token: "ZEC",
+    sourceChain: WORMHOLE.near,
+    // ntt-zec.hydration-whm.near — deployments/prod/near-ntt-zec.json.
+    sourceEmitter: "0xca4092420316d55cfbb9a479ca23fdf0f5a0864a80c755b46e071c834fbf3976",
+    manager: "0xe20cED5f5798cD4FeBc7aE182309b9f51345e0cC",
+    transceiver: "0x0dd43A80C6F96019B8f5699Df1890DFa33BdDE85",
   },
 ];
