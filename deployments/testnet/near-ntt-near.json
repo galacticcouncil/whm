@@ -1,0 +1,96 @@
+{
+  "migration": "near-ntt-near",
+  "environment": "testnet",
+  "startedAt": "2026-10-10T18:05:58.594Z",
+  "completedAt": "2026-10-10T18:14:23.858Z",
+  "steps": [
+    {
+      "name": "001-deploy-ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "1fCF9XCzXdMaDX2USH6RNd4Jag9mVTWL2K3eCTSGf3P",
+        "nttAccount": "ntt-near.whm-ntt-0bugdc.testnet",
+        "emitter": "34831e4dba0ea821cb7f0af0ce96f5efe4beb0db1fded12219e4329ff95a7213",
+        "owner": "whm-ntt-0bugdc.testnet",
+        "codeSha256": "4d9aaeb3dac0ad8cb59730476b5d49b099f02af4f15b1afb8e170007480e9491",
+        "tokenDecimals": "24",
+        "registrationDeposit": "1250000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T18:05:58.595Z",
+      "completedAt": "2026-10-10T18:06:18.169Z"
+    },
+    {
+      "name": "002-register-emitter@core",
+      "status": "completed",
+      "output": {
+        "txHash": "6JevKp84gFLsinu1MH6DqbXrHLCb73TKU2SM6oT9KfKB",
+        "emitter": "34831e4dba0ea821cb7f0af0ce96f5efe4beb0db1fded12219e4329ff95a7213"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T18:09:54.361Z",
+      "completedAt": "2026-10-10T18:10:05.031Z"
+    },
+    {
+      "name": "003-register-storage@token",
+      "status": "completed",
+      "output": {
+        "txHash": "8YCMdT2yGVTWSMNusfDGo9CtGN5N5FEswGbtPA6RECP9",
+        "deposit": "1250000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T18:10:05.033Z",
+      "completedAt": "2026-10-10T18:10:19.801Z"
+    },
+    {
+      "name": "004-set-peer@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "Br3HVBKVBkoTBrEy6mh4nmtoss8f7gKpGHMvUEiHxemJ",
+        "chainId": "73",
+        "manager": "0x0000000000000000000000005b1334885320cFd7158760256c7bD0Af58006b09",
+        "transceiver": "0x0000000000000000000000005e875F689EA8dd25e11a69cfb6C9f844C4b3B207",
+        "decimals": "24",
+        "inboundLimit": "100000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T18:10:19.802Z",
+      "completedAt": "2026-10-10T18:10:30.413Z"
+    },
+    {
+      "name": "005-transfer-ownership@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "Gi1eTWUvkMgm8N5CMU4R3hAw4zzm4Twdnf1EGRfMmA9V",
+        "newOwner": "whm-ntt-0bugdc.testnet"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T18:10:30.414Z",
+      "completedAt": "2026-10-10T18:10:40.600Z"
+    },
+    {
+      "name": "006-delete-keys@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "7QapPQV4Qq9hbKmD18tgkyS3KZnM5b2CxJSHSzh1QzFs",
+        "deletedKeys": "ed25519:4KduaVNPQhmqEujJVLcpkneQYdiYaq6u4nSbEDS26881",
+        "owner": "whm-ntt-0bugdc.testnet",
+        "codeSha256": "4d9aaeb3dac0ad8cb59730476b5d49b099f02af4f15b1afb8e170007480e9491"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T18:10:40.602Z",
+      "completedAt": "2026-10-10T18:11:04.133Z"
+    },
+    {
+      "name": "007-accept-ownership@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "6xYKpnma95xVBF4nW2PQeG8CZVLPzwBJcctSqu5jteHH",
+        "owner": "whm-ntt-0bugdc.testnet"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T18:14:02.528Z",
+      "completedAt": "2026-10-10T18:14:23.856Z"
+    }
+  ]
+}

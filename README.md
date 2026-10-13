@@ -20,9 +20,9 @@ Cross-chain infrastructure connecting EVM chains, Solana, Sui and Hydration via 
 │                                                                                 │
 │  ┌────────────────────────────────────────────────────────────────────────────┐ │
 │  │                          agents/  (off-chain)                              │ │
-│  │   broadcaster — Solana → Wormhole price/rate publisher                     │ │
-│  │   scan        — Basejump + Intents indexer                                 │ │
-│  │   relayer     — Wormhole VAA relayer (hydration-ntt, intent)               │ │
+│  │   broadcaster — Price/rate publisher                                       │ │
+│  │   scan        — Data indexer                                               │ │
+│  │   relayer     — VAA relayer (ntt, oracles, intent)                         │ │
 │  └────────────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -68,7 +68,7 @@ contracts/      # Foundry (Solidity) — @whm/contracts
 crates/         # Anchor / Cargo workspaces — @whm/crates-solana (extensible)
 migrations/     # Cross-platform deploy pipelines
 deployments/    # Migration state files (prod/, fork/)
-agents/         # Off-chain services (broadcaster, scan, relayer, quoter, nintent)
+agents/         # Off-chain services (broadcaster, scan, relayer, intent)
 common/         # @whm/common — shared TS (evm, args, migration)
 sh/             # Cross-cutting bash wrappers (fork-*, migrate-*, verify-*)
 docs/           # Cross-cutting protocol docs
@@ -106,8 +106,7 @@ See [migrations/README.md](migrations/README.md) for the migration model, naming
 | `@whm/contracts`     | `contracts/`          | Foundry project + per-package scripts      |
 | `@whm/crates-solana` | `crates/solana/`      | Anchor workspace + per-package scripts     |
 | `@whm/crates-near`   | `crates/near/`        | Near contracts + per-package scripts       |
-| `@whm/broadcaster`   | `agents/broadcaster/` | Wormhole price/rate publisher              |
-| `@whm/scan`          | `agents/scan/`        | Wormhole indexer (intent/basejump)         |
-| `@whm/relayer`       | `agents/relayer/`     | Wormhole VAA relayer (ntt, oracle, intent) |
-| `@whm/quoter`        | `agents/quoter/`      | Relay-fee quoter                           |
-| `@whm/nintent`       | `agents/nintent/`     | Intent deposit notifier (1Click)           |
+| `@whm/broadcaster`   | `agents/broadcaster/` | Price/rate publisher                       |
+| `@whm/scan`          | `agents/scan/`        | Data indexer (intent/basejump)             |
+| `@whm/relayer`       | `agents/relayer/`     | VAA relayer (ntt, oracle, intent)          |
+| `@whm/intent`        | `agents/intent/`      | Intents off-chain (quoter, 1Click relayer) |

@@ -83,29 +83,67 @@
 
         const held = o.rail_state === "queued";
         const done = o.state === "settled";
-        const failed = o.state === "failed" || o.state === "refunded";
+        const refunded = o.state === "refunded";
+        const failed = o.state === "failed";
+
+        const oneClick = o.deposit_address
+          ? [
+              "",
+              `<a class="link" href="${nearIntentsUrl(o.deposit_address)}" target="_blank" rel="noreferrer">1Click execution ↗</a>`,
+            ]
+          : null;
 
         const destTx = destTxLink(o.dest_tx, o.dest_tx_url, chain);
-        const destRows = [
-          o.dest_amount
-            ? [
-                "",
-                asset(
-                  o.dest_amount,
-                  destMeta,
-                  o.dest_asset ?? "",
-                  chainIcon(chain ?? destChain(o)),
-                ),
-              ]
-            : null,
-          destTx ? ["tx", destTx] : null,
-          o.deposit_address
-            ? [
-                "",
-                `<a class="link" href="${nearIntentsUrl(o.deposit_address)}" target="_blank" rel="noreferrer">1Click execution ↗</a>`,
-              ]
-            : null,
-        ].filter(Boolean);
+        const refundTx = destTxLink(o.refund_tx, o.refund_tx_url, "ethereum");
+
+        // A refund never reaches the destination chain — the ETH goes back to the refund address on
+        // Ethereum. Rendering the quote's output here is what made a refunded order read as
+        // delivered, so the last leg follows where the money actually went.
+        const last = refunded
+          ? {
+              where: "ethereum",
+              kind: "refunded",
+              rows: [
+                o.refund_amount ? ["", asset(o.refund_amount, ETH)] : null,
+                refundTx ? ["tx", refundTx] : null,
+                o.refund_reason
+                  ? ["", `<span class="dim">${esc(o.refund_reason.toLowerCase())}</span>`]
+                  : null,
+                oneClick,
+              ],
+            }
+          : {
+              where,
+              kind: failed ? o.state : done ? "received" : (o.settlement_status ?? "pending"),
+              pending: !done && !failed,
+              rows: [
+                done && o.dest_amount
+                  ? [
+                      "",
+                      asset(
+                        o.dest_amount,
+                        destMeta,
+                        o.dest_asset ?? "",
+                        chainIcon(chain ?? destChain(o)),
+                      ),
+                    ]
+                  : null,
+                // Not delivered yet: what the quote promised, said as an expectation.
+                !done && !failed && o.quoted_amount
+                  ? [
+                      "expecting",
+                      asset(
+                        o.quoted_amount,
+                        destMeta,
+                        o.dest_asset ?? "",
+                        chainIcon(chain ?? destChain(o)),
+                      ),
+                    ]
+                  : null,
+                destTx ? ["tx", destTx] : null,
+                oneClick,
+              ],
+            };
 
         return [
           legCard({
@@ -150,17 +188,7 @@
               : [],
             since: placedAt,
           }),
-          legCard({
-            where,
-            kind: failed
-              ? o.state
-              : done
-                ? "received"
-                : (o.settlement_status ?? "pending"),
-            pending: !done && !failed,
-            rows: destRows,
-            since: placedAt,
-          }),
+          legCard({ ...last, rows: last.rows.filter(Boolean), since: placedAt }),
         ].join("");
       }
 
@@ -183,17 +211,26 @@
               assetIcon(o.asset_in),
             ),
           ),
-          kv(
-            "received",
-            o.dest_amount
-              ? asset(
-                  o.dest_amount,
-                  destMeta,
-                  o.dest_asset ?? "",
-                  chainIcon(destChain(o)),
-                )
-              : '<span class="dim">pending</span>',
-          ),
+          // What the user ended up with, which is not always the asset they ordered: a refund comes
+          // back as ETH on Ethereum, and a quote's output is only ever an expectation.
+          o.state === "refunded"
+            ? kv(
+                "refunded",
+                o.refund_amount
+                  ? asset(o.refund_amount, ETH)
+                  : '<span class="dim">amount unreported</span>',
+              )
+            : kv(
+                o.state === "settled" ? "received" : "expecting",
+                (o.state === "settled" ? o.dest_amount : o.quoted_amount)
+                  ? asset(
+                      o.state === "settled" ? o.dest_amount : o.quoted_amount,
+                      destMeta,
+                      o.dest_asset ?? "",
+                      chainIcon(destChain(o)),
+                    )
+                  : '<span class="dim">pending</span>',
+              ),
           kv("caller", addrLink(o.caller, "hydration")),
           kv("recipient", addrLink(o.dest_address, destChain(o))),
           kv("destination asset", mono(o.dest_asset)),

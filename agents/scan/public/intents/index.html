@@ -103,12 +103,15 @@
        */
       const destChain = (r) => tokens.dest[r.dest_asset]?.chain ?? null;
 
+      /** The rail's own unit, not a destination — a refund comes back in it. */
+      const ETH = { symbol: "ETH", decimals: 18 };
+
       /**
        * What the order actually did.
        *
        * The user sold an asset on Hydration and received one somewhere else entirely — ETH is only
-       * the rail in between, so it does not belong in this column. Until 1Click reports the
-       * destination there is nothing to show on the right.
+       * the rail in between, so it does not belong in this column. Except on a refund, where the
+       * ETH is the whole story and the asset the order named was never delivered.
        */
       function assets(r) {
         const inSide = asset(
@@ -117,9 +120,17 @@
           `#${r.asset_in ?? "?"}`,
           assetIcon(r.asset_in),
         );
-        const out = r.dest_amount
+        if (r.state === "refunded") {
+          const back = r.refund_amount
+            ? asset(r.refund_amount, ETH)
+            : '<span class="dim">refunded</span>';
+          return `<span class="assets">${inSide}<span class="arrow">↩</span>${back}</span>`;
+        }
+        // Only a settled order has an amount; anything else is the quote, which is an expectation.
+        const amount = r.state === "settled" ? r.dest_amount : r.quoted_amount;
+        const out = amount
           ? asset(
-              r.dest_amount,
+              amount,
               tokens.dest[r.dest_asset],
               r.dest_asset ?? "",
               chainIcon(destChain(r)),

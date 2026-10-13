@@ -79,8 +79,7 @@ Full migration model + conventions: [migrations/README.md](migrations/README.md)
 agents/
   broadcaster/            # @whm/broadcaster — Solana → Wormhole price/rate publisher
   scan/                   # @whm/scan — chain indexer; one ingest writer + a container per domain
-  nintent/                # @whm/nintent — intent deposit notifier (OrderProcessed → 1Click)
-  quoter/                 # @whm/quoter — relay-fee quoter service
+  intent/                 # @whm/intent — intents off-chain: relay-fee quoter + 1Click notifier
   relayer/                # @whm/relayer — Wormhole VAA relayer (hydration-ntt, intent)
 
 common/                   # @whm/common — shared TS (evm, args, migration)
@@ -121,9 +120,8 @@ contracts
 crates/solana
 agents/broadcaster
 agents/scan
-agents/quoter
 agents/relayer
-agents/nintent
+agents/intent
 ```
 
 **Agents declare ONLY runtime deps.** The TS toolchain — `typescript`, `tsx`, `esbuild`, `dotenv`, `@types/*` — lives in the **root** `package.json` and resolves from agent packages via upward `node_modules` lookup. Never add these as agent `devDependencies` (a package-specific type like `@types/pg` is the only acceptable exception). New agents follow the `broadcaster`/`scan` pattern: workspace member, runtime-deps-only `package.json`, esbuild bundle to `dist/index.js`, `node:NN-slim` Docker copying just the bundle, and a modular `src/` (`config` / `clients` / `watcher` / `api` / `endpoints` / `index`) — not one fat `index.ts`.
@@ -152,7 +150,7 @@ Cross-platform glue lives at the **migration** layer and the **IDL/ABI sync** la
 - **Crash-safe.** State is persisted after each step. Resume by re-running the same command; reset a stage with `--from <step-name>`; pause early with `--pause-at <step-name>`.
 - **Upgradeable contracts.** Solidity inherits OZ UUPS upgradeable patterns. Initialization is done in migration steps, not constructors.
 - **Wormhole SDKs.** EVM uses `wormhole-solidity-sdk` (pinned via Soldeer). Solana uses Wormhole Core Bridge through Anchor. `relayer` agent uses `@wormhole-foundation/relayer-engine`.
-- **Agent bundling.** `broadcaster` and `nintent` bundle to a single `dist/index.js` via esbuild (CJS, node platform; see [esbuild.config.mjs](esbuild.config.mjs)); avoid top-level await / ESM-only constructs in their `src/`. `scan` and `relayer` are multi-entry — one bundle per container, `dist/<name>/app.js`, declared in their own `esbuild.entries.mjs`. Agents carry only runtime deps — esbuild, tsx, typescript, and dotenv come from the **root** package.json (see Workspace members).
+- **Agent bundling.** `broadcaster` bundles to a single `dist/index.js` via esbuild (CJS, node platform; see [esbuild.config.mjs](esbuild.config.mjs)); avoid top-level await / ESM-only constructs in its `src/`. `scan`, `relayer` and `intent` are multi-entry — one bundle per container, `dist/<name>/app.js`, declared in their own `esbuild.entries.mjs`. Agents carry only runtime deps — esbuild, tsx, typescript, and dotenv come from the **root** package.json (see Workspace members).
 - **IDL sync.** `broadcaster` consumes the Solana program's IDL — `pnpm run sync-idl` in `agents/broadcaster/` copies `crates/solana/target/idl/oracle_emitter.json` and `crates/solana/target/types/oracle_emitter.ts` into `agents/broadcaster/src/emitter/`. Re-run after Solana program changes.
 - **Ops scripts.** `contracts/scripts/<feature>/` (EVM) and `crates/solana/scripts/<program>/` (Solana) hold one-shot `tsx`/`bash` entry points. They use the per-package `package.json` plus root `.env` for PKs.
 
@@ -257,7 +255,7 @@ Common scopes: `oracle`, `basejump`, `intents`, `scan`, `contracts`, `crates`, `
 
 - **Oracle path:** source emitter → Wormhole (VAA) → `OracleReceiver` on Hydration's EVM (extends `MessageReceiver`) → `oracle.setPrice()`, all in one transaction. Solana's emitter is the `oracle-emitter` Anchor program; Ethereum's is `OracleEmitter.sol`. Each source has its OWN receiver deployment, renounced independently — an oracle serving both authorizes both receiver addresses. The relay leg is not implemented; it needs an `oracle` feature in `agents/relayer`.
 - **Basejump path:** Source EVM `BasejumpEmitter.sol` fires two rails in one call — an NTT settlement of the gross amount addressed to the landing, then a fast-path Wormhole message of the net amount. `BasejumpReceiver.completeTransfer` (Hydration) verifies that message and calls `BasejumpLanding.sol`, which pays the recipient through the `0x0401` dispatch precompile or queues on a shortfall. Settlement precedes publication, so a payout can never outrun its settlement.
-- **Intents path:** `IntentEmitter.placeOrder(assetIn, amountIn, minEthOut, depositAddress, maxRelayFee)` (Hydration) sells the asset for WETH via the router, then in one call settles it over NTT to `IntentReceiver` **and** publishes `abi.encode(sequence, depositAddress, amount, maxRelayFee)` as its own Wormhole message — NTT carries no payload, so the destination travels separately. Both legs key on the NTT **manager's** sequence. On Ethereum, `agents/relayer` (intent feature) reads the settlement, finds the instruction in the source tx's `LogMessagePublished` logs, sizes a fee via `quoter`, and calls `IntentReceiver.processOrder(nttVaa, instructionVaa, feeRequested)` → deliver → pay caller → forward the rest; emits `OrderProcessed`, which `nintent` uses to nudge 1Click. `processOrder` also asserts the settlement actually released — a VAA the inbound rate limiter queued is delivered but credits nothing — via `NttManager.isMessageExecuted` + `getInboundQueuedTransfer`. Separately and from its own deployment, `IntentQuoteEmitter.publishQuote(Quote)` publishes a standing authorization whose MPC derivation path is `keccak256(terms)`; its Wormhole emitter address is distinct from `IntentEmitter`'s, so `IntentReceiver` rejects a quote VAA as `UnauthorizedEmitter` rather than decoding it. See [docs/intents/spec.md](docs/intents/spec.md).
+- **Intents path:** `IntentEmitter.placeOrder(assetIn, amountIn, minEthOut, depositAddress, maxRelayFee)` (Hydration) sells the asset for WETH via the router, then in one call settles it over NTT to `IntentReceiver` **and** publishes `abi.encode(sequence, depositAddress, amount, maxRelayFee)` as its own Wormhole message — NTT carries no payload, so the destination travels separately. Both legs key on the NTT **manager's** sequence. On Ethereum, `agents/relayer` (intent feature) reads the settlement, finds the instruction in the source tx's `LogMessagePublished` logs, sizes a fee by estimating the real call, and calls `IntentReceiver.processOrder(nttVaa, instructionVaa, feeRequested)` → deliver → pay caller → forward the rest; emits `OrderProcessed`, which `intent`'s relayer app uses to nudge 1Click. `processOrder` also asserts the settlement actually released — a VAA the inbound rate limiter queued is delivered but credits nothing — via `NttManager.isMessageExecuted` + `getInboundQueuedTransfer`. Separately and from its own deployment, `IntentQuoteEmitter.publishQuote(Quote)` publishes a standing authorization whose MPC derivation path is `keccak256(terms)`; its Wormhole emitter address is distinct from `IntentEmitter`'s, so `IntentReceiver` rejects a quote VAA as `UnauthorizedEmitter` rather than decoding it. See [docs/intents/spec.md](docs/intents/spec.md).
 - **Off-chain:** `broadcaster` reads Solana oracle state and signs `send_price` / `send_rate` instructions. `scan` splits indexing from serving: one `ingest` container is the sole writer, filling a shared event store plus the two tables no feature owns (`wh_messages`, `ntt_transfers`), and a container per domain reads those and serves its own API and pages. See [agents/scan/README.md](agents/scan/README.md). `relayer` polls Wormhole for VAAs and submits them to receiver contracts.
 - **Shared:** `@whm/common` exports `chains`, `ifs`, `wallet`, `args`, `migration`. Any change here affects all consumers.
 
@@ -276,6 +274,6 @@ Common scopes: `oracle`, `basejump`, `intents`, `scan`, `contracts`, `crates`, `
 - **Keep contracts upgradeable-safe** — they inherit OZ UUPS upgradeable; never add state-init constructors; respect storage layout when adding fields.
 - **Do not commit `.env`** (gitignored). `.env.<context>` templates are checked in (no secrets, just RPCs).
 - **Do not add a TS toolchain dep (`typescript`/`tsx`/`esbuild`/`dotenv`/`@types/*`) to an agent's `package.json`** — those live in the **root** and resolve upward. Agents declare runtime deps only.
-- **`broadcaster` and `nintent` bundle to CJS** via esbuild — avoid top-level await or ESM-only constructs in `src/`.
+- **`broadcaster` bundles to CJS** via esbuild — avoid top-level await or ESM-only constructs in `src/`.
 - **Sync IDL/types before merging Solana program changes** — `broadcaster` will silently break against outdated types.
 - **Don't add `ctx.ref` cross-migration calls** — that pattern was removed. Cross-deployment dependencies go through env-config copies.

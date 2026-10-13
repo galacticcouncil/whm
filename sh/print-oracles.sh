@@ -2,12 +2,13 @@
 set -euo pipefail
 
 RPC="https://rpc.hydradx.cloud/evm"
+RPC_ROBINHOOD="https://rpc.mainnet.chain.robinhood.com"
 
 check() {
-  local name=$1 addr=$2
+  local name=$1 addr=$2 rpc=${3:-$RPC}
 
   local result
-  result=$(cast call -r "$RPC" "$addr" 'latestRoundData()(uint80,int256,uint256,uint256,uint80)')
+  result=$(cast call -r "$rpc" "$addr" 'latestRoundData()(uint80,int256,uint256,uint256,uint80)')
 
   # Strip Foundry formatting like "102962134 [1.029e8]" → "102962134"
   local round price updated
@@ -22,10 +23,20 @@ check() {
     "$name" "$price" "$ts_human" "$round"
 }
 
-echo "=== Hydration Oracles ==="
+echo "=== Hydration Managed Oracles ==="
 echo ""
-check "PRIME"   "0x6e3E9403Cf486af5f2cE0A6b3d7a23ee0e6BC84e"
 check "SOL"     "0xf832dc4268Ac29C9C0B16De1784382BEee801Fb8"
-check "JitoSOL" "0xFcEd56d89A63120e7bE512224CE3d08373cF6CeE"
-check "wstETH"  "0x35bEe05585c74462c9C40473B2E744537424C9FD"
-check "apyUsd"  "0x6a738A5B191FC7D68477C6e6480726bAAfB944Bd"
+
+echo ""
+echo "=== Hydration Checked Oracles ==="
+echo ""
+check "PRIME"   "0x09221057Cf7E75953D199FB319E606972A6A82Cd"
+check "JitoSOL" "0x64b7BbAC63E5aDcA0ec35C4AEBf9937Fc1d79C1D"
+check "wstETH"  "0xBE6B91cCb5b41e68426Dcb584830A360093c2775"
+check "apyUsd"  "0x80FaaC4Da72FCcABDa5B276D9A931252D6242Caf"
+check "SPY"     "0x802893C9CDD5AaC833E52783DF39e572fe8f8538"
+
+echo ""
+echo "=== Robinhood Checked Oracles ==="
+echo ""
+check "HDX"     "0xD1a2198CBbC7cbfB602DF581D8614eD31682901D" "$RPC_ROBINHOOD"

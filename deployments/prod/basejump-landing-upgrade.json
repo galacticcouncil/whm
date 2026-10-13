@@ -1,0 +1,24 @@
+{
+  "migration": "basejump-landing-upgrade",
+  "environment": "prod",
+  "startedAt": "2026-09-17T13:24:27.427Z",
+  "completedAt": "2026-09-17T13:24:38.369Z",
+  "steps": [
+    {
+      "name": "001-deploy-landing-impl",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xd04b89968a04de4217db9a36721a030d650db1f6",
+        "currentImplAddress": "0x4Ea0D58aB1551B5794bca0d2327dBedc85baE31f",
+        "proxyAddress": "0x70e9b12c3b19cb5f0e59984a5866278ab69df976",
+        "proxyOwner": "0xAA7e0000000000000000000000000000000AA7E1",
+        "receiverImplAddress": "0x68B9bD652ff9DFE337644e1C3e4C55835013EA78",
+        "transferSelector": "0x7c4d8c1f",
+        "upgradeCalldata": "0x4f1ef286000000000000000000000000d04b89968a04de4217db9a36721a030d650db1f600000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-09-17T13:24:27.428Z",
+      "completedAt": "2026-09-17T13:24:38.368Z"
+    }
+  ]
+}

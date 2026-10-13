@@ -20,6 +20,8 @@ const HYDRATION_CHAIN = 73;
  * NttPayload.sequenceOf, which is what the contract checks against.
  */
 const SEQUENCE_OFFSET = 70 + 24;
+const DECIMALS_OFFSET = 140;
+const AMOUNT_OFFSET = 141;
 
 /**
  * Normalize a VAA into a 0x-hex byte string for viem `bytes` args. Accepts the Wormhole API's
@@ -42,6 +44,19 @@ function normalizeVaa(raw: string): `0x${string}` {
  */
 function settlementSequence(payload: `0x${string}`): bigint {
   return Buffer.from(payload.slice(2), "hex").readBigUInt64BE(SEQUENCE_OFFSET);
+}
+
+/**
+ * Read what a settlement releases, scaled out of NTT's trimmed representation.
+ *
+ * @param payload the transceiver payload, 0x-hex
+ * @param decimals precision the destination expects, 18 for native ETH
+ * @returns the amount in the destination's own units
+ */
+function settlementAmount(payload: `0x${string}`, decimals: number): bigint {
+  const bytes = Buffer.from(payload.slice(2), "hex");
+  const trimmedTo = bytes.readUInt8(DECIMALS_OFFSET);
+  return bytes.readBigUInt64BE(AMOUNT_OFFSET) * 10n ** BigInt(decimals - trimmedTo);
 }
 
 /** IWormhole reads the preflight needs. */
@@ -142,10 +157,10 @@ async function preflight(
     },
   ];
 
-  const [sequence, depositAddress, amount, maxRelayFee] = decodeAbiParameters(
-    [{ type: "uint64" }, { type: "address" }, { type: "uint256" }, { type: "uint256" }],
+  const [sequence, depositAddress, maxRelayFee] = decodeAbiParameters(
+    [{ type: "uint64" }, { type: "address" }, { type: "uint256" }],
     instruction.payload,
-  ) as [bigint, `0x${string}`, bigint, bigint];
+  ) as [bigint, `0x${string}`, bigint];
 
   const settled = settlementSequence(settlement.payload);
 
@@ -164,6 +179,8 @@ async function preflight(
     }) as Promise<boolean>,
     publicClient.getBalance({ address: receiver }),
   ]);
+
+  const amount = settlementAmount(settlement.payload, 18);
 
   console.log("── preflight ─────────────────────────────────");
   console.log("wormhole:          ", wormhole);
@@ -210,10 +227,13 @@ async function preflight(
     );
     return false;
   }
-  // Only checkable when the settlement has already landed. Otherwise this call delivers it, and what
-  // it releases is not knowable from here.
-  if (delivered && balance < amount) {
-    console.error(`✗ NotFunded — needs ${amount}, receiver holds ${balance}.`);
+  // The forward is sized by the settlement, so a shortfall shows up as the native transfer failing
+  // rather than as a named revert. Worth flagging when the settlement has already landed.
+  if (delivered && balance < settlementAmount(settlement.payload, 18)) {
+    console.error(
+      `✗ receiver holds ${balance}, settlement released ` +
+        `${settlementAmount(settlement.payload, 18)} — the forward will revert.`,
+    );
     return false;
   }
   if (!delivered) {

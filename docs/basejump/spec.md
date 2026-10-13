@@ -12,11 +12,10 @@ between the two legs is the fee, which accrues in the pool.
 
 ## Scope
 
-- Inbound only: Base → Hydration. Outbound (Hydration → EVM) is out of scope.
-- Single token: EURC — the **only** token with a Base NTT leg, so the Base deployment is effectively
-  single-token. Every other EVM-railed token hubs on Ethereum.
-- Ethereum → Hydration is the same shape with different constants, and needs no new Hydration
-  deployment. See [Adding a corridor](#adding-a-corridor).
+- Inbound only: Ethereum → Hydration. Outbound (Hydration → EVM) is out of scope.
+- Single token live: USDC. Every other Ethereum-railed token is one owner call away — see
+  [Adding a token](#adding-a-token); another source chain is a corridor — see
+  [Adding a corridor](#adding-a-corridor).
 
 Design diagrams: [schema.md](schema.md). Indexing: [indexer.md](indexer.md).
 
@@ -27,7 +26,7 @@ entrypoints — the corridor is inbound-only by compiler, not by configuration.
 
 | Contract | Chain | Role |
 | --- | --- | --- |
-| [`BasejumpEmitter`](../../contracts/src/basejump/BasejumpEmitter.sol) | Base | Source. `bridgeViaWormhole` — NTT settlement + fast-path message |
+| [`BasejumpEmitter`](../../contracts/src/basejump/BasejumpEmitter.sol) | Ethereum | Source. `bridgeViaWormhole` — NTT settlement + fast-path message |
 | [`BasejumpReceiver`](../../contracts/src/basejump/BasejumpReceiver.sol) | Hydration | Receiver. `completeTransfer` — verifies the VAA, calls the landing |
 | [`BasejumpLanding`](../../contracts/src/basejump/BasejumpLanding.sol) | Hydration | Pre-funded pool. Pays the recipient, retains the fee |
 
@@ -38,20 +37,20 @@ UUPS — it has no receive path to inherit. Both implement
 the two ends share.
 
 ```
-Base                                             Hydration
-────                                             ─────────
+Ethereum                                         Hydration
+────────                                         ─────────
 BasejumpEmitter
   │
   ├─ SETTLEMENT (gross)                          BasejumpLanding
-  │    nttManagerFor[EURC]                         ▲
-  │      .transfer(gross, 73, landing)             │ pays asset 44
-  │    → NttManager 0xd1dc3517…d89a (LOCKING)      │
-  │    → guardians → relayer (hydration-ntt)       │
-  │    → NttManager 0x8dd1286a…bc4c (BURNING) ─────┘
+  │    nttManagerFor[USDC]                         ▲
+  │      .transfer(gross, 73, landing)             │ pays asset 21
+  │    → NttManager 0x447b2c74…8398 (LOCKING)      │
+  │    → guardians → relayer (ntt)                 │
+  │    → NttManager 0xeceab645…28fc (BURNING) ─────┘
   │
   └─ FAST (net = gross − assetFee)                BasejumpReceiver
        wormhole.publishMessage(nonce, payload, 200)   │ landing
-       → guardians → relayer (not implemented) ───────┤
+       → guardians → relayer (basejump) ──────────────┤
                                                       ▼
                                             IBasejumpLanding.transfer
                                               → DISPATCH 0x0401
@@ -87,17 +86,18 @@ the fast-path publish are both paid from it.
 ### Receiver — `completeTransfer(vaa)`
 
 `parseAndVerifyVM` → replay check → `authorizedEmitters[sourceChain]` → decode `TransferPayload` →
-`IBasejumpLanding.transfer(sourceAsset, amount, recipient, data)`, all in one transaction.
+`IBasejumpLanding.transfer(sourceAsset, amount, recipient)`, all in one transaction. `data` is not
+forwarded.
 
-### Landing — `transfer(sourceAsset, amount, recipient, data)`
+### Landing — `transfer(sourceAsset, amount, recipient)`
 
 Resolves `destAssetFor[sourceAsset]`. If the pool balance suffices, dispatches `currencies.transfer`
 through the `0x0401` precompile (pallet 79, call 0; `currencyId = uint32(uint160(destAsset))`);
 otherwise it **queues** a `PendingTransfer` (FIFO), drained by `fulfillPending()`.
 
-`data` is accepted and discarded. It exists for a future corridor whose `recipient` is a contract
-needing Hydration-side action once funds land — an inbound intent. Reaching a callback needs the
-landing upgraded first.
+The landing takes no `data`. The payload field exists for a future corridor whose `recipient` is a
+contract needing Hydration-side action once funds land — an inbound intent. Reaching a callback
+needs both the receiver and the landing upgraded first.
 
 ## Wire format
 
@@ -109,7 +109,7 @@ The fast-path message is `abi.encode(TransferPayload)`:
 | `amount` | `uint256` | **Net** — gross minus `assetFee`. The settlement delivers gross to the pool |
 | `recipient` | `bytes32` | AccountId32 on Hydration |
 | `transferSequence` | `uint64` | The NTT manager's sequence for the settlement that replenishes this payout — the correlation key between the two rails |
-| `data` | `bytes` | Opaque, forwarded end-to-end |
+| `data` | `bytes` | Opaque. Published by the emitter, dropped by the receiver; nothing on Hydration reads it |
 
 ## Storage and admin
 
@@ -155,38 +155,43 @@ per-token.
 | --- | --- |
 | Hydration chain id / EVM chain id | `73` / `222222` |
 | Hydration message core | `0x3792a6d63c31941B2805181771795D9176fA82A1` (`messageFee` 0, guardian set 7, 19 keys) |
-| Base chain id | `30` |
-| EURC (Base) | `0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42` |
-| EURC (Hydration, asset 44) | `0x000000000000000000000000000000010000002c` |
-| NTT manager (Base, LOCKING) | `0xD1dc3517732c98502b5c1ba2389AcA9E9016d89a` |
-| NTT manager (Hydration, BURNING) | `0x8dd1286A29df5a2785fb638d6fb1598144cfbc4c` |
-| `assetFee[EURC]` | `100000` (0.1 EURC) |
-| Base TC Safe (emitter owner) | `0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7` |
+| Ethereum chain id | `2` |
+| `BasejumpEmitter` (Ethereum) | `0xa72e2bf29c840eb93adbb9ee1aa41580f01c9944` |
+| `BasejumpReceiver` (Hydration) | `0x35bf3a1b9ac564c8f66c97cea1ee410cd3f97c8a` |
+| `BasejumpLanding` (Hydration) | `0x70e9b12c3b19cb5f0e59984a5866278ab69df976` (impl `0x4ea0d58a…e31f`) |
+| USDC (Ethereum) | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
+| USDC (Hydration, asset 21) | `0x0000000000000000000000000000000100000015` |
+| NTT manager (Ethereum, LOCKING) | `0x447b2c7485A3d6813F8197E605b10BcCD8dd8398` |
+| NTT manager (Hydration, BURNING) | `0xEcEab64542A875C4472671D9Ed1E690cdD4e28fC` |
+| `assetFee[USDC]` | `100000` (0.1 USDC) |
+| Ethereum TC Safe (emitter owner) | `0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7` |
 | Hydration TC (receiver + landing owner) | `0xaa7e0000000000000000000000000000000aa7e1` |
 
-**Rate limits** (read live): outbound 100,000 EURC per 24 h sliding window; inbound
-184,467,440,737 EURC with `rateLimitDuration` 86400 — effectively unlimited. `quoteDeliveryPrice`
-returns 0 on this route. Note `getCurrentInboundCapacity()` reverts on the deployed Hydration
-manager; read `getInboundLimitParams(30)` instead, which returns packed `TrimmedAmount`s
-(`amount = raw >> 8`, `decimals = raw & 0xff`).
+**Rate limits** (read live): outbound 100,000 USDC per 24 h sliding window. `quoteDeliveryPrice`
+returns 0 on this route. If `getCurrentInboundCapacity()` reverts on the Hydration manager, read
+`getInboundLimitParams(2)` instead, which returns packed `TrimmedAmount`s (`amount = raw >> 8`,
+`decimals = raw & 0xff`).
 
 ## Deployment
 
-One migration, [`basejump-base`](../../migrations/definitions/basejump-base/), covering both ends.
-The landing is the existing pool `0x70e9b12c…df976`, so nothing is discovered across chains and no
+One migration, [`basejump-ethereum`](../../migrations/definitions/basejump-ethereum/), covering both
+ends; ran 2026-08-28, recorded in
+[`deployments/prod/basejump-ethereum.json`](../../deployments/prod/basejump-ethereum.json). The
+landing is the existing pool `0x70e9b12c…df976`, so nothing is discovered across chains and no
 address is copied by hand.
 
 | Steps | Chain | Wallet |
 | --- | --- | --- |
-| `001-deploy-emitter` → `002-set-landing@emitter` → `003-set-eurc-ntt-manager@emitter` → `004-set-eurc-fee@emitter` | Base | `ctx.wallet.base` (`PK`) |
+| `001-deploy-emitter` → `002-set-landing@emitter` → `003-set-usdc-ntt-manager@emitter` → `004-set-usdc-fee@emitter` | Ethereum | `ctx.wallet.ethereum` (`PK_ETHEREUM`) |
 | `005-deploy-receiver` → `006-set-emitter@receiver` → `007-set-landing@receiver` | Hydration | `ctx.wallet.hydration` (`PK_HYDRATION`) |
 | `008-transfer-ownership@receiver` → `009-transfer-ownership@emitter` | both | — |
 
 ```
-1. pnpm migrate:basejump-base                        # start to finish, ends TC/Safe-owned
+1. pnpm migrate:basejump-ethereum                    # start to finish, ends TC/Safe-owned
 2. verify invariant 1 across both chains
-3. TC: landing.setAuthorizedBridge(<receiver>, true) # ← go-live switch
-4. TC: revoke any previously authorized bridge on the pool
+3. governance on the landing: setDestAsset(USDC, asset 21), fund, setAuthorizedBridge(<receiver>, true)
+                                                     # ← go-live switch — referendum #404, 2026-09-16
+4. TC: upgrade the receiver when its implementation predates the current source (below)
 5. relay on  →  canary
 ```
 
@@ -194,17 +199,27 @@ Step 006 reads the emitter address straight from `ctx.outputs["001-deploy-emitte
 ends cannot be wired to different deployments — a fresh emitter deploy is a new Wormhole emitter, and
 an env-copied address would silently authorize a stale one.
 
-The migration does not touch the landing: it is already TC-owned, already mapped
-`EURC -> asset 44`, and already funded. Three consequences:
+The migration does not touch the landing: the pool is TC-owned, so step 3 is governance. Three
+consequences:
 
-**The TC call in step 3 is the go-live switch.** Until it lands, a delivered VAA reverts at
+**The landing's code must match the receiver's call.** The receiver calls the four-argument
+`transfer(address,uint256,bytes32,bytes)` — `data` is the inbound-intent channel, so a recipient
+contract can be told what to do with the funds — and the pool must dispatch exactly that. A pool
+whose implementation does not match the current source is brought up to it with
+[`basejump-landing-upgrade`](../../migrations/definitions/basejump-landing-upgrade/): it builds,
+checks the artifact against the selector the live receiver calls, deploys the current
+`BasejumpLanding` implementation and records the `upgradeToAndCall` calldata for the TC. Storage
+layout is unchanged, so the pool balance, routes, authorizations and queue carry over. Vet it with
+`_probeBasejumpLandingUpgrade.ts --impl <address>`, which enacts the TC motion on a fork and
+replays the real VAAs waiting on the corridor. The `basejump` relayer can run before the motion
+enacts — its retry budget spans days — but a VAA that exhausts it needs a manual replay.
+
+**The authorization in step 3 is the go-live switch.** Until it lands, a delivered VAA reverts at
 `onlyAuthorizedBridge`, `processedVaas[hash]` rolls back, and the relay retries — so steps 1–2 are
 safe to run early and the corridor simply stays dark. Nothing is at risk in between.
 
 **Previously authorized bridges stay authorized.** Disarming an old source stops new VAAs but does
-not revoke its authorization on the pool — hence step 4 in the same TC batch.
-
-**Liquidity is continuous.** Reusing the pool means no funding step and no drain-and-refill window.
+not revoke its authorization on the pool — revoke it in the same governance batch.
 
 The Hydration deployer key needs an `EVMAccounts.ContractDeployer` slot; a chopsticks fork does not
 enforce this, so a fork run does not validate it.
@@ -213,11 +228,15 @@ enforce this, so a fork run does not validate it.
 
 Two legs, two different needs:
 
-- **Settlement** — the NTT VAA is delivered to Hydration by the `hydration-ntt` feature in
-  [`agents/relayer`](../../agents/relayer/), which already carries the EURC route.
-- **Fast path** — **not implemented.** Nothing currently delivers the emitter's instant message to
-  `BasejumpReceiver.completeTransfer`. Needs a `basejump` feature in the relayer: subscribe to the
-  source emitter, submit to the receiver. `fulfillPending()` also needs a keeper.
+- **Settlement** — the NTT VAA is delivered to Hydration by the `ntt` app in
+  [`agents/relayer`](../../agents/relayer/), which carries the USDC route.
+- **Fast path** — the `basejump` app in [`agents/relayer`](../../agents/relayer/) subscribes to each
+  corridor's emitter and submits the VAA to that corridor's receiver
+  ([routes.ts](../../agents/relayer/src/apps/basejump/routes.ts)). It does not wait on the source
+  tx hash, and retries for days because every failure short of a bad VAA is transient (invariants
+  4 and 5), a receiver the TC has not upgraded or armed yet included. A VAA that exhausts the budget
+  parks in the engine's failed queue and needs a manual replay. `fulfillPending()` still needs a
+  keeper.
 
 ## Test coverage
 
@@ -253,36 +272,30 @@ emitter, so this is one more instance rather than a new kind of trust, but it is
 A corridor needs:
 
 1. A migration deploying both ends: the source emitter on the source chain, and this corridor's
-   receiver on Hydration. A new source deployment is required per chain — the Base contract is a
-   Base-specific emitter wired to the Base EURC manager.
+   receiver on Hydration. A new source deployment is required per chain — the Ethereum contract is
+   an Ethereum-specific emitter wired to the Ethereum USDC manager.
 2. Hydration TC, on the shared landing: `landing.setAuthorizedBridge(<this receiver>, true)` and
    `landing.setDestAsset(<source asset>, <hydration asset>)`.
    `contracts/scripts/basejump-landing/addRoute.ts` prints the calldata for both.
-3. One entry in the relayer's route list — the settlement leg only.
+3. Two relayer entries: the settlement leg in `ntt/routes.ts`, and the emitter → receiver pair in
+   `basejump/routes.ts`.
 4. Fund the pool in the destination asset.
 
-### Ethereum → Hydration (USDC) — ready
+### Ethereum → Hydration (USDC) — live
 
-[`basejump-ethereum`](../../migrations/definitions/basejump-ethereum/) exists and mirrors
-`basejump-base` step for step: 001–004 deploy and wire the Ethereum emitter, 005–008 deploy this
-corridor's receiver on Hydration and hand it to the TC, 009 hands the emitter to the Ethereum TC
-Safe. Step 006 is the go-live switch. Run with `pnpm migrate:basejump-ethereum` — needs
-`PK_ETHEREUM` and `PK_HYDRATION` (the latter must hold an `EVMAccounts.ContractDeployer` slot).
+The corridor above; see [Deployment](#deployment).
 
 Verified on mainnet: the Ethereum USDC `NttManager` is
 `0x447b2c7485A3d6813F8197E605b10BcCD8dd8398` — `token()` = USDC `0xA0b86991…eB48`, `getMode()` =
 LOCKING (Ethereum is USDC's hub), `getPeer(73)` = `0xEcEab645…28fC`, and
 `quoteDeliveryPrice(73, hex"00")` = 0. The Hydration side is `0xEcEab645…28fC`, mode BURNING,
 `token()` = asset 21 `0x…0100000015`, `getPeer(2)` pointing back. Outbound limit 100,000 USDC/24h.
-The relayer's `NTT_ROUTES` already carries this settlement leg, so step 3 is already done.
+The relayer's `ntt` routes carry this settlement leg and its `basejump` routes the fast path, so
+step 3 is done.
 
 Exercised end to end on an Ethereum fork: 10 USDC in settles 10 gross to the landing and publishes
 9.9 net, with `assetFee` 100,000 (0.1 USDC) retained. The settlement logs precede the fast-path
 `LogMessagePublished` in the receipt, which is invariant 2 holding against the real manager.
-
-The pool holds **no asset 21 today** — it is EURC-only. Fund before go-live, and authorize the
-receiver on the landing; until that call lands the corridor stays dark, so the migration is safe to
-run in full first.
 
 ### Arbitrum → Hydration (USDC) — blocked
 
@@ -302,18 +315,16 @@ migration is a constants-only copy of `basejump-ethereum`.
 — **but only if that token has an NTT manager on that same source chain.** That is the binding
 constraint, and it is narrow. Live NTT legs:
 
-| Token | Hub (locking) | Decimals | Addable to a Base deployment? | To an Ethereum one? |
-| --- | --- | --- | --- | --- |
-| EURC | Base | 6 | already the route | no leg |
-| USDC | Ethereum | 6 | **no Base leg** | yes — one owner call |
-| USDT | Ethereum | 6 | **no Base leg** | yes — one owner call |
-| WBTC | Ethereum | 8 | **no Base leg** | yes — one owner call |
-| DAI / sUSDS / WETH | Ethereum | 18 | **no Base leg** | blocked on the dust gate below |
-| SOL / jitoSOL / PRIME | Solana | — | n/a | n/a (non-EVM source) |
+| Token | Hub (locking) | Decimals | Addable to the Ethereum deployment? |
+| --- | --- | --- | --- |
+| USDC | Ethereum | 6 | live |
+| USDT | Ethereum | 6 | yes — one owner call |
+| WBTC | Ethereum | 8 | yes — one owner call |
+| DAI / sUSDS / WETH | Ethereum | 18 | blocked on the dust gate below |
+| SOL / jitoSOL / PRIME | Solana | — | n/a (non-EVM source) |
 
-So the per-asset mapping buys nothing on Base — EURC is the only Base-railed token and will be until
-someone stands up another Base NTT route. Its value is on an **Ethereum** source deployment, where
-six tokens share one chain and each additional one really is a single `setNttManager` call.
+Six tokens share the Ethereum source, so each additional one really is a single `setNttManager`
+call plus a landing route.
 
 Standing up a new NTT route where none exists is not a Basejump change: it needs a manager plus
 transceiver on the source chain, a burning-side manager on Hydration, bilateral `setPeer`, and a
@@ -321,8 +332,8 @@ Hydration runtime governance call `EVMAccounts.set_ntt_minter(assetId, manager)`
 — referendum-class. Basejump can only onboard NTT-railed tokens as fast as someone stands up NTT
 routes.
 
-**Dust gate on any token with more than 8 decimals.** NTT trims amounts to 8 decimals. EURC, USDC and
-USDT are 6dp and WBTC is 8dp, so all four are exact. An 18dp asset (WETH, DAI, sUSDS) loses up to
+**Dust gate on any token with more than 8 decimals.** NTT trims amounts to 8 decimals. USDC and USDT
+are 6dp and WBTC is 8dp, so all three are exact. An 18dp asset (WETH, DAI, sUSDS) loses up to
 `1e10` wei between the gross settlement leg and the net fast leg — a silent per-transfer pool leak —
 and may revert `TransferAmountHasDust`. Before enabling one, either quantize `actualAmount` to the
 trim granularity in `bridgeViaWormhole` or set `assetFee[asset]` at or above the maximum trim dust.

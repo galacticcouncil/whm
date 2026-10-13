@@ -24,14 +24,16 @@ const SLIPPAGE_BPS = 100;
  * settles it over NTT to IntentReceiver on Ethereum, and publishes `depositAddress` beside it as
  * its own Wormhole message. This script only places the order — the relayer's `intent` app pairs
  * the two VAAs and calls processOrder (deliver → pay caller → forward to the depositAddress), and
- * the nintent agent (agents/nintent) watches the resulting `OrderProcessed` and notifies 1Click.
+ * the intent agent's relayer app (agents/intent) watches the resulting `OrderProcessed` and
+ * notifies 1Click.
  *
  *   0. Quote the relay fee (maxRelayFee, +20% headroom) — gas-based, independent of the swap.
  *   1. 1Click quote for (--ethOut − maxRelayFee): the relay fee is skimmed on Ethereum, so the swap
  *      is sized to what actually lands at the depositAddress (--ethOut is the full WETH settled).
  *   2. approve(assetIn) + placeOrder(assetIn, amountIn, minEthOut, depositAddress, maxRelayFee).
  *
- * Returns once the order is committed; the relayer forwards and nintent notifies 1Click out-of-band.
+ * Returns once the order is committed; the relayer forwards and the intent agent notifies 1Click
+ * out-of-band.
  *
  * --ethOut is an estimate, and has to be: depositAddress is an argument to placeOrder, so the quote
  * must exist before the swap that decides how much WETH there is. FLEX_INPUT absorbs the gap.
@@ -73,10 +75,10 @@ async function main(): Promise<void> {
   //    user-authorized ceiling carried in the instruction (quoter + headroom, default +20%); the
   //    relayer charges its own marginBps=0 cost at processOrder time, bounded by it. --ethOut is the
   //    full WETH settled; the fee is skimmed on Ethereum, so the swap is quoted for ethOut − fee.
-  const quoterUrl = optionalEnv("QUOTER_URL") || "https://quoter-api.play.hydration.cloud";
+  const quoterUrl = optionalEnv("QUOTER_URL") || "https://quoter-intent.play.hydration.cloud";
   const marginBps = Number(optionalEnv("MAX_FEE_MARGIN_BPS") ?? "2000");
-  // No gasLimit: the quoter's ETH_GAS_LIMIT is the single forecast, so this ceiling and the
-  // relayer's bill are sized from the same number and cannot drift apart. Only marginBps differs.
+  // No gasLimit: the quoter models the envelope itself, and overriding it here would replace that
+  // model with a guess. See docs/intents/relay-fee.md.
   const feeRes = await fetch(
     `${quoterUrl}/relay-fee?chain=ethereum&feeAsset=native&marginBps=${marginBps}`,
   );
@@ -159,9 +161,9 @@ async function main(): Promise<void> {
   console.log(`  transferSequence=${transferSequence} ethOut=${actual} (estimated ${ethOut})`);
 
   // 3. Done. The relayer pairs the settlement with its instruction and forwards to depositAddress;
-  //    the nintent agent watches OrderProcessed and notifies 1Click.
+  //    the intent agent watches OrderProcessed and notifies 1Click.
   console.log(
-    `\nDone. Relayer forwards → nintent notifies 1Click. Track status for ${depositAddress}.`,
+    `\nDone. Relayer forwards → intent agent notifies 1Click. Track status for ${depositAddress}.`,
   );
 }
 

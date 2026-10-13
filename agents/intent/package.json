@@ -1,0 +1,23 @@
+{
+  "name": "@whm/intent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start:relayer": "node dist/relayer/app.js",
+    "start:quoter": "node dist/quoter/app.js",
+    "prebuild": "npm run clean",
+    "build": "node ./esbuild.dist.mjs",
+    "clean": "rm -rf dist/",
+    "dev": "node ./esbuild.dev.mjs",
+    "docker:build": "docker build -t galacticcouncil/intent:latest .",
+    "docker:deploy": "docker buildx build --platform linux/amd64 -t galacticcouncil/intent:latest --push .",
+    "docker:up": "docker stack deploy -c docker-compose.yml intent"
+  },
+  "dependencies": {
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.17",
+    "@fastify/cors": "^10.0.2",
+    "fastify": "^5.2.0",
+    "viem": "^2.46.1",
+    "winston": "^3.8.2"
+  }
+}

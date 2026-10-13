@@ -23,9 +23,16 @@ export interface Network {
  * `dev_newBlock` fight and deadlock).
  */
 export async function spawn(spec: ChainSpec): Promise<Network> {
+  // Opt-in speed-up for reruns: CHOPSTICKS_DB caches fetched state in SQLite, keyed by block, so it
+  // only pays off together with CHOPSTICKS_BLOCK pinning the fork to the same block every run.
+  const cache = {
+    ...(process.env.CHOPSTICKS_DB ? { db: process.env.CHOPSTICKS_DB } : {}),
+    ...(process.env.CHOPSTICKS_BLOCK ? { block: Number(process.env.CHOPSTICKS_BLOCK) } : {}),
+  };
   const { chain, addr, close } = await setupWithServer({
     endpoint: spec.endpoint,
     port: spec.port,
+    ...cache,
     // Skip signature verification — submit as any origin
     "mock-signature-host": true,
     "build-block-mode": BuildBlockMode.Manual,

@@ -8,6 +8,8 @@ import logger from "../logger";
 import type { EngineConfig } from "../config";
 import type { ChainId, RelayerApp } from "../types";
 
+import { sourceTx } from "./source-tx";
+
 export interface AppOptions {
   /**
    * Engine namespace. LOAD-BEARING: every Redis key derives from it —
@@ -24,6 +26,12 @@ export interface AppOptions {
   retries?: number;
   /** Backoff between attempts: min(2^attempt * base, max). */
   backoff?: { baseMs: number; maxMs: number };
+  /**
+   * Resolve `ctx.sourceTxHash` before handlers run, holding the VAA until Wormholescan has indexed
+   * it. Only for an app that reads the source transaction — it trades latency for the hash, and an
+   * app that just logs it should leave this off and relay the moment the spy delivers.
+   */
+  sourceTx?: boolean;
 }
 
 /**
@@ -42,11 +50,14 @@ export function createApp(cfg: EngineConfig, opts: AppOptions): RelayerApp {
   );
 
 
-  return new StandardRelayerApp<StandardRelayerContext>(Environment.MAINNET, {
+  const app = new StandardRelayerApp<StandardRelayerContext>(Environment.MAINNET, {
     name: opts.name,
     logger,
     spyEndpoint: cfg.spyEndpoint,
     redis: cfg.redis,
+    // Ours instead — see engine/source-tx.ts. The engine's sleeps a flat 32s on the miss that
+    // every fresh VAA produces, because the spy is ahead of the Wormholescan indexer it asks.
+    fetchSourceTxhash: false,
     ...(opts.retries ? { workflows: { retries: opts.retries } } : {}),
     ...(opts.backoff
       ? {
@@ -57,5 +68,10 @@ export function createApp(cfg: EngineConfig, opts: AppOptions): RelayerApp {
       ? { missedVaaOptions: { startingSequenceConfig: opts.startingSequence } }
       : {}),
   });
+
+  // Registered here so it runs ahead of the chain routes, which `listen()` appends last.
+  if (opts.sourceTx) app.use(sourceTx() as never);
+
+  return app;
 }
 

@@ -5,33 +5,41 @@ import {
   type Abi,
   type Account,
   type Address,
+  type Chain,
   type Hash,
   type PublicClient,
+  type Transport,
   type WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { hydration, HYDRATION_EVM_CHAIN_ID } from "../chains";
-import { hydrationFees } from "../utils/fees";
+import { chainFees } from "../utils/fees";
 
-export interface HydrationClients {
+/** Account plus read and write clients for one chain; writes go to `wallet.chain`. */
+export interface ChainClients {
   account: Account;
-  publicClient: PublicClient;
-  wallet: WalletClient;
+  publicClient: PublicClient<Transport, Chain>;
+  wallet: WalletClient<Transport, Chain, Account>;
 }
+
+/** A contract call, independent of the chain it will be sent to. */
+export type Call = {
+  to: Address;
+  abi: Abi;
+  functionName: string;
+  args: readonly unknown[];
+};
 
 /**
  * Connect to Hydration's EVM and assert the RPC is the chain we think it is.
  *
  * @param rpcUrl Hydration EVM RPC.
  * @param key Signing key.
- * @returns Account plus read and write clients.
+ * @returns Account, public client, and wallet client, all built against Hydration.
  * @throws When the RPC reports a different chain id.
  */
-export async function hydrationClients(
-  rpcUrl: string,
-  key: `0x${string}`,
-): Promise<HydrationClients> {
+export async function hydrationClients(rpcUrl: string, key: `0x${string}`): Promise<ChainClients> {
   const account = privateKeyToAccount(key);
   const publicClient = createPublicClient({ chain: hydration, transport: http(rpcUrl) });
   const wallet = createWalletClient({ account, chain: hydration, transport: http(rpcUrl) });
@@ -45,12 +53,39 @@ export async function hydrationClients(
 }
 
 /**
- * Submit `receiveMessage(vaa)` to a Hydration contract under a caller-owned nonce.
+ * Submit a call to whichever chain `clients` was built against, under a caller-owned nonce.
  *
  * Simulated first so a revert surfaces as a named error before a nonce is spent — the queue then
  * classifies it rather than burning gas.
  *
- * @param clients Hydration account and clients.
+ * @param clients Account and clients for the destination chain.
+ * @param call The contract, function, and arguments to submit.
+ * @param nonce Nonce to submit under.
+ * @returns The transaction hash.
+ */
+export async function submit(clients: ChainClients, call: Call, nonce: number): Promise<Hash> {
+  const { account, publicClient, wallet } = clients;
+  const { to: address, abi, functionName, args } = call;
+
+  await publicClient.simulateContract({ address, abi, functionName, args, account });
+
+  const fees = await chainFees(wallet.chain, publicClient);
+
+  // Fee fields are always explicit, so viem never falls back to its cached tx-type guess.
+  const tx = { address, abi, functionName, args, nonce, account } as const;
+  return fees.kind === "legacy"
+    ? wallet.writeContract({ ...tx, gasPrice: fees.gasPrice })
+    : wallet.writeContract({
+        ...tx,
+        maxFeePerGas: fees.maxFeePerGas,
+        maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+      });
+}
+
+/**
+ * Submit `receiveMessage(vaa)` under a caller-owned nonce.
+ *
+ * @param clients Account and clients for the destination chain.
  * @param abi ABI carrying `receiveMessage(bytes)`.
  * @param to Contract that consumes the VAA.
  * @param vaaBytes The guardian-signed VAA.
@@ -58,41 +93,12 @@ export async function hydrationClients(
  * @returns The transaction hash.
  */
 export async function receiveMessage(
-  clients: HydrationClients,
+  clients: ChainClients,
   abi: Abi,
   to: Address,
   vaaBytes: Buffer,
   nonce: number,
 ): Promise<Hash> {
-  const { account, publicClient, wallet } = clients;
   const args = [`0x${vaaBytes.toString("hex")}`] as const;
-
-  await publicClient.simulateContract({
-    address: to,
-    abi,
-    functionName: "receiveMessage",
-    args,
-    account,
-  });
-
-  // Hydration wants no priority fee, and some compatible RPCs omit
-  // eth_maxPriorityFeePerGas — see utils/fees.
-  const fees = await hydrationFees(publicClient);
-  const call = {
-    address: to,
-    abi,
-    functionName: "receiveMessage",
-    args,
-    nonce,
-    chain: hydration,
-    account,
-  } as const;
-
-  return fees.kind === "legacy"
-    ? wallet.writeContract({ ...call, gasPrice: fees.gasPrice })
-    : wallet.writeContract({
-        ...call,
-        maxFeePerGas: fees.maxFeePerGas,
-        maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
-      });
+  return submit(clients, { to, abi, functionName: "receiveMessage", args }, nonce);
 }

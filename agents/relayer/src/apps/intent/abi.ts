@@ -5,7 +5,8 @@ export const receiverAbi = parseAbi([
   "function processOrder(bytes nttVaa, bytes instructionVaa, uint256 feeRequested) external",
   "error AlreadyRedeemed()",
   "error SequenceMismatch(uint64 instructed, uint64 settled)",
-  "error NotFunded(uint256 required, uint256 available)",
+  "error SettlementNotReleased(uint64 sequence)",
+  "error UnexpectedTrim(uint8 decimals)",
   "error FeeExceedsCeiling()",
   "error UnauthorizedEmitter(uint16 chainId, bytes32 emitter)",
 ]);
@@ -18,10 +19,13 @@ export const coreBridgeAbi = parseAbi([
   "event LogMessagePublished(address indexed sender, uint64 sequence, uint32 nonce, bytes payload, uint8 consistencyLevel)",
 ]);
 
-/** The emitter's forwarding instruction, as published beside each settlement. */
+/**
+ * The emitter's forwarding instruction, as published beside each settlement:
+ * `abi.encode(sequence, depositAddress, maxRelayFee)`. No amount — the receiver reads that off the
+ * settlement, so an instruction has no size to over-state.
+ */
 export const instructionAbi = [
   { type: "uint64" },
   { type: "address" },
-  { type: "uint256" },
   { type: "uint256" },
 ] as const;

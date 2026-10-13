@@ -16,13 +16,13 @@ verifiable; nothing is passed as a caller argument.
                       HYDRATION                          ETHEREUM              NEAR
                       ─────────                          ────────              ────
 
-  publishQuote(Quote)
+  publishQuote(terms, bridgeAmount)          reads the price oracle
     │
     ├─► [A] quote VAA ──────────────────────────────────────────────────────► IntentRouter
-    │        emitter: IntentQuoteEmitter                                        reads `recipient`
-    │        payload: packed terms (§2)                                         re-derives A from
-    │        path:    keccak256(payload)                                        keccak256(payload)
-    │        once per route, replayed every fill
+    │        emitter: IntentQuoteEmitter                                        reads `recipient`,
+    │        payload: identity prefix + priced tail (§2)                        `amountIn`, `minOutPerIn`
+    │        path:    keccak256(identity prefix)                                re-derives A from
+    │        once per tranche, consumed once                                    the identity prefix
     │
   placeOrder(…, depositAddress, maxRelayFee)          ┌── IntentReceiver
     │                                                 │     .processOrder(B, C, fee)
@@ -34,14 +34,15 @@ verifiable; nothing is passed as a caller argument.
     └─► [C] forwarding instruction ───────────────────┘            │
              emitter: IntentEmitter                                │  POA watcher
              payload: abi.encode(seq, depositAddress,              │  (not our tx)
-                                 amount, maxRelayFee)              ▼
+                                 maxRelayFee)                      ▼
              carries: where the value goes                    account A credited
                                                               nep141:eth.omft.near
 ```
 
-**[B] and [C] leave the same transaction** and are joined by the NTT manager's sequence. **[A] is
-independent** — published once per route, and only the MPC variant has one at all. The 1Click variant
-uses [B] + [C] and stops at the deposit address.
+**All three leave the same transaction.** [B] and [C] are joined by the NTT manager's sequence; [A]
+carries the price for that tranche and is joined to nothing — it stands on its own hash. Only the
+unattended variant publishes [A] at all; the attended one uses [B] + [C] and stops at the deposit
+address.
 
 **[A] and [C] have different emitter addresses**, because `IntentQuoteEmitter` is a separate
 deployment from `IntentEmitter`. `IntentReceiver` pins the emitter it accepts instructions from, so a
@@ -111,7 +112,8 @@ Solver relay RPC             https://solver-relay-v2.chaindefuser.com/rpc
 ETH  (intents token id)      nep141:eth.omft.near
 POA min deposit (eth:1)      100000000000            (1e11 wei)
 MPC domain_id                1                       (Ed25519; 0 = Secp256k1)
-Quote window                 min_deadline_ms = 120000
+Quote freshness              max_quote_age           ⚠ size from measured POA delay
+Intent deadline              < tranche interval      see phase2.md §5
 ```
 
 ### Account derivation — `(router, path) → A → 0xN`
@@ -268,15 +270,15 @@ normative version, and `IntentEmitter.computeTerms(order)` returns the exact byt
 so an off-chain encoder can be diffed against it rather than trusted.
 
 ```
- byte  0    1                                33      35 36 37            37+D        38+D
-       ├────┼───────────────────────────────────┼──────┼──┼──┼─────────────┼──────────┼──────────┐
-       │ ver│            quoteId                │ slip │k │D │ destAsset   │    R     │ recipient│
-       │  1 │              32                   │   2  │1 │1 │     D       │    1     │    R     │
-       └────┴───────────────────────────────────┴──────┴──┴──┴─────────────┴──────────┴──────────┘
+ byte  0    1                                33      35 36 37            37+D        38+D        38+D+R      54+D+R
+       ├────┼───────────────────────────────────┼──────┼──┼──┼─────────────┼──────────┼──────────┼──────────┼───────────┐
+       │ ver│            quoteId                │ slip │k │D │ destAsset   │    R     │ recipient│ amountIn │minOutPerIn│
+       │  2 │              32                   │   2  │1 │1 │     D       │    1     │    R     │    16    │    16     │
+       └────┴───────────────────────────────────┴──────┴──┴──┴─────────────┴──────────┴──────────┴──────────┴───────────┘
        │◄────────────── ORDER_HEADER_SIZE = 37 ──────────────►│
-                                                              │◄─ length-prefixed strings ─────►│
+       │◄────────── identity prefix — authPath = keccak256(this) ────────────────────►│◄──── priced tail ───────────────►│
 
-       total = 38 + D + R          k = recipientKind      slip = maxSlippageBps
+       total = 70 + D + R          k = recipientKind      slip = maxSlippageBps
 ```
 
 Two length-prefixed strings, and the second length is only readable after the first string is
@@ -286,7 +288,7 @@ first of.
 
 | Offset | Size | Field              | Type    | Notes                                                                                                                                                         |
 | ------ | ---- | ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0      | 1    | `version`          | u8      | `1`. Reject anything else. Inside the hash, so a future layout derives disjoint accounts.                                                                     |
+| 0      | 1    | `version`          | u8      | `2`. Reject anything else. Inside the hash, so a future layout derives disjoint accounts.                                                                     |
 | 1      | 32   | `quoteId`          | bytes32 | Namespace value, unique per schedule. Must be non-zero. |
 | 33     | 2    | `maxSlippageBps`   | u16     | Floor tolerance, committed at order creation.                                                                                                                 |
 | 35     | 1    | `recipientKind`    | u8      | `0` = destination chain (`ft_withdraw`), `1` = intents account (`transfer`).                                                                              |
@@ -294,6 +296,26 @@ first of.
 | 37     | D    | `destinationAsset` | bytes   | UTF-8 intents token id, e.g. `nep141:zec.omft.near`. Use the bare id, **not** 1Click's `1cs_v1:` form.                                                        |
 | 37+D   | 1    | `recipientLen`     | u8      |                                                                                                                                                               |
 | 38+D   | R    | `recipient`        | bytes   | UTF-8 destination address. **The value the whole design protects.**                                                                                           |
+| 38+D+R | 16   | `amountIn`         | u128    | The tranche's `bridgeAmount`. A **cap** on what one fill may consume, not a price. Outside the path.                                                          |
+| 54+D+R | 16   | `minOutPerIn`      | u128    | Destination smallest-units per `1e18` of input, read from the Hydration oracle with `maxSlippageBps` already applied. Outside the path.                       |
+
+### Why the path stops before the priced tail
+
+`authPath` hashes bytes `0 … 38+D+R` — the identity fields only. The address `A` derives from it and
+must be computable **once**, at schedule creation, before any tranche has a price. Hashing the whole
+payload would make every tranche a different account, and an address can only be derived by an
+off-chain round trip ([spec.md §3](spec.md#3-key-derivation-and-the-constant-address)) — so a schedule
+of unknown length could never pre-derive them.
+
+The trade is that publishing is no longer self-binding on the priced half: a stranger can publish a
+quote for someone else's path. They cannot choose the number — `publishQuote` reads the oracle, and
+the oracle pair is looked up from `destinationAsset` rather than passed — so the worst available is
+publishing a true price at an unfavourable moment. The freshness check in §3 bounds that to the age
+window.
+
+`maxSlippageBps` stays in the identity prefix even though the router no longer reads it: it is a term
+the user committed to, `publishQuote` applies it, and a different tolerance should derive a different
+account.
 
 `quoteId` is meaningless to the router. It exists so two schedules that agree on every other term
 stay on disjoint accounts; reusing one merges their balances.
@@ -393,12 +415,11 @@ Plain `abi.encode`, not packed — the decoder is Solidity, and the bytes are ne
 abi.encode(
     uint64  transferSequence,  // the NTT manager's sequence for the settlement it pairs with
     address depositAddress,    // where the receiver forwards
-    uint256 amount,            // what the settlement delivers, already quantized to TRIM_UNIT
     uint256 maxRelayFee        // ceiling on what the caller may claim
 )
 ```
 
-Fixed 128 bytes, all static — no strings, so no length games:
+Fixed 96 bytes, all static — no strings, so no length games:
 
 ```
  word   0                1                2                3
@@ -420,7 +441,7 @@ sweep of the source receipt — which is how the relayer finds it:
   └──────────────────────────────────────────────────────────┘
         │                                    │
         │ filter topics[1] == emitter        │ decode data → sequence, depositAddress,
-        │                                    │               amount, maxRelayFee
+        │                                    │               maxRelayFee
         ▼                                    ▼
    nothing to do here              match sequence against [B], then processOrder
 ```
@@ -435,9 +456,12 @@ the instruction by the emitter's, and those are three independent counters. `pro
 the manager sequence from the settlement payload and rejects a mismatch, which is what stops a caller
 pairing any pending settlement with whichever instruction carries the richest ceiling.
 
-**Why `amount` is carried rather than read from the settlement.** The receiver would otherwise have
-to parse the NTT transfer payload to learn it. Carrying it costs 32 bytes and makes the instruction
-self-describing; the settlement still has to have actually landed before anything moves.
+**Why `amount` is read from the settlement rather than carried.** The receiver walks into the NTT
+transfer body for it — `NttPayload.settlementOf` returns it off the same pass that yields the
+sequence and the digest preimage. That makes the number it forwards the number the rail released, so
+an instruction has no size to over-state and there is no divergence to check for. It costs ~517 gas
+against carrying it, and saves 32 bytes of instruction. The amount arrives trimmed to 8 decimals;
+any other precision reverts `UnexpectedTrim` rather than being scaled by a guess.
 
 **Delivered is not released.** `processOrder` cannot infer that funds arrived from the settlement
 having been delivered. NTT's inbound rate limiter consumes the VAA and marks the manager message
@@ -455,35 +479,49 @@ nothing while `isVAAConsumed` reads true. The receiver therefore asks the manage
 | true | ≠ 0 | queued — nothing credited |
 | true | 0 | queued, then completed — released |
 
-**Consistency level.** Published instantly (200) rather than finalized. The instruction carries no
-authority of its own — it is inert until a settlement naming the same sequence arrives — so waiting
-on finality would only delay the relayer. The one cost is a reorg window: if the publishing
-transaction were dropped after guardians signed, the manager's counter would rewind and a later,
-different transfer could reuse that sequence. On a GRANDPA chain that needs a block dropped
-pre-finalization, so it is collator-level rather than routine. See the verification table in
-[spec.md](spec.md#7-verification-status) — level 200 is not yet confirmed to work from chain 73.
+**Consistency level.** Published finalized (202), matching the settlement leg. The sequence the
+instruction names is contract storage, so a reorg rewinds it — and a guardian signature is never
+retracted. Signed pre-finality, the instruction would stay valid forever while pointing at whatever
+transfer next took that counter. At 202 the guardian drops a message whose block disappears, in the
+same `pending` loop that already protects the settlement, so the pair can be orphaned together but
+never split.
+
+This costs no latency. Chain 73's watcher does honour 200 — measured across 22 live orders, the
+instruction was signed a median of 38s ahead of its settlement — but a relayer cannot act until the
+settlement arrives, and that is 202 either way. The reorg window was that 38s. See
+[audit-2026-08-23.md](audit-2026-08-23.md), note 8.
 
 ---
 
 ## 3. VAA envelope checks — every `finalize` call
 
-The VAA is verified on **every** call. It is not stored, and there is no
-registration step: VAAs are permanent, publicly retrievable data, so the bot
-resubmits the same one for each tranche and the router re-derives the terms from
-guardian-signed bytes each time.
+The VAA is verified on **every** call. It is not stored, and there is no registration step: the router
+re-derives the terms from guardian-signed bytes each time.
 
 ```rust
 let vm = wormhole_core.parse_and_verify_vaa(vaa);      // guardian quorum
 
 require!(vm.emitter_chain == 73, "wrong source chain");            // Hydration
-require!(vm.emitter_address == self.emitter_address, "wrong emitter");
+require!(vm.emitter_address == self.emitter_address, "wrong emitter");   // IntentQuoteEmitter
 require!(vm.consistency_level >= 1, "not finalized");
 
-let order = decode_order(&vm.payload);
-require!(order.intents_account == self.derived_raw(order.order_id), "account mismatch");
+// The priced tail is only meaningful while it is current.
+require!(env::block_timestamp_ms() / 1000 - vm.timestamp as u64 <= self.max_quote_age,
+         "quote too old");
+
+// One quote, one fill. Inserted here, before any promise; removed on a failure path.
+require!(self.consumed.insert(&vm.hash), "quote already consumed");
+
+let quote = decode_quote(&vm.payload);
+let path  = keccak256(identity_prefix(&vm.payload));
 ```
 
 Both emitter checks are mandatory and neither is sufficient alone — see §1.
+
+**The age check is the load-bearing one.** `minOutPerIn` was true when the tranche fired; a VAA is
+permanent public data, so without a bound the oldest quote for a path prices the fill as readily as
+the newest. Size `max_quote_age` above the observed POA crediting delay plus relay slack, and no
+higher — every extra second is a window in which the committed rate drifts from the market.
 
 > **No stored order state, by choice.** Caching the decoded order to save
 > verification gas would make the security argument transitive (storage → writer →
@@ -493,9 +531,12 @@ Both emitter checks are mandatory and neither is sufficient alone — see §1.
 > thing worth publishing once rather than per tranche is the **message on Hydration**
 > — that saving is on the emitter side and needs nothing from the router.
 
-Replay is a non-issue and needs no guard. Resubmitting the same VAA is the intended
-mode of operation: it authorizes draining whatever balance `A` currently holds, so
-a repeat call with an empty balance simply fails. The balance bounds the authority.
+Replay is guarded by `consumed`, keyed on the VAA hash, because a quote now authorizes **one** fill of
+at most its own `amountIn`. That is what stops an accumulated balance being swept by whichever quote
+happens to be presented, and it is what keeps a DCA behaving like a DCA — see
+[phase2.md](phase2.md) §6.
+
+Balance still bounds the authority on top of that: a call against an empty account fails regardless.
 
 ⚠ **UNVERIFIED:** the NEAR core bridge's method name and returned struct shape
 (`parse_and_verify_vaa` vs `verify_vaa`, and its field names).
@@ -615,9 +656,11 @@ pub struct IntentRouter {
     mpc_signer:       AccountId,                      // v1.signer
     intents_contract: AccountId,                      // intents.near
     emitter_chain:    u16,                            // 73
-    emitter_address:  [u8; 32],                       // IntentEmitter, universal
+    emitter_address:  [u8; 32],                       // IntentQuoteEmitter — quotes only
+    max_quote_age:    u64,                            // seconds; see §3
     derived:  LookupMap<[u8;32], PublicKey>,          // cached MPC pubkeys (perf only)
     counters: LookupMap<[u8;32], u64>,                // nonce counters
+    consumed: LookupSet<[u8;32]>,                     // quote VAA hashes already filled
     signed:   LookupMap<([u8;32], u64), MultiPayload>,
 }
 
@@ -627,10 +670,10 @@ impl IntentRouter {
     /// deterministic and publicly computable, so this is not security-relevant.
     pub fn register_path(&mut self, order_id: [u8;32]) -> Promise;
 
-    /// Verify the VAA and swap A's current balance to the recipient it carries.
-    /// Permissionless; anyone may relay. The same VAA is resubmitted every tranche.
-    pub fn finalize(&mut self, vaa: Base64VecU8, quote_hash: String,
-                    amount_out: U128) -> Promise;
+    /// Verify the VAA and swap A's balance to the recipient, amount and rate it carries.
+    /// Permissionless; anyone may relay. One quote VAA, one fill.
+    /// No price and no amount is a parameter — see below.
+    pub fn finalize(&mut self, vaa: Base64VecU8) -> Promise;
 
     #[private]
     pub fn on_signed(
@@ -643,51 +686,43 @@ impl IntentRouter {
 }
 ```
 
-`finalize` takes `quote_hash` only to bind the emitted payload to the quote the bot
-will publish; the router cannot reach the relay to validate it.
+### Where each number comes from
 
-### Why `amount_out` is the only amount passed
+Nothing is a caller argument. `finalize` takes bytes the guardians signed, and reads the rest.
 
-The VAA carries what the user **commits** — `recipient`, `destinationAsset`,
-`maxSlippageBps` — all immutable policy. Amounts are _observations_, so they cannot
-be committed at publish time:
+- **`recipient`, `destinationAsset`** — from the VAA's identity prefix. Immutable policy, and the
+  path is their hash, so there is nothing to disagree with.
+- **`minOutPerIn`** — from the VAA's priced tail. Read off the Hydration oracle inside
+  `publishQuote`, in the transaction that fired the tranche, with `maxSlippageBps` applied.
+- **`amount_in`** — `min(vaa.amountIn, balance)`, where `balance` comes from `intents.near` via
+  `mt_batch_balance_of`. Hydration cannot know what arrives, because the relay fee is deducted in
+  flight, so the amount is observed rather than committed.
+- **`amount_out`** — `amount_in × minOutPerIn / 1e18`. Computed, never supplied.
 
-- **`amount_in`** — Hydration knows what it sends, not what arrives; the relay fee is
-  deducted in flight. And one VAA serves every tranche, each with a different amount.
-  So the router reads `A`'s balance from `intents.near` via `mt_batch_balance_of`,
-  making it trustless — no caller input at all.
-- **`amount_out`** — a live solver quote. Not derivable on-chain: there is no ZEC
-  oracle, and `quote_hash` is an opaque relay handle a contract cannot resolve.
-  Committing it in the VAA would recreate the stale-limit-price failure that ruled
-  out pre-minted 1Click quotes (`spec.md` §1).
+**Why `amountIn` is a cap and not the amount.** `bridgeAmount` is an upper bound on what lands: the
+credit is `bridgeAmount - feeRequested`, and the fee is always at or under its ceiling. So the normal
+case has `balance < cap` and the fill sweeps the account clean, while a backlog has `balance > cap`
+and one fill takes roughly one tranche. Using the lower bound instead would under-consume by the fee
+difference on every single tranche, and that residue would accumulate for the life of the schedule.
 
-So `amount_out` must come from the caller, and it is bounded by policy rather than
-trusted:
-
-| Bot supplies          | Consequence                                            |
-| --------------------- | ------------------------------------------------------ |
-| `amount_out` inflated | relay rejects it — amounts disagree with its own quote |
-| `amount_out` too low  | rejected by the floor check against `maxSlippageBps`   |
-
-Neither misdirects funds; `recipient` never comes from a caller argument.
-
-**Consequence of reading the balance:** if a tranche lands between the bot's quote
-and the router's balance read, the signed diff covers a larger amount than the quote
-and the relay rejects it. Benign — the balance is untouched and the next tick
-re-quotes against the new balance — and rare, since tranches are hours or days
-apart. Adding the promise hop for the balance read is worth removing a caller input.
+**Why the tail is not trusted blindly.** A stranger may publish a quote for a path they do not own
+(see §2), so `minOutPerIn` is only as good as the freshness check — `block_timestamp - vaa.timestamp
+<= max_quote_age`. Without it, a quote from any point in the past prices the fill.
 
 ### Concurrency
 
-The router does **not** serialize `finalize`. It cannot: settlement happens on
-`intents.near` via the bot's `publish_intent`, so there is no callback telling the
-router when an intent completed.
+The router still learns nothing about settlement — that happens on `intents.near` via the bot's
+`publish_intent`, with no callback — so it cannot serialize on outcomes. It serializes on the quote
+instead.
 
-Two concurrent `finalize` calls therefore produce two validly-signed intents
-against one balance. This is safe but wasteful — both carry the same recipient, the
-first to settle consumes the balance, the second fails on insufficient funds. No
-loss, no misdirection. Serialization is the bot's job (§7), and it is an efficiency
-concern rather than a safety one.
+`consumed` is inserted in the **synchronous** phase, before the balance promise, and removed on any
+failure path. Two concurrent `finalize` calls on the same VAA therefore cannot both proceed: the
+second is rejected on entry rather than racing to a second signature.
+
+Two *different* quote VAAs for one path can still be in flight together — a backlog with two
+unexpired tranches — and that is intended. Each is capped by its own `amountIn`, so together they
+commit at most what those two tranches delivered. If the balance covers only one, the second fails on
+insufficient funds at `intents.near`: no loss, no misdirection.
 
 ### Events
 
@@ -732,48 +767,33 @@ impossible.
 }
 ```
 
-**Quote** — `POST https://solver-relay-v2.chaindefuser.com/rpc`, header `X-API-Key: <Partner Portal JWT>`:
+**Fetch the quote VAA** — the bot stores only `authPath → sequence`, from `scan`'s `QuotePublished`
+index, and refetches the bytes:
 
-```json
-{
-  "id": 1,
-  "jsonrpc": "2.0",
-  "method": "quote",
-  "params": [
-    {
-      "defuse_asset_identifier_in": "nep141:eth.omft.near",
-      "defuse_asset_identifier_out": "<destinationAsset from the order>",
-      "exact_amount_in": "10000000000000000",
-      "min_deadline_ms": 120000
-    }
-  ]
-}
+```
+GET https://api.wormholescan.io/api/v1/vaas/73/<IntentQuoteEmitter emitter hex>/<sequence>
+  → { "data": { "vaa": "<base64>" } }
 ```
 
-```json
-{
-  "result": [
-    {
-      "quote_hash": "…",
-      "amount_in": "…",
-      "amount_out": "…",
-      "expiration_time": "2026-08-21T12:10:27Z"
-    }
-  ]
-}
-```
-
-An empty array or `null` means no solver took it — back off and re-quote. Note
-the 1Click distribution-channel JWT is **not** a relay credential and yields
-`result: null` for every pair, including liquid ones.
+> **No `quote` call.** The price is fixed on-chain before the bot sees the order, so there is nothing
+> to ask a solver and no `quote_hash` to obtain. The relay's `quote` method is gated behind a Partner
+> Portal `X-API-Key` — the 1Click distribution JWT is **not** a relay credential and returns
+> `result: null` for every pair, including liquid ones. That gate no longer sits in the critical path.
+>
+> It also reports authentication failure, an unknown asset id, and an empty book identically as
+> `result: null`, so any future use of it needs a known-liquid control pair to tell those apart.
 
 **Publish:**
 
 ```json
 { "id": 1, "jsonrpc": "2.0", "method": "publish_intent", "params": [{
-    "quote_hashes": ["<quote_hash>"],
+    "quote_hashes": [],
     "signed_data": { "...MultiPayload from the event..." } }]}
 ```
+
+`quote_hashes` is empty: the intent is a limit order posted to the book at the price the chain fixed,
+not a leg matched to a solver's quote. The empty array is accepted. **Whether solvers fill from the
+book is untested and blocking** — see [spec.md §7](spec.md#7-verification-status).
 
 ```json
 { "result": { "status": "OK", "intent_hash": "…" } }
@@ -792,28 +812,27 @@ the 1Click distribution-channel JWT is **not** a relay credential and yields
 
 ## 7. Bot state machine
 
-One instance per intents account. Exactly one in-flight intent per account.
+One instance per intents account. The bot fetches no quotes and computes no prices — it watches a
+balance, relays a VAA, and publishes what the router signed.
 
 ```
-IDLE ──balance > 0──► QUOTING ──quote ok──► FINALIZING ──event──► PUBLISHING
-  ▲                      │                      │                    │
-  │                      │ no solver            │ tx fail            │ SETTLED
-  │                      ▼                      ▼                    ▼
-  └──────────────── BACKOFF ◄───────────────────┴──────────── IDLE ◄──┘
+IDLE ──balance > 0──► FINALIZING ──event──► PUBLISHING
+  ▲                      │                     │
+  │                      │ tx fail             │ SETTLED / expired
+  │                      ▼                     ▼
+  └──────────────── BACKOFF ◄──────────────────┘
 ```
 
 Invariants:
 
-- Never hold two in-flight intents for one account — the second would sign
-  against funds the first already committed.
-- Never treat a quote as durable. If `expiration_time` passes before the signed
-  payload arrives, discard and re-quote. Costs nothing; no funds move on an
-  expired quote.
 - Balance is the only source of truth. Do not track individual deposits, and do
   not persist anything whose loss would strand funds — a fresh bot with an empty
   database must resume correctly from balance alone.
-- The router does not serialize `finalize` (§5) — the per-account lock here is the
-  only thing preventing two signed intents against one balance. Losing it costs a
-  wasted signature, not funds.
+- Quote VAA bytes are not state. Fetch them from the Wormhole API by
+  `(chain, emitter, sequence)`; `scan` indexes `QuotePublished` with the sequence.
+- Prefer the freshest unconsumed quote for a path. An older one fails the age check
+  in §3 rather than filling at a stale rate, so trying it wastes gas, not money.
 - Retries are safe: nonce derivation is deterministic, so re-publishing after a
   failed `publish_intent` reuses the same nonce rather than burning a new one.
+- A losing race costs nothing. `finalize` rejects a consumed VAA on entry (§5), so a
+  second relayer — or the user — pushing the same one is harmless.

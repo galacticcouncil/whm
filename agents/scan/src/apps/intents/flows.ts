@@ -10,15 +10,14 @@ import { OrderPlacedEvt, OrderProcessedEvt, QuotePublishedEvt, RelayFeePaidEvt }
 
 /**
  * The forwarding instruction the emitter publishes beside each settlement:
- * `abi.encode(sequence, depositAddress, amount, maxRelayFee)`. NTT carries no payload of its own,
- * so the destination travels separately and names the settlement it belongs to.
+ * `abi.encode(sequence, depositAddress, maxRelayFee)`. NTT's own payload field is an integrator hook
+ * with no caller-facing setter, so the destination travels separately and names the settlement it
+ * belongs to.
+ *
+ * Only the leading sequence is read, so a longer payload still resolves — do not narrow this to an
+ * exact-length decode, or re-indexing loses every instruction whose shape has since changed.
  */
-const INSTRUCTION = [
-  { type: "uint64" },
-  { type: "address" },
-  { type: "uint256" },
-  { type: "uint256" },
-] as const;
+const INSTRUCTION = [{ type: "uint64" }, { type: "address" }, { type: "uint256" }] as const;
 
 interface Published {
   sender: `0x${string}`;
@@ -96,9 +95,17 @@ export const orders: Flow = {
     /** Where the user's asset actually lands. Not the Ethereum deposit address. */
     dest_address: "TEXT",
     dest_asset: "TEXT",
+    /** What settled. Null until it does — a refunded order delivers nothing. */
     dest_amount: "NUMERIC",
     dest_tx: "TEXT",
     dest_tx_url: "TEXT",
+    /** What the quote promised, which is an expectation and not a receipt. */
+    quoted_amount: "NUMERIC",
+    /** The origin asset returned to `refundTo`: ETH, back on Ethereum. */
+    refund_amount: "NUMERIC",
+    refund_reason: "TEXT",
+    refund_tx: "TEXT",
+    refund_tx_url: "TEXT",
     placed: "JSONB",
     processed: "JSONB",
   },

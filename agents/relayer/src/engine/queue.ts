@@ -1,13 +1,14 @@
 import { formatEther, formatGwei, type Account, type Hash, type PublicClient } from "viem";
 
 import logger from "../logger";
-import { isDone, revertName } from "./revert";
+import { isDead, isDone, revertName } from "./revert";
 
 /** Enough gas for one submission; below this the process is out of runway and exits. */
 const MIN_GAS = 1_000_000n;
 
 const CHAIN_NAMES: Record<number, string> = {
   1: "ethereum",
+  4663: "robinhood",
   8453: "base",
   222222: "hydration",
   11155111: "sepolia",
@@ -137,14 +138,21 @@ export function createQueue(deps: QueueDeps) {
       const message = (e as Error).message ?? String(e);
 
       if (isDone(name)) {
-        task.logger.info(`${task.label} already completed`);
+        // The name says which kind of done: a replayed VAA, or — on the PSM receivers — a second
+        // signed copy of a message they already consumed (see DONE_ERRORS in ./revert).
+        task.logger.info(`${task.label} already completed (${name})`);
+        task.resolve();
+      } else if (isDead(name)) {
+        // Nothing was written and no retry can change that — drop it, but at warn: a VAA that aged
+        // out of maxPriceAge is a real gap in the feed, not a completion.
+        task.logger.warn(`${task.label} dropped, cannot succeed (${name})`);
         task.resolve();
       } else if (message.includes("nonce too low")) {
         task.logger.info("nonce too low, reloading");
         nonce = await publicClient.getTransactionCount({ address: account.address });
         pending.unshift(task);
       } else {
-        // Not proven finished — a queued settlement, an underfunded receiver, an RPC blip. Hand it
+        // Not proven finished — a queued settlement, a failing forward, an RPC blip. Hand it
         // back so the engine retries with backoff rather than acking a failure as a success.
         task.logger.warn(`${task.label} failed${name ? ` (${name})` : ""}: ${message}`);
         task.reject(e);

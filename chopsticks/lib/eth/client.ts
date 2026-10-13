@@ -6,7 +6,7 @@ import { hydration } from "@galacticcouncil/descriptors";
 import type { Network } from "../network";
 import type { EventRecord } from "../events";
 
-import { sendRawEthTx, type EthTxResult } from "./submit";
+import { sendRawEthTx, sendRawEthTxs, type EthBatchResult, type EthTxResult } from "./submit";
 
 const DEFAULT_GAS = 6_000_000n;
 const DEFAULT_GAS_PRICE = 10_000_000n; // 0.01 gwei — realistic Hydration EVM gas price
@@ -58,20 +58,24 @@ export class EthClient {
     return this.net.client.getTypedApi(hydration);
   }
 
-  private async submit(fields: { to?: Hex; data: Hex; value?: bigint }): Promise<EthTxResult> {
+  /** Signs at the next nonce and advances it — the tx is not sent. */
+  private async sign(fields: { to?: Hex; data: Hex; value?: bigint; gas?: bigint }): Promise<Hex> {
     const rawTx = await this.account.signTransaction({
       type: "legacy",
       chainId: this.opts.chainId,
       nonce: this.nonce,
       gasPrice: this.opts.gasPrice ?? DEFAULT_GAS_PRICE,
-      gas: this.opts.gas ?? DEFAULT_GAS,
+      gas: fields.gas ?? this.opts.gas ?? DEFAULT_GAS,
       value: fields.value ?? 0n,
       to: fields.to,
       data: fields.data,
     });
-    const res = await sendRawEthTx(this.net, rawTx);
     this.nonce += 1;
-    return res;
+    return rawTx;
+  }
+
+  private async submit(fields: { to?: Hex; data: Hex; value?: bigint }): Promise<EthTxResult> {
+    return sendRawEthTx(this.net, await this.sign(fields));
   }
 
   /** Deploy via CREATE; returns the deterministic contract address + tx result. */
@@ -84,6 +88,26 @@ export class EthClient {
   /** Call an existing contract. */
   call(to: Hex, data: Hex, value = 0n): Promise<EthTxResult> {
     return this.submit({ to, data, value });
+  }
+
+  /**
+   * Batching: sign a deploy now, send it later with {@link sendBatch}. Every block on a fork costs the
+   * same fixed build time, so sealing several txs together is the main lever on a probe's runtime.
+   * `gas` is per tx: each tx's gas limit is reserved against the block's, so size it.
+   */
+  async signDeploy(initCode: Hex, gas?: bigint, value = 0n): Promise<{ address: Hex; rawTx: Hex }> {
+    const address = getContractAddress({ from: this.account.address, nonce: BigInt(this.nonce) });
+    return { address, rawTx: await this.sign({ data: initCode, value, gas }) };
+  }
+
+  /** Batching: sign a call now, send it later with {@link sendBatch}. */
+  signCall(to: Hex, data: Hex, gas?: bigint, value = 0n): Promise<Hex> {
+    return this.sign({ to, data, value, gas });
+  }
+
+  /** Seals signed txs — in nonce order — into one block. */
+  sendBatch(rawTxs: Hex[]): Promise<EthBatchResult> {
+    return sendRawEthTxs(this.net, rawTxs);
   }
 
   events(blockHash: string): Promise<EventRecord[]> {

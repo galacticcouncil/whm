@@ -78,6 +78,11 @@ export class SettlementPoller {
         dest_amount: exec.destAmount,
         dest_tx: exec.destTx,
         dest_tx_url: exec.destTxUrl,
+        quoted_amount: exec.quotedAmount,
+        refund_amount: exec.refundAmount,
+        refund_reason: exec.refundReason,
+        refund_tx: exec.refundTx,
+        refund_tx_url: exec.refundTxUrl,
       },
     );
     if (!applied) return;

@@ -24,3 +24,4 @@ mainnet = "https://ethereum-rpc.publicnode.com"
 # Resolved lazily: the PSM fork suites skip when these are unset.
 base = "${RPC_BASE}"
 hydration = "${RPC_HYDRATION}"
+robinhood = "https://rpc.mainnet.chain.robinhood.com"

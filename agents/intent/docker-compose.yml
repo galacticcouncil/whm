@@ -1,0 +1,42 @@
+version: "3.3"
+# One image, one service per app. The command names the entry point — nothing is selected at
+# runtime, and the banner says which app a container is.
+services:
+  # Prices the destination relay fee. Stateless, read-only, no keys.
+  app-quoter:
+    image: galacticcouncil/intent:latest
+    command: [node, quoter/app.js]
+    environment:
+      # Gas price and the guardian set are read here; the envelope itself is code.
+      - ETH_RPC=
+    ports:
+      - "8080:8080"
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
+  # Tells 1Click a deposit landed. Without it an order stops at `processed` and never resolves.
+  app-relayer:
+    image: galacticcouncil/intent:latest
+    command: [node, relayer/app.js]
+    environment:
+      # Websocket: OrderProcessed arrives over eth_subscribe, never by polling.
+      - ETH_WSS=
+      - INTENT_RECEIVER=0x2173F6ecE25768e7EFc5199f70f8783d88Ba63c8
+    ports:
+      - "8081:8080"
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
+networks:
+  default:
+    driver: overlay

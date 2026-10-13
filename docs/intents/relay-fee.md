@@ -1,138 +1,147 @@
-# Relay Fee — paying the relayer on the destination
+# Relay Fee — sizing `maxRelayFee` and `feeRequested`
 
-> Scope: the **Hydration / Moonbeam → out** direction only (today: → Ethereum). This is the leg
-> where a relayer submits the final delivery transaction on the destination chain and must be paid
-> for the gas it spends. Both the relay cost and the reimbursement are settled **on the destination
-> chain, out of the bridged value** — never on the source. The relayer is only ever paid on a
-> **successful** delivery.
+The intents path settles WETH from Hydration to Ethereum over NTT and publishes a forwarding
+instruction beside it. On Ethereum a relayer calls
+[`IntentReceiver.processOrder(nttVaa, instructionVaa, feeRequested)`](../../contracts/src/intents/IntentReceiver.sol),
+which delivers the settlement, forwards the ETH to the deposit address, and pays itself
+`feeRequested` out of the delivered amount.
 
-There are two delivery paths out of Moonbeam, chosen by how fast the source finalizes:
+Two numbers price that call, and they are produced at different times by different parties:
 
-|               | **WTT** (direct)                         | **BJP** (pooled)                                          |
-| ------------- | ---------------------------------------- | --------------------------------------------------------- |
-| When          | Source finalizes fast                    | Source finality slow                                      |
-| Liquidity     | None — tokens delivered straight through | Pre-funded landing pool fronts, slow transfer replenishes |
-| Messages      | **1** (TokenBridge payload-3)            | **2** (fast signal + slow TokenBridge replenish)          |
-| Relayer trust | **Permissionless** market                | **Permissioned** (a trusted bot)                          |
-| Fee model     | `maxRelayFee` ceiling in the payload     | Gated reimbursement from the pool                         |
+- **`maxRelayFee`** — a ceiling the user authorizes at `placeOrder` time, carried inside the
+  guardian-signed instruction. It must be sized **before either VAA exists**, so it is a forecast.
+- **`feeRequested`** — what the relayer actually claims, bounded by the ceiling. By then the call is
+  fully known, so it is a measurement, not a forecast.
 
-The two paths need _different_ fee models, and the reason is the number of relayable messages —
-explained at the end. Pick one model per path; don't mix them.
+Everything below is about the first. The second needs no model: [`agents/relayer`](../../agents/relayer/)
+runs `estimateContractGas` on the real call and prices at `maxFeePerGas`.
 
----
+> A too-low `maxRelayFee` is a liveness problem, never a loss. No relayer submits, the VAA sits
+> valid and replay-safe, and the relayer retries with backoff until gas falls. Funds are never at
+> risk — but the order stalls, so under-sizing is the failure mode worth engineering against.
 
-## WTT — permissionless relay market (`maxRelayFee`)
+## The forecast
 
-The WTT path is a single message: the swapped WETH is bridged through the Wormhole TokenBridge with
-a payload (`transferTokensWithPayload`), and **any** relayer calls `redeem` on the destination
-`IntentReceiver` to unwrap → native ETH → forward to the deposit address. Because anyone can relay,
-the fee has to be **bounded and self-policing** — no relayer can over-charge, and an unprofitable
-job simply goes unrelayed.
+```
+gas = 21_000                  intrinsic
+    + 16·nonzero + 4·zero     calldata, derived from the envelope
+    + EXEC                    execution, pinned from measurement
 
-**The mechanism**
+fee = gas × maxFeePerGas × (1 + marginBps)
+```
 
-- The payload carries `(intentId, depositAddress, maxRelayFee)`. `maxRelayFee` is an
-  ETH-denominated **ceiling** the user authorizes at emit time, sized from a gas estimate plus
-  headroom. It rides inside the **guardian-signed VAA**, so it is authenticated end-to-end — no
-  separate signed quote, no trusted signer, no source-chain call.
-- The relayer names its own price: `redeem(vaa, feeRequested)`. The contract enforces
-  `feeRequested ≤ maxRelayFee` and forwards `amount − feeRequested` to the deposit address, paying
-  `feeRequested` (native ETH) to `msg.sender`.
+The caller owns the margin. [`agents/intent`](../../agents/intent/) returns the estimate; the SDK
+passes `marginBps=2000` for its own headroom.
 
-**Why this is safe**
+The fee is always native, and only ever native: `IntentReceiver` pays it out of the ETH it delivers
+(`to.call{value: feeRequested}`), so there is no asset to convert into. The settlement arrives as
+WETH and is unwrapped a step earlier — same wei either way, which is why the SDK can subtract
+`maxRelayFee` straight from a WETH amount.
 
-- **No on-chain floor needed.** The contract can't see gas cost, so the floor is the relayer's own
-  choice: before submitting, it decodes `maxRelayFee` and `amount` from the VAA, estimates gas
-  locally, and only relays if `maxRelayFee ≥ cost + margin`.
-- **Competition drives the fee below the ceiling** when gas is cheap — relayers undercut on
-  `feeRequested` rather than all grabbing the max.
-- **A too-low `maxRelayFee` is a liveness issue, never a loss.** If it can't cover gas, nobody
-  relays; the VAA just sits unredeemed (still valid, still replay-safe) until gas drops or it's
-  retried with a higher ceiling. Funds are never at risk.
+### Calldata — derived
 
-**Two relayer gotchas**
+`processOrder` carries two VAAs, and a VAA's wire size is fixed by its framing:
 
-- It's **racy**: multiple relayers may decode the same VAA; the first `redeem` to land wins (the
-  TokenBridge marks the VAA consumed) and the losers' txs revert. Margin must cover that revert
-  risk. Run your own backstop relayer for liveness.
-- The relayer must apply the **8-decimal Wormhole rescale** (`× 10^(decimals−8)` for 18-decimal
-  WETH) when reading `amount`, or its profitability math is off.
+```
+vaaBytes(sigs, payload) = 6 + 66·sigs + 51 + payload
+                          │   │         │    └── the emitter's own bytes
+                          │   │         └── body header: timestamp, nonce, emitterChain,
+                          │   │              emitterAddress, sequence, consistencyLevel
+                          │   └── 65-byte signature + 1-byte guardian index
+                          └── version, guardianSetIndex, numSignatures
+```
 
-**Sizing.** The contract can't see the OneClick `requiredDeposit`, so the UI sizes `amountIn` such
-that `amount − maxRelayFee ≥ requiredDeposit`. There's no pool to decapitalize, so Wormhole dust
-just lands in `amount` and is forwarded/fee'd normally — no buffer needed.
+- **NTT settlement** — 217-byte payload, fixed by the NTT transceiver message shape.
+- **Instruction** — 128 bytes, literally `abi.encode(uint64, address, uint256, uint256)`.
+- **`sigs`** — the live guardian quorum, `⌊2n/3⌋+1` over `getGuardianSet(getCurrentGuardianSetIndex())`.
+  19 guardians today, so 13.
 
----
+ABI-encoded into `processOrder(bytes,bytes,uint256)` that is `4 + 96 + (32 + pad32(1132)) +
+(32 + pad32(1043))` = **2372 bytes**, which is what every observed delivery carries, to the byte.
 
-## BJP — trusted relayer (gated reimbursement from the pool)
+Roughly 20% of those bytes are zero (measured) — signatures are entropy, but offsets, length words,
+padded addresses and the ABI-encoded payload are not. Assuming all-nonzero instead costs +0.9% on
+the total, so the split is not worth more precision than that.
 
-The BJP path emits **two** messages: a **fast** signal (claimed via `completeTransfer`, paid out of
-the pre-funded landing pool to beat slow finality) and a **slow** TokenBridge transfer that
-replenishes the pool ~13 min later. Only the **fast** leg needs a fee model — and because it is a
-_claim against pool liquidity_, not a token transfer, a permissionless fee here is exploitable (see
-below). So BJP uses a **trusted bot** instead of an open market.
+> [EIP-7623](https://eips.ethereum.org/EIPS/eip-7623)'s calldata floor does not bind here: 8057
+> tokens puts the floor at ~101k against ~610k actually used.
 
-**The mechanism**
+### Execution — pinned
 
-- Fast-path completion stays **callable by anyone** (so deliveries never stall on the bot), but the
-  reimbursement is **gated**: the landing pays a fee only when the completer is on an
-  `authorizedRelayer` allowlist.
-  - Trusted bot calls it → recipient paid **+** bot reimbursed.
-  - Anyone else calls it → recipient still paid, **no fee** (free completion / fallback).
-- To reimburse, the fast-path completer (`completeTransfer`'s `msg.sender`) is **forwarded down to
-  the landing** — `completeTransfer → _executeTransfer → BasejumpLanding.transfer(..., relayer)` —
-  because that's where the pool liquidity lives.
-- The fee is paid **from the pool's accrued `assetFee` margin**, and the recipient receives the
-  **full `netAmount`**. The LP simply nets `assetFee − relayGas` instead of `assetFee`.
+`EXEC ≈ 560_000`. This is the part that is *not* derivable — NTT delivery through the transceiver
+and manager, the rate-limiter checks, the WETH unwrap, and two native transfers. Measured across
+deliveries it is remarkably stable: **555,345 four times over, and 559,674 once** (a cold-account
+touch).
 
-**Why a trusted bot, and what it buys**
+It changes when `IntentReceiver` or the NTT stack is upgraded, and it is not self-calibrating. The
+drift alarm is free, though: the relayer estimates the real call for every order, so a pinned value
+that has gone stale shows up as a gap between the two.
 
-- **No `maxRelayFee`, no payload change, no user knob.** The authenticated ceiling existed to bound
-  an _untrusted_ relayer; a trusted bot doesn't need it. The source, the `TransferPayload`, and the
-  intents sizing checklist are all unchanged.
-- **Bounded blast radius** instead of an authenticated ceiling: the landing carries a configurable
-  `relayCap`, so a leaked bot key can't drain the pool with one inflated reimbursement.
-- **The slow leg stays permissionless.** The slow TokenBridge transfer is addressed to the pool, so
-  whoever redeems it, the tokens always credit the pool — the operator (who runs both the pool and
-  the bot) is motivated to replenish, and no third party can interfere.
+**Known limitation.** Signature verification lives inside this constant rather than scaling with
+`sigs`, because every sample was at 13 signatures and there is no second point to fit a slope
+against. On a guardian-set rotation the calldata term tracks the change and this one does not —
+re-pin it if that happens.
 
----
+### Gas price — what the relayer will bill, not what it will pay
 
-## Why the two paths can't share one model
+`estimateFeesPerGas().maxFeePerGas`, which is the exact primitive the relayer prices with.
 
-The danger on a pooled path is **cherry-picking**: if the fast leg pays a fee but the slow leg
-doesn't, a permissionless relayer relays only the profitable fast leg (collecting the fee, draining
-the pool) and ignores the slow replenishment, shifting that gas onto the LP and risking the pool
-running dry. (It's never _theft_ — the slow tokens always reach the pool when anyone redeems them —
-but it's a real economic/liveness misalignment.)
+The distinction is the whole point, and getting it wrong is what stalls orders. The relayer **pays**
+the base fee — `effectiveGasPrice` equalled it on every observed delivery, no priority tip, included
+anyway. But it **charges** `maxFeePerGas`, and viem computes that as `baseFee × 1.2` via its
+`baseFeeMultiplier`: the relayer's own headroom against the price moving before its transaction
+lands.
 
-Two ways out: incentivize **both** legs, or make the fast leg **permissioned**. BJP takes the second
-— a trusted bot has no incentive to cherry-pick, so the slow leg can safely stay open.
+Quote the base fee and the ceiling collapses onto the ask:
 
-**WTT has none of this**: a single message both delivers to the recipient _and_ pays its redeemer.
-There's no second leg to skip and no pool to drain, so the fee can be fully permissionless and
-self-policing via `maxRelayFee`. That's exactly why WTT is preferred wherever source finality is
-fast enough to skip the pool.
+```
+ceiling  = gas × base × 1.2      quote, then the caller's 20%
+asks     = gas × base × 1.2      viem's multiplier
+headroom = 0
+```
 
----
+Measured at −0.1%. Every order then becomes a coin flip on base-fee drift — it delivers if the base
+fee happens to fall between placement and relay, and retries until it does if it rises. Pricing the
+ask instead restores the caller's margin to the 20% it was meant to be.
 
-## Contract surface (summary)
+Base fee drift over the delivery lag was 0.74×–1.71×, **median 1.01×** — a martingale, so the
+current value is the best point estimate and no history improves it. That spread is what the
+caller's margin is for; it is uncertainty to absorb, not bias to correct.
 
-**WTT** (intents-local):
+## What this replaced
 
-- `IntentReceiver` — `redeem(vaa, feeRequested)`; decode the 96-byte payload, enforce
-  `feeRequested ≤ maxRelayFee`, pay `msg.sender`, forward the rest.
-- `IIntentReceiver` — updated `redeem` signature + fee event/error.
-- `IntentEmitterWtt` — encode `maxRelayFee` into the TokenBridge payload (96 bytes).
+A configured `ETH_GAS_LIMIT` constant, at 350,000 against a real 608,573–612,890 — a 1.75× shortfall
+that the margin could not cover. Measured across the first orders on the NTT path, fee charged ÷
+actual relayer cost ran `0.80 0.62 0.65 0.29`, with the backstop relayer absorbing the difference.
+Raising it to 700,000 fixed the direction and left the number arbitrary.
 
-**BJP** (shared BasejumpCore infra):
+## The branch a forecast cannot see
 
-- `BasejumpCore` — forward `completeTransfer`'s caller through `_processMessage` / `_executeTransfer`.
-- `IBasejumpLanding` — add the `relayer` arg to `transfer`.
-- `BasejumpLandingNative` — `authorizedRelayer` allowlist + `relayCap`; gated reimbursement from the
-  pool; recipient still receives full `netAmount`.
-- `BasejumpLanding` (Hydration/XCM variant) — inherits the new arg and **ignores it** (no EVM payee).
-- `IntentEmitterBjp`, `IntentRouter`, the payload format — **unchanged**.
+`processOrder` skips delivery when a generic NTT relayer already delivered the settlement:
 
-All affected contracts are UUPS-upgradeable; every change above is logic-only or append-only storage
-(`authorizedRelayer`, `relayCap`) — no storage reordering.
+```solidity
+if (!transceiver.isVAAConsumed(settlement.hash)) {
+    transceiver.receiveMessage(nttVaa);
+}
+```
+
+That is a large saving, and it is unknowable at `placeOrder` time — the settlement does not exist
+yet. The forecast always assumes the expensive branch. The relayer's own estimate sees the truth and
+charges the lower amount, which is the correct division of labour: the ceiling is conservative, the
+claim is exact.
+
+## Why the fee is charged on the destination
+
+The relayer spends gas on Ethereum and is reimbursed on Ethereum, out of the delivered amount, only
+on success. It never costs the user anything on Hydration. `processOrder` is atomic — deliver,
+forward, pay — so whoever did the work is the one paid, and a failed call pays nobody.
+
+The contract cannot enforce a fee *floor*; it cannot observe gas. The floor is relayer
+self-interest, and competition pushes `feeRequested` below the ceiling when gas is cheap. An
+`authorizedRelayer` allowlist grants a 5-minute exclusivity window from the settlement's timestamp
+before the call opens to anyone — a liveness and MEV control, not a fee surface. While the allowlist
+is empty, processing is permissionless.
+
+Relaying is racy: several relayers may build the same call, and the first to land wins. The losers
+revert and eat the gas, which is a cost the observed numbers above do not include — they cover
+successful deliveries only.

@@ -3,11 +3,11 @@ packages:
   - chopsticks
   - contracts
   - crates/solana
+  - crates/near
   - agents/broadcaster
   - agents/relayer
   - agents/scan
-  - agents/quoter
-  - agents/nintent
+  - agents/intent
 
 onlyBuiltDependencies:
   - esbuild

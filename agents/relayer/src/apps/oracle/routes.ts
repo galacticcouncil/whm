@@ -22,7 +22,7 @@ export const ROUTES: OracleRoute[] = [
   {
     source: "solana",
     sourceChain: WORMHOLE.solana,
-    sourceEmitter: "AN6yxTepWFFjQWbo4448bNHHQR1Je48ppTkgBEpZ1SoJ",
+    sourceEmitter: "2knjvgqZKtU3nV1r9RaLshS9JYWMerZ1ysSFcDyTVsdn",
     receiver: "0x582e2fac5af62dc024396b5e7f549c72273a69c3",
   },
   {
@@ -30,5 +30,11 @@ export const ROUTES: OracleRoute[] = [
     sourceChain: WORMHOLE.ethereum,
     sourceEmitter: "0xfbf682642a6a28760e717b637f12d014bd5db4b9",
     receiver: "0x6913770466fed4dbc24337cd7f1ae92af4321083",
+  },
+  {
+    source: "robinhood",
+    sourceChain: WORMHOLE.robinhood,
+    sourceEmitter: "0x9fbd9f16ce7fa17097e91cc36dc1b7b47adca9de",
+    receiver: "0x3b6e3469d8e64e306f235838e0fdf7b4d60a39ce",
   },
 ];

@@ -80,8 +80,10 @@ tx's `(v, r, s)` to derive the EVM sender (`msg.sender`/`from`). Consequences:
   bytes (handled in `sendRawEthTx`).
 - **`eth_getTransactionCount` returns a huge number.** `account_basic` field-order mis-decode on
   `2.0.0` — track nonce manually (`EthClient` does; don't read it back).
-- **Deploy seems gated?** It isn't — no `EVMAccounts.ContractDeployer` whitelist is needed on the
-  fork; any key deploys.
+- **`EVM.CreateOriginNotAllowed` on deploy.** CREATE is gated on `EVMAccounts.ContractDeployer`
+  (since ~Sep 2026; earlier forks let any key deploy). Whitelist the H160 before deploying:
+  `setStorage({ EVMAccounts: { ContractDeployer: [[[address], true]] } })` — `true` for a `()`
+  value, `null` deletes the entry.
 - **`BadProof` on every extrinsic.** You're on the substrate `EVM.call` path — use `sendRawEthTx`.
 - **Block mode stays Manual** (the default): inject each tx with `chain.newBlock` for a deterministic
   block hash. Instant mode + manual `newBlock` fight and deadlock.

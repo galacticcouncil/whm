@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/oracle_emitter.json`.
  */
 export type OracleEmitter = {
-  "address": "AN6yxTepWFFjQWbo4448bNHHQR1Je48ppTkgBEpZ1SoJ",
+  "address": "2knjvgqZKtU3nV1r9RaLshS9JYWMerZ1ysSFcDyTVsdn",
   "metadata": {
     "name": "oracleEmitter",
     "version": "0.1.0",

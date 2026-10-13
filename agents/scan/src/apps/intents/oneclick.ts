@@ -19,9 +19,9 @@ export const TERMINAL_STATE: Record<string, string> = {
 };
 
 /**
- * Execution status plus the destination leg, recovered from the original quote. Address, asset and
- * amount are known at quote time; the destination-chain transaction only appears once 1Click
- * settles.
+ * Execution status plus the destination leg, recovered from the original quote. Address and asset
+ * are known at quote time; the amount and the destination-chain transaction only appear once 1Click
+ * settles — and on a refund they never do.
  */
 export interface ExecutionInfo {
   status: string;
@@ -29,10 +29,21 @@ export interface ExecutionInfo {
   destAddress?: string;
   /** 1Click asset id, which encodes the destination chain. */
   destAsset?: string;
-  /** Settled output if available, else what was quoted. */
+  /**
+   * What actually settled. Deliberately not defaulted to the quote: a refunded order still carries
+   * the output it was quoted, and reporting that as delivered is how a page ends up claiming the
+   * user received tokens that were never sent.
+   */
   destAmount?: string;
   destTx?: string;
   destTxUrl?: string;
+  /** What the quote promised. An expectation while pending, and nothing more once it is not. */
+  quotedAmount?: string;
+  /** Origin asset returned to `refundTo` — ETH here, since that is what was deposited. */
+  refundAmount?: string;
+  refundReason?: string;
+  refundTx?: string;
+  refundTxUrl?: string;
 }
 
 /**
@@ -46,13 +57,21 @@ export async function getExecution(depositAddress: string): Promise<ExecutionInf
     const r = await OneClickService.getExecutionStatus(depositAddress);
     const req = r.quoteResponse?.quoteRequest;
     const destTx = r.swapDetails?.destinationChainTxHashes?.[0];
+    // The refund is the last thing to happen on the origin chain; the deposit that preceded it may
+    // be in this list too.
+    const originTx = r.swapDetails?.originChainTxHashes?.at(-1);
     return {
       status: String(r.status),
       destAddress: req?.recipient,
       destAsset: req?.destinationAsset,
-      destAmount: r.swapDetails?.amountOut ?? r.quoteResponse?.quote?.amountOut,
+      destAmount: r.swapDetails?.amountOut,
       destTx: destTx?.hash,
       destTxUrl: destTx?.explorerUrl,
+      quotedAmount: r.quoteResponse?.quote?.amountOut,
+      refundAmount: r.swapDetails?.refundedAmount,
+      refundReason: r.swapDetails?.refundReason,
+      refundTx: originTx?.hash,
+      refundTxUrl: originTx?.explorerUrl,
     };
   } catch (e) {
     log.warn(`[intents] getExecution ${depositAddress}: ${(e as Error).message}`);
