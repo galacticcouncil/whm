@@ -141,8 +141,9 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///      window must not exceed `ORIGIN_CANCEL_DELAY`, or the origin's cancel can open before a
     ///      waiting head is payable. A credit larger than the capacity can never be paid and
     ///      stalls the head, as a head larger than the reserve can release does. The cancel is the
-    ///      exit. Retired credits merge per recipient and have no cancel, so a merged `unpayable`
-    ///      balance above the capacity waits for a raise.
+    ///      exit. Retired credits merge per recipient and have no cancel, so `claimUnpayable` pays
+    ///      a merged balance in parts, at most the allowance per call, and one above the capacity
+    ///      is paid across refills.
     ///
     ///      Ships closed, like `depositLimit`: zero is closed, never unlimited, and nothing is paid
     ///      until `setPayoutLimit` has set it.
@@ -442,26 +443,51 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
         return _cancel(index, credit);
     }
 
-    /// @notice Pay out a retired credit once its recipient can receive again. Permissionless.
+    /// @notice Pay out a retired balance once its recipient can receive again, as much of it as
+    ///         can leave now. Permissionless.
     /// @dev Goes only to `recipient`, so a third party calling this can hand them their money but
     ///      never redirect it. Reverts while they are still unpayable, which costs the caller gas
     ///      and nothing else.
     ///
-    ///      This pays a credit, so it spends the payout limit like `claim` does, whole or not at
-    ///      all. A recipient's retired credits are one balance, so a balance above the limit's
-    ///      capacity cannot be paid until the capacity is raised.
+    ///      This pays a credit, so it spends the payout limit like `claim` does. Unlike `claim` it
+    ///      pays in part: the smallest of the balance, what the reserve can release and the
+    ///      allowance. The rest stays owed. A recipient's retired credits are one balance with no
+    ///      cancel, so paying it whole would hold a balance above the limit's capacity until an
+    ///      admin raised the capacity. In parts, a balance `B` is paid in full within about
+    ///      `ceil(B / capacity)` windows when the reserve is liquid and nothing else spends the
+    ///      allowance. While the recipient can receive, nothing retires into their balance, so the
+    ///      remainder only shrinks.
+    ///
+    ///      The cost falls on the queue, whose heads are paid whole. Anyone may call this whenever
+    ///      anything can be paid, so a retired balance takes the allowance and the returning
+    ///      liquidity ahead of the heads, up to `B` for each balance cleared. Several add up. Where
+    ///      the allowance binds, a head waits up to about `B / capacity` windows longer. Where
+    ///      liquidity binds, it waits until `B` more liquidity has come back, however long that
+    ///      takes. Either way its origin's cancel can open first.
+    ///
+    ///      While the allowance or the liquidity is short of a balance, anyone may also split it
+    ///      into many small transfers, calling this each time either grows: every block, for the
+    ///      allowance. All of it still arrives, at the caller's gas, but an address that credits
+    ///      only deposits above a minimum may not credit them.
+    ///
+    ///      It reverts for liquidity or allowance only when there is none: `InsufficientLiquidity`
+    ///      when the reserve can release nothing, checked first, then `InsufficientPayoutAllowance`
+    ///      when the allowance is spent. Both report the whole balance as requested.
     function claimUnpayable(address recipient) external {
         if (claimsPaused) revert ClaimsPaused();
 
-        uint256 amount = unpayable[recipient];
-        if (amount == 0) revert NothingUnpayable(recipient);
+        uint256 balance = unpayable[recipient];
+        if (balance == 0) revert NothingUnpayable(recipient);
 
         uint256 available = _reserveLiquidity();
-        if (amount > available) revert InsufficientLiquidity(amount, available);
+        if (available == 0) revert InsufficientLiquidity(balance, available);
         uint256 allowance = payoutLimit.available();
-        if (amount > allowance) revert InsufficientPayoutAllowance(amount, allowance);
+        if (allowance == 0) revert InsufficientPayoutAllowance(balance, allowance);
 
-        unpayable[recipient] = 0;
+        uint256 amount = balance < available ? balance : available;
+        if (allowance < amount) amount = allowance;
+
+        unpayable[recipient] = balance - amount;
         totalUnpayable -= amount;
 
         payoutLimit.consume(amount);

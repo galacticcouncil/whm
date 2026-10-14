@@ -6,6 +6,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {HollarBaseFacilitator} from "../../../src/psm/HollarBaseFacilitator.sol";
 import {HollarBaseVault} from "../../../src/psm/HollarBaseVault.sol";
+import {IFiatToken} from "../../../src/psm/interfaces/IFiatToken.sol";
 import {IHollarBaseFacilitator} from "../../../src/psm/interfaces/IHollarBaseFacilitator.sol";
 import {IHollarBaseVault} from "../../../src/psm/interfaces/IHollarBaseVault.sol";
 import {RateLimiter} from "../../../src/psm/lib/RateLimiter.sol";
@@ -821,6 +822,72 @@ contract PsmRoundTripTest is Test {
         vault.claim();
         assertEq(usdc.balanceOf(carol), credited);
         assertEq(WINDOW - usdc.balanceOf(carol), 5e6, "the cycle that filled the window cost 5 USDC");
+        _assertBacked();
+        _assertSolvent();
+    }
+
+    // ─── Retired balances ───────────────────────────────────────
+
+    /// @dev Circle blacklisting `who`: every transfer to them reverts and `isBlacklisted` says so.
+    ///      Undone with `vm.clearMockedCalls()`.
+    function _blacklist(address who) internal {
+        vm.mockCallRevert(
+            address(usdc), abi.encodeWithSelector(MockToken.transfer.selector, who), "Blacklistable: account is blacklisted"
+        );
+        vm.mockCall(address(usdc), abi.encodeWithSelector(IFiatToken.isBlacklisted.selector, who), abi.encode(true));
+    }
+
+    /// @dev Two redemptions name the same Base payee, who cannot receive USDC when they are paid: a
+    ///      whole outbound window at launch values, 9,995 net, and then 6 HOLLAR from another
+    ///      holder. Both retire into one balance, above the payout capacity. Once Circle clears the
+    ///      payee, the balance is paid in parts with no admin action: the capacity in the first
+    ///      window, the rest from the refill.
+    function test_roundTrip_aRetiredBalanceAboveThePayoutCapacityIsPaidInParts() public {
+        _limitedWithAliceHolding();
+        vm.prank(admin);
+        vault.setPayoutLimit(WINDOW, 1 days);
+        address payee = makeAddr("payee");
+        _blacklist(payee);
+
+        vm.prank(alice);
+        facilitator.redeem(WINDOW, payee, type(uint16).max, NO_DEADLINE, bytes32(0));
+        _relayHydrationToBase();
+        assertEq(vault.drain(10), 0, "retired, not paid");
+        uint256 first = WINDOW - (WINDOW * 5) / 10_000;
+        assertEq(vault.unpayable(payee), first);
+
+        // Bob deposits 6 USDC, takes the 6 HOLLAR, and redeems it to the same payee.
+        usdc.mint(bob, 6e6);
+        vm.startPrank(bob);
+        usdc.approve(address(vault), type(uint256).max);
+        vault.deposit(6e6, _toBytes32(bob));
+        vm.stopPrank();
+        _relayBaseToHydration();
+        vm.startPrank(bob);
+        hollar.approve(address(facilitator), type(uint256).max);
+        facilitator.redeem(6e6, payee, type(uint16).max, NO_DEADLINE, bytes32(0));
+        vm.stopPrank();
+        _relayHydrationToBase();
+        assertEq(vault.drain(10), 0, "retired too");
+
+        uint256 merged = first + 6e6 - (6e6 * 5) / 10_000;
+        assertEq(vault.unpayable(payee), merged, "one balance");
+        assertGt(merged, WINDOW, "above the payout capacity");
+        assertEq(vault.payoutAllowance(), WINDOW, "and retiring spent nothing");
+
+        vm.clearMockedCalls();
+        vault.claimUnpayable(payee);
+        assertEq(usdc.balanceOf(payee), WINDOW, "the whole capacity in the first window");
+        assertEq(vault.unpayable(payee), merged - WINDOW, "the rest still owed");
+        vm.expectRevert(
+            abi.encodeWithSelector(IHollarBaseVault.InsufficientPayoutAllowance.selector, merged - WINDOW, 0)
+        );
+        vault.claimUnpayable(payee);
+
+        vm.warp(365 days + 2 days);
+        vault.claimUnpayable(payee);
+        assertEq(usdc.balanceOf(payee), merged, "every unit, once the window refilled");
+        assertEq(vault.totalUnpayable(), 0);
         _assertBacked();
         _assertSolvent();
     }

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
@@ -60,6 +61,7 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
     address internal mallory = makeAddr("mallory");
     address internal payee = makeAddr("payee");
     address internal redeemer = makeAddr("redeemer");
+    address internal borrower = makeAddr("borrower");
 
     function setUp() public {
         vm.warp(T0);
@@ -426,7 +428,9 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
         assertEq(usdc.balanceOf(carol), _net(6_000e6), "paid once the window has refilled");
     }
 
-    function test_claimUnpayable_revertsWhenTheAllowanceCannotCoverIt() public {
+    /// @dev A balance the allowance cannot cover is paid in part, not refused: the call pays the
+    ///      allowance, and the rest stays owed until the window has refilled it.
+    function test_claimUnpayable_paysWhatTheAllowanceCoversAndTheRestLater() public {
         _deposit(alice, 100_000e6);
         _credit(mallory, 6_000e6, 1);
         _credit(bob, 6_000e6, 2);
@@ -434,12 +438,12 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
         vault.drain(10);
         vm.clearMockedCalls();
 
-        vm.expectRevert(
-            abi.encodeWithSelector(InsufficientPayoutAllowance.selector, _net(6_000e6), CAPACITY - _net(6_000e6))
-        );
+        uint256 allowance = CAPACITY - _net(6_000e6);
         vault.claimUnpayable(mallory);
-        assertEq(vault.unpayable(mallory), _net(6_000e6), "still owed");
-        assertEq(vault.totalUnpayable(), _net(6_000e6));
+        assertEq(usdc.balanceOf(mallory), 1_000_000e6 + allowance, "the allowance, paid at once");
+        assertEq(vault.unpayable(mallory), _net(6_000e6) - allowance, "the rest still owed");
+        assertEq(vault.totalUnpayable(), _net(6_000e6) - allowance);
+        assertEq(vault.payoutAllowance(), 0, "the window is spent");
 
         vm.warp(T0 + 1 days);
         vault.claimUnpayable(mallory);
@@ -514,32 +518,87 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
         assertEq(vault.payoutAllowance(), before - _net(1_000e6), "the retirement spent nothing");
     }
 
-    /// @dev `claimUnpayable` competes with the queue for the allowance and pays whole, so a retired
-    ///      balance below the capacity waits while queue payments spend each refill.
-    function test_claimUnpayable_waitsWhileQueuePaymentsSpendTheRefill() public {
+    /// @dev `claimUnpayable` competes with the queue for the allowance and pays in part, so whoever
+    ///      calls it can take each refill for a retired balance ahead of the queue. The head waits,
+    ///      but only until the balance is paid: the queue's extra wait is bounded by the balance.
+    function test_claimUnpayable_takesTheRefillAheadOfTheQueueUntilPaid() public {
         _deposit(alice, 500_000e6);
         _credit(mallory, 6_000e6, 1);
         _blacklist(mallory);
         vault.drain(10);
         vm.clearMockedCalls();
         _credit(dave, 10_000e6, 2);
-        vault.drain(10); // the window is spent
+        vault.drain(10); // the window is spent, 5 left
+        _credit(bob, 1_000e6, 3);
 
         uint256 clock = T0;
-        for (uint256 k; k < 20; k++) {
-            _credit(bob, 1_000e6, 100 + k);
+        uint256 refills;
+        while (vault.unpayable(mallory) > 0) {
             clock += 2 hours + 24 minutes; // 1,000 of refill
             vm.warp(clock);
-            vm.expectPartialRevert(InsufficientPayoutAllowance.selector);
             vault.claimUnpayable(mallory);
-            vault.drain(10);
+            assertEq(vault.drain(10), 0, "the head waits while the retired balance takes the refill");
+            refills++;
         }
-        assertEq(vault.unpayable(mallory), _net(6_000e6), "two days of steady payouts and still waiting");
+        assertEq(refills, 6, "5,997 paid from the 5 left and six refills of 1,000");
+        assertEq(usdc.balanceOf(mallory), 1_000_000e6 + _net(6_000e6), "all of it, to the recipient");
+        assertEq(vault.owed(bob), _net(1_000e6), "and the head still waits");
 
-        clock += 15 hours;
+        clock += 2 hours + 24 minutes;
         vm.warp(clock);
-        vault.claimUnpayable(mallory);
-        assertEq(vault.unpayable(mallory), 0, "paid once the queue went quiet");
+        assertEq(vault.drain(10), _net(1_000e6), "with the balance paid, the queue moves again");
+    }
+
+    /// @dev The liquidity side of the same cost. Borrowers hold the whole reserve and repay 100 an
+    ///      hour, so liquidity binds and the allowance never does. A 999.5 head is payable from what
+    ///      has come back by hour 10, but a cleared 5,997 balance takes each 100 first. The head
+    ///      waits until that much more has come back, and is paid at hour 70. Its origin's cancel
+    ///      opens at hour 24, while it still waits.
+    function test_claimUnpayable_takesReturningLiquidityAheadOfTheQueueUntilPaid() public {
+        _deposit(alice, 100_000e6);
+        _credit(mallory, 6_000e6, 1);
+        _blacklist(mallory);
+        vault.drain(10);
+        vm.clearMockedCalls();
+        vm.prank(guardian);
+        vault.setInvestPaused(false); // what the retirement withdrew goes back to Aave
+        _creditFor(payee, redeemer, 1_000e6, 2, PsmPayload.NO_FEE_CAP);
+        assertEq(vault.headSince(), T0, "the payee's credit became the head now");
+
+        uint256 borrowed = usdc.balanceOf(address(aUsdc));
+        vm.prank(borrower);
+        pool.drainForBorrow(borrowed);
+        assertEq(_liquidity(), 0);
+
+        for (uint256 h = 1; h <= 70; h++) {
+            vm.warp(T0 + h * 1 hours);
+            vm.prank(borrower);
+            usdc.transfer(address(aUsdc), 100e6);
+
+            if (h <= 60) {
+                assertLt(_liquidity(), vault.payoutAllowance(), "liquidity binds, not the allowance");
+                vault.claimUnpayable(mallory);
+            }
+            if (h == 10) {
+                // What has come back would pay the head by now, and the retired balance took all of it.
+                assertGe(h * 100e6, _net(1_000e6));
+                assertEq(usdc.balanceOf(mallory) - 1_000_000e6, h * 100e6, "the retired balance took it");
+            }
+            if (h == 60) assertEq(vault.unpayable(mallory), 0, "5,997 paid from sixty hours of repayments");
+
+            if (h == 24) {
+                // The head has sat a day unpaid, so its origin can recall it first.
+                uint256 snapshot = vm.snapshotState();
+                vm.prank(redeemer);
+                vault.cancelQueuedRedemption(1);
+                assertEq(vault.owed(payee), 0, "the origin recalls it before it is paid");
+                vm.revertToState(snapshot);
+            }
+
+            if (h < 70) assertEq(vault.drain(10), 0, "the head waits while the retired balance takes the liquidity");
+        }
+        assertEq(usdc.balanceOf(mallory), 1_000_000e6 + _net(6_000e6), "the balance was paid first");
+        assertEq(vault.drain(10), _net(1_000e6), "the head once that much more had come back");
     }
 
     // ─── Sizing ─────────────────────────────────────────────────
@@ -574,10 +633,11 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
     }
 
     /// @dev A recipient's retired credits are one balance. Two credits that each fit the capacity
-    ///      merge into one that does not, and there is no cancel from `unpayable`. The way out is a
-    ///      raise, which if finite grants nothing at once: the level carries over and refills toward
-    ///      the new capacity.
-    function test_claimUnpayable_mergedBalanceAboveTheCapacityWaitsForARaise() public {
+    ///      merge into one that does not, and there is no cancel from `unpayable`. It is paid in
+    ///      parts, with no raise: the whole capacity now and the rest from the refill. A raise only
+    ///      speeds the refill, and if finite grants nothing at once: the level carries over and
+    ///      refills toward the new capacity.
+    function test_claimUnpayable_mergedBalanceAboveTheCapacityIsPaidInParts() public {
         _deposit(alice, 100_000e6);
         _credit(mallory, 6_000e6, 1);
         _credit(mallory, 6_000e6, 2);
@@ -590,18 +650,27 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
         assertGt(merged, CAPACITY, "above what the limit can ever hold");
 
         vm.warp(T0 + 30 days);
-        vm.expectRevert(abi.encodeWithSelector(InsufficientPayoutAllowance.selector, merged, CAPACITY));
+        vault.claimUnpayable(mallory);
+        assertEq(usdc.balanceOf(mallory), 1_000_000e6 + CAPACITY, "the whole capacity, at once");
+        assertEq(vault.unpayable(mallory), merged - CAPACITY, "the rest still owed");
+        vm.expectRevert(abi.encodeWithSelector(InsufficientPayoutAllowance.selector, merged - CAPACITY, 0));
         vault.claimUnpayable(mallory);
 
+        // An hour on, the level has refilled part way. A finite raise keeps that level and grants
+        // nothing at once: it refills toward the new capacity from there.
+        vm.warp(T0 + 30 days + 1 hours);
+        uint256 level = vault.payoutAllowance();
+        assertGt(level, 0);
         vm.prank(admin);
         vault.setPayoutLimit(20_000e6, WINDOW);
-        assertEq(vault.payoutAllowance(), CAPACITY, "a finite raise grants nothing at once");
-        vm.expectRevert(abi.encodeWithSelector(InsufficientPayoutAllowance.selector, merged, CAPACITY));
-        vault.claimUnpayable(mallory);
+        assertEq(vault.payoutAllowance(), level, "a finite raise keeps the level and grants nothing at once");
 
+        // One hour at the old rate and two at the new refill 2,083, past the 1,994 left. Three
+        // hours at the old rate alone refill 1,250.
         vm.warp(T0 + 30 days + 3 hours);
         vault.claimUnpayable(mallory);
         assertEq(usdc.balanceOf(mallory), 1_000_000e6 + merged, "paid once the allowance reached it");
+        assertEq(vault.totalUnpayable(), 0);
     }
 
     // ─── The origin's cancel ────────────────────────────────────
@@ -797,6 +866,406 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
 
             uint256 left = usdc.balanceOf(mallory) + deposited - funded;
             assertLe(left, CAPACITY + (CAPACITY * (clock - T0)) / WINDOW, "paid past the bucket");
+        }
+    }
+
+    // ─── Partial claims from the unpayable balance ──────────────
+
+    /// @dev One `claimUnpayable`, checked against the books. It pays `expected` to `who`, takes
+    ///      exactly that from their balance, from `totalUnpayable` and from the allowance, and
+    ///      reports it in its event. `surplus()` does not move: assets and liabilities both fall
+    ///      by what left.
+    function _claimUnpayableExpecting(address who, uint256 expected) internal {
+        uint256 balance = vault.unpayable(who);
+        uint256 total = vault.totalUnpayable();
+        uint256 allowance = vault.payoutAllowance();
+        uint256 held = usdc.balanceOf(who);
+        uint256 surplusBefore = vault.surplus();
+
+        vm.expectEmit(true, false, false, true, address(vault));
+        emit UnpayableClaimed(who, expected);
+        vault.claimUnpayable(who);
+
+        assertEq(usdc.balanceOf(who) - held, expected, "paid");
+        assertEq(vault.unpayable(who), balance - expected, "the balance falls by what was paid");
+        assertEq(vault.totalUnpayable(), total - expected, "and so does the total");
+        assertEq(vault.payoutAllowance(), allowance - expected, "the allowance falls by what was paid");
+        assertEq(vault.surplus(), surplusBefore, "surplus does not move");
+    }
+
+    /// @dev What the reserve can release now, read as the vault reads it: idle USDC plus the
+    ///      smaller of its aUSDC and Aave's virtual balance.
+    function _liquidity() internal view returns (uint256) {
+        uint256 supplied = aUsdc.balanceOf(address(vault));
+        uint256 inAave = pool.getVirtualUnderlyingBalance(address(usdc));
+        return usdc.balanceOf(address(vault)) + (supplied < inAave ? supplied : inAave);
+    }
+
+    /// @dev A balance several times the capacity is paid across windows, at most the allowance per
+    ///      call, part of a window included. Nothing else spends the allowance, so it is paid in
+    ///      full within ceil(B / capacity) windows: 39,980 takes the first window and three refills.
+    function test_claimUnpayable_paysABalanceSeveralTimesTheCapacityAcrossWindows() public {
+        _deposit(alice, 100_000e6);
+        for (uint256 i = 1; i <= 4; i++) {
+            _credit(mallory, 10_000e6, i);
+        }
+        _blacklist(mallory);
+        assertEq(vault.drain(10), 0, "all four retired");
+        vm.clearMockedCalls();
+
+        uint256 balance = 4 * _net(10_000e6);
+        assertEq(vault.unpayable(mallory), balance);
+        assertEq(vault.totalUnpayable(), balance);
+
+        _claimUnpayableExpecting(mallory, CAPACITY);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientPayoutAllowance.selector, balance - CAPACITY, 0));
+        vault.claimUnpayable(mallory);
+
+        vm.warp(T0 + 6 hours);
+        _claimUnpayableExpecting(mallory, CAPACITY / 4); // a quarter of the window refills a quarter
+
+        vm.warp(T0 + 1 days);
+        _claimUnpayableExpecting(mallory, CAPACITY - CAPACITY / 4);
+
+        vm.warp(T0 + 2 days);
+        _claimUnpayableExpecting(mallory, CAPACITY);
+
+        vm.warp(T0 + 3 days);
+        _claimUnpayableExpecting(mallory, balance - 3 * CAPACITY);
+
+        assertEq(vault.totalUnpayable(), 0);
+        assertEq(usdc.balanceOf(mallory), 1_000_000e6 + balance, "every unit, to the recipient");
+        assertEq(vault.payoutAllowance(), 4 * CAPACITY - balance, "nothing spent past what was paid");
+        vm.expectRevert(abi.encodeWithSelector(NothingUnpayable.selector, mallory));
+        vault.claimUnpayable(mallory);
+        _assertSolvent();
+    }
+
+    /// @dev Short of liquidity, it pays what the reserve can release and leaves the rest owed. The
+    ///      allowance pays for what left, not for the balance. The rest is paid once borrowers repay.
+    function test_claimUnpayable_paysWhatTheReserveCanReleaseAndTheRestLater() public {
+        _deposit(alice, 100_000e6);
+        _credit(mallory, 6_000e6, 1);
+        _blacklist(mallory);
+        vault.drain(10);
+        vm.clearMockedCalls();
+        vm.prank(guardian);
+        vault.setInvestPaused(false); // what the retirement withdrew goes back to Aave
+
+        // Borrowers leave the reserve 2,000.
+        uint256 borrowed = usdc.balanceOf(address(aUsdc)) - 2_000e6;
+        vm.prank(borrower);
+        pool.drainForBorrow(borrowed);
+        assertEq(_liquidity(), 2_000e6);
+
+        _claimUnpayableExpecting(mallory, 2_000e6);
+        assertEq(vault.payoutAllowance(), CAPACITY - 2_000e6, "spent by what left");
+        vm.expectRevert(abi.encodeWithSelector(InsufficientLiquidity.selector, _net(6_000e6) - 2_000e6, 0));
+        vault.claimUnpayable(mallory);
+
+        vm.prank(borrower);
+        usdc.transfer(address(aUsdc), borrowed);
+        _claimUnpayableExpecting(mallory, _net(6_000e6) - 2_000e6);
+        assertEq(usdc.balanceOf(mallory), 1_000_000e6 + _net(6_000e6), "all of it, in two parts");
+        _assertSolvent();
+    }
+
+    /// @dev The balance can grow between part payments: a recipient blocked again has new credits
+    ///      retired into what is still owed. Each step keeps the books: what was paid and what is
+    ///      still owed add up to what retired, and the total is the sum of the balances.
+    function test_claimUnpayable_balanceAddedToBetweenPartialClaims() public {
+        _deposit(alice, 200_000e6);
+        _credit(mallory, 8_000e6, 1);
+        _credit(bob, 6_000e6, 2);
+        _blacklist(mallory);
+        assertEq(vault.drain(10), _net(6_000e6), "mallory retired, bob paid");
+        vm.clearMockedCalls();
+        uint256 retired = _net(8_000e6);
+
+        _claimUnpayableExpecting(mallory, CAPACITY - _net(6_000e6)); // what bob left of the window
+        _assertRetiredBooks(retired);
+
+        // Blocked again, she has two more credits retired into what is still owed. Each retires
+        // once the refill covers it, as the allowance is checked before the transfer is tried, and
+        // that refill then pays the same 1,000 off the merged balance.
+        uint256 clock = T0;
+        uint256[2] memory more = [uint256(1_000e6), 500e6];
+        for (uint256 k; k < 2; k++) {
+            _blacklist(mallory);
+            _credit(mallory, more[k], 3 + k);
+            clock += 2 hours + 24 minutes; // 1,000 of refill
+            vm.warp(clock);
+            assertEq(vault.drain(10), 0, "retired, not paid");
+            retired += _net(more[k]);
+            _assertRetiredBooks(retired);
+
+            vm.clearMockedCalls();
+            _claimUnpayableExpecting(mallory, 1_000e6);
+            _assertRetiredBooks(retired);
+        }
+
+        clock += 1 days;
+        vm.warp(clock);
+        _claimUnpayableExpecting(mallory, retired - (usdc.balanceOf(mallory) - 1_000_000e6));
+        _assertRetiredBooks(retired);
+        assertEq(vault.unpayable(mallory), 0);
+        assertEq(usdc.balanceOf(mallory) - 1_000_000e6, retired, "every unit retired, paid once");
+        _assertSolvent();
+    }
+
+    /// @dev Mallory's credits all retired, so `claimUnpayable` is the only thing that paid her.
+    function _assertRetiredBooks(uint256 retired) internal view {
+        uint256 paid = usdc.balanceOf(mallory) - 1_000_000e6;
+        assertEq(paid + vault.unpayable(mallory), retired, "paid and still owed add up to what retired");
+        assertEq(vault.totalUnpayable(), vault.unpayable(mallory), "the total is the sum of the balances");
+    }
+
+    /// @dev It refuses only when nothing can be paid, in a fixed order: the pause, an empty
+    ///      balance, a reserve that can release nothing, then a spent allowance. Liquidity is checked
+    ///      before the allowance, so with neither it reports the liquidity. Each error reports the
+    ///      whole balance as requested.
+    function test_claimUnpayable_revertsOnlyWhenNothingCanBePaid() public {
+        _deposit(alice, 100_000e6);
+        _credit(mallory, 6_000e6, 1);
+        _blacklist(mallory);
+        vault.drain(10);
+        vm.clearMockedCalls();
+        vm.prank(guardian);
+        vault.setInvestPaused(false); // what the retirement withdrew goes back to Aave
+        uint256 balance = _net(6_000e6);
+
+        vm.expectRevert(abi.encodeWithSelector(NothingUnpayable.selector, bob));
+        vault.claimUnpayable(bob);
+
+        // No liquidity, the whole allowance.
+        uint256 borrowed = usdc.balanceOf(address(aUsdc));
+        vm.prank(borrower);
+        pool.drainForBorrow(borrowed);
+        assertEq(_liquidity(), 0);
+        assertEq(vault.payoutAllowance(), CAPACITY);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientLiquidity.selector, balance, 0));
+        vault.claimUnpayable(mallory);
+
+        // Neither: the liquidity is reported, and an empty balance before either.
+        vm.prank(admin);
+        vault.setPayoutLimit(0, 0);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientLiquidity.selector, balance, 0));
+        vault.claimUnpayable(mallory);
+        vm.expectRevert(abi.encodeWithSelector(NothingUnpayable.selector, bob));
+        vault.claimUnpayable(bob);
+
+        // Liquidity back, no allowance.
+        vm.prank(borrower);
+        usdc.transfer(address(aUsdc), borrowed);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientPayoutAllowance.selector, balance, 0));
+        vault.claimUnpayable(mallory);
+
+        // The pause comes before everything.
+        vm.prank(guardian);
+        vault.setClaimsPaused(true);
+        vm.expectRevert(ClaimsPaused.selector);
+        vault.claimUnpayable(mallory);
+        vm.expectRevert(ClaimsPaused.selector);
+        vault.claimUnpayable(bob);
+        vm.prank(guardian);
+        vault.setClaimsPaused(false);
+
+        assertEq(vault.unpayable(mallory), balance, "nothing refused moved the books");
+        assertEq(vault.totalUnpayable(), balance);
+
+        // Reopened, the limit starts empty, and pays once it has refilled.
+        vm.prank(admin);
+        vault.setPayoutLimit(CAPACITY, WINDOW);
+        vm.warp(T0 + WINDOW);
+        _claimUnpayableExpecting(mallory, balance);
+    }
+
+    // Fuzz bookkeeping. Every run starts from the state `setUp` leaves, these included.
+    address[2] internal fzWho;
+    mapping(address => bool) internal fzListed;
+    mapping(address => uint256) internal fzRetired;
+    mapping(address => uint256) internal fzPaid;
+    mapping(address => uint256) internal fzEmitted;
+    uint256[] internal fzClock;
+    uint256[] internal fzOut;
+    uint256 internal fzBorrowed;
+
+    /// @dev Over arbitrary mixes of retirements, additions to a balance, part payments, queue
+    ///      payments competing for the allowance, liquidity coming and going, and waiting:
+    ///      - every unit retired is paid once or still owed, and the event reports what was paid;
+    ///      - `totalUnpayable` is the sum of the balances;
+    ///      - a claim pays the smallest of balance, liquidity and allowance, and is refused only
+    ///        when its recipient is blocked or that smallest is zero;
+    ///      - over any span, nothing is paid past the capacity plus the refill over that span.
+    ///      Then, with every block lifted and nothing else spending, every balance is paid within
+    ///      ceil(B / capacity) windows.
+    function testFuzz_claimUnpayable_partialClaimsPayEveryRetiredUnitOnce(uint256 seed) public {
+        _deposit(alice, 300_000e6);
+        fzWho[0] = carol;
+        fzWho[1] = dave;
+        _fzSetListed(carol, true);
+        _fzSetListed(dave, true);
+        uint256 clock = T0;
+        _fzCheckpoint(clock);
+
+        for (uint256 i = 1; i <= 40; i++) {
+            seed = uint256(keccak256(abi.encode(seed, i)));
+            address who = fzWho[(seed >> 8) % 2];
+            uint256 op = seed % 10;
+
+            if (op < 2) {
+                _credit(who, bound(seed >> 16, 1e6, 6_000e6), i);
+            } else if (op == 2) {
+                _credit(bob, bound(seed >> 16, 1e6, 6_000e6), i);
+            } else if (op < 5) {
+                _fzDrain(1 + (seed >> 80) % 5);
+            } else if (op < 7) {
+                _fzClaimUnpayable(who);
+            } else if (op == 7) {
+                _fzSetListed(who, !fzListed[who]);
+            } else if (op == 8) {
+                clock += (seed >> 96) % 12 hours;
+                vm.warp(clock);
+            } else {
+                _fzMoveLiquidity(seed >> 112);
+            }
+
+            _fzCheckpoint(clock);
+            _fzAssertBooks();
+        }
+
+        _fzSettleUp(clock);
+    }
+
+    /// @dev Drains, and books what it retired from the vault's own `CreditUnpayable` events.
+    function _fzDrain(uint256 maxEntries) internal {
+        vm.recordLogs();
+        vault.drain(maxEntries);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 j; j < logs.length; j++) {
+            if (logs[j].emitter == address(vault) && logs[j].topics[0] == CreditUnpayable.selector) {
+                fzRetired[address(uint160(uint256(logs[j].topics[2])))] += abi.decode(logs[j].data, (uint256));
+            }
+        }
+    }
+
+    /// @dev Claims for `who`, and checks the call against the smallest of balance, liquidity and
+    ///      allowance read just before it. Books what reached them and what the event said.
+    function _fzClaimUnpayable(address who) internal {
+        uint256 expected = vault.unpayable(who);
+        uint256 liquidity = _liquidity();
+        uint256 allowance = vault.payoutAllowance();
+        if (liquidity < expected) expected = liquidity;
+        if (allowance < expected) expected = allowance;
+        uint256 held = usdc.balanceOf(who);
+
+        vm.recordLogs();
+        try vault.claimUnpayable(who) {
+            assertFalse(fzListed[who], "a blocked recipient is never paid");
+            assertEq(usdc.balanceOf(who) - held, expected, "pays the smallest of balance, liquidity and allowance");
+        } catch {
+            assertTrue(fzListed[who] || expected == 0, "refused only when nothing could be paid");
+        }
+        fzPaid[who] += usdc.balanceOf(who) - held;
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 j; j < logs.length; j++) {
+            if (
+                logs[j].emitter == address(vault) && logs[j].topics[0] == UnpayableClaimed.selector
+                    && address(uint160(uint256(logs[j].topics[1]))) == who
+            ) fzEmitted[who] += abi.decode(logs[j].data, (uint256));
+        }
+    }
+
+    /// @dev Circle blocks or clears `who`. The mocks are rebuilt, since clearing them clears all.
+    function _fzSetListed(address who, bool listed) internal {
+        fzListed[who] = listed;
+        vm.clearMockedCalls();
+        for (uint256 j; j < 2; j++) {
+            if (fzListed[fzWho[j]]) _blacklist(fzWho[j]);
+        }
+    }
+
+    /// @dev Liquidity comes and goes. A retirement leaves its amount idle in the vault, where it
+    ///      stays until a deposit sweeps it back into Aave, so a deposit is one move here. Borrowers
+    ///      take Aave down to a few thousand, or repay part of what they took.
+    function _fzMoveLiquidity(uint256 r) internal {
+        uint256 move = r % 3;
+        if (move == 0) {
+            _deposit(alice, bound(r >> 8, 1e6, 6_000e6));
+        } else if (move == 1) {
+            uint256 held = usdc.balanceOf(address(aUsdc));
+            uint256 left = bound(r >> 8, 0, 12_000e6);
+            uint256 amount = held > left ? held - left : 0;
+            vm.prank(borrower);
+            pool.drainForBorrow(amount);
+            fzBorrowed += amount;
+        } else {
+            uint256 amount = bound(r >> 8, 0, fzBorrowed);
+            vm.prank(borrower);
+            usdc.transfer(address(aUsdc), amount);
+            fzBorrowed -= amount;
+        }
+    }
+
+    /// @dev Everything paid against credits, cumulative: bob and the two retirable recipients are
+    ///      the only payees, and none of them holds USDC from anywhere else.
+    function _fzCheckpoint(uint256 clock) internal {
+        fzClock.push(clock);
+        fzOut.push(usdc.balanceOf(bob) + usdc.balanceOf(fzWho[0]) + usdc.balanceOf(fzWho[1]));
+    }
+
+    function _fzAssertBooks() internal view {
+        uint256 sum;
+        for (uint256 j; j < 2; j++) {
+            address who = fzWho[j];
+            uint256 owedNow = vault.unpayable(who);
+            assertEq(fzPaid[who] + owedNow, fzRetired[who], "every unit retired is paid once or still owed");
+            assertEq(fzEmitted[who], fzPaid[who], "the event reports what was paid");
+            sum += owedNow;
+        }
+        assertEq(vault.totalUnpayable(), sum, "the total is the sum of the balances");
+
+        // Over the span from any earlier checkpoint to this one. The refill is floored at each
+        // update, so a span that starts between updates can see one unit more.
+        uint256 last = fzClock.length - 1;
+        for (uint256 k; k < last; k++) {
+            assertLe(
+                fzOut[last] - fzOut[k],
+                CAPACITY + (CAPACITY * (fzClock[last] - fzClock[k])) / WINDOW + 1,
+                "paid past the limit over a span"
+            );
+        }
+        _assertSolvent();
+    }
+
+    /// @dev Lift every block, repay the borrowers, and spend nothing else. One call per recipient
+    ///      each window then pays every balance within ceil(B / capacity) windows.
+    function _fzSettleUp(uint256 clock) internal {
+        _fzSetListed(fzWho[0], false);
+        _fzSetListed(fzWho[1], false);
+        vm.prank(borrower);
+        usdc.transfer(address(aUsdc), fzBorrowed);
+        fzBorrowed = 0;
+
+        uint256 owedAtStart = vault.totalUnpayable();
+        uint256 windows;
+        while (true) {
+            for (uint256 j; j < 2; j++) {
+                if (vault.unpayable(fzWho[j]) > 0) _fzClaimUnpayable(fzWho[j]);
+            }
+            _fzCheckpoint(clock);
+            _fzAssertBooks();
+            if (vault.totalUnpayable() == 0) break;
+
+            clock += WINDOW;
+            vm.warp(clock);
+            windows++;
+        }
+
+        assertLe(windows, (owedAtStart + CAPACITY - 1) / CAPACITY, "paid within ceil(B / capacity) windows");
+        for (uint256 j; j < 2; j++) {
+            assertEq(fzPaid[fzWho[j]], fzRetired[fzWho[j]], "every unit retired, paid");
         }
     }
 }

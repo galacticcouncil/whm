@@ -47,7 +47,8 @@ Holds the reserve. Inherits `MessageReceiver` (UUPS + Wormhole verification + re
   checked before the transfer is tried, so a blacklisted head the allowance cannot cover is not
   retired until the allowance covers it, though retiring it spends nothing, and the credits behind
   it wait too. The wait is at most a window for credits within the capacity, unless something else
-  spends the refill first: a `claimUnpayable` or a capacity cut.
+  spends the refill first: a `claimUnpayable`, until the retired balance is paid, or a capacity
+  cut.
 - **`cancelQueuedRedemption(index)`** — the credit at the head is given up and its value goes back
   to the credit's `origin` — the Hydration account it came from — never to a caller's pick. The
   credit's `recipient` may ask at any time; its `origin` only for a redemption, and only once it
@@ -57,7 +58,10 @@ Holds the reserve. Inherits `MessageReceiver` (UUPS + Wormhole verification + re
   payout must stop this path too. `cancelQueuedRedemptionFor(index)` is the admin's copy — same
   gate, same books — for a head its owner cannot clear.
 - **`claimUnpayable(recipient)`** — pays out a credit that was retired because its recipient could
-  not receive USDC, once that clears. It spends the payout limit like any other payment.
+  not receive USDC, once that clears. A recipient's retired credits are one balance, and it pays as
+  much of it as it can: the smallest of the balance, the reserve's liquidity and the payout
+  allowance. The rest stays owed for a later call. It spends the payout limit like any other
+  payment.
 - **`emergencyUnwindAave(amount)`** — guardian; pulls the reserve out of Aave and stops deposits
   from re-supplying it until `setInvestPaused(false)`.
 
@@ -182,8 +186,28 @@ recipient one.
 
 A retired credit is senior to every live entry — it was ahead of all of them when it retired — so
 `claimUnpayable` draws on the reserve without regard to the queue. It competes with the queue for
-the payout allowance, and pays whole, so a retired balance waits while queue payments spend each
-refill. Retirement is terminal: the fee
+the payout allowance and the reserve's liquidity, and pays in parts. Each call pays the smallest
+of the balance, the liquidity and the allowance, and reverts for liquidity or allowance only when
+there is none. So a retired balance of any size is paid, at most the allowance per call. With the
+reserve liquid and nothing else spending the allowance, a balance `B` is paid in full within
+about `ceil(B ÷ capacity)` windows. Credits retired to the same recipient while Circle blocks them
+add to `B` and lengthen that. While the recipient can receive, nothing retires into their
+balance, so the remainder only shrinks and the queue's wait on it is bounded by `B`. The cost
+falls on the queue heads, which are paid whole: anyone may call `claimUnpayable`, and it takes
+the allowance and the returning liquidity ahead of them. Where the allowance binds, a head waits
+up to about `B ÷ capacity` windows of refill longer. Where liquidity binds, it waits until `B`
+more liquidity has come back, however long that takes. That is per cleared balance, and several
+add up. Either way an origin's cancel can open before a waiting head is paid. The money always
+goes to the recipient.
+
+It can arrive in many small parts. While the allowance or the liquidity is below a cleared
+balance, anyone can call `claimUnpayable` each time either grows: every block, for the allowance.
+At launch values a 2 s Base block refills about 0.23 USDC, so a balance of 5,997 can arrive as
+about 25,900 transfers over about 14 hours. All of it still arrives and the caller pays the gas,
+but an address that credits only deposits above a minimum, an exchange deposit address for
+example, may not credit them automatically.
+
+Retirement is terminal: the fee
 is released then, and there is no cancel back from `unpayable` — a recipient Circle never clears
 has no exit short of an upgrade, which is accepted. The one path that retires someone is the
 permissionless `drain`; a blacklisted head calling `claim` is refused with the credit intact, so a
@@ -207,7 +231,8 @@ who named a payment address they do not control — an off-ramp's — therefore 
 stall, and no way to recall a payment the queue is about to make, to within the payout window. The
 delay and the window are both 24 h at launch. A head the allowance cannot cover becomes payable at
 most a window after reaching the head. Any other spend during that wait lets the origin's cancel
-open first: a `claimUnpayable`, which anyone may call, or a capacity cut. So does a longer window.
+open first: a `claimUnpayable`, which anyone may call and which takes whatever allowance is left
+until the retired balance is paid (above), or a capacity cut. So does a longer window.
 
 **A cancelled re-mint is a redemption.** The facilitator's queue remembers which kind an entry
 came as. Cancelling a queued deposit refunds fee-free (`KIND_REFUND`); cancelling a queued re-mint
@@ -266,8 +291,10 @@ it, whoever could forge a payout message could deposit first and raise their own
 they deposit. The deposit limit is gross too, for the reorg bound above. Booking is not limited,
 so every credit still lands and the burn on Hydration never fails for want of allowance. Only
 payment waits. `drain` stops at a head the allowance cannot cover, in order and without
-reverting. `claim` and `claimUnpayable` revert with `InsufficientPayoutAllowance`, and
-`claimable` reads zero for such a head. The overflow pays as the window refills the allowance.
+reverting. `claim` reverts with `InsufficientPayoutAllowance`, and `claimable` reads zero for such
+a head. `claimUnpayable` pays what the allowance covers and reverts with
+`InsufficientPayoutAllowance` only once it is spent. The overflow pays as the window refills the
+allowance.
 
 It bounds the cash, not the books. A forged or faulty credit still books at once and takes
 `principal`, as it did before the limit, so once such credits have taken it, honest redemptions
@@ -289,10 +316,13 @@ about the whole reserve, and raising the capacity with the bucket would keep it 
 The capacity moves with the other two: raising either without it strands the larger credits. The window sits at or below
 `ORIGIN_CANCEL_DELAY`, or the origin's cancel can open before a waiting head is payable. A credit
 above the capacity is never covered and stalls the head, as a head larger than the reserve can
-release does, and the exit is the same: `cancelQueuedRedemption`, or the admin's copy. The
-residual: a recipient's retired credits merge into one `unpayable` balance with no cancel, so a
-balance above the capacity cannot be claimed until the admin raises it. A finite raise grants
-nothing at once, as the level refills toward the new capacity. `UNLIMITED` opens payment at once,
+release does, and the exit is the same: `cancelQueuedRedemption`, or the admin's copy. A
+recipient's retired credits merge into one `unpayable` balance with no cancel, and a balance above
+the capacity is paid in parts, at most the allowance per call. The residual is time: a balance `B`
+is paid within about `ceil(B ÷ capacity)` windows when the reserve is liquid and nothing else
+spends the allowance, and credits retired to the same recipient meanwhile lengthen that. A raise
+shortens it, though a finite raise grants nothing at once, as the level refills toward the new
+capacity. `UNLIMITED` opens payment at once,
 and a finite limit set after it starts full. Closing the limit and reopening it starts the
 allowance at zero, refilling over a full window, so emergencies use `setClaimsPaused`.
 
