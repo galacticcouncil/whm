@@ -3,11 +3,10 @@ set -euo pipefail
 
 # Usage: migrate-governance-robinhood.sh <env>
 #
-# Deploy the shared GovernanceDispatcher on Hydration and the first GovernanceExecutor on
-# Robinhood. Both ERC-1967 proxies are initialized atomically and have no deployer authority.
+# Deploy the Robinhood GovernanceExecutor for the shared Hydration GovernanceDispatcher.
+# Set GOVERNANCE_DISPATCHER_HYDRATION in the migration env file before running.
 #
 # Required env vars:
-#   PK_HYDRATION  Hydration deployer (0x...)
 #   PK_ROBINHOOD  Robinhood deployer (0x...)
 
 ENV=${1:?Usage: migrate-governance-robinhood.sh <env (prod|fork)>}
@@ -23,14 +22,10 @@ if [ -f "$ROOT_DIR/.env" ]; then
 fi
 
 if [ "$ENV" = "fork" ]; then
-  PK=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-  PK_HYDRATION=$PK
-  PK_ROBINHOOD=$PK
+  PK_ROBINHOOD=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 fi
 
-PK_HYDRATION=${PK_HYDRATION:?Missing PK_HYDRATION (Hydration EVM private key)}
 PK_ROBINHOOD=${PK_ROBINHOOD:?Missing PK_ROBINHOOD (Robinhood EVM private key)}
-
-export PK_HYDRATION PK_ROBINHOOD
+export PK_ROBINHOOD
 
 "$TSX" "$RUNNER" --migration governance-robinhood --env "$ENV"

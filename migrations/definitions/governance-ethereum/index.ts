@@ -6,7 +6,7 @@ import type { MigrationConfig } from "./types";
  * Hydration OpenGov -> Ethereum governance route.
  *
  * This migration deploys only the destination executor. The shared Hydration dispatcher is
- * deployed by governance-robinhood and supplied here explicitly as configuration.
+ * deployed by governance-hydration and supplied here explicitly as configuration.
  *
  * Required PK env vars:
  *   PK_ETHEREUM — Ethereum deployer

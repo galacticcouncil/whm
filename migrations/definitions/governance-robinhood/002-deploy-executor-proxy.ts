@@ -1,10 +1,10 @@
-import { getAddress, isAddress } from "viem";
+import { getAddress, isAddress, zeroAddress } from "viem";
 
 import { deployExecutorProxy } from "../../actions/governance/deploy";
 import type { MigrationStep } from "./types";
 
 const step: MigrationStep = {
-  name: "004-deploy-executor-proxy",
+  name: "002-deploy-executor-proxy",
   description: "Deploy and atomically initialize GovernanceExecutor proxy on Robinhood",
   action: async (ctx) => {
     const required = (key: string) => {
@@ -13,12 +13,14 @@ const step: MigrationStep = {
       return value;
     };
 
-    const implAddress = ctx.outputs["003-deploy-executor-implementation"].implAddress;
-    const sourceDispatcher = ctx.outputs["002-deploy-dispatcher-proxy"].proxyAddress;
+    const implAddress = ctx.outputs["001-deploy-executor-implementation"].implAddress;
+    const sourceDispatcher = required("GOVERNANCE_DISPATCHER_HYDRATION");
     const wormholeCore = required("WORMHOLE_CORE_ROBINHOOD");
     const vetoer = required("ROBINHOOD_TC_SAFE");
     if (!isAddress(implAddress)) throw new Error(`Invalid executor implementation: ${implAddress}`);
-    if (!isAddress(sourceDispatcher)) throw new Error(`Invalid source dispatcher: ${sourceDispatcher}`);
+    if (!isAddress(sourceDispatcher) || getAddress(sourceDispatcher) === zeroAddress) {
+      throw new Error(`Invalid GOVERNANCE_DISPATCHER_HYDRATION: ${sourceDispatcher}`);
+    }
     if (!isAddress(wormholeCore)) throw new Error(`Invalid WORMHOLE_CORE_ROBINHOOD: ${wormholeCore}`);
     if (!isAddress(vetoer)) throw new Error(`Invalid ROBINHOOD_TC_SAFE: ${vetoer}`);
 

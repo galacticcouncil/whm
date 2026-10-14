@@ -7,7 +7,6 @@ import type {
 type EvmWallet = ReturnType<typeof wallet.getWallet>;
 
 export interface WalletContext {
-  hydration: EvmWallet;
   robinhood: EvmWallet;
 }
 

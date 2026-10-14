@@ -745,37 +745,44 @@ Each destination deployment has its own configuration and custody record. At min
 Production deployments use the repository's crash-safe migration framework and produce immutable
 state files under `deployments/prod/`.
 
-The first route is deployed by `governance-robinhood`. Its four independently persisted steps
-deploy the shared dispatcher implementation and atomically initialized proxy on Hydration, then the
-executor implementation and atomically initialized proxy on Robinhood. The migration verifies the
-ERC-1967 implementation slots, UUPS UUIDs, runtime code hashes, Wormhole chain IDs, initialized
-configuration, and the destination Safe's threshold and owner count. Run it against both forks
-before production:
+The shared source is deployed independently by `governance-hydration`. Its two persisted steps
+deploy the dispatcher implementation and atomically initialized proxy on Hydration. Each destination
+migration then deploys its own executor implementation and atomically initialized proxy. This keeps
+the source deployment independent of rollout order or readiness on any destination chain.
+
+Run and record the Hydration deployment before any destination migration:
 
 ```text
 pnpm fork:hydration
+pnpm migrate:governance-hydration:fork
+pnpm migrate:governance-hydration
+```
+
+Then copy the dispatcher proxy from
+`deployments/<context>/governance-hydration.json` into each destination migration's
+`GOVERNANCE_DISPATCHER_HYDRATION` setting and run that migration, for example:
+
+```text
 pnpm fork:robinhood
 pnpm migrate:governance-robinhood:fork
 pnpm migrate:governance-robinhood
 ```
 
 Robinhood mainnet uses EVM chain ID `4663`, Wormhole chain ID `72`, and Wormhole core
-`0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB`. Later destination migrations reuse the Hydration
-dispatcher proxy recorded by the production `governance-robinhood` migration; they must not deploy
-another source dispatcher.
+`0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB`.
 
-The `governance-ethereum`, `governance-hyper-evm`, and `governance-base` migrations each deploy only
-a destination executor implementation and atomically initialized proxy. Before running one, copy
-the dispatcher proxy from `deployments/<context>/governance-robinhood.json` into that migration's
-`GOVERNANCE_DISPATCHER_HYDRATION` setting. Their production network configuration is:
+The `governance-robinhood`, `governance-ethereum`, `governance-hyper-evm`, and `governance-base`
+migrations each deploy only a destination executor implementation and atomically initialized proxy.
+Their production network configuration is:
 
 | Destination | EVM chain ID | Wormhole chain ID | Wormhole core |
 | --- | ---: | ---: | --- |
+| Robinhood | 4663 | 72 | `0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB` |
 | Ethereum | 1 | 2 | `0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B` |
 | HyperEVM | 999 | 47 | `0x7C0faFc4384551f063e05aee704ab943b8B53aB3` |
 | Base | 8453 | 30 | `0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6` |
 
-All three migrations verify the destination Wormhole chain ID and the configured Technical
+All four migrations verify the destination Wormhole chain ID and the configured Technical
 Committee Safe's 4-of-7 custody before deploying the proxy.
 
 Before the Hydration deployment, verify on-chain that the proposed `0xaa7e...aa7e2` identity has no

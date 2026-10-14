@@ -3,27 +3,20 @@ import { wallet } from "@whm/common/evm";
 import type { MigrationConfig } from "./types";
 
 /**
- * First cross-chain governance route: Hydration OpenGov -> Robinhood Chain.
+ * Hydration OpenGov -> Robinhood Chain governance route.
  *
- * The dispatcher is the shared Hydration source for every future destination. It is deployed here
- * because Robinhood is the first route; later destination migrations must take its proxy address
- * from this migration's production state as explicit environment configuration rather than deploy
- * another dispatcher.
- *
- * Both proxies initialize atomically. The deployer has no authority after deployment: dispatcher
- * publication/upgrades require the synthetic OpenGov caller, while executor administration and
- * upgrades require an executed governance or delayed Technical Committee action.
+ * This migration deploys only the destination executor. The shared Hydration dispatcher is
+ * deployed independently by governance-hydration and supplied here as explicit configuration.
  *
  * Required PK env vars:
- *   PK_HYDRATION — Hydration deployer (must hold an EVMAccounts.ContractDeployer slot)
  *   PK_ROBINHOOD — Robinhood deployer
  *
  * Env file: migrations/envs/<context>/governance-robinhood.env
  */
 const config: MigrationConfig = {
   name: "governance-robinhood",
-  description: "Deploy the Hydration governance dispatcher and Robinhood governance executor",
-  pks: ["PK_HYDRATION", "PK_ROBINHOOD"],
+  description: "Deploy the Robinhood governance executor for the shared Hydration dispatcher",
+  pks: ["PK_ROBINHOOD"],
 
   setup(env) {
     const required = (key: string) => {
@@ -33,11 +26,6 @@ const config: MigrationConfig = {
     };
 
     return {
-      hydration: wallet.getWallet(
-        required("RPC_HYDRATION"),
-        Number(required("CHAIN_ID_HYDRATION")),
-        env.PK_HYDRATION as `0x${string}`,
-      ),
       robinhood: wallet.getWallet(
         required("RPC_ROBINHOOD"),
         Number(required("CHAIN_ID_ROBINHOOD")),
