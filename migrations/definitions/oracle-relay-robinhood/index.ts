@@ -6,7 +6,7 @@ import type { MigrationConfig } from "./types";
  * Oracle relay with Robinhood Chain as source (direct integration).
  *
  * Robinhood OracleEmitter publishes Chainlink prices (SPY/USD) via Wormhole, read through an
- * immutable ChainlinkAdapter that scales the feed's 8 decimals to the emitter's 18. An
+ * immutable AggregatorV3Adapter that scales the feed's 8 decimals to the emitter's 18. An
  * OracleReceiver on Hydration's EVM verifies the VAA and writes the price straight to the
  * Hydration oracle.
  *

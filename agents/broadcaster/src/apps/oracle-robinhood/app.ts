@@ -4,7 +4,7 @@ import { wallet } from "@whm/common/evm";
 
 import { boot } from "../../loop.js";
 import { createEvmBroadcaster, type EvmFeed } from "../../evm/broadcaster.js";
-import { roundWatch } from "../../evm/chainlink.js";
+import { roundWatch } from "../../evm/adapter.js";
 import { signingKey } from "../../evm/signer.js";
 import { marketAge } from "../../evm/staleness.js";
 import type { Broadcaster } from "../../types.js";

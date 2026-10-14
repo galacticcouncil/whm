@@ -10,9 +10,12 @@ import type { MigrationConfig } from "./types";
  *   002 register it as an emitter on the Wormhole core
  *   003 register its storage on the token
  *   004 peer it with the Hydration manager + transceiver
- *   005 transfer its ownership to the NEAR custodian
+ *   005 propose the NEAR custodian as its owner
  *   006 delete the contract account's keys — from here only the owner can upgrade it (`upgrade`),
  *       and no key can sign as its emitter. Refuses unless the code on chain is NTT_WASM
+ *   007 accept the ownership — sent here if the custodian is the deployer; otherwise the custodian
+ *       calls `accept_ownership` itself, and this step stops until it has. Re-run to continue.
+ *       Until then the deployer stays owner: a mistyped custodian is fixed by its `transfer_ownership`
  *
  * NEAR SIDE ONLY. The Hydration NttManager (BURNING) and WormholeTransceiver are deployed and
  * configured from hydration-ntt — the usual per-token `add-chain Hydration --mode burning` — and

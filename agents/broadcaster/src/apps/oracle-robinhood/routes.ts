@@ -11,7 +11,7 @@ export const STALE_AFTER = 26 * 60 * 60;
 
 /**
  * Mainnet routes, from deployments/prod/oracle-relay-robinhood.json. Every source here is a
- * ChainlinkAdapter, whose `feed()` names the Chainlink proxy watched for staleness.
+ * AggregatorV3Adapter, whose `feed()` names the Chainlink proxy watched for staleness.
  */
 export const ROUTES: EmitterRoute[] = [
   {

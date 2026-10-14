@@ -11,6 +11,12 @@ import type { SubstrateChain, Watch } from "../types";
 
 const FINALIZED_STALE_MS = 60_000;
 
+/** Any single read. A request lost to a dropped socket never settles on its own. */
+const RPC_TIMEOUT_MS = 60_000;
+
+/** A drain in flight this long without writing a block is wedged, not slow. */
+const STALL_MS = 10 * 60_000;
+
 type EvmPayload = HydrationEvents["EVM"]["Log"];
 
 interface IndexedLog {
@@ -41,6 +47,8 @@ export class SubstrateWatcher {
   private pendingSafe?: bigint;
   private lastBlockAt = 0;
   private busy = false;
+  /** Last time a drain started or wrote a block — what the watchdog measures a stall against. */
+  private progressAt = 0;
   /** Watch entries by emitting address — one address may serve several roles. */
   private readonly targets = new Map<string, Watch[]>();
 
@@ -59,7 +67,7 @@ export class SubstrateWatcher {
   }
 
   async latestSafe(): Promise<bigint> {
-    const { number } = await this.client.getFinalizedBlock();
+    const { number } = await withTimeout(this.client.getFinalizedBlock(), "finalized block");
     const tip = BigInt(number);
     return tip > this.cfg.confirmations ? tip - this.cfg.confirmations : 0n;
   }
@@ -69,7 +77,10 @@ export class SubstrateWatcher {
     this.pendingSafe = await this.latestSafe();
     await this.drain();
     this.subscribe();
-    this.timer = setInterval(() => void this.drain(), liveIntervalMs);
+    this.timer = setInterval(() => {
+      this.watchdog();
+      void this.drain();
+    }, liveIntervalMs);
     log.info(`[${this.cfg.name}] live: finalized-block subscription`);
   }
 
@@ -95,9 +106,22 @@ export class SubstrateWatcher {
     });
   }
 
+  /**
+   * Exit when a drain has hung. A drain holds `busy` until it settles, and every later drain —
+   * stale-stream recovery included — returns early behind it, so a hang is otherwise silent and
+   * permanent. Exiting hands recovery to the orchestrator: a fresh process, a fresh client, and the
+   * cursor resumes where it was.
+   */
+  private watchdog(): void {
+    if (!this.busy || Date.now() - this.progressAt < STALL_MS) return;
+    log.error(`[${this.cfg.name}] drain stalled for ${STALL_MS / 60_000} min, exiting`);
+    process.exit(1);
+  }
+
   private async drain(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
+    this.progressAt = Date.now();
     try {
       const stale = Date.now() - this.lastBlockAt > FINALIZED_STALE_MS;
       if (this.pendingSafe === undefined && stale) this.pendingSafe = await this.latestSafe();
@@ -139,8 +163,8 @@ export class SubstrateWatcher {
     const fetchErr: { e?: Error } = {};
 
     const fetcher = async () => {
+      const inflight: Promise<Block>[] = [];
       try {
-        const inflight: Promise<Block>[] = [];
         let next = from + 1n;
         while (inflight.length < this.cfg.concurrency && next <= safe) {
           inflight.push(this.fetchBlock(next++));
@@ -152,6 +176,8 @@ export class SubstrateWatcher {
         }
       } catch (e) {
         fetchErr.e = e as Error;
+        // The rest are abandoned — keep their later rejections from going unhandled.
+        for (const p of inflight) p.catch(() => {});
       } finally {
         queue.close();
       }
@@ -182,6 +208,7 @@ export class SubstrateWatcher {
         if (n > 0) this.onIngest?.(this.cfg.name);
         ingested += n;
         processed++;
+        this.progressAt = Date.now();
         if (block.number - lastCheckpoint >= BigInt(this.cfg.checkpointEvery)) {
           await this.checkpoint(block.number, cursors);
           const bps = Math.round(processed / ((Date.now() - start) / 1000));
@@ -218,14 +245,25 @@ export class SubstrateWatcher {
   }
 
   private async fetchBlock(n: bigint): Promise<Block> {
-    const hash = await this.client._request<string>("chain_getBlockHash", [Number(n)]);
+    const hash = await withTimeout(
+      this.client._request<string>("chain_getBlockHash", [Number(n)]),
+      `block #${n} hash`,
+    );
     if (!hash) throw new Error(`block #${n}: no hash`);
     const at = hash as `0x${string}`;
-    const records = await this.client.getUnsafeApi().query.System.Events.getValue({ at });
+    const records = await withTimeout(
+      this.client.getUnsafeApi().query.System.Events.getValue({ at }),
+      `block #${n} events`,
+    );
     const logs = this.extractEvmLogs(records as unknown as RawRecord[]);
     // Only blocks that produced something we index are worth a timestamp read.
     const timestamp = logs.length
-      ? Number(await this.client.getUnsafeApi().query.Timestamp.Now.getValue({ at }))
+      ? Number(
+          await withTimeout(
+            this.client.getUnsafeApi().query.Timestamp.Now.getValue({ at }),
+            `block #${n} timestamp`,
+          ),
+        )
       : 0;
     return { number: n, hash: at, timestamp, logs };
   }
@@ -294,6 +332,22 @@ function topicsMatch(w: Watch, topics: `0x${string}`[]): boolean {
       ? want.some((x) => x.toLowerCase() === got)
       : want.toLowerCase() === got;
   });
+}
+
+/**
+ * Reject a read that has not settled within `RPC_TIMEOUT_MS`, so a lost request fails its drain
+ * instead of holding it forever.
+ *
+ * @param p The read.
+ * @param what What it reads, for the error.
+ * @returns The read's own result.
+ */
+function withTimeout<T>(p: Promise<T>, what: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what}: timed out`)), RPC_TIMEOUT_MS);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
 type RawRecord = {

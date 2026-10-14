@@ -2,12 +2,13 @@
 set -euo pipefail
 
 RPC="https://rpc.hydradx.cloud/evm"
+RPC_ROBINHOOD="https://rpc.mainnet.chain.robinhood.com"
 
 check() {
-  local name=$1 addr=$2
+  local name=$1 addr=$2 rpc=${3:-$RPC}
 
   local result
-  result=$(cast call -r "$RPC" "$addr" 'latestRoundData()(uint80,int256,uint256,uint256,uint80)')
+  result=$(cast call -r "$rpc" "$addr" 'latestRoundData()(uint80,int256,uint256,uint256,uint80)')
 
   # Strip Foundry formatting like "102962134 [1.029e8]" → "102962134"
   local round price updated
@@ -34,3 +35,8 @@ check "JitoSOL" "0x64b7BbAC63E5aDcA0ec35C4AEBf9937Fc1d79C1D"
 check "wstETH"  "0xBE6B91cCb5b41e68426Dcb584830A360093c2775"
 check "apyUsd"  "0x80FaaC4Da72FCcABDa5B276D9A931252D6242Caf"
 check "SPY"     "0x802893C9CDD5AaC833E52783DF39e572fe8f8538"
+
+echo ""
+echo "=== Robinhood Checked Oracles ==="
+echo ""
+check "HDX"     "0xD1a2198CBbC7cbfB602DF581D8614eD31682901D" "$RPC_ROBINHOOD"

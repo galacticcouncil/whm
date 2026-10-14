@@ -1,9 +1,9 @@
 import type { MigrationStep } from "./types";
-import { deploy } from "../../actions/chainlink-adapter/deploy";
+import { deploy } from "../../actions/aggregator-adapter-v3/deploy";
 
 const step: MigrationStep = {
   name: "002-deploy-adapter",
-  description: "Deploy ChainlinkAdapter for SPY/USD on Robinhood",
+  description: "Deploy AggregatorV3Adapter for SPY/USD on Robinhood",
   action: async (ctx) => {
     const feed = ctx.env.SPY_USD_FEED;
     const maxAge = ctx.env.SPY_MAX_AGE;

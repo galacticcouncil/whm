@@ -5,7 +5,7 @@ import { registerFeed } from "../../actions/oracle-emitter-ethereum/registerFeed
 
 const step: MigrationStep = {
   name: "005-register-spy@emitter",
-  description: "Register SPY feed (ChainlinkAdapter.latestRate) on Robinhood OracleEmitter",
+  description: "Register SPY feed (AggregatorV3Adapter.latestRate) on Robinhood OracleEmitter",
   action: async (ctx) => {
     const source = ctx.outputs["002-deploy-adapter"].address;
 

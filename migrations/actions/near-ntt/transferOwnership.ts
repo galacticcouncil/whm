@@ -13,8 +13,9 @@ export type TransferOwnershipResult = {
 };
 
 /**
- * Hands the NEAR NTT contract's `owner` to a new account. One step — there is no accept — so the
- * new owner must be an account someone controls. 1 yocto, like every owner method.
+ * Proposes a new `owner` for the NEAR NTT contract. Nothing moves until that account calls
+ * `accept_ownership` (`acceptOwnership`) — a mistyped one is fixed by proposing again. 1 yocto, like
+ * every owner method.
  *
  * The new owner is also who upgrades the contract (`upgrade`). Until step 006 deletes the account's
  * keys, the deployer key can redeploy it too; after, only the owner can.

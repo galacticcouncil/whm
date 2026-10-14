@@ -1,0 +1,101 @@
+[
+  {
+    "agent": "broadcaster/oracle-solana",
+    "chain": "solana",
+    "bot": "E7SyrLkNM4pDft3p3eJZ1cVWs9VWktbrw1qteQiv2HDa",
+    "share": "10/10",
+    "tx24h": 76,
+    "costPerTx": "5000",
+    "burn24h": "380000",
+    "lastActionAt": 1791647848000,
+    "discoveredAt": 1791649421000
+  },
+  {
+    "agent": "broadcaster/oracle-ethereum",
+    "chain": "ethereum",
+    "bot": "0x93ab4e6d6adc4f9d54f89a55230ecc1660760789",
+    "share": "8/8",
+    "tx24h": 8,
+    "costPerTx": "14717803562299",
+    "burn24h": "117742428498392",
+    "lastActionAt": 1791632015000,
+    "discoveredAt": 1791649421000
+  },
+  {
+    "agent": "broadcaster/oracle-robinhood",
+    "chain": "robinhood",
+    "bot": "0x93ab4e6d6adc4f9d54f89a55230ecc1660760789",
+    "share": "4/4",
+    "tx24h": 4,
+    "costPerTx": "1759682260000",
+    "burn24h": "7038729040000",
+    "lastActionAt": 1791631946000,
+    "discoveredAt": 1791649421000
+  },
+  {
+    "agent": "broadcaster/oracle-hydration",
+    "chain": "hydration",
+    "bot": "0xf1db8c4bfbb3d6a97c9b669a2ffc0b70f41f3547",
+    "share": "5/5",
+    "tx24h": 5,
+    "costPerTx": "585060392314",
+    "burn24h": "2925301961570",
+    "lastActionAt": 1791647916000,
+    "discoveredAt": 1791649421000
+  },
+  {
+    "agent": "relayer/ntt",
+    "chain": "hydration",
+    "bot": "0xf1db8c4bfbb3d6a97c9b669a2ffc0b70f41f3547",
+    "share": "10/15",
+    "tx24h": 11,
+    "costPerTx": "1583803807631",
+    "burn24h": "17421841883941",
+    "lastActionAt": 1791640650000,
+    "discoveredAt": 1791649421000
+  },
+  {
+    "agent": "relayer/oracle",
+    "chain": "hydration",
+    "bot": "0xf1db8c4bfbb3d6a97c9b669a2ffc0b70f41f3547",
+    "share": "10/10",
+    "tx24h": 83,
+    "costPerTx": "1450481170419",
+    "burn24h": "120389937144777",
+    "lastActionAt": 1791647850000,
+    "discoveredAt": 1791649421000
+  },
+  {
+    "agent": "relayer/oracle-robinhood",
+    "chain": "robinhood",
+    "bot": "0x93ab4e6d6adc4f9d54f89a55230ecc1660760789",
+    "share": "5/5",
+    "tx24h": 5,
+    "costPerTx": "5783215117600",
+    "burn24h": "28916075588000",
+    "lastActionAt": 1791647930000,
+    "discoveredAt": 1791649421000
+  },
+  {
+    "agent": "relayer/intent",
+    "chain": "ethereum",
+    "bot": "-",
+    "share": "0/0",
+    "tx24h": 0,
+    "costPerTx": "-",
+    "burn24h": "0",
+    "lastActionAt": 0,
+    "discoveredAt": 1791649421000
+  },
+  {
+    "agent": "relayer/basejump",
+    "chain": "hydration",
+    "bot": "0xf1db8c4bfbb3d6a97c9b669a2ffc0b70f41f3547",
+    "share": "1/1",
+    "tx24h": 1,
+    "costPerTx": "1486378349145",
+    "burn24h": "1486378349145",
+    "lastActionAt": 1791572910000,
+    "discoveredAt": 1791649421000
+  }
+]

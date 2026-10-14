@@ -19,4 +19,5 @@ export const FROM_SEQUENCE = {
   [WORMHOLE.base]: fromSeq("base"),
   [WORMHOLE.solana]: fromSeq("solana"),
   [WORMHOLE.sui]: fromSeq("sui"),
+  [WORMHOLE.near]: fromSeq("near"),
 };

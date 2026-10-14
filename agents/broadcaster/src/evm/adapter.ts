@@ -19,8 +19,8 @@ export type RoundAge = (fromSec: number, toSec: number) => number;
 /** Wall-clock age — right for a 24/7 feed. */
 const wallClock: RoundAge = (fromSec, toSec) => toSec - fromSec;
 
-// ChainlinkAdapter (contracts/src/oracles/ChainlinkAdapter.sol) + the Chainlink proxy behind it
-const CHAINLINK_ABI = [
+// AggregatorV3Adapter (contracts/src/oracles/adapters/AggregatorV3Adapter.sol) + the Chainlink proxy behind it
+const ADAPTER_V3_ABI = [
   {
     type: "function",
     name: "feed",
@@ -44,7 +44,7 @@ const CHAINLINK_ABI = [
 ] as const;
 
 /**
- * Build a check that warns when the Chainlink round behind a ChainlinkAdapter source is older than
+ * Build a check that warns when the Chainlink round behind an AggregatorV3Adapter source is older than
  * `staleAfter` — a dead feed, which publishing alone hides because the adapter keeps returning its
  * last answer.
  *
@@ -69,7 +69,7 @@ export function roundWatch(
       if (!proxy) {
         proxy = (await client.readContract({
           address: feed.source,
-          abi: CHAINLINK_ABI,
+          abi: ADAPTER_V3_ABI,
           functionName: "feed",
         })) as Address;
         proxies.set(feed.source, proxy);
@@ -78,7 +78,7 @@ export function roundWatch(
 
       const [, , , updatedAt] = (await client.readContract({
         address: proxy,
-        abi: CHAINLINK_ABI,
+        abi: ADAPTER_V3_ABI,
         functionName: "latestRoundData",
       })) as readonly [bigint, bigint, bigint, bigint, bigint];
 

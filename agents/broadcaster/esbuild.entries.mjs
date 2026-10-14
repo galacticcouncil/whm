@@ -6,6 +6,7 @@ export const entryPoints = {
   "oracle-solana/app": "src/apps/oracle-solana/app.ts",
   "oracle-ethereum/app": "src/apps/oracle-ethereum/app.ts",
   "oracle-robinhood/app": "src/apps/oracle-robinhood/app.ts",
+  "oracle-hydration/app": "src/apps/oracle-hydration/app.ts",
 };
 
 /**

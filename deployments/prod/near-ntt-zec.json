@@ -1,0 +1,96 @@
+{
+  "migration": "near-ntt-zec",
+  "environment": "prod",
+  "startedAt": "2026-10-10T22:57:34.404Z",
+  "completedAt": "2026-10-12T14:43:29.281Z",
+  "steps": [
+    {
+      "name": "001-deploy-ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "7o1BYmkFuAfh32JpfLfUDEzfxsDS9QzNRFZuBdFydsZK",
+        "nttAccount": "ntt-zec.hydration-whm.near",
+        "emitter": "ca4092420316d55cfbb9a479ca23fdf0f5a0864a80c755b46e071c834fbf3976",
+        "owner": "hydration-whm.near",
+        "codeSha256": "a3137c9e1f5e96b3d1b2b7a823835c7dad54ab72d47e9b977b94c8e062186303",
+        "tokenDecimals": "8",
+        "registrationDeposit": "1250000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T22:57:34.406Z",
+      "completedAt": "2026-10-10T22:57:52.696Z"
+    },
+    {
+      "name": "002-register-emitter@core",
+      "status": "completed",
+      "output": {
+        "txHash": "eu4cvpg7P9J3AfwtBiVmPDDSFeJCsxaK8ct5NkhwccY",
+        "emitter": "ca4092420316d55cfbb9a479ca23fdf0f5a0864a80c755b46e071c834fbf3976"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T22:57:52.698Z",
+      "completedAt": "2026-10-10T22:58:03.204Z"
+    },
+    {
+      "name": "003-register-storage@token",
+      "status": "completed",
+      "output": {
+        "txHash": "6USUMDiWdZVHWjpvFDGS8zUD5hLaZ3V1MfJBRimbj6BN",
+        "deposit": "1250000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T22:58:03.206Z",
+      "completedAt": "2026-10-10T22:58:16.761Z"
+    },
+    {
+      "name": "004-set-peer@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "BjtqHLgrPzJsrphB7Bs3K5Efyyeoyk7vYzNjsuoPqFsC",
+        "chainId": "73",
+        "manager": "0x000000000000000000000000e20cED5f5798cD4FeBc7aE182309b9f51345e0cC",
+        "transceiver": "0x0000000000000000000000000dd43A80C6F96019B8f5699Df1890DFa33BdDE85",
+        "decimals": "8",
+        "inboundLimit": "1000000000"
+      },
+      "error": null,
+      "startedAt": "2026-10-10T22:58:16.763Z",
+      "completedAt": "2026-10-10T22:58:27.250Z"
+    },
+    {
+      "name": "005-transfer-ownership@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "BcYBwVrCg2W34AJcMf483kCoVje9UjNHnizuTAk2hq37",
+        "newOwner": "hydration.sputnik-dao.near"
+      },
+      "error": null,
+      "startedAt": "2026-10-12T12:14:04.557Z",
+      "completedAt": "2026-10-12T12:14:14.635Z"
+    },
+    {
+      "name": "006-delete-keys@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "4vYQmSiCKUHY2WaHCwrEuSp6AivGvQhSa2sR1SD8Sc22",
+        "deletedKeys": "ed25519:9hziFbfcBtkDvWuKJXxqZGM1EXKHUQn1bcAF8M4NxCxQ",
+        "owner": "hydration-whm.near",
+        "codeSha256": "a3137c9e1f5e96b3d1b2b7a823835c7dad54ab72d47e9b977b94c8e062186303"
+      },
+      "error": null,
+      "startedAt": "2026-10-12T12:14:14.637Z",
+      "completedAt": "2026-10-12T12:14:37.072Z"
+    },
+    {
+      "name": "007-accept-ownership@ntt",
+      "status": "completed",
+      "output": {
+        "txHash": "",
+        "owner": "hydration.sputnik-dao.near"
+      },
+      "error": null,
+      "startedAt": "2026-10-12T14:43:21.795Z",
+      "completedAt": "2026-10-12T14:43:29.279Z"
+    }
+  ]
+}

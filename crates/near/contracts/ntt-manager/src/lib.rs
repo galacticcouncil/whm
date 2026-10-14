@@ -86,6 +86,9 @@ pub struct NttManager {
 
     /// Inbound transfers over the limit, verified and consumed, waiting out the 24 h delay.
     inbound_queue: LookupMap<[u8; 32], InboundTransfer>,
+
+    /// Proposed by `transfer_ownership`, owner once it calls `accept_ownership`.
+    pending_owner: Option<AccountId>,
 }
 
 #[near]
@@ -113,6 +116,7 @@ impl NttManager {
             executed: LookupSet::new(StorageKey::Executed),
             claimable: LookupMap::new(StorageKey::Claimable),
             inbound_queue: LookupMap::new(StorageKey::InboundQueue),
+            pending_owner: None,
         }
     }
 
@@ -191,20 +195,33 @@ impl NttManager {
         emit("unpaused", json!({}));
     }
 
+    /// Proposes `new_owner`, who takes over on `accept_ownership` — a mistyped account never gets
+    /// the contract. Proposing again replaces the proposal.
     #[payable]
     pub fn transfer_ownership(&mut self, new_owner: AccountId) {
         self.assert_owner();
-        emit("ownership_transferred", json!({ "previous_owner": self.owner, "new_owner": new_owner }));
-        self.owner = new_owner;
+        emit("ownership_transfer_started", json!({ "owner": self.owner, "pending_owner": new_owner }));
+        self.pending_owner = Some(new_owner);
+    }
+
+    /// Completes `transfer_ownership`, called by the proposed owner — with 1 yocto, like every
+    /// owner method.
+    #[payable]
+    pub fn accept_ownership(&mut self) {
+        near_sdk::assert_one_yocto();
+        let caller = env::predecessor_account_id();
+        require!(self.pending_owner.as_ref() == Some(&caller), "Unauthorized");
+        emit("ownership_transferred", json!({ "previous_owner": self.owner, "new_owner": caller }));
+        self.owner = caller;
+        self.pending_owner = None;
     }
 
     /// Redeploys this contract with the wasm passed as the call's raw input (not JSON), then runs
     /// the new code's `migrate` — one batch on this account, so a `migrate` that fails reverts the
     /// deploy too and the old code stays.
     ///
-    /// The upgrade authority is `owner`, not an access key: once the account's keys are deleted
-    /// (migration step 006), only the owner can change the code — the NEAR form of EVM NTT's
-    /// owner-gated UUPS upgrade.
+    /// The upgrade authority is `owner`, not an access key: once the account's keys are deleted,
+    /// only the owner can change the code — the NEAR form of EVM NTT's owner-gated UUPS upgrade.
     #[payable]
     pub fn upgrade(&mut self) -> Promise {
         self.assert_owner();
@@ -231,6 +248,10 @@ impl NttManager {
 
     pub fn owner(&self) -> &AccountId {
         &self.owner
+    }
+
+    pub fn pending_owner(&self) -> Option<&AccountId> {
+        self.pending_owner.as_ref()
     }
 
     pub fn is_paused(&self) -> bool {
@@ -416,6 +437,46 @@ pub(crate) mod tests {
         let mut c = contract();
         set_ctx(accounts(0).as_str(), 0);
         c.transfer_ownership(accounts(1));
+    }
+
+    #[test]
+    fn ownership_moves_on_accept() {
+        let mut c = contract();
+        c.transfer_ownership(accounts(1));
+        assert_eq!(c.owner(), &accounts(0));
+        assert_eq!(c.pending_owner(), Some(&accounts(1)));
+
+        as_caller(accounts(1));
+        c.accept_ownership();
+        assert_eq!(c.owner(), &accounts(1));
+        assert_eq!(c.pending_owner(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn only_the_proposed_owner_accepts() {
+        let mut c = contract();
+        c.transfer_ownership(accounts(1));
+        as_caller(accounts(2));
+        c.accept_ownership();
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn a_new_proposal_replaces_the_old() {
+        let mut c = contract();
+        c.transfer_ownership(accounts(1));
+        c.transfer_ownership(accounts(2));
+        as_caller(accounts(1));
+        c.accept_ownership();
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn nothing_to_accept_without_a_proposal() {
+        let mut c = contract();
+        as_caller(accounts(1));
+        c.accept_ownership();
     }
 
     #[test]

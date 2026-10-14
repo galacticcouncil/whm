@@ -25,6 +25,8 @@
     "migrate:oracle-relay-robinhood:fork": "bash sh/migrate-oracle-relay-robinhood.sh fork",
     "migrate:governance-robinhood": "bash sh/migrate-governance-robinhood.sh prod",
     "migrate:governance-robinhood:fork": "bash sh/migrate-governance-robinhood.sh fork",
+    "migrate:oracle-relay-hydration": "bash sh/migrate-oracle-relay-hydration.sh prod",
+    "migrate:oracle-relay-hydration:fork": "bash sh/migrate-oracle-relay-hydration.sh fork",
     "migrate:intent": "bash sh/migrate-intent.sh prod",
     "migrate:intent:fork": "bash sh/migrate-intent.sh fork",
     "migrate:intent-mpc": "bash sh/migrate-intent-mpc.sh prod",
@@ -33,7 +35,8 @@
     "migrate:near-ntt-near": "bash sh/migrate-near-ntt-near.sh prod",
     "migrate:near-ntt-near:fork": "bash sh/migrate-near-ntt-near.sh fork",
     "migrate:near-ntt-near:testnet": "bash sh/migrate-near-ntt-near.sh testnet",
-    "print:oracles": "bash sh/print-oracles.sh"
+    "print:oracles": "bash sh/print-oracles.sh",
+    "print:agents": "bash sh/print-agents.sh"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

@@ -24,7 +24,7 @@ use near_sdk::{
 
 use crate::messages::{manager_message_digest, NativeTokenTransfer, NttManagerMessage, TransceiverMessage};
 use crate::outbound::ext_wormhole;
-use crate::payout::{ext_ft, StorageBalance, GAS_FOR_PAY_OUT_REGISTERING, GAS_FOR_REGISTER};
+use crate::payout::{ext_ft, Held, StorageBalance, CLAIM_RESERVE, GAS_FOR_PAY_OUT_REGISTERING, GAS_FOR_REGISTER};
 use crate::rate_limit::RATE_LIMIT_DURATION;
 use crate::vaa::Vaa;
 use crate::{account_hash, emit, now, parse_bytes32, NttManager, NttManagerExt, NEAR_CHAIN_ID};
@@ -35,8 +35,9 @@ pub const GAS_FOR_STORAGE_VIEW: Gas = Gas::from_tgas(5);
 pub const GAS_FOR_ON_VERIFIED: Gas = Gas::from_tgas(15);
 pub const GAS_FOR_ON_SETTLED: Gas = Gas::from_tgas(5);
 
-/// Headroom for the `executed` entry and, when queued, the queue entry — what `complete` requires
-/// on top of the registration deposit. The exact cost is measured and the rest refunded.
+/// Headroom for the `executed` entry and, when queued, the queue entry — or, when paid out,
+/// `CLAIM_RESERVE` — what `complete` requires on top of the registration deposit. The exact cost
+/// is measured and the rest refunded.
 pub const STORAGE_ALLOWANCE: NearToken = NearToken::from_millinear(5);
 
 /// A verified transfer waiting out the inbound delay.
@@ -48,6 +49,8 @@ pub struct InboundTransfer {
     pub amount: U128,
     pub source_chain: u16,
     pub queued_at: u64,
+    /// The VAA's, for the `transfer_received` a release logs.
+    pub wormhole_sequence: u64,
 }
 
 /// A transfer checked against config — not yet against the guardians.
@@ -143,6 +146,7 @@ impl NttManager {
                     amount: U128(inbound.amount),
                     source_chain: inbound.source_chain,
                     queued_at: now,
+                    wormhole_sequence: inbound.wormhole_sequence,
                 },
             );
         }
@@ -150,20 +154,21 @@ impl NttManager {
         // measurable after it.
         self.inbound_queue.flush();
 
-        // An unreadable balance is treated as unregistered. Registering an account that already is
-        // succeeds and refunds — to this contract, the predecessor: the documented residual.
+        // A failed balance view is treated as unregistered; an answer that is not a NEP-145
+        // `StorageBalance` panics this receipt instead — VAA unconsumed, deposit refunded. Registering
+        // an account that already is succeeds and refunds — to this contract, the predecessor: the
+        // documented residual.
         let registered = matches!(storage, Ok(Some(_)));
         let registration = if registered { None } else { Some(self.registration_deposit) };
 
         let storage_cost = env::storage_byte_cost()
             .saturating_mul(env::storage_usage().saturating_sub(storage_before) as u128);
         let used = storage_cost.saturating_add(registration.unwrap_or(NearToken::from_yoctonear(0)));
+        // A pay-out leaves now: the excess stays with it, covering a failed one's `claimable` entry.
+        let reserve = if released { CLAIM_RESERVE } else { NearToken::from_yoctonear(0) };
         let deposit = NearToken::from_yoctonear(deposit.0);
-        require!(deposit >= used, "InsufficientDeposit");
+        require!(deposit >= used.saturating_add(reserve), "InsufficientDeposit");
         let excess = deposit.saturating_sub(used);
-        if !excess.is_zero() {
-            let _ = Promise::new(caller).transfer(excess);
-        }
 
         let event = json!({
             "digest": hex::encode(inbound.digest),
@@ -175,8 +180,12 @@ impl NttManager {
 
         if released {
             emit("transfer_received", event);
-            let _ = self.pay_out(account_id, inbound.amount, registration);
+            let held = Held { caller, amount: U128(excess.as_yoctonear()) };
+            let _ = self.pay_out(account_id, inbound.amount, registration, Some(held));
         } else {
+            if !excess.is_zero() {
+                let _ = Promise::new(caller).transfer(excess);
+            }
             emit("transfer_queued_inbound", event);
             if let Some(deposit) = registration {
                 let _ = ext_ft::ext(self.token.clone())
@@ -210,9 +219,10 @@ impl NttManager {
             "account": transfer.account,
             "amount": transfer.amount,
             "source_chain": transfer.source_chain,
+            "wormhole_sequence": transfer.wormhole_sequence,
         }));
         // Registered at `complete`; if that failed, the transfer fails into `claimable`.
-        self.pay_out(transfer.account, transfer.amount.0, None)
+        self.pay_out(transfer.account, transfer.amount.0, None, None)
     }
 
     pub fn get_queued_inbound(&self, digest: String) -> Option<InboundTransfer> {
@@ -479,6 +489,9 @@ mod tests {
         set_ctx_with("anyone.near", RATE_LIMIT_DURATION, 0);
         let _ = c.release_inbound(digest(&o));
         assert!(c.get_queued_inbound(digest(&o)).is_none());
+        // The release joins back to its VAA.
+        let log = near_sdk::test_utils::get_logs().pop().unwrap();
+        assert!(log.contains("\"transfer_received\"") && log.contains("\"wormhole_sequence\":42"), "{log}");
     }
 
     #[test]
@@ -511,6 +524,45 @@ mod tests {
             RECIPIENT.parse().unwrap(),
             "relayer.near".parse().unwrap(),
             U128(1_000_000_000_000_000_000_000), // 0.001 NEAR < 0.00125
+            Ok(7),
+            Ok(None),
+        );
+    }
+
+    /// Whether the last call refunded anything to the relayer.
+    fn refunded() -> bool {
+        near_sdk::test_utils::get_created_receipts()
+            .into_iter()
+            .filter(|r| r.receiver_id.as_str() == "relayer.near")
+            .flat_map(|r| r.actions)
+            .any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))
+    }
+
+    #[test]
+    fn a_pay_out_holds_the_excess_until_it_settles() {
+        let mut c = zec();
+        verified(&mut c, &defaults(), true, 0);
+        assert!(!refunded());
+    }
+
+    #[test]
+    fn a_queued_transfer_refunds_the_excess_at_once() {
+        let mut c = zec();
+        verified(&mut c, &Overrides { amount: 1_001, ..defaults() }, true, 0);
+        assert!(refunded());
+    }
+
+    #[test]
+    #[should_panic(expected = "InsufficientDeposit")]
+    fn a_pay_out_needs_the_claim_reserve() {
+        // Covers the registration and the replay entry, not a `claimable` entry on top.
+        let mut c = zec();
+        set_ctx_with(CONTRACT, 0, 0);
+        c.on_verified(
+            vaa(&defaults()),
+            RECIPIENT.parse().unwrap(),
+            "relayer.near".parse().unwrap(),
+            U128(2_250_000_000_000_000_000_000), // 0.00225 NEAR: 0.00125 + 0.001
             Ok(7),
             Ok(None),
         );

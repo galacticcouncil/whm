@@ -36,6 +36,10 @@ pub struct TransferMsg {
     pub recipient_chain: u16,
     /// Hex: a 20-byte EVM address, or the same left-padded to 32 bytes.
     pub recipient: String,
+    /// Who a failed publish refunds; `sender_id` if absent. For a sender whose plain token balance
+    /// credits no one — `intents.near`, an Omni connector. Must be registered on the token: a refund
+    /// it cannot take is credited to the sender's `claimable`, not to it.
+    pub refund_to: Option<AccountId>,
 }
 
 /// A transfer locked on NEAR, carried to `on_published`.
@@ -45,6 +49,8 @@ pub struct OutboundTransfer {
     /// `NttManagerMessage.id`, assigned when locked.
     pub id: u64,
     pub sender: AccountId,
+    /// `TransferMsg.refund_to`, or the sender.
+    pub refund_to: AccountId,
     /// Locked, in token units — dust-free, so it untrims exactly.
     pub amount: U128,
     pub trimmed: TrimmedAmount,
@@ -81,10 +87,12 @@ impl NttManager {
         let now = now();
         require!(self.outbound.consume(locked, now), "TransferExceedsRateLimit");
         let inbound_backflow = self.inbound_limit(msg.recipient_chain).backflow(locked, now);
+        let refund_to = msg.refund_to.unwrap_or_else(|| sender_id.clone());
 
         let transfer = OutboundTransfer {
             id: self.next_seq(),
             sender: sender_id,
+            refund_to,
             amount: U128(locked),
             trimmed,
             recipient_chain: msg.recipient_chain,
@@ -120,7 +128,8 @@ impl NttManager {
                 self.outbound.backflow(transfer.amount.0, now);
                 self.inbound_limit(transfer.recipient_chain).debit(transfer.inbound_backflow.0, now);
                 emit("transfer_failed", transfer_json(&transfer));
-                Some(self.pay_out(transfer.sender, transfer.amount.0, None))
+                // A refund `refund_to` cannot take lands in the sender's `claimable`.
+                Some(self.pay_out_crediting(transfer.refund_to, transfer.sender, transfer.amount.0, None, None))
             }
         }
     }
@@ -194,6 +203,7 @@ fn transfer_json(transfer: &OutboundTransfer) -> serde_json::Value {
     json!({
         "id": transfer.id,
         "sender": transfer.sender,
+        "refund_to": transfer.refund_to,
         "amount": transfer.amount,
         "recipient_chain": transfer.recipient_chain,
         "recipient": hex::encode(transfer.recipient),
@@ -297,6 +307,7 @@ mod tests {
         let transfer = OutboundTransfer {
             id: 0,
             sender: accounts(1),
+            refund_to: accounts(1),
             amount: U128(400),
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
@@ -316,6 +327,7 @@ mod tests {
         let transfer = OutboundTransfer {
             id: 0,
             sender: accounts(1),
+            refund_to: accounts(1),
             amount: U128(400),
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
@@ -334,6 +346,7 @@ mod tests {
         let transfer = OutboundTransfer {
             id: 5,
             sender: accounts(1),
+            refund_to: accounts(1),
             amount: U128(400),
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,
@@ -372,6 +385,70 @@ mod tests {
         parse_recipient(&format!("0x{}", "22".repeat(32)));
     }
 
+    /// The transfer `ft_on_transfer` handed `on_published`.
+    fn sent_transfer() -> OutboundTransfer {
+        near_sdk::test_utils::get_created_receipts()
+            .into_iter()
+            .flat_map(|r| r.actions)
+            .find_map(|a| match a {
+                near_sdk::mock::MockAction::FunctionCallWeight { method_name, args, .. }
+                    if method_name == b"on_published" =>
+                {
+                    let args: serde_json::Value = serde_json::from_slice(&args).unwrap();
+                    Some(serde_json::from_value(args["transfer"].clone()).unwrap())
+                }
+                _ => None,
+            })
+            .expect("on_published")
+    }
+
+    #[test]
+    fn refunds_go_to_the_sender_by_default() {
+        let mut c = zec();
+        let _ = c.ft_on_transfer(accounts(1), U128(400), msg());
+        assert_eq!(sent_transfer().refund_to, accounts(1));
+    }
+
+    #[test]
+    fn refund_to_redirects_the_refund() {
+        let mut c = zec();
+        let m = json!({ "recipient_chain": HYDRATION, "recipient": RECIPIENT, "refund_to": accounts(2) });
+        let _ = c.ft_on_transfer(accounts(1), U128(400), m.to_string());
+        let transfer = sent_transfer();
+        assert_eq!(transfer.sender, accounts(1));
+        assert_eq!(transfer.refund_to, accounts(2));
+
+        as_self();
+        let _ = c.on_published(transfer, Err(PromiseError::Failed));
+        assert_eq!(call_args("ft_transfer")["receiver_id"], accounts(2).as_str());
+        // A refund it cannot take is credited to the sender, never to it.
+        assert_eq!(call_args("on_paid")["account"], accounts(1).as_str());
+    }
+
+    /// The JSON args of the first `method` call the last call created.
+    fn call_args(method: &str) -> serde_json::Value {
+        near_sdk::test_utils::get_created_receipts()
+            .into_iter()
+            .flat_map(|r| r.actions)
+            .find_map(|a| match a {
+                near_sdk::mock::MockAction::FunctionCallWeight { method_name, args, .. }
+                    if method_name == method.as_bytes() =>
+                {
+                    Some(serde_json::from_slice(&args).unwrap())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no {method} call"))
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidMsg")]
+    fn an_invalid_refund_to_is_refunded() {
+        let mut c = zec();
+        let m = json!({ "recipient_chain": HYDRATION, "recipient": RECIPIENT, "refund_to": "Not An Account" });
+        let _ = c.ft_on_transfer(accounts(1), U128(400), m.to_string());
+    }
+
     #[test]
     fn failed_publish_takes_back_only_the_backflow_it_added() {
         // Inbound window full: the lock's backflow adds nothing, so the refund must debit nothing.
@@ -381,6 +458,7 @@ mod tests {
         let transfer = OutboundTransfer {
             id: 0,
             sender: accounts(1),
+            refund_to: accounts(1),
             amount: U128(400),
             trimmed: TrimmedAmount { amount: 400, decimals: 8 },
             recipient_chain: HYDRATION,

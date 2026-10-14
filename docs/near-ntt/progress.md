@@ -16,7 +16,8 @@ Implementation log for [spec.md](spec.md), one entry per stage. Branch: `feat/ne
 
 **Docs**
 
-- [../near/](../near/) — the Omni → Solana → NTT corridor, kept as the fallback.
+- [../near-omni/](../near-omni/) — the Omni → Solana → NTT corridor, kept as the fallback (never
+  built; superseded once NEAR NTT went live).
 - [spec.md](spec.md) — NEAR as a LOCKING hub, Hydration BURNING; manager + transceiver in one
   contract per token; `sha256(account_id)` addressing with no registry; fail-closed outbound;
   claimable fallback inbound; single-hub rule against the fallback.
@@ -319,3 +320,44 @@ into the manager: [omft-routing.md](omft-routing.md).
 
 The testnet contract (`ntt-near.whm-ntt-0bugdc.testnet`) runs pre-stage-6 code: step 006 refuses on
 it (code hash ≠ `NTT_WASM`). Redeploy it with the deployer key first.
+
+## Stage 7 — second audit
+
+External review of `dc15b04` (manual + pashov 12-agent pass, `audit-2026-09-29.md`, gitignored): no
+Critical or High; 2 findings, 13 leads.
+
+| Report item | Fix |
+| ----------- | --- |
+| F1 a failed pay-out's `claimable` entry unfunded — on a thin contract `on_paid` fails `LackBalanceForState`, credit lost, VAA consumed | Not the report's threshold reserve: a pay-out **holds** the `complete` deposit's excess (`Held`, ≥ `CLAIM_RESERVE` 0.002 NEAR) until `on_paid`, which pays the entry from it and refunds the rest. `claim` zeroes its entry instead of removing it. Each failure funds itself, however many land together. Minimum deposit unchanged. `9f618fa` |
+| F2 failed-publish refund to a routing contract strands | Optional `TransferMsg.refund_to`. `76db612`. As first written it **credited a failed refund to `refund_to`**, so a fresh unregistered account per transfer made the contract pay a new `claimable` entry each — caught by the re-review; a refund `refund_to` cannot take now credits the sender |
+| L1 unguarded `new` | Checked: `deployNtt` creates, funds, deploys and inits in one transaction. No change |
+| L3 single-step ownership | `transfer_ownership` proposes, `accept_ownership` takes over; migration step `007-accept-ownership@ntt`. `b4bd889` |
+| L5 no event on a successful claim | `claimed`, logged as the tokens leave (`payout_failed` follows a failure). `23cda8e` |
+| L7 queued release event lacks `wormhole_sequence` | Stored on `InboundTransfer`, logged on release. `23cda8e` |
+| L2, L4, L6, L8–L13 | Not taken — hardening or documented tradeoffs |
+
+F1 reproduced first against the old wasm: with 0.05 mN free, `on_paid` failed `LackBalanceForState`
+and `claimable_of` stayed 0. On a successful transfer the redeemer's net cost is the same as before
+(1.98 mN in the sandbox: registration + replay entry).
+
+| Check | Result |
+| ----- | ------ |
+| `cargo test -p ntt-manager` | 75 passed |
+| Sandbox | 26 passed — + a failed unlock and claim on a contract with no free balance, `refund_to`, a refund `refund_to` cannot take (fails on the first `refund_to` code), a failed unlock and a failed `complete` at the minimum gas (92 TGas), a 13-of-19 VAA (93 TGas), and the token flows on `zec.omft.near`'s mainnet code — `safe_mint` from the Zcash connector at its 90 TGas publishes |
+| Testnet | redeployed on the same account; NEAR → Hydration transfer (sequence 6) delivered on a Hydration fork, replay rejected |
+
+**Re-review** of the fixes (`/near-audit`, 6 reviewers, `audit-2026-10-10.md`, gitignored): 0 findings,
+20 leads. Taken: the `refund_to` credit above; a minimum-gas test for a failed unlock; spec notes on
+pooled held funds, callback-arg compatibility and the 006 → 007 window. Both prior reports' fixes
+hold.
+
+**Full re-audit** (`/near-audit`, all 8 agents incl. the 75-row prior-findings pass,
+`audit-2026-10-10-full.md`, gitignored): 0 findings, 17 leads. Taken: the ZEC token suite, the 13-of-19
+VAA and failed-`complete` minimum-gas tests, and a corrected `on_verified` comment.
+
+The sandbox binary has no darwin-x86_64 build: from a Rosetta shell, run it as
+`CARGO_TARGET_DIR=target/arm64 arch -arm64 rustup run stable-aarch64-apple-darwin cargo test -p ntt-sandbox -- --test-threads=1`
+(with `NTT_WASM` set as in `test:sandbox`).
+
+`pending_owner` changes the contract struct, so no deployed contract upgrades to this code: none is
+on mainnet, and testnet is redeployed from scratch on the same account.
