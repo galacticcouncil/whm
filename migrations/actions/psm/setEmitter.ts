@@ -1,8 +1,8 @@
 import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
-import facilitatorJson from "../../../contracts/out-psm/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
-import vaultJson from "../../../contracts/out-psm/HollarBaseVault.sol/HollarBaseVault.json";
+import facilitatorJson from "../../../contracts/out/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
+import vaultJson from "../../../contracts/out/HollarBaseVault.sol/HollarBaseVault.json";
 
 /**
  * Bind the counterpart's emitter address. One-shot on both sides: the call freezes itself, so a

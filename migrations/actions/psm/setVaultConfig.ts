@@ -1,7 +1,7 @@
 import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
-import vaultJson from "../../../contracts/out-psm/HollarBaseVault.sol/HollarBaseVault.json";
+import vaultJson from "../../../contracts/out/HollarBaseVault.sol/HollarBaseVault.json";
 
 export type TxResult = { txHash: string; contract: string };
 

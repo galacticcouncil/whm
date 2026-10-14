@@ -123,7 +123,6 @@ const build = spawnSync(
     maxBuffer: 1 << 28,
     env: {
       ...process.env,
-      FOUNDRY_PROFILE: process.env.FOUNDRY_PROFILE ?? "psm",
       FOUNDRY_TEST: join(scratch, "no-tests"),
       FOUNDRY_SCRIPT: join(scratch, "no-scripts"),
     },

@@ -6,8 +6,8 @@ set -euo pipefail
 # Run the psm-base merged migration (Hydration facilitator + Base vault + emitter binding
 # + launch parameters + admin handover) in one shot.
 #
-# Builds first: the PSM contracts use their own Foundry profile and the actions read artifacts
-# from contracts/out-psm/, so a stale artifact must never be what gets deployed.
+# Builds first: the actions read the PSM artifacts from contracts/out/, so a stale artifact must
+# never be what gets deployed.
 #
 # Arguments:
 #   <env>   Environment context: prod | fork
@@ -48,6 +48,6 @@ PK=${PK:?Missing PK}
 
 export PK_FACILITATOR PK
 
-(cd "$ROOT_DIR/contracts" && FOUNDRY_PROFILE=psm forge build)
+(cd "$ROOT_DIR/contracts" && forge build)
 
 "$TSX" "$RUNNER" --migration psm-base --env "$ENV" "$@"

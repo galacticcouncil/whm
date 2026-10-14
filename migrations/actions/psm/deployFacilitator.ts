@@ -3,13 +3,14 @@ import { encodeFunctionData } from "viem";
 import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
-import facilitatorJson from "../../../contracts/out-psm/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
-import erc1967ProxyJson from "../../../contracts/out-psm/ERC1967Proxy.sol/ERC1967Proxy.json";
+import facilitatorJson from "../../../contracts/out/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
+import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.psm.json";
 
 /**
- * Artifacts come from out-psm/, not out/. The PSM contracts are built under the `psm` Foundry
- * profile (optimizer on, 200 runs) because HollarBaseVault does not fit under EIP-170 without it.
- * sh/migrate-psm-base.sh builds it; run `FOUNDRY_PROFILE=psm forge build` yourself otherwise.
+ * The PSM compiles under the `psm` compiler profile (optimizer on, 200 runs) because
+ * HollarBaseVault does not fit under EIP-170 without it; contracts/foundry.toml restricts src/psm
+ * to it. A contract compiled under both profiles gets one artifact per profile, so the proxy comes
+ * from ERC1967Proxy.psm.json. sh/migrate-psm-base.sh builds first; run `forge build` otherwise.
  */
 export type DeployFacilitatorParams = WalletContext & {
   wormholeCore: `0x${string}`;

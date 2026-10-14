@@ -1,7 +1,7 @@
 import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
-import accessControlJson from "../../../contracts/out-psm/AccessControlUpgradeable.sol/AccessControlUpgradeable.json";
+import accessControlJson from "../../../contracts/out/AccessControlUpgradeable.sol/AccessControlUpgradeable.json";
 
 const DEFAULT_ADMIN_ROLE =
   "0x0000000000000000000000000000000000000000000000000000000000000000" as const;

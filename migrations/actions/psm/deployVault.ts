@@ -3,10 +3,10 @@ import { encodeFunctionData } from "viem";
 import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
-import vaultJson from "../../../contracts/out-psm/HollarBaseVault.sol/HollarBaseVault.json";
-import erc1967ProxyJson from "../../../contracts/out-psm/ERC1967Proxy.sol/ERC1967Proxy.json";
+import vaultJson from "../../../contracts/out/HollarBaseVault.sol/HollarBaseVault.json";
+import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.psm.json";
 
-/** See deployFacilitator for why artifacts come from out-psm/. */
+/** See deployFacilitator for why the proxy artifact is ERC1967Proxy.psm.json. */
 export type DeployVaultParams = WalletContext & {
   wormholeCore: `0x${string}`;
   usdc: `0x${string}`;

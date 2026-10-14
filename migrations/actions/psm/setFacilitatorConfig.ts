@@ -1,7 +1,7 @@
 import type { ifs } from "@whm/common/evm";
 import type { WalletContext } from "../types";
 
-import facilitatorJson from "../../../contracts/out-psm/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
+import facilitatorJson from "../../../contracts/out/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
 
 export type SetLimitsParams = WalletContext & {
   contract: `0x${string}`;

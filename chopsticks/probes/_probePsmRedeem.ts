@@ -35,9 +35,9 @@ import { spawnForks, teardownForks, type Network } from "../lib/network";
 import { getAccountCode, getEventsAt } from "../lib/queries";
 import { toJson } from "../lib/utils";
 
-import facilitatorJson from "../../contracts/out-psm/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
-import proxyJson from "../../contracts/out-psm/ERC1967Proxy.sol/ERC1967Proxy.json";
-import forkWormholeJson from "../../contracts/out-psm/ForkWormhole.sol/ForkWormhole.json";
+import facilitatorJson from "../../contracts/out/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
+import proxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.psm.json";
+import forkWormholeJson from "../../contracts/out/ForkWormhole.sol/ForkWormhole.json";
 
 // ─── Real Hydration ──────────────────────────────────────────────
 

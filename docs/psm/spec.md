@@ -510,7 +510,7 @@ for a full period — emergencies use `setPaused`.
 ## Deployment
 
 ```sh
-FOUNDRY_PROFILE=psm pnpm --filter @whm/contracts build   # only when invoking the runner directly; the wrapper builds
+pnpm --filter @whm/contracts build   # only when invoking the runner directly; the wrapper builds
 pnpm migrate:psm-base:fork
 pnpm migrate:psm-base
 ```
@@ -533,14 +533,15 @@ The runner resumes a `failed` step on every invocation and `--from <next>` does 
 emitter binds read before they write — an already-bound value is idempotent, a different one throws
 — and the handovers refuse the deployer itself; the vault's also refuses an admin with no code.
 
-The PSM uses its own Foundry profile (`[profile.psm]`: optimizer on, 200 runs, `out-psm/`) because
-`HollarBaseVault` does not fit under EIP-170 unoptimised. The default profile is untouched so
-nothing already deployed changes bytecode. `sh/migrate-psm-base.sh` builds it before running.
+Only the PSM compiles with the optimizer (200 runs), because `HollarBaseVault` does not fit under
+EIP-170 unoptimised: `contracts/foundry.toml` restricts `src/psm/**` to a `psm` compiler profile and
+everything else keeps the default settings, so one `forge build` compiles the whole tree and nothing
+already deployed changes bytecode. `sh/migrate-psm-base.sh` builds before running.
 
 ## Testing
 
 ```sh
-FOUNDRY_PROFILE=psm forge test --match-path "test/psm/**"    # fork suites skip without RPC_BASE / RPC_HYDRATION
+forge test --match-path "test/psm/**"                        # fork suites skip without RPC_BASE / RPC_HYDRATION
 npx tsx chopsticks/probes/_probePsmRedeem.ts                 # the redeem leg, real runtime
 ```
 

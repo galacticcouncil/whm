@@ -22,10 +22,10 @@ import type { MigrationConfig } from "./types";
  * both binds are one-shot and self-freezing, so a step that runs before the address it needs
  * exists cannot be corrected by re-running it — only by redeploying that side.
  *
- * The PSM contracts live under a separate Foundry profile and the actions read artifacts from
- * contracts/out-psm/. sh/migrate-psm-base.sh builds them first; by hand it is
+ * The PSM compiles under its own compiler profile (see contracts/foundry.toml); the actions read
+ * artifacts from contracts/out/. sh/migrate-psm-base.sh builds them first; by hand it is
  *
- *   FOUNDRY_PROFILE=psm pnpm --filter @whm/contracts build
+ *   pnpm --filter @whm/contracts build
  *
  * The emitter binds (005/006) read before they write — an already-bound value is idempotent on
  * resume, a different one throws — and the handovers refuse to hand the role to the deployer
