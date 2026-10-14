@@ -24,6 +24,12 @@ abstract contract MockWormhole {
         _vm.emitterAddress = emitterAddress;
         _vm.payload = payload;
         _vm.hash = keccak256(encodedVM);
+        // A salted VAA (a fourth word, so `payload` sits at 0x80) carries its sequence in the
+        // salt's low 64 bits; bits above stand in for envelope fields a re-observation changes.
+        if (uint256(bytes32(encodedVM[64:96])) == 0x80) {
+            (,,, uint256 salt) = abi.decode(encodedVM, (uint16, bytes32, bytes, uint256));
+            _vm.sequence = uint64(salt);
+        }
         // Real guardians stamp the envelope observation time here; mirror it from the test clock
         // unless a test pins one, which is how a source chain leading the local clock is expressed.
         _vm.timestamp = vaaTimestampOverride == 0 ? uint32(block.timestamp) : vaaTimestampOverride;
