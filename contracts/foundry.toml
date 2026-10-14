@@ -9,6 +9,9 @@ out = "out-psm"
 libs = ["dependencies"]
 optimizer = true
 optimizer_runs = 200
+# Governance (from master) hits stack-too-deep under this optimizer setting
+# and is not part of the PSM deploy, so this profile leaves it out.
+skip = ["src/governance/**", "test/governance/**"]
 
 [soldeer]
 remappings_generate = false
