@@ -82,7 +82,7 @@ Practicalities: Pyth is pull-based, so someone pays to post updates; feeds carry
 that a floor should widen by rather than ignore; staleness must be a hard reject, not a warning. The
 relay leg already runs — `agents/relayer`'s `oracle` app has two production routes — so this is a
 `PythAdapter` plus a `registerFeed` per asset, not an integration. Design:
-[phase2.md](phase2.md) §4.
+[spec.md](spec.md) §4.
 
 ---
 
@@ -129,7 +129,7 @@ since §4 wants the same feed.
 
 This is the option that was taken. Publishing the quote **per tranche** rather than per route is what
 removes the staleness §2.3 warns about: the oracle is read in the transaction that fires the tranche,
-so the floor is never older than the trade it prices. Full design: [phase2.md](phase2.md).
+so the floor is never older than the trade it prices. Full design: [spec.md](spec.md).
 
 Reach for §3 when the spread given away by a floor costs more than K signatures per tranche, and treat
 §4 as its end state rather than as a separate option.
