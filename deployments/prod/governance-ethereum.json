@@ -1,0 +1,43 @@
+{
+  "migration": "governance-ethereum",
+  "environment": "prod",
+  "startedAt": "2026-10-15T16:05:58.871Z",
+  "completedAt": "2026-10-15T16:11:29.877Z",
+  "steps": [
+    {
+      "name": "001-deploy-executor-implementation",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xef47b42d2872c440232bd3e9224b224793f964f2",
+        "deployTxHash": "0x4bc609afebe28f645ca5be4c1607ca4c340ecc129d0a500168add1f193353716",
+        "runtimeCodeHash": "0xd536b4f1ce8aa3903c44025c557fedafdfc7d0fe708d2418428a7ee9fe062123",
+        "proxiableUUID": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+      },
+      "error": null,
+      "startedAt": "2026-10-15T16:05:58.872Z",
+      "completedAt": "2026-10-15T16:07:26.359Z"
+    },
+    {
+      "name": "002-deploy-executor-proxy",
+      "status": "completed",
+      "output": {
+        "proxyAddress": "0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83",
+        "deployTxHash": "0x62210c90f98689c6db225d525c25444419ec34f99c7454d2b1449eb92f58b13c",
+        "runtimeCodeHash": "0x423ac93d743bb57334a5b19099844339d12da8b81a65eecf957839a4cd839873",
+        "implAddress": "0xef47b42d2872c440232bd3e9224b224793f964f2",
+        "wormholeCore": "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B",
+        "wormholeId": "2",
+        "sourceDispatcher": "0x00302167F9597b9d90Bd342311c5c4be39BF0Fa0",
+        "sourceDispatcherBytes32": "0x00000000000000000000000000302167f9597b9d90bd342311c5c4be39bf0fa0",
+        "vetoer": "0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7",
+        "vetoerThreshold": "4",
+        "vetoerOwners": "0x990Df21C11f82127b371102F44970E2fc6c5520A,0x8F6b274E80D0DC7A5274Ea9696dAdceF73b4515D,0x6466b77eeE8687639ABDbBB51eea453Bf5e7Cf30,0xF34e845538Cc8A498eDD97d7cde16FdfEf3d4d99,0x538a22F1e7AF49Bb040f30F95c17d928cd178A3a,0x2b6F2D5bC8EEfCC82Fef4546Fe7ff2143A238497,0x16b25bbAbd8aA87c29989820E721AaE739075AC4",
+        "vetoPeriod": "86400",
+        "executionGracePeriod": "604800"
+      },
+      "error": null,
+      "startedAt": "2026-10-15T16:07:26.359Z",
+      "completedAt": "2026-10-15T16:11:29.877Z"
+    }
+  ]
+}
