@@ -29,3 +29,7 @@ PK_HYDRATION=${PK_HYDRATION:?Missing PK_HYDRATION (Hydration EVM private key)}
 export PK_HYDRATION
 
 "$TSX" "$RUNNER" --migration governance-hydration --env "$ENV"
+
+if [ "$ENV" = "prod" ]; then
+  node "$ROOT_DIR/scripts/governance/verify-neckwork.mjs"
+fi

@@ -26,6 +26,7 @@
     "migrate:oracle-relay-robinhood:fork": "bash sh/migrate-oracle-relay-robinhood.sh fork",
     "migrate:governance-hydration": "bash sh/migrate-governance-hydration.sh prod",
     "migrate:governance-hydration:fork": "bash sh/migrate-governance-hydration.sh fork",
+    "verify:governance-hydration": "node scripts/governance/verify-neckwork.mjs",
     "migrate:governance-robinhood": "bash sh/migrate-governance-robinhood.sh prod",
     "migrate:governance-robinhood:fork": "bash sh/migrate-governance-robinhood.sh fork",
     "migrate:governance-ethereum": "bash sh/migrate-governance-ethereum.sh prod",
