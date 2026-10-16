@@ -1,0 +1,57 @@
+{
+  "migration": "utxo-withdraw-zec",
+  "environment": "testnet",
+  "startedAt": "2026-10-16T12:36:54.528Z",
+  "completedAt": "2026-10-16T13:01:32.935Z",
+  "steps": [
+    {
+      "name": "001-deploy-withdraw",
+      "status": "completed",
+      "output": {
+        "txHash": "Gw8y7zWVVg7ZMy8eGFuoGg6gco9ca6KhEbbwKpTHBxpL",
+        "withdrawAccount": "zec-withdraw2.whm-ntt-0bugdc.testnet",
+        "owner": "whm-ntt-0bugdc.testnet",
+        "codeSha256": "5e3d54cd65ceb9b8b37dfa7b4ef18df5075e9715d86160140a4cdc634db13c93",
+        "chain": "ZcashTestnet"
+      },
+      "error": null,
+      "startedAt": "2026-10-16T13:00:27.916Z",
+      "completedAt": "2026-10-16T13:00:41.636Z"
+    },
+    {
+      "name": "002-transfer-ownership@withdraw",
+      "status": "completed",
+      "output": {
+        "txHash": "Bz5YTdwQeTcEte3GrQXXJz7DvmcmeVKM9dqHQN2dCAzW",
+        "newOwner": "whm-ntt-0bugdc.testnet"
+      },
+      "error": null,
+      "startedAt": "2026-10-16T13:00:41.637Z",
+      "completedAt": "2026-10-16T13:00:51.583Z"
+    },
+    {
+      "name": "003-delete-keys@withdraw",
+      "status": "completed",
+      "output": {
+        "txHash": "3GxuCiXAEzZhjsB1mAzME5Jpa67dBi1diSfYxorh9vgx",
+        "deletedKeys": "ed25519:4KduaVNPQhmqEujJVLcpkneQYdiYaq6u4nSbEDS26881",
+        "owner": "whm-ntt-0bugdc.testnet",
+        "codeSha256": "5e3d54cd65ceb9b8b37dfa7b4ef18df5075e9715d86160140a4cdc634db13c93"
+      },
+      "error": null,
+      "startedAt": "2026-10-16T13:00:51.584Z",
+      "completedAt": "2026-10-16T13:01:13.594Z"
+    },
+    {
+      "name": "004-accept-ownership@withdraw",
+      "status": "completed",
+      "output": {
+        "txHash": "EPyDGopnSKrWdV6qhPMzq7S1uxFhTbh5H4YxgdqbEpiF",
+        "owner": "whm-ntt-0bugdc.testnet"
+      },
+      "error": null,
+      "startedAt": "2026-10-16T13:01:13.595Z",
+      "completedAt": "2026-10-16T13:01:32.934Z"
+    }
+  ]
+}

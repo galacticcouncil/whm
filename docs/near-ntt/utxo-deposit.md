@@ -1,4 +1,4 @@
-# BTC and ZEC → Hydration through NEAR NTT
+# UTXO deposit — BTC and ZEC → Hydration through NEAR NTT
 
 How a user holding BTC on Bitcoin or ZEC on Zcash gets it onto Hydration with **one transfer from
 their own wallet**, by composing Omni's UTXO connectors with our NEAR NTT manager. The manager stays

@@ -310,7 +310,7 @@ or Medium. Fixed:
 single-receipt transfer.
 
 BTC / ZEC from their own chains — one transfer to an Omni connector deposit address, minted straight
-into the manager: [omft-routing.md](omft-routing.md).
+into the manager: [utxo-deposit.md](utxo-deposit.md).
 
 | Check | Result |
 | ----- | ------ |

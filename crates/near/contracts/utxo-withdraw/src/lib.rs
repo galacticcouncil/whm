@@ -1,16 +1,16 @@
 //! UTXO withdraw — sends a UTXO-chain token on NEAR (`zec.omft.near`) to its native chain through
 //! Omni's connector, from an account derived from the destination address. Design:
-//! `docs/near-ntt/zec-withdraw.md`.
+//! `docs/near-ntt/utxo-withdraw.md`.
 //!
 //! ```text
 //! terms = the destination address    path = chain prefix + address    A = v1.signer key for (self, path)
 //!
-//! withdraw(address)
+//! withdraw(address, coin)
 //!   → v1.signer.derived_public_key(path)
 //!        → on_key: A
 //!             ├─ token.ft_balance_of(A)           ┐
 //!             ├─ connector.get_config()           │ joint
-//!             └─ connector.get_utxos_paged(page)  ┘
+//!             └─ connector.list_utxos([coin])     ┘
 //!                  → on_reads: the whole transaction, every number computed here
 //!                       → v1.signer.sign(sha256 of the delegate action)
 //!                            → on_signed: emit the SignedDelegateAction
@@ -21,9 +21,14 @@
 //! Nothing is stored per account and nothing is held: the contract only signs, for `A`, one of two
 //! fixed delegate actions. Anyone may call; a relayer submits the result and pays its gas.
 //!
+//! `coin` names which of the connector's coins to spend. It is an id, not a number: the connector
+//! values it from its own records, and the user output, fee and change are computed here — so the
+//! choice moves only which part of Omni's reserve is spent. The caller picks it because reading the
+//! connector's coin set on chain is too expensive (each coin carries its source transaction).
+//!
 //! **The invariant.** Every path to `sign` signs a delegate built from the address (which fixes
-//! `A`), the clock, and reads of `A`'s balance and the connector. No admin sign, no generic
-//! `sign(payload)`, no public callback.
+//! `A`), the coin id, the clock, and reads of `A`'s balance and the connector. No admin sign, no
+//! generic `sign(payload)`, no public callback.
 
 pub mod chain;
 /// Per-chain logic, one module each; `chain::Chain` dispatches to them.
@@ -41,21 +46,22 @@ use near_sdk::serde_json::{self, json};
 use near_sdk::{env, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError};
 
 use chain::Chain;
-use connector::{best_fit, ext_connector, ext_ft, output, withdraw_msg, ConnectorConfig, Utxo};
+use connector::{coin_key, ext_connector, ext_ft, fits, output, withdraw_msg, ConnectorConfig, Utxo};
 use delegate::{signed, signing_hash, Delegate, NONCE_MULTIPLIER};
 use mpc::{ext_mpc, implicit_account, parse_ed25519, Payload, SignRequest, SignatureResponse, DOMAIN_ED25519};
 
 pub const GAS_FOR_DERIVE: Gas = Gas::from_tgas(10);
 pub const GAS_FOR_BALANCE: Gas = Gas::from_tgas(5);
 pub const GAS_FOR_CONFIG: Gas = Gas::from_tgas(10);
-pub const GAS_FOR_UTXOS: Gas = Gas::from_tgas(50);
+/// One coin, with its source transaction (up to ~9 KB as JSON).
+pub const GAS_FOR_COIN: Gas = Gas::from_tgas(15);
 /// `v1.signer` requires 15 TGas attached; the rest covers its yield callback.
 pub const GAS_FOR_SIGN: Gas = Gas::from_tgas(30);
 pub const GAS_FOR_ON_SIGNED: Gas = Gas::from_tgas(10);
 /// `on_reads`' own work, then the sign it schedules.
 pub const GAS_FOR_ON_READS: Gas = Gas::from_tgas(30 + 30 + 10);
 /// `on_key`'s own work, the joint reads and `on_reads` — the larger of its two branches.
-pub const GAS_FOR_ON_KEY: Gas = Gas::from_tgas(10 + 5 + 10 + 50 + 70);
+pub const GAS_FOR_ON_KEY: Gas = Gas::from_tgas(10 + 5 + 10 + 15 + 70);
 
 /// `migrate` on the new code, in the same batch as its deploy.
 pub const GAS_FOR_MIGRATE: Gas = Gas::from_tgas(50);
@@ -66,7 +72,8 @@ const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 /// Which delegate `on_key` builds.
 #[near(serializers = [json])]
 pub enum Kind {
-    Withdraw,
+    /// Spending this connector coin, `txid:vout`.
+    Withdraw { coin: String },
     Claim,
 }
 
@@ -95,8 +102,6 @@ pub struct UtxoWithdraw {
     /// `zcash-connector.bridge.near`.
     connector: AccountId,
 
-    /// Connector coins read per withdrawal, from the start of its set.
-    coin_page: u64,
     /// Blocks a signed delegate stays valid.
     validity: u64,
     /// Gas of the delegate's function call.
@@ -112,7 +117,6 @@ impl UtxoWithdraw {
         mpc_signer: AccountId,
         token: AccountId,
         connector: AccountId,
-        coin_page: u64,
         validity: u64,
         withdraw_tgas: u64,
     ) -> Self {
@@ -123,7 +127,6 @@ impl UtxoWithdraw {
             mpc_signer,
             token,
             connector,
-            coin_page,
             validity,
             withdraw_gas: Gas::from_tgas(withdraw_tgas),
         };
@@ -133,11 +136,13 @@ impl UtxoWithdraw {
 
     // =============== Signing ================================================================
 
-    /// Signs `A`'s withdrawal of its whole balance to `address`. Anyone may call, with 1 yocto —
-    /// the signer's deposit — and at least `GAS_FOR_DERIVE + GAS_FOR_ON_KEY` free.
+    /// Signs `A`'s withdrawal of its whole balance to `address`, spending the connector's `coin`
+    /// (`txid:vout`). Anyone may call, with 1 yocto — the signer's deposit — and at least
+    /// `GAS_FOR_DERIVE + GAS_FOR_ON_KEY` free.
     #[payable]
-    pub fn withdraw(&mut self, address: String) -> Promise {
-        self.derive(address, Kind::Withdraw)
+    pub fn withdraw(&mut self, address: String, coin: String) -> Promise {
+        coin_key(&coin);
+        self.derive(address, Kind::Withdraw { coin })
     }
 
     /// Signs `A`'s `claim_lost_found` on the connector — tokens a cancelled withdrawal could not
@@ -158,19 +163,19 @@ impl UtxoWithdraw {
         let key = parse_ed25519(&key.unwrap_or_else(|_| env::panic_str("DeriveFailed")));
         let account = implicit_account(&key);
         match kind {
-            Kind::Withdraw => ext_ft::ext(self.token.clone())
+            Kind::Withdraw { coin } => ext_ft::ext(self.token.clone())
                 .with_static_gas(GAS_FOR_BALANCE)
                 .ft_balance_of(account)
                 .and(ext_connector::ext(self.connector.clone()).with_static_gas(GAS_FOR_CONFIG).get_config())
                 .and(
                     ext_connector::ext(self.connector.clone())
-                        .with_static_gas(GAS_FOR_UTXOS)
-                        .get_utxos_paged(Some(0), Some(self.coin_page)),
+                        .with_static_gas(GAS_FOR_COIN)
+                        .list_utxos(vec![coin_key(&coin)]),
                 )
                 .then(
                     Self::ext(env::current_account_id())
                         .with_static_gas(GAS_FOR_ON_READS)
-                        .on_reads(address, hex::encode(key)),
+                        .on_reads(address, hex::encode(key), coin),
                 ),
             Kind::Claim => {
                 let delegate = Delegate {
@@ -195,15 +200,21 @@ impl UtxoWithdraw {
         &mut self,
         address: String,
         key: String,
+        coin: String,
         #[callback_result] balance: Result<U128, PromiseError>,
         #[callback_result] config: Result<ConnectorConfig, PromiseError>,
-        #[callback_result] coins: Result<BTreeMap<String, Utxo>, PromiseError>,
+        #[callback_result] coins: Result<BTreeMap<String, Option<Utxo>>, PromiseError>,
     ) -> Promise {
         let key: [u8; 32] = parse_hex32(&key);
         let balance = balance.unwrap_or_else(|_| env::panic_str("BalanceReadFailed")).0;
         let config = config.unwrap_or_else(|_| env::panic_str("ConfigReadFailed"));
         let coins = coins.unwrap_or_else(|_| env::panic_str("CoinReadFailed"));
-        let (delegate, info) = self.build_withdraw(&address, key, balance, &config, &coins);
+        let value = coins
+            .get(&coin_key(&coin))
+            .and_then(|c| c.as_ref())
+            .map(|c| c.balance.0)
+            .unwrap_or_else(|| env::panic_str("UnknownCoin"));
+        let (delegate, info) = self.build_withdraw(&address, key, balance, &config, &coin, value);
         self.sign(&address, delegate, info)
     }
 
@@ -240,13 +251,12 @@ impl UtxoWithdraw {
     // account. Each logs an event.
 
     #[payable]
-    pub fn set_params(&mut self, coin_page: u64, validity: u64, withdraw_tgas: u64) {
+    pub fn set_params(&mut self, validity: u64, withdraw_tgas: u64) {
         self.assert_owner();
-        self.coin_page = coin_page;
         self.validity = validity;
         self.withdraw_gas = Gas::from_tgas(withdraw_tgas);
         self.assert_params();
-        emit("params_set", json!({ "coin_page": coin_page, "validity": validity, "withdraw_tgas": withdraw_tgas }));
+        emit("params_set", json!({ "validity": validity, "withdraw_tgas": withdraw_tgas }));
     }
 
     /// Proposes `new_owner`, who takes over on `accept_ownership`. Proposing again replaces it.
@@ -313,7 +323,6 @@ impl UtxoWithdraw {
             "mpc_signer": self.mpc_signer,
             "token": self.token,
             "connector": self.connector,
-            "coin_page": self.coin_page,
             "validity": self.validity,
             "withdraw_tgas": self.withdraw_gas.as_tgas(),
         })
@@ -345,15 +354,17 @@ impl UtxoWithdraw {
             )
     }
 
-    /// The whole transaction for a withdrawal of `balance` from `A`. Every number is computed here;
-    /// the connector re-checks each and accepts only this transaction.
+    /// The whole transaction for a withdrawal of `balance` from `A`, spending `coin` worth `value`.
+    /// Every number is computed here; the connector re-checks each and accepts only this
+    /// transaction.
     pub(crate) fn build_withdraw(
         &self,
         address: &str,
         key: [u8; 32],
         balance: u128,
         config: &ConnectorConfig,
-        coins: &BTreeMap<String, Utxo>,
+        coin: &str,
+        value: u128,
     ) -> (Delegate, Signed) {
         require!(config.chain == self.chain.connector_chain(), "ConnectorChainMismatch");
         require!(balance >= config.min_withdraw_amount.0, "BelowMinimum");
@@ -368,7 +379,7 @@ impl UtxoWithdraw {
             .unwrap_or_else(|| env::panic_str("BelowFees"));
 
         let need = user_out + fee;
-        let (input, value) = best_fit(coins, need, config.min_change_amount.0);
+        require!(fits(value, need, config.min_change_amount.0), "CoinDoesNotFit");
         let change = value - need;
 
         let mut outputs = vec![output(user_out, &self.chain.script(address))];
@@ -380,7 +391,7 @@ impl UtxoWithdraw {
             outputs.push(output(change, &self.chain.script(change_address)));
         }
 
-        let msg = withdraw_msg(address, &input, outputs, fee);
+        let msg = withdraw_msg(address, coin, outputs, fee);
         let args = json!({ "receiver_id": self.connector, "amount": U128(balance), "msg": msg });
         let account = implicit_account(&key);
         let delegate = Delegate {
@@ -399,7 +410,7 @@ impl UtxoWithdraw {
             account,
             address: address.to_string(),
             amount: Some(U128(balance)),
-            input: Some(input),
+            input: Some(coin.to_string()),
         };
         (delegate, info)
     }
@@ -433,7 +444,6 @@ impl UtxoWithdraw {
     }
 
     fn assert_params(&self) {
-        require!(self.coin_page > 0, "InvalidCoinPage");
         require!(self.validity > 0, "InvalidValidity");
         require!(self.withdraw_gas.as_tgas() > 0 && self.withdraw_gas.as_tgas() <= 290, "InvalidWithdrawGas");
     }
@@ -459,7 +469,7 @@ mod tests {
 
     const CONTRACT: &str = "zec-withdraw.hydration-whm.near";
     const CHANGE: &str = "t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ua";
-    const COIN: &str = "959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099";
+    const TXID: &str = "959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099";
     const KEY: [u8; 32] = [0xab; 32];
 
     fn set_ctx(predecessor: &str, deposit: u128, height: u64) {
@@ -480,9 +490,8 @@ mod tests {
             "v1.signer".parse().unwrap(),
             "zec.omft.near".parse().unwrap(),
             "zcash-connector.bridge.near".parse().unwrap(),
-            100,
             600,
-            250,
+            200,
         )
     }
 
@@ -496,8 +505,8 @@ mod tests {
         }
     }
 
-    fn coins(values: &[(&str, u128)]) -> BTreeMap<String, Utxo> {
-        values.iter().map(|(k, v)| (k.to_string(), Utxo { balance: U128(*v) })).collect()
+    fn coin() -> String {
+        format!("{TXID}:0")
     }
 
     /// The `Withdraw` msg inside a withdrawal delegate. Tests pay the change address itself, so both
@@ -510,8 +519,7 @@ mod tests {
     #[test]
     fn worked_example() {
         let c = contract();
-        let coins = coins(&[(&format!("{COIN}@0"), 7_002_606_605), ("small@0", 1_000)]);
-        let (d, info) = c.build_withdraw(CHANGE, KEY, 50_000_000, &live_config(), &coins);
+        let (d, info) = c.build_withdraw(CHANGE, KEY, 50_000_000, &live_config(), &coin(), 7_002_606_605);
 
         assert_eq!(d.sender_id.as_str(), "ab".repeat(32));
         assert_eq!(d.receiver_id.as_str(), "zec.omft.near");
@@ -526,7 +534,7 @@ mod tests {
 
         let w = &msg_of(&d)["Withdraw"];
         assert_eq!(w["target_btc_address"], CHANGE);
-        assert_eq!(w["input"], json!([format!("{COIN}:0")]));
+        assert_eq!(w["input"], json!([coin()]));
         assert_eq!(w["max_gas_fee"], "10000");
         let script = "76a91413bbd8bc8df03a5a9cda88103f583aa8bc043e2488ac";
         assert_eq!(
@@ -537,21 +545,35 @@ mod tests {
             ])
         );
         assert_eq!(info.amount, Some(U128(50_000_000)));
+        assert_eq!(info.input, Some(coin()));
     }
 
     #[test]
     fn exact_coin_has_no_change_output() {
         let c = contract();
-        let (d, _) = c.build_withdraw(CHANGE, KEY, 1_000_000, &live_config(), &coins(&[("x@1", 990_000)]));
+        let (d, _) = c.build_withdraw(CHANGE, KEY, 1_000_000, &live_config(), &coin(), 990_000);
         let w = &msg_of(&d)["Withdraw"];
         assert_eq!(w["output"].as_array().unwrap().len(), 1);
         assert_eq!(w["output"][0]["value"], 980_000u64);
     }
 
     #[test]
+    #[should_panic(expected = "CoinDoesNotFit")]
+    fn coin_too_small() {
+        contract().build_withdraw(CHANGE, KEY, 1_000_000, &live_config(), &coin(), 500_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "CoinDoesNotFit")]
+    fn coin_would_leave_dust_change() {
+        // need 990_000; 995_000 leaves 5_000 of change, under min_change_amount.
+        contract().build_withdraw(CHANGE, KEY, 1_000_000, &live_config(), &coin(), 995_000);
+    }
+
+    #[test]
     #[should_panic(expected = "BelowMinimum")]
     fn below_the_connector_minimum() {
-        contract().build_withdraw(CHANGE, KEY, 99_999, &live_config(), &coins(&[("x@0", 1 << 40)]));
+        contract().build_withdraw(CHANGE, KEY, 99_999, &live_config(), &coin(), 1 << 40);
     }
 
     #[test]
@@ -559,20 +581,21 @@ mod tests {
     fn wrong_connector() {
         let mut config = live_config();
         config.chain = "BitcoinMainnet".into();
-        contract().build_withdraw(CHANGE, KEY, 1_000_000, &config, &coins(&[("x@0", 1 << 40)]));
-    }
-
-    #[test]
-    #[should_panic(expected = "NoCoinFits")]
-    fn no_coin_on_the_page_covers() {
-        contract().build_withdraw(CHANGE, KEY, 1_000_000, &live_config(), &coins(&[("x@0", 500_000)]));
+        contract().build_withdraw(CHANGE, KEY, 1_000_000, &config, &coin(), 1 << 40);
     }
 
     #[test]
     #[should_panic(expected = "InvalidAddress")]
     fn withdraw_rejects_a_bad_address() {
         let mut c = contract();
-        let _ = c.withdraw("t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ub".into());
+        let _ = c.withdraw("t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ub".into(), coin());
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidCoin")]
+    fn withdraw_rejects_a_bad_coin_id() {
+        let mut c = contract();
+        let _ = c.withdraw(CHANGE.into(), format!("{TXID}@0"));
     }
 
     #[test]
@@ -580,7 +603,7 @@ mod tests {
     fn withdraw_needs_the_signer_deposit() {
         let mut c = contract();
         set_ctx(accounts(1).as_str(), 0, 1_000);
-        let _ = c.withdraw(CHANGE.into());
+        let _ = c.withdraw(CHANGE.into(), coin());
     }
 
     #[test]
@@ -611,7 +634,7 @@ mod tests {
     fn only_the_owner_sets_params() {
         let mut c = contract();
         set_ctx(accounts(1).as_str(), 1, 1_000);
-        c.set_params(50, 600, 250);
+        c.set_params(600, 200);
     }
 
     #[test]

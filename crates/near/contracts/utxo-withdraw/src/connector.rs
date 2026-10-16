@@ -31,7 +31,8 @@ pub struct ConnectorConfig {
     pub min_withdraw_amount: U128,
 }
 
-/// A connector coin, as `get_utxos_paged` returns it.
+/// A connector coin, as `list_utxos` returns it. Its `tx_bytes` — the source transaction, up to
+/// ~9 KB — is ignored, and is why the contract reads one named coin, never a page of them.
 #[near(serializers = [json])]
 pub struct Utxo {
     pub balance: U128,
@@ -40,7 +41,7 @@ pub struct Utxo {
 #[ext_contract(ext_connector)]
 pub trait Connector {
     fn get_config(&self) -> ConnectorConfig;
-    fn get_utxos_paged(&self, from_index: Option<u64>, limit: Option<u64>) -> BTreeMap<String, Utxo>;
+    fn list_utxos(&self, utxo_storage_keys: Vec<String>) -> BTreeMap<String, Option<Utxo>>;
 }
 
 #[ext_contract(ext_ft)]
@@ -54,17 +55,22 @@ impl BridgeFee {
     }
 }
 
-/// Best fit: the smallest coin that pays `need` exactly or leaves change of at least `min_change`.
-/// Ties go to the lowest key, so the pick is deterministic. Returns the coin as the `Withdraw`
-/// message names it, `txid:vout` (the connector keys coins `txid@vout`), and its value.
-pub fn best_fit(coins: &BTreeMap<String, Utxo>, need: u128, min_change: u128) -> (String, u128) {
-    coins
-        .iter()
-        .map(|(key, coin)| (key, coin.balance.0))
-        .filter(|&(_, value)| value == need || value >= need.saturating_add(min_change))
-        .min_by_key(|&(key, value)| (value, key.clone()))
-        .map(|(key, value)| (key.replacen('@', ":", 1), value))
-        .unwrap_or_else(|| env::panic_str("NoCoinFits"))
+/// A coin of `value` can pay `need` alone: exactly, or with change of at least `min_change` (the
+/// connector rejects smaller change).
+pub fn fits(value: u128, need: u128, min_change: u128) -> bool {
+    value == need || value >= need.saturating_add(min_change)
+}
+
+/// `txid:vout` — as the `Withdraw` message names a coin — to the connector's storage key,
+/// `txid@vout`. Panics `InvalidCoin` on anything else.
+pub fn coin_key(coin: &str) -> String {
+    let (txid, vout) = coin.split_once(':').unwrap_or_else(|| env::panic_str("InvalidCoin"));
+    let txid_ok = txid.len() == 64 && txid.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    let vout_ok = !vout.is_empty() && vout.len() <= 10 && vout.bytes().all(|b| b.is_ascii_digit());
+    if !txid_ok || !vout_ok || vout.parse::<u32>().is_err() {
+        env::panic_str("InvalidCoin");
+    }
+    format!("{txid}@{vout}")
 }
 
 /// One transaction output, as the connector's `TxOut` deserializes it.
@@ -94,39 +100,37 @@ pub fn withdraw_msg(
 mod tests {
     use super::*;
 
-    fn coins(values: &[(&str, u128)]) -> BTreeMap<String, Utxo> {
-        values.iter().map(|(k, v)| (k.to_string(), Utxo { balance: U128(*v) })).collect()
+    #[test]
+    fn fit_rules() {
+        assert!(fits(1_500, 1_500, 100)); // exact, no change
+        assert!(fits(1_600, 1_500, 100)); // change at the minimum
+        assert!(!fits(1_550, 1_500, 100)); // dust change
+        assert!(!fits(1_000, 1_500, 100)); // too small
     }
 
     #[test]
-    fn smallest_coin_that_covers() {
-        let c = coins(&[("a@0", 9_000), ("b@1", 1_000), ("c@0", 2_000), ("d@2", 5_000)]);
-        assert_eq!(best_fit(&c, 1_500, 100), ("c:0".into(), 2_000));
+    fn coin_ids() {
+        let txid = "959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099";
+        assert_eq!(coin_key(&format!("{txid}:0")), format!("{txid}@0"));
+        assert_eq!(coin_key(&format!("{txid}:12")), format!("{txid}@12"));
     }
 
     #[test]
-    fn exact_match_needs_no_change() {
-        let c = coins(&[("a@0", 1_550), ("b@0", 1_500)]);
-        // 1_550 leaves dust change of 50; 1_500 is exact.
-        assert_eq!(best_fit(&c, 1_500, 100), ("b:0".into(), 1_500));
+    #[should_panic(expected = "InvalidCoin")]
+    fn coin_id_needs_a_colon() {
+        coin_key("959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099@0");
     }
 
     #[test]
-    fn dust_change_is_skipped() {
-        let c = coins(&[("a@0", 1_550), ("b@0", 1_700)]);
-        assert_eq!(best_fit(&c, 1_500, 100), ("b:0".into(), 1_700));
+    #[should_panic(expected = "InvalidCoin")]
+    fn coin_id_needs_lowercase_hex() {
+        coin_key("959B9355B4157E21C927F3B1850B969AD80828125AA676B418031A25F641C099:0");
     }
 
     #[test]
-    fn ties_go_to_the_lowest_key() {
-        let c = coins(&[("b@0", 2_000), ("a@0", 2_000)]);
-        assert_eq!(best_fit(&c, 1_500, 100).0, "a:0");
-    }
-
-    #[test]
-    #[should_panic(expected = "NoCoinFits")]
-    fn nothing_covers() {
-        best_fit(&coins(&[("a@0", 1_000)]), 1_500, 100);
+    #[should_panic(expected = "InvalidCoin")]
+    fn coin_id_vout_is_a_u32() {
+        coin_key("959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099:4294967296");
     }
 
     #[test]
@@ -151,10 +155,10 @@ mod tests {
     #[test]
     fn coins_parse_the_live_shape() {
         let live = r#"{"959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099@0":
-            {"path":"abb17a0b","tx_bytes":[],"vout":0,"balance":"7002606605"}}"#;
-        let c: BTreeMap<String, Utxo> = serde_json::from_str(live).unwrap();
-        let (input, value) = best_fit(&c, 49_990_000, 10_000);
-        assert_eq!(input, "959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099:0");
-        assert_eq!(value, 7_002_606_605);
+            {"path":"abb17a0b","tx_bytes":[4,0,0,128],"vout":0,"balance":"7002606605"},
+            "0000000000000000000000000000000000000000000000000000000000000000@1":null}"#;
+        let c: BTreeMap<String, Option<Utxo>> = serde_json::from_str(live).unwrap();
+        let key = coin_key("959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099:0");
+        assert_eq!(c[&key].as_ref().unwrap().balance, U128(7_002_606_605));
     }
 }

@@ -9,7 +9,7 @@ token. Its wire format is byte-for-byte EVM NTT, so the Hydration side is unmodi
 
 Design: [docs/near-ntt/spec.md](../../docs/near-ntt/spec.md) · pre-implementation checks:
 [verify.md](../../docs/near-ntt/verify.md) · build log: [progress.md](../../docs/near-ntt/progress.md) ·
-BTC / ZEC from their own chains: [omft-routing.md](../../docs/near-ntt/omft-routing.md).
+BTC / ZEC from their own chains: [utxo-deposit.md](../../docs/near-ntt/utxo-deposit.md).
 
 ## Layout
 
@@ -35,6 +35,7 @@ sandbox/                   end-to-end tests on a NEAR sandbox (near-workspaces)
   forge/                   EVM check: a NEAR-published payload through the real TransceiverStructs
   tests/delegate.rs        utxo-withdraw's delegate encoding against nearcore's own types
 scripts/ntt-manager/       user scripts + local fork
+scripts/utxo-withdraw/     derive a withdraw account; sign and relay a withdraw or claim (the bot's job)
 ```
 
 Deployment is [`migrations/definitions/near-ntt-{zec,near}`](../../migrations/definitions/) — NEAR

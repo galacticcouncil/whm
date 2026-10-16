@@ -1,4 +1,4 @@
-# ZEC Hydration → Zcash through a derived NEAR account
+# UTXO withdraw — ZEC Hydration → Zcash through a derived NEAR account
 
 How a Hydration user sends ZEC back to a Zcash address with **one Hydration call**, no NEAR account
 and no third party. The call makes an NTT transfer that lands `zec.omft.near` on a NEAR account `A`
@@ -9,7 +9,7 @@ Researched 2026-10-16. **[V]** verified in code, on chain or by a live call; **[
 
 ## Why
 
-Zcash → Hydration is one transfer today ([omft-routing.md](omft-routing.md)). The way back is not:
+Zcash → Hydration is one transfer today ([utxo-deposit.md](utxo-deposit.md)). The way back is not:
 Hydration → NEAR NTT ([spec.md § Inbound](spec.md#inbound--hydration--near)) pays a NEAR account,
 and the user ends up holding `zec.omft.near` there. The current fix routes the NTT transfer to a
 1Click deposit address, which works but:
@@ -29,10 +29,10 @@ only ever send it to their address.
   transfer to `sha256(A)` and emits the address, keyed on the NTT sequence. The NTT message carries
   only `sha256(A)`, which cannot be inverted — the event is how the bot learns what to relay, from
   chain alone.
-- **New: `ZecWithdraw`** at `zec-withdraw.hydration-whm.near`, stateless, DAO-upgradeable like the NTT
+- **New: `UtxoWithdraw`** at `zec-withdraw.hydration-whm.near`, stateless, DAO-upgradeable like the NTT
   manager. Two methods, each signing one fixed NEAR meta-transaction for `A`.
-- **New: a bot** (no authority) redeems the NTT VAA for `A`, calls `withdraw(address)` and submits
-  the signed result, paying the NEAR gas.
+- **New: a bot** (no authority) redeems the NTT VAA for `A`, picks the connector coin to spend, calls
+  `withdraw(address, coin)` and submits the signed result, paying the NEAR gas.
 - **No refund.** Funds in `A` can only leave to the address in the terms; every failure puts them
   back in `A` for the next attempt.
 
@@ -43,7 +43,7 @@ app      address → path → A (view: v1.signer.derived_public_key)       valid
 user     ZecWithdrawEmitter.send(amount, address, A)                    NTT transfer to sha256(A) + WithdrawRequested
 bot      NTT VAA (ZEC transceiver → NEAR) paired with the event by seq  checks derive(address) == A
 bot      ntt-zec.complete(vaa, A)                                       zec.omft.near lands on A
-bot      zec-withdraw.withdraw(address)                                 MPC signs a delegate action for A
+bot      zec-withdraw.withdraw(address, coin)                           MPC signs a delegate action for A
 bot      tx { receiver: A, actions: [SignedDelegate] }                  A → zec.omft.near.ft_transfer_call(connector, Withdraw)
 Omni     relayer signs and broadcasts the Zcash tx, verifies it         address receives ZEC
 ```
@@ -54,7 +54,7 @@ Omni     relayer signs and broadcasts the Zcash tx, verifies it         address 
 | User | `ZecWithdrawEmitter.send` on Hydration | Hydration gas; NTT delivery price to NEAR is 0 **[V]** |
 | `ZecWithdrawEmitter` | pulls ZEC, NTT transfer, emits the address | — |
 | Bot | `complete`, creates `A` once, `withdraw`, submits the delegate | NEAR gas, `A`'s token storage (0.00125 NEAR once), 1 yocto per call |
-| `ZecWithdraw` | derives `A`, builds and MPC-signs the delegate | — |
+| `UtxoWithdraw` | derives `A`, builds and MPC-signs the delegate | — |
 | Omni connector | validates the withdrawal, signs the Zcash tx through its own MPC, burns | bridge fee and Zcash fee, out of the amount |
 
 ## Terms → `A`
@@ -126,7 +126,7 @@ event WithdrawRequested(uint64 indexed sequence, bytes32 indexed nearAccount, ad
 - UUPS like the other Hydration contracts; config is the manager and the token. Its migration follows
   the usual deploy → wire → ownership order.
 
-## `ZecWithdraw`
+## `UtxoWithdraw`
 
 Implemented as the generic `utxo-withdraw` contract
 ([crates/near/contracts/utxo-withdraw](../../crates/near/contracts/utxo-withdraw)), one deployment per
@@ -143,7 +143,6 @@ pub struct UtxoWithdraw {
     mpc_signer:     AccountId,   // v1.signer
     token:          AccountId,   // zec.omft.near
     connector:      AccountId,   // zcash-connector.bridge.near
-    coin_page:      u64,         // how many connector coins to read when picking one — 100
     validity:       u64,         // blocks a signed delegate stays valid
     withdraw_gas:   Gas,         // gas for the inner ft_transfer_call
 }
@@ -152,34 +151,34 @@ FEE = chain.miner_fee(1, 2)      // Zcash: ZIP-317 for 1 input and ≤ 2 outputs
 
 #[near]
 impl UtxoWithdraw {
-    /// Sign A's withdrawal of its whole balance to `address`. Permissionless; 1 yocto (MPC deposit).
-    #[payable] pub fn withdraw(&mut self, address: String) -> Promise;
+    /// Sign A's withdrawal of its whole balance to `address`, spending the connector coin `coin`
+    /// (`txid:vout`). Permissionless; 1 yocto (MPC deposit).
+    #[payable] pub fn withdraw(&mut self, address: String, coin: String) -> Promise;
     /// Sign A's `claim_lost_found` on the connector. Permissionless; 1 yocto.
     #[payable] pub fn claim(&mut self, address: String) -> Promise;
     // private callbacks; owner: config, upgrade, two-step ownership
 }
 ```
 
-### `withdraw(address)`
+### `withdraw(address, coin)`
 
-One argument, the terms. The contract reads everything else and computes every number:
+The terms, and which of Omni's coins to spend. The contract reads the rest and computes every number:
 
 ```
-validate address (t1/t3, mainnet)                                  else panic
+validate address (t1/t3, mainnet); coin is "txid:vout"            else panic
 path = "zcash:v1:" + address
 v1.signer.derived_public_key({ path, predecessor: self, domain_id: 1 })
 → on_key:  A = hex(key)
    ├─ zec.omft.near.ft_balance_of(A)                                          ┐
    ├─ connector.get_config()                    withdraw fee, change address, │ joint
    │                                            min_change_amount             │
-   └─ connector.get_utxos_paged(0, coin_page)   Omni's coins and their values ┘
+   └─ connector.list_utxos([coin])              that coin's value             ┘
 → on_reads
    amount      = balance(A)                                       whole balance
    bridge_fee  = max(amount × fee_rate / 10,000, fee_min)         the connector's own formula
    user_out    = amount − bridge_fee − FEE                        require > 0
-   coin        = best fit: the smallest coin on the page with
-                 value == user_out + FEE
-                 or value ≥ user_out + FEE + min_change_amount    else panic: wait for the next attempt
+   require coin.value == user_out + FEE
+        or coin.value ≥ user_out + FEE + min_change_amount       else panic: the caller picks another
    change      = coin.value − user_out − FEE                      omitted if 0
    output      = [ { user_out, script(address) }, { change, script(change_address) } ]
    delegate = DelegateAction {
@@ -203,7 +202,14 @@ v1.signer.derived_public_key({ path, predecessor: self, domain_id: 1 })
 (UTXOs), each spent whole, so a withdrawal names the one it spends and returns the rest to the
 connector as change. A coin is named by its id `txid:vout` — the transaction that created it and
 which output it was — and carries no amount: the connector looks its value up in its own records.
-`get_utxos_paged` keys them `txid@vout`; the `Withdraw` message takes `txid:vout`.
+The connector keys them `txid@vout`; the `Withdraw` message takes `txid:vout`.
+
+**Why the caller names the coin.** Every coin the connector returns carries `tx_bytes`, the full
+transaction that created it (up to ~9 KB, as a JSON number array). A page of them is 50–100 KB per 10
+coins **[V 2026-10-16]**: 49 testnet coins came to 499 KB and ran a 69 TGas `get_utxos_paged` out of
+gas on testnet; 100 mainnet coins are 449 KB. Picking on chain would not fit a transaction, and a
+small page would always be the same few oldest coins. So the bot picks off-chain over the whole set
+(a free view), and the contract reads only that coin with `list_utxos`.
 
 **Worked example** (a live connector coin): `A` holds 0.5 ZEC; the coin `959b…c099:0` holds
 7,002,606,605 zat.
@@ -221,8 +227,8 @@ which output it was — and carries no amount: the connector looks its value up 
 Deriving it locally from the root key (as Omni's connector does, `kdf.rs`) would save one hop at the
 cost of curve code in the contract; not done.
 
-**The caller controls nothing but the address**, which fixes `A`. Amount, coin, user output, fee,
-change, target, nonce and expiry all come from the contract:
+**The caller controls the address**, which fixes `A`, **and which coin to spend** — an id, not a
+number. Amount, user output, fee, change, target, nonce and expiry all come from the contract:
 
 - **The user output and the fee are exact.** `coin = user output + change + fee`, with the coin's
   value, the user output and the fee all fixed — so the change is fixed too. The connector re-checks
@@ -231,16 +237,16 @@ change, target, nonce and expiry all come from the contract:
   output; fee ≥ the ZIP-317 minimum and ≤ our `max_gas_fee` = `FEE` **[V `remove_vutxo_by_psbt`,
   `check_withdraw_psbt`, deployed commit `d2140eca`]**.
 - **Which coin is spent is Omni's business.** It changes only which part of Omni's reserve moves;
-  the user output is the same.
+  the user output is the same. An unknown coin panics in the contract (`UnknownCoin`), one that does
+  not fit (`CoinDoesNotFit`), one already taken in the connector — each before anything moves.
 - **One coin, so the fee never varies.** The live set **[V 2026-10-16]** is 1,020 coins holding
-  145,222 ZEC: median 82 ZEC, largest 8,480 ZEC, then 495, 491, 360, 350. The first page of 100
-  (`coin_page`) includes the 8,480 ZEC coin, so a single coin covers any withdrawal up to that; a
-  larger one fails and is retried. A single input also satisfies the connector's rule that change be
+  145,222 ZEC: median 82 ZEC, largest 8,480 ZEC, then 495, 491, 360, 350. A single coin covers any
+  withdrawal up to the largest, 8,480 ZEC; a larger one cannot be built and waits. A single input also satisfies the connector's rule that change be
   smaller than the smallest input.
-- **Best fit, not largest.** A coin is locked while a withdrawal spending it is pending. Always taking
-  the largest would send every withdrawal to the same coin and fail all but one. The smallest coin
-  that covers spreads withdrawals across coins, keeps the big ones free for big withdrawals, and moves
-  the least of Omni's reserve.
+- **The bot picks best fit, not largest.** A coin is locked while a withdrawal spending it is
+  pending. Always taking the largest would send every withdrawal to the same coin and fail all but
+  one. The smallest coin that covers spreads withdrawals across coins, keeps the big ones free for big
+  withdrawals, and moves the least of Omni's reserve.
 - **Races only fail.** Two withdrawals of similar size in the same block can pick the same coin: one goes through,
   the other panics in the connector and `A` is refunded in full. The connector moves a spent coin out
   of its available set, so the next attempt picks another. Above `passive_management_upper_limit`
@@ -264,7 +270,7 @@ no arguments. Reachable only when the connector cancels a withdrawal and its ref
 ### The invariant
 
 > Every path to `v1.signer.sign` signs one of these two delegate actions, built from the address
-> (which fixes `A`), the clock and reads of `A`'s balance and the connector. Nothing else: no admin
+> (which fixes `A`), the coin id, the clock and reads of `A`'s balance and the connector. Nothing else: no admin
 > sign, no generic `sign(payload)`, no debug helper, no public callback.
 
 `A`'s key is a full-access key, so this contract is the whole of `A`'s security. Derivation binds to the
@@ -280,8 +286,10 @@ watch     ZEC transceiver VAAs to NEAR (chain 15); for each, the WithdrawRequest
 check     sha256(hex(nearAccount)) == VAA recipient and derive(zcashAddress) == nearAccount, else alert
 redeem    ntt-zec.complete(vaa, A)                         deposit ≥ 0.00125 + 0.005 NEAR, excess refunded
 create    if A has no account: Transfer(1 yocto) to A       once
+coin      best fit over the connector's whole set (get_utxos_paged, paged — a free view): the
+          smallest coin paying user_out + FEE exactly or leaving change ≥ min_change_amount
 sign      balance(A) ≥ min_withdraw_amount and A has no pending sign on the connector →
-          zec-withdraw.withdraw(address), 1 yocto          read the signed delegate from the event
+          zec-withdraw.withdraw(address, coin), 1 yocto    read the signed delegate from the event
 submit    tx { signer: bot, receiver: A, actions: [Delegate(signed)] }
 follow    connector GenerateBtcPendingInfo for A → Omni signs, broadcasts, verify_withdraw_v2
 ```
@@ -343,26 +351,26 @@ A balance under the minimum waits in `A` until the next transfer tops it up.
 
 ## Compared with 1Click
 
-| | 1Click (now) | `ZecWithdraw` |
+| | 1Click (now) | `UtxoWithdraw` |
 | --- | --- | --- |
 | Deposit target | 1Click deposit address, new per quote | `A`, one per Zcash address, reused |
 | Who moves the funds | 1Click + a solver | Omni's connector, which already backs `zec.omft.near` |
 | On failure | refund to a NEAR account the user did not need | funds stay in `A`, next attempt |
-| Trust added | 1Click, solver liveness | `ZecWithdraw` (DAO), MPC network |
+| Trust added | 1Click, solver liveness | `UtxoWithdraw` (DAO), MPC network |
 
 ## Trust
 
 Wormhole guardians and the NTT manager (as for every NTT transfer); Omni's Zcash connector and its
 DAO `rainbowbridge.sputnik-dao.near`, plus its trusted relayer for liveness — already trusted, since
 the connector custodies the native ZEC behind `zec.omft.near`; the NEAR MPC network; the
-`ZecWithdraw` DAO, which can upgrade the contract and so controls every `A`.
+`UtxoWithdraw` DAO, which can upgrade the contract and so controls every `A`.
 
 ## Open
 
 1. **Gas.** The SDK attaches 100 TGas to `ft_transfer_call`, but the connector's `ft_on_transfer`
    schedules a light-client read and a 100 TGas static callback. Measure on the mainnet wasm; size
    `withdraw_gas`, and the bot's outer transaction, from the result.
-2. **`derived_public_key` called cross-contract** from `ZecWithdraw` — a view method, expected to work
+2. **`derived_public_key` called cross-contract** from `UtxoWithdraw` — a view method, expected to work
    as a plain function call; confirm in the sandbox.
 3. **Sandbox.** Mainnet wasm of `zec.omft.near`, `zcash-connector.bridge.near` and our `ntt-zec`; an
    Ed25519 mock signer; the delegate executed end to end, including the failure refund and

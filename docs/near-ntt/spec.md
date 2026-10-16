@@ -176,7 +176,7 @@ token.ft_transfer_call(
 
 `refund_to` is optional: who a failed publish pays back, `sender_id` if absent. It is for senders
 whose plain token balance credits no one — `intents.near.ft_withdraw`, an Omni connector — see
-[omft-routing.md](omft-routing.md). It must be registered on the token: a refund it cannot take is
+[utxo-deposit.md](utxo-deposit.md). It must be registered on the token: a refund it cannot take is
 credited to the **sender**'s `claimable`, never to `refund_to` — otherwise anyone could name a fresh,
 unregistered account per transfer and make the contract pay a new entry for each.
 
@@ -408,7 +408,7 @@ before mainnet regardless.
   does it from the Hydration transceiver's emitter and sequence, or a raw VAA.
 - **From Bitcoin or Zcash.** A user pays a deposit address on their own chain — one plain transfer,
   no NEAR account. Omni's connector mints nBTC / ZEC straight into the manager with our `msg`. See
-  [omft-routing.md](omft-routing.md).
+  [utxo-deposit.md](utxo-deposit.md).
 
 **For integrators.** `complete`, `release_inbound` and `claim` return chains that always end in
 success — a failed pay-out lands in `claimable`, a failed `on_verified` is refunded — so a contract
