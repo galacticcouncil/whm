@@ -100,7 +100,7 @@ For us:
 | Bridge fee (safe deposit) | **[I]** — config `fee_min` 400 sat | none **[V in code]**   |
 | Deposit address check | `bc1qvxag…` for an `ntt-btc` order | `t1LdHrV7…` for an `ntt-zec` order |
 
-Each Hydration asset is backed by exactly one NEAR token (spec.md § Hub): the BTC asset by nBTC,
+Each Hydration asset is backed by exactly one NEAR token ([near-ntt spec § Hub](../near-ntt/spec.md#hub)): the BTC asset by nBTC,
 never also by `btc.omft.near`.
 
 ## What the NTT manager must guarantee

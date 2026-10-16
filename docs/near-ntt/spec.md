@@ -13,8 +13,7 @@ guardians observe every message it publishes.
 
 The Hydration side is an unmodified NTT deployment. Only the NEAR contract is new.
 
-The two-hop Omni → Solana → NTT corridor in [../near-omni/spec.md](../near-omni/spec.md) was the
-alternative; it was never built. The two cannot feed the same Hydration token — see [Hub](#hub).
+A two-hop Omni → Solana → NTT corridor was the alternative; it was never built. The two cannot feed the same Hydration token — see [Hub](#hub).
 
 ## Scope
 
@@ -176,7 +175,7 @@ token.ft_transfer_call(
 
 `refund_to` is optional: who a failed publish pays back, `sender_id` if absent. It is for senders
 whose plain token balance credits no one — `intents.near.ft_withdraw`, an Omni connector — see
-[utxo-deposit.md](utxo-deposit.md). It must be registered on the token: a refund it cannot take is
+[near-utxo/deposit.md](../near-utxo/deposit.md). It must be registered on the token: a refund it cannot take is
 credited to the **sender**'s `claimable`, never to `refund_to` — otherwise anyone could name a fresh,
 unregistered account per transfer and make the contract pay a new entry for each.
 
@@ -408,7 +407,7 @@ before mainnet regardless.
   does it from the Hydration transceiver's emitter and sequence, or a raw VAA.
 - **From Bitcoin or Zcash.** A user pays a deposit address on their own chain — one plain transfer,
   no NEAR account. Omni's connector mints nBTC / ZEC straight into the manager with our `msg`. See
-  [utxo-deposit.md](utxo-deposit.md).
+  [near-utxo/deposit.md](../near-utxo/deposit.md).
 
 **For integrators.** `complete`, `release_inbound` and `claim` return chains that always end in
 success — a failed pay-out lands in `claimable`, a failed `on_verified` is refunded — so a contract

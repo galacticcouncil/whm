@@ -9,8 +9,8 @@ Researched 2026-10-16. **[V]** verified in code, on chain or by a live call; **[
 
 ## Why
 
-Zcash → Hydration is one transfer today ([utxo-deposit.md](utxo-deposit.md)). The way back is not:
-Hydration → NEAR NTT ([spec.md § Inbound](spec.md#inbound--hydration--near)) pays a NEAR account,
+Zcash → Hydration is one transfer today ([deposit.md](deposit.md)). The way back is not:
+Hydration → NEAR NTT ([spec.md § Inbound](../near-ntt/spec.md#inbound--hydration--near)) pays a NEAR account,
 and the user ends up holding `zec.omft.near` there. The current fix routes the NTT transfer to a
 1Click deposit address, which works but:
 
