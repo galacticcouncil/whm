@@ -1,0 +1,11 @@
+{
+  "contract": "GovernanceDispatcher",
+  "address": "0xfddb5acb121a6abab4919cfc1672250697163bed",
+  "deploymentTransaction": "0x6c2cf20f5a496ec2d1a3879ec71bcaedd38f1de6f9099678beb90edfe3dec0df",
+  "url": "https://hydration-explorer.neckwork.net/api/v2/contract/222222/0xfddb5acb121a6abab4919cfc1672250697163bed",
+  "match": "exact_match",
+  "creationMatch": "exact_match",
+  "runtimeMatch": "exact_match",
+  "chainId": "222222",
+  "checkedAt": "2026-10-15T13:28:52.709Z"
+}
