@@ -15,7 +15,8 @@
 //!                       → v1.signer.sign(sha256 of the delegate action)
 //!                            → on_signed: emit the SignedDelegateAction
 //! claim(address)
-//!   → derived_public_key → on_key: claim_lost_found delegate → sign → on_signed
+//!   → derived_public_key → on_key → connector.list_lost_found([A])
+//!        → on_lost_found: only if A has an entry, the claim_lost_found delegate → sign → on_signed
 //! ```
 //!
 //! Nothing is stored per account and nothing is held: the contract only signs, for `A`, one of two
@@ -27,8 +28,10 @@
 //! connector's coin set on chain is too expensive (each coin carries its source transaction).
 //!
 //! **The invariant.** Every path to `sign` signs a delegate built from the address (which fixes
-//! `A`), the coin id, the clock, and reads of `A`'s balance and the connector. No admin sign, no
-//! generic `sign(payload)`, no public callback.
+//! `A`), the coin id, the clock, and reads of `A`'s balance and the connector — and only one that
+//! does something: a withdrawal of a balance at the minimum or above, or a claim of an existing
+//! `lost_found` entry. A no-op delegate would still consume `A`'s nonce and cancel the bot's pending
+//! one. No admin sign, no generic `sign(payload)`, no public callback.
 
 pub mod chain;
 /// Per-chain logic, one module each; `chain::Chain` dispatches to them.
@@ -58,10 +61,18 @@ pub const GAS_FOR_COIN: Gas = Gas::from_tgas(15);
 /// `v1.signer` requires 15 TGas attached; the rest covers its yield callback.
 pub const GAS_FOR_SIGN: Gas = Gas::from_tgas(30);
 pub const GAS_FOR_ON_SIGNED: Gas = Gas::from_tgas(10);
+pub const GAS_FOR_LOST_FOUND: Gas = Gas::from_tgas(5);
+/// `on_lost_found`'s own work, then the sign it schedules.
+pub const GAS_FOR_ON_LOST_FOUND: Gas = Gas::from_tgas(10 + 30 + 10);
 /// `on_reads`' own work, then the sign it schedules.
 pub const GAS_FOR_ON_READS: Gas = Gas::from_tgas(30 + 30 + 10);
 /// `on_key`'s own work, the joint reads and `on_reads` — the larger of its two branches.
 pub const GAS_FOR_ON_KEY: Gas = Gas::from_tgas(10 + 5 + 10 + 15 + 70);
+
+/// Upper bound on `validity`. A signed delegate needs only the few blocks a relay takes; one that
+/// lives longer can be held and relayed after the next transfer lands, splitting that balance into
+/// extra withdrawals the user pays fees on.
+pub const MAX_VALIDITY: u64 = 100;
 
 /// `migrate` on the new code, in the same batch as its deploy.
 pub const GAS_FOR_MIGRATE: Gas = Gas::from_tgas(50);
@@ -146,7 +157,7 @@ impl UtxoWithdraw {
     }
 
     /// Signs `A`'s `claim_lost_found` on the connector — tokens a cancelled withdrawal could not
-    /// refund come back to `A`. Same terms as `withdraw`.
+    /// refund come back to `A`. Same terms as `withdraw`; signs only when `A` has an entry.
     #[payable]
     pub fn claim(&mut self, address: String) -> Promise {
         self.derive(address, Kind::Claim)
@@ -177,22 +188,29 @@ impl UtxoWithdraw {
                         .with_static_gas(GAS_FOR_ON_READS)
                         .on_reads(address, hex::encode(key), coin),
                 ),
-            Kind::Claim => {
-                let delegate = Delegate {
-                    sender_id: account.clone(),
-                    receiver_id: self.connector.clone(),
-                    method_name: "claim_lost_found",
-                    args: b"{}".to_vec(),
-                    gas: self.withdraw_gas,
-                    deposit: ONE_YOCTO,
-                    nonce: env::block_height() * NONCE_MULTIPLIER,
-                    max_block_height: env::block_height() + self.validity,
-                    public_key: key,
-                };
-                let info = Signed { action: "claim".into(), account, address: address.clone(), amount: None, input: None };
-                self.sign(&address, delegate, info)
-            }
+            Kind::Claim => ext_connector::ext(self.connector.clone())
+                .with_static_gas(GAS_FOR_LOST_FOUND)
+                .list_lost_found(vec![account])
+                .then(
+                    Self::ext(env::current_account_id())
+                        .with_static_gas(GAS_FOR_ON_LOST_FOUND)
+                        .on_lost_found(address, hex::encode(key)),
+                ),
         }
+    }
+
+    /// Signs the claim only when the connector holds a `lost_found` entry for `A`.
+    #[private]
+    pub fn on_lost_found(
+        &mut self,
+        address: String,
+        key: String,
+        #[callback_result] entries: Result<BTreeMap<AccountId, Option<U128>>, PromiseError>,
+    ) -> Promise {
+        let key: [u8; 32] = parse_hex32(&key);
+        let entries = entries.unwrap_or_else(|_| env::panic_str("LostFoundReadFailed"));
+        let (delegate, info) = self.build_claim(&address, key, &entries);
+        self.sign(&address, delegate, info)
     }
 
     #[private]
@@ -415,6 +433,35 @@ impl UtxoWithdraw {
         (delegate, info)
     }
 
+    /// `A`'s `claim_lost_found`, if the connector holds an entry for it — else `NothingToClaim`.
+    pub(crate) fn build_claim(
+        &self,
+        address: &str,
+        key: [u8; 32],
+        entries: &BTreeMap<AccountId, Option<U128>>,
+    ) -> (Delegate, Signed) {
+        let account = implicit_account(&key);
+        let amount = entries
+            .get(&account)
+            .copied()
+            .flatten()
+            .filter(|a| a.0 > 0)
+            .unwrap_or_else(|| env::panic_str("NothingToClaim"));
+        let delegate = Delegate {
+            sender_id: account.clone(),
+            receiver_id: self.connector.clone(),
+            method_name: "claim_lost_found",
+            args: b"{}".to_vec(),
+            gas: self.withdraw_gas,
+            deposit: ONE_YOCTO,
+            nonce: env::block_height() * NONCE_MULTIPLIER,
+            max_block_height: env::block_height() + self.validity,
+            public_key: key,
+        };
+        let info = Signed { action: "claim".into(), account, address: address.to_string(), amount: Some(amount), input: None };
+        (delegate, info)
+    }
+
     fn sign(&self, address: &str, delegate: Delegate, info: Signed) -> Promise {
         let bytes = delegate.encode();
         let hash = signing_hash(&bytes);
@@ -444,7 +491,7 @@ impl UtxoWithdraw {
     }
 
     fn assert_params(&self) {
-        require!(self.validity > 0, "InvalidValidity");
+        require!(self.validity > 0 && self.validity <= MAX_VALIDITY, "InvalidValidity");
         require!(self.withdraw_gas.as_tgas() > 0 && self.withdraw_gas.as_tgas() <= 290, "InvalidWithdrawGas");
     }
 }
@@ -490,7 +537,7 @@ mod tests {
             "v1.signer".parse().unwrap(),
             "zec.omft.near".parse().unwrap(),
             "zcash-connector.bridge.near".parse().unwrap(),
-            600,
+            100,
             200,
         )
     }
@@ -526,7 +573,7 @@ mod tests {
         assert_eq!(d.method_name, "ft_transfer_call");
         assert_eq!(d.deposit, ONE_YOCTO);
         assert_eq!(d.nonce, 1_000 * NONCE_MULTIPLIER);
-        assert_eq!(d.max_block_height, 1_600);
+        assert_eq!(d.max_block_height, 1_100);
 
         let args: serde_json::Value = serde_json::from_slice(&d.args).unwrap();
         assert_eq!(args["receiver_id"], "zcash-connector.bridge.near");
@@ -634,7 +681,52 @@ mod tests {
     fn only_the_owner_sets_params() {
         let mut c = contract();
         set_ctx(accounts(1).as_str(), 1, 1_000);
-        c.set_params(600, 200);
+        c.set_params(100, 200);
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidValidity")]
+    fn validity_is_capped() {
+        contract().set_params(MAX_VALIDITY + 1, 200);
+    }
+
+    #[test]
+    fn validity_at_the_cap() {
+        let mut c = contract();
+        c.set_params(MAX_VALIDITY, 200);
+        assert_eq!(c.get_params()["validity"], MAX_VALIDITY);
+    }
+
+    fn lost_found(amount: Option<u128>) -> BTreeMap<AccountId, Option<U128>> {
+        [(implicit_account(&KEY), amount.map(U128))].into_iter().collect()
+    }
+
+    #[test]
+    fn claim_signs_an_existing_entry() {
+        let (d, info) = contract().build_claim(CHANGE, KEY, &lost_found(Some(5_000)));
+        assert_eq!(d.receiver_id.as_str(), "zcash-connector.bridge.near");
+        assert_eq!(d.method_name, "claim_lost_found");
+        assert_eq!(d.deposit, ONE_YOCTO);
+        assert_eq!(info.amount, Some(U128(5_000)));
+    }
+
+    #[test]
+    #[should_panic(expected = "NothingToClaim")]
+    fn claim_refuses_without_an_entry() {
+        contract().build_claim(CHANGE, KEY, &lost_found(None));
+    }
+
+    #[test]
+    #[should_panic(expected = "NothingToClaim")]
+    fn claim_refuses_a_zero_entry() {
+        contract().build_claim(CHANGE, KEY, &lost_found(Some(0)));
+    }
+
+    #[test]
+    #[should_panic(expected = "NothingToClaim")]
+    fn claim_refuses_another_accounts_entry() {
+        let other: BTreeMap<AccountId, Option<U128>> = [(implicit_account(&[0xcd; 32]), Some(U128(5_000)))].into_iter().collect();
+        contract().build_claim(CHANGE, KEY, &other);
     }
 
     #[test]

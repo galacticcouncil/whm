@@ -143,7 +143,7 @@ pub struct UtxoWithdraw {
     mpc_signer:     AccountId,   // v1.signer
     token:          AccountId,   // zec.omft.near
     connector:      AccountId,   // zcash-connector.bridge.near
-    validity:       u64,         // blocks a signed delegate stays valid
+    validity:       u64,         // blocks a signed delegate stays valid, ≤ MAX_VALIDITY (100)
     withdraw_gas:   Gas,         // gas for the inner ft_transfer_call
 }
 
@@ -154,7 +154,7 @@ impl UtxoWithdraw {
     /// Sign A's withdrawal of its whole balance to `address`, spending the connector coin `coin`
     /// (`txid:vout`). Permissionless; 1 yocto (MPC deposit).
     #[payable] pub fn withdraw(&mut self, address: String, coin: String) -> Promise;
-    /// Sign A's `claim_lost_found` on the connector. Permissionless; 1 yocto.
+    /// Sign A's `claim_lost_found` on the connector, only if A has an entry. Permissionless; 1 yocto.
     #[payable] pub fn claim(&mut self, address: String) -> Promise;
     // private callbacks; owner: config, upgrade, two-step ownership
 }
@@ -260,6 +260,10 @@ number. Amount, user output, fee, change, target, nonce and expiry all come from
   at `(creation_height − 1) × 10⁶`, and each executed delegate leaves a nonce from an earlier block.
   Two signatures from the same block share a nonce — only one executes. A failed attempt consumes
   `A`'s nonce, so an older outstanding signature is simply re-made.
+- **Short-lived signatures.** `validity` is capped at `MAX_VALIDITY` = 100 blocks (~1–2 min) — the
+  few blocks a relay needs. A longer-lived whole-balance delegate could be held by a third party and
+  relayed after the user's next transfer lands, withdrawing only the old amount and splitting the new
+  balance into extra withdrawals the user pays fees on (audit 2026-10-16, finding 2).
 
 ### `claim(address)`
 
@@ -267,11 +271,23 @@ Same derivation and signing, one action: `FunctionCall claim_lost_found` on the 
 no arguments. Reachable only when the connector cancels a withdrawal and its refund to `A` fails
 (`lost_found[A]`) **[V `claim_lost_found`]**. The tokens come back to `A`, then go out by `withdraw`.
 
+```
+derived_public_key → on_key: A → connector.list_lost_found([A]) → on_lost_found
+   no entry, or 0 → panic NothingToClaim         nothing signed
+   entry          → claim_lost_found delegate → sign → on_signed
+```
+
+It signs only when the entry exists: a claim with nothing to claim would still consume `A`'s nonce
+when relayed and cancel a withdrawal the bot has already had signed — free griefing (audit
+2026-10-16, finding 1).
+
 ### The invariant
 
 > Every path to `v1.signer.sign` signs one of these two delegate actions, built from the address
-> (which fixes `A`), the coin id, the clock and reads of `A`'s balance and the connector. Nothing else: no admin
-> sign, no generic `sign(payload)`, no debug helper, no public callback.
+> (which fixes `A`), the coin id, the clock and reads of `A`'s balance and the connector — and only
+> one that does something: a withdrawal of a balance at the minimum or above, or a claim of an
+> existing `lost_found` entry. Nothing else: no admin sign, no generic `sign(payload)`, no debug
+> helper, no public callback.
 
 `A`'s key is a full-access key, so this contract is the whole of `A`'s security. Derivation binds to the
 account id, not the code: whoever can change the code controls every `A`. Same model as the NTT

@@ -42,6 +42,7 @@ pub struct Utxo {
 pub trait Connector {
     fn get_config(&self) -> ConnectorConfig;
     fn list_utxos(&self, utxo_storage_keys: Vec<String>) -> BTreeMap<String, Option<Utxo>>;
+    fn list_lost_found(&self, account_ids: Vec<AccountId>) -> BTreeMap<AccountId, Option<U128>>;
 }
 
 #[ext_contract(ext_ft)]
