@@ -77,14 +77,14 @@ mod tests {
     }
 
     /// Golden vector, live `v1.signer` 2026-10-16: `derived_public_key({ path:
-    /// "zcash:v1:t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ua", predecessor: "zec-withdraw.hydration-whm.near",
+    /// "zcash:v1:t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ua", predecessor: "withdraw-zec.hydration-whm.near",
     /// domain_id: 1 })`. The app and the bot must reproduce this `A`.
     #[test]
     fn live_derivation() {
-        let key = parse_ed25519("ed25519:Go2WbMRLcQmhkoLYEaaDp81p31yztZj5SFPCNaA3aFuV");
+        let key = parse_ed25519("ed25519:FhYNkYjdaYj6tAymcRFyRgH8jQNbW5VARJHtvGdEvD3N");
         assert_eq!(
             implicit_account(&key).as_str(),
-            "eaa9ba8d08e006a70135c5a0674519f69f33a21557f3f3f85441c42e1d1c7184"
+            "da66533e90179ebb2e9e546afd4410e36f76e8a8b4ec0376b4e2a8825f802e11"
         );
     }
 

@@ -29,7 +29,7 @@ only ever send it to their address.
   transfer to `sha256(A)` and emits the address, keyed on the NTT sequence. The NTT message carries
   only `sha256(A)`, which cannot be inverted — the event is how the bot learns what to relay, from
   chain alone.
-- **New: `UtxoWithdraw`** at `zec-withdraw.hydration-whm.near`, stateless, DAO-upgradeable like the NTT
+- **New: `UtxoWithdraw`** at `withdraw-zec.hydration-whm.near`, stateless, DAO-upgradeable like the NTT
   manager. Two methods, each signing one fixed NEAR meta-transaction for `A`.
 - **New: a bot** (no authority) redeems the NTT VAA for `A`, picks the connector coin to spend, calls
   `withdraw(address, coin)` and submits the signed result, paying the NEAR gas.
@@ -43,7 +43,7 @@ app      address → path → A (view: v1.signer.derived_public_key)       valid
 user     ZecWithdrawEmitter.send(amount, address, A)                    NTT transfer to sha256(A) + WithdrawRequested
 bot      NTT VAA (ZEC transceiver → NEAR) paired with the event by seq  checks derive(address) == A
 bot      ntt-zec.complete(vaa, A)                                       zec.omft.near lands on A
-bot      zec-withdraw.withdraw(address, coin)                           MPC signs a delegate action for A
+bot      withdraw-zec.withdraw(address, coin)                           MPC signs a delegate action for A
 bot      tx { receiver: A, actions: [SignedDelegate] }                  A → zec.omft.near.ft_transfer_call(connector, Withdraw)
 Omni     relayer signs and broadcasts the Zcash tx, verifies it         address receives ZEC
 ```
@@ -62,7 +62,7 @@ Omni     relayer signs and broadcasts the Zcash tx, verifies it         address 
 ```
 terms   = Zcash transparent address, t1… (P2PKH) or t3… (P2SH), mainnet base58check
 path    = "zcash:v1:" + address                        exact string; base58 is case-sensitive
-key     = v1.signer.derived_public_key({ path, predecessor: "zec-withdraw.hydration-whm.near", domain_id: 1 })
+key     = v1.signer.derived_public_key({ path, predecessor: "withdraw-zec.hydration-whm.near", domain_id: 1 })
 A       = lowercase hex of the 32 key bytes            NEAR implicit account
 NTT to  = sha256(A)                                    what the Hydration transfer names
 ```
@@ -131,8 +131,9 @@ event WithdrawRequested(uint64 indexed sequence, bytes32 indexed nearAccount, ad
 Implemented as the generic `utxo-withdraw` contract
 ([crates/near/contracts/utxo-withdraw](../../crates/near/contracts/utxo-withdraw)), one deployment per
 chain: `chain` fixes the address format, path prefix and miner fee, and the rest is config. This
-deployment is `chain: Zcash` at `zec-withdraw.hydration-whm.near`; a BTC one would add a `Bitcoin`
-chain (its fee policy is the open part) and deploy beside it, with its own set of accounts.
+deployment is `chain: Zcash` at `withdraw-zec.hydration-whm.near`; a BTC one would add a `Bitcoin`
+chain (its fee policy is the open part) and deploy beside it as `withdraw-btc.hydration-whm.near`,
+with its own set of accounts.
 
 ```rust
 #[near(contract_state)]
@@ -305,7 +306,7 @@ create    if A has no account: Transfer(1 yocto) to A       once
 coin      best fit over the connector's whole set (get_utxos_paged, paged — a free view): the
           smallest coin paying user_out + FEE exactly or leaving change ≥ min_change_amount
 sign      balance(A) ≥ min_withdraw_amount and A has no pending sign on the connector →
-          zec-withdraw.withdraw(address, coin), 1 yocto    read the signed delegate from the event
+          withdraw-zec.withdraw(address, coin), 1 yocto    read the signed delegate from the event
 submit    tx { signer: bot, receiver: A, actions: [Delegate(signed)] }
 follow    connector GenerateBtcPendingInfo for A → Omni signs, broadcasts, verify_withdraw_v2
 ```

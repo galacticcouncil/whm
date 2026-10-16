@@ -514,7 +514,7 @@ mod tests {
     use near_sdk::test_utils::{accounts, VMContextBuilder};
     use near_sdk::testing_env;
 
-    const CONTRACT: &str = "zec-withdraw.hydration-whm.near";
+    const CONTRACT: &str = "withdraw-zec.hydration-whm.near";
     const CHANGE: &str = "t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ua";
     const TXID: &str = "959b9355b4157e21c927f3b1850b969ad80828125aa676b418031a25f641c099";
     const KEY: [u8; 32] = [0xab; 32];
