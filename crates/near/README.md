@@ -23,9 +23,17 @@ contracts/ntt-manager/     the contract (near-sdk 5)
   src/trimmed.rs           8-decimal trimming, with dust
   src/vaa.rs               VAA body parser
   tests/fixtures/          real mainnet NTT VAAs — golden vectors
+contracts/utxo-withdraw/    a UTXO-chain token on NEAR → its native chain via Omni's connector, from an
+                           MPC-derived account per destination address; one deployment per chain
+  src/chain.rs             the deployment's chain; dispatches to chains/
+  src/chains/zcash.rs      Zcash: t1/t3 address → script, derivation path, ZIP-317 fee
+  src/connector.rs         connector reads, bridge fee, best-fit coin, the Withdraw message
+  src/delegate.rs          NEP-366 delegate actions, borsh by hand
+  src/mpc.rs               v1.signer derived_public_key / sign
 sandbox/                   end-to-end tests on a NEAR sandbox (near-workspaces)
   tests/wasm/              mainnet code of the Wormhole core, wrap.near and zec.omft.near
   forge/                   EVM check: a NEAR-published payload through the real TransceiverStructs
+  tests/delegate.rs        utxo-withdraw's delegate encoding against nearcore's own types
 scripts/ntt-manager/       user scripts + local fork
 ```
 

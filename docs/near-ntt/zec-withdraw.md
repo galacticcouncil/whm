@@ -128,23 +128,30 @@ event WithdrawRequested(uint64 indexed sequence, bytes32 indexed nearAccount, ad
 
 ## `ZecWithdraw`
 
+Implemented as the generic `utxo-withdraw` contract
+([crates/near/contracts/utxo-withdraw](../../crates/near/contracts/utxo-withdraw)), one deployment per
+chain: `chain` fixes the address format, path prefix and miner fee, and the rest is config. This
+deployment is `chain: Zcash` at `zec-withdraw.hydration-whm.near`; a BTC one would add a `Bitcoin`
+chain (its fee policy is the open part) and deploy beside it, with its own set of accounts.
+
 ```rust
 #[near(contract_state)]
-pub struct ZecWithdraw {
+pub struct UtxoWithdraw {
+    owner:          AccountId,
+    pending_owner:  Option<AccountId>,
+    chain:          Chain,       // Zcash
     mpc_signer:     AccountId,   // v1.signer
     token:          AccountId,   // zec.omft.near
     connector:      AccountId,   // zcash-connector.bridge.near
-    coin_page:      u64,         // how many connector coins to read when picking one
+    coin_page:      u64,         // how many connector coins to read when picking one — 100
     validity:       u64,         // blocks a signed delegate stays valid
     withdraw_gas:   Gas,         // gas for the inner ft_transfer_call
-    owner:          AccountId,
-    pending_owner:  Option<AccountId>,
 }
 
-const FEE: u128 = 10_000;        // zat; ZIP-317 for 1 input and ≤ 2 outputs is always 2 × 5,000
+FEE = chain.miner_fee(1, 2)      // Zcash: ZIP-317 for 1 input and ≤ 2 outputs is always 2 × 5,000 = 10,000 zat
 
 #[near]
-impl ZecWithdraw {
+impl UtxoWithdraw {
     /// Sign A's withdrawal of its whole balance to `address`. Permissionless; 1 yocto (MPC deposit).
     #[payable] pub fn withdraw(&mut self, address: String) -> Promise;
     /// Sign A's `claim_lost_found` on the connector. Permissionless; 1 yocto.
