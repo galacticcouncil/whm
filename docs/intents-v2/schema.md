@@ -68,6 +68,10 @@ version 1 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | deadline 8 | recipi
 fixed prefix 80, total 82 + D + R; wire value of version = 2
 ```
 
+The version byte selects the strategy: 2 = limit swap, the only one the router accepts in the MVP. A
+new strategy takes the next version, with its own layout; it hashes to a different path, so its
+accounts never overlap this one's.
+
 The encoder **and** both decoders (Solidity, Rust) enforce every check above and exact-length
 accounting of both strings — a string over 255 bytes would wrap through the `uint8` length and let two
 terms hash alike. The router validates raw bytes and never relies on encoder-only checks. Numeric

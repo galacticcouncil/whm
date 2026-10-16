@@ -1,18 +1,56 @@
 # SPEC — Intents v2: unattended swaps and DCA
 
-v2 replaces 1Click. A user creates a swap or a DCA once; every execution afterwards runs with
-nobody present, no HTTP call and no keys. Two things make that possible, and they are the whole
-design:
+v2 is v1 with 1Click swapped for our own **strategy**. The rail is untouched: `placeOrder` sells into
+WETH, settles over NTT, and `IntentReceiver` forwards native ETH to a `depositAddress`
+([v1 spec](../intents/spec.md#shared-transport)). The rail only knows that address. Whoever owns it,
+and what they do with the ETH, is the strategy.
 
-- **The deposit address is derived once**, from terms the user signs at creation. One action — a
-  swap, or a whole DCA schedule — has one NEAR account `A` and one Ethereum deposit address `0xN`,
-  reused by every tranche. Nothing off-chain picks where funds go.
-- **The price is read on Hydration** in the transaction that fires each tranche, and travels to NEAR
-  in a guardian-signed **order** message. Nothing off-chain picks the rate either.
+```
+placeOrder → NTT + instruction → IntentReceiver → ETH → depositAddress → strategy
+└──────────────────── v1 rail, unchanged ────────────────────┘
+```
 
-The value rail — Hydration WETH → NTT → Ethereum → POA — is unchanged; see
-[spec.md](../intents/spec.md#shared-transport). Implementation detail, data formats and review history:
-[plan.md](plan.md).
+| | v1 | v2 |
+| --- | --- | --- |
+| Entry on Hydration | user calls `placeOrder` | ICE `on_resolved` → `IntentDispatcher` → the same `placeOrder` |
+| Rail | NTT + instruction → `IntentReceiver` → ETH to `depositAddress` | same contracts, same relayer |
+| `depositAddress` | 1Click's, random per quote | POA address `0xN` of `A`, derived from the terms |
+| Who triggers the swap | 1Click backend | our bot → `IntentRouter.finalize(terms, orderVaa)` → MPC signs for `A` |
+| Price | 1Click quote, solver-competed | order message: Hydration feed price, one per order |
+| Refund | 1Click, to `refundTo` | router, ETH to `refundTo` after the deadline |
+
+Only two things are new:
+
+- **The router owns the deposit address.** Only it can sign for `A`, which replaces 1Click's custody.
+  `A` is derived from the terms, so the router stores nothing.
+- **The order message carries the price.** 1Click quoted a solver-competed price; we post limit
+  orders with no quote, which fill exactly at our floor. The floor must therefore be near market at
+  each order, so every order brings its own Hydration price.
+
+Everything else — nonces, order expiry, catch-up, delivery after a failed withdrawal — makes those two
+safe; none of it adds a step to the flow.
+
+### The strategy
+
+A strategy is what the owner of the deposit address does with the ETH.
+
+| Strategy | Deposit address owned by | Does |
+| --- | --- | --- |
+| 1Click (v1) | 1Click | solver-competed quote → swap → withdraw |
+| **Limit swap** (v2, this spec) | `IntentRouter` | swap `balance(A)` at ≥ `outPerIn × (1 − slippage)`; deliver; refund after the deadline |
+| Later | `IntentRouter` | Dutch auction ([dutch-auction.md](dutch-auction.md)), wNEAR rail, other destination kinds |
+
+- **The terms are the strategy's parameters**, and hashing them into `A` makes one strategy instance
+  one account. One action — a swap, or a whole DCA schedule — has one `A` and one `0xN`, reused by
+  every order.
+- **The terms' version byte selects the strategy**; `finalize` dispatches on it. A new strategy is a
+  new terms version: it derives disjoint accounts and changes nothing on the rail, Hydration or
+  Ethereum. The MVP ships one.
+- **Swap and DCA are the same strategy.** The router does not tell them apart: it swaps whatever `A`
+  holds at the price of the order it is given. The difference lives entirely on Hydration — ICE fires
+  one order into `A` for a swap, N for a DCA.
+
+Implementation detail, data formats and review history: [plan.md](plan.md), [schema.md](schema.md).
 
 | Component | Chain | Status | Role |
 | --- | --- | --- | --- |
@@ -162,9 +200,11 @@ market by up to `maxFeedAge` before that check trips. Alert on missed heartbeats
 
 ---
 
-## 5. NEAR — `finalize(terms, orderVaa)`
+## 5. NEAR — the limit-swap strategy, `finalize(terms, orderVaa)`
 
-Two arguments. Every number comes from the order message, the terms or a balance read.
+Two arguments. Every number comes from the order message, the terms or a balance read. `finalize`
+dispatches on the terms' version byte; terms version 2 is the limit swap below, the only strategy
+the MVP ships. An unknown version reverts.
 
 ```
 finalize(terms, orderVaa)
@@ -219,7 +259,7 @@ scan surfaces it and the user can send it on manually.
 ## 7. Residual
 
 - **The surplus above the floor goes to the solver.** Recovering it needs price discovery — relay
-  quotes or a Dutch auction ([dutch-auction.md](dutch-auction.md)) — later.
+  quotes, or a Dutch auction as a second strategy ([dutch-auction.md](dutch-auction.md)) — later.
 - **A compromised bot can stall**, and choose among a path's still-valid orders. It cannot redirect,
   misprice below the floor or refund early.
 - **Anyone can trigger a catch-up** of a path by placing their own order with its public terms,

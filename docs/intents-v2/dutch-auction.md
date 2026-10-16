@@ -63,9 +63,10 @@ than a tolerance around a reference the router cannot see.
 
 ### Wire format
 
-Append to [`IntentCodec`](../../contracts/src/intents/IntentCodec.sol) and bump `VERSION` to `2`,
-which is what the version byte is for — a new layout derives disjoint accounts, so nothing has to
-migrate.
+A second router strategy beside the limit swap ([spec.md](spec.md#the-strategy)): append to
+[`IntentCodec`](../../contracts/src/intents/IntentCodec.sol) as the next terms version after the limit
+swap's `2`. The version byte selects the strategy, and a new layout derives disjoint accounts, so
+nothing has to migrate.
 
 ```
 offset  size  field              offset  size  field
@@ -77,7 +78,7 @@ offset  size  field              offset  size  field
                                    73+D     R  recipient    total 73 + D + R
 ```
 
-Fixed prefix through `stepSecs` is 72 bytes — the v2 equivalent of `ORDER_HEADER_SIZE`.
+Fixed prefix through `stepSecs` is 72 bytes — this layout's equivalent of `ORDER_HEADER_SIZE`.
 
 ---
 
