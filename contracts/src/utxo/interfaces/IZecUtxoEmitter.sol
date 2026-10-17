@@ -21,21 +21,22 @@ interface IZecUtxoEmitter {
     /// @param sender Who sent
     /// @param amount ZEC settled to NEAR, net of `fee`
     /// @param fee ZEC kept for the bot's gas
-    /// @param zcashAddress The destination, decoded: 2-byte version and 20-byte hash
+    /// @param destination The destination address — here the 22-byte `zcashAddress`. `bytes`, so
+    ///        every coin's emitter logs the same event; only for indexing, never what pays out
     event WithdrawRequested(
         uint64 indexed sequence,
         bytes32 indexed nearAccount,
         address indexed sender,
         uint256 amount,
         uint256 fee,
-        bytes22 zcashAddress
+        bytes destination
     );
 
+    /// @param sequence The NEAR NTT manager's sequence — the id the transfer's VAA carries
     /// @param zecIn Fee ZEC sold
     /// @param nearOut NEAR sent, quantized to the rail's precision
     /// @param account The NEAR account it was sent to
-    /// @param sequence The NEAR NTT manager's sequence for the transfer
-    event Refueled(uint256 zecIn, uint256 nearOut, string account, uint64 sequence);
+    event Refueled(uint64 indexed sequence, uint256 zecIn, uint256 nearOut, string account);
 
     event FeeSet(uint256 fee);
     event Swept(address indexed asset, address indexed to, uint256 amount);

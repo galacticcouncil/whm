@@ -80,7 +80,7 @@ contract ZecUtxoEmitter is Initializable, UUPSUpgradeable, IZecUtxoEmitter {
         // An implicit account's id is its key in lowercase hex.
         sequence = _bridge(zecNttManager, net, sha256(bytes(_hex(nearAccount))));
 
-        emit WithdrawRequested(sequence, nearAccount, msg.sender, net, fee, zcashAddress);
+        emit WithdrawRequested(sequence, nearAccount, msg.sender, net, fee, abi.encodePacked(zcashAddress));
     }
 
     /// @inheritdoc IZecUtxoEmitter
@@ -108,7 +108,7 @@ contract ZecUtxoEmitter is Initializable, UUPSUpgradeable, IZecUtxoEmitter {
 
         sequence = _bridge(nearNttManager, nearOut, sha256(bytes(account)));
 
-        emit Refueled(zecIn, nearOut, account, sequence);
+        emit Refueled(sequence, zecIn, nearOut, account);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────

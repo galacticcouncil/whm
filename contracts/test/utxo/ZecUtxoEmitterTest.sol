@@ -116,7 +116,7 @@ contract ZecUtxoEmitterTest is Test {
         vm.startPrank(user);
         zec.approve(address(emitter), 1_000_000);
         vm.expectEmit(address(emitter));
-        emit IZecUtxoEmitter.WithdrawRequested(0, CANARY_ACCOUNT, user, 1_000_000 - FEE, FEE, T1);
+        emit IZecUtxoEmitter.WithdrawRequested(0, CANARY_ACCOUNT, user, 1_000_000 - FEE, FEE, abi.encodePacked(T1));
         emitter.send(1_000_000, T1, CANARY_ACCOUNT);
         vm.stopPrank();
     }
