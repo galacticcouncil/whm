@@ -166,9 +166,11 @@ refuel    TC, whenever it wants: held ZEC → router sell → NEAR → ntt-near 
 relay     the bot relays only transfers that have a WithdrawRequested event from this contract
 ```
 
-- **No price on chain.** The fee is a flat amount in zat, like Omni's own 10,000 zat. Its NEAR value
-  drifts with the ZEC/NEAR rate; a fee of ~$0.05–0.06 against ~$0.03–0.04 of cost has room for large
-  moves, and governance retunes `fee` when it needs to.
+- **No price on chain — for now.** The fee is a flat 10,000 zat, like Omni's own bridge fee. Against
+  the worst-case NEAR cost of a withdrawal (≈ 0.0097 NEAR, first one to an `A`; ≈ 4,200 zat at NEAR
+  $5.05 / ZEC $1,156, 2026-10-17) it has ~2.4× room for ZEC/NEAR moves, and governance retunes `fee`
+  when it needs to. Later the rate comes from an oracle: the fee is priced in NEAR and converted to
+  zat at the oracle's ZEC/NEAR rate per `send`.
 - **Users never depend on a swap.** A per-transfer "buy exactly 0.01 NEAR" would track the cost
   exactly but would make every user transfer depend on ZEC/NEAR liquidity on Hydration, and revert
   when it is thin. Holding ZEC and swapping in batches moves that dependency to `refuel`, which

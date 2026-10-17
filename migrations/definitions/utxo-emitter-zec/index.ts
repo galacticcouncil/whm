@@ -10,8 +10,8 @@ import type { MigrationConfig } from "./types";
  * `withdraw-zec.hydration-whm.near` — is utxo-withdraw-zec.
  *
  *   001 deploy ZecUtxoEmitter (UUPS proxy, initialized in the same transaction)
- *   002 set the NEAR NttManager @emitter  — refuel's rail
- *   003 set the fee @emitter
+ *   002 set the fee @emitter
+ *   003 set the NEAR NttManager @emitter  — refuel's rail
  *   004 set the ZEC NttManager @emitter   — send goes live here, so it comes after the fee
  *   005 transfer ownership to the Hydration Emergency Admin
  *
