@@ -13,9 +13,8 @@ const RECIPIENT = /^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
  * refuse.
  *
  * `GET /api/deposit/:chain/:recipient?refund=<address>` → the address to pay the coin to, on its own
- * chain, for it to arrive on Hydration at `recipient`, and the order behind it. `refund` is where a
- * refused deposit goes back to — part of the order, so it changes the address; the app should ask
- * for it.
+ * chain, for it to arrive on Hydration at `recipient`. `refund` is where a refused deposit goes back
+ * to — part of the order, so it changes the address; the app should ask for it.
  *
  * 404 for an unknown chain on both.
  *
@@ -59,8 +58,8 @@ export function routes(provider: JsonRpcProvider, derivers: Record<string, Deriv
         }
 
         try {
-          const { address, order } = await depositAddress(provider, deriver.chain, recipient, refund);
-          return { chain, recipient, refund: refund ?? null, address, order };
+          const { address } = await depositAddress(provider, deriver.chain, recipient, refund);
+          return { chain, recipient, refund: refund ?? null, address };
         } catch (e) {
           return reply.code(502).send({ error: (e as Error).message });
         }

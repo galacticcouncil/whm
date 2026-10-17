@@ -21,7 +21,7 @@ vector, its address codec and miner fee. A new coin is a chain file, an entry in
 GET /api/withdraw/:chain/:address                     address on the coin's chain
   → { chain, address, account, send: { destination, nearAccount } }
 GET /api/deposit/:chain/:recipient?refund=<address>   recipient on Hydration
-  → { chain, recipient, refund, address, order }
+  → { chain, recipient, refund, address }
 GET /api/health      → { ok: true }
 GET /api/status      → { chains }
 ```
