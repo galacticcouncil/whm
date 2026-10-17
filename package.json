@@ -33,6 +33,8 @@
     "migrate:near-ntt-near": "bash sh/migrate-near-ntt-near.sh prod",
     "migrate:near-ntt-near:fork": "bash sh/migrate-near-ntt-near.sh fork",
     "migrate:near-ntt-near:testnet": "bash sh/migrate-near-ntt-near.sh testnet",
+    "migrate:utxo-emitter-zec": "bash sh/migrate-utxo-emitter-zec.sh prod",
+    "migrate:utxo-emitter-zec:fork": "bash sh/migrate-utxo-emitter-zec.sh fork",
     "migrate:utxo-withdraw-zec": "bash sh/migrate-utxo-withdraw-zec.sh prod",
     "migrate:utxo-withdraw-zec:testnet": "bash sh/migrate-utxo-withdraw-zec.sh testnet",
     "print:oracles": "bash sh/print-oracles.sh",
