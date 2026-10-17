@@ -61,12 +61,15 @@ ntt-<token> ──(lock + publish)──▶ Wormhole ──▶ our `ntt` relayer
   ```json
   {
     "recipient_id": "ntt-btc.<parent>.near",
-    "safe_deposit": { "msg": "{\"recipient_chain\":73,\"recipient\":\"0x<Hydration H160>\"}" },
+    "safe_deposit": { "msg": "{\"recipient_chain\":73,\"recipient\":\"0x<Hydration H160>\",\"refund_to\":\"hydration.sputnik-dao.near\"}" },
     "refund_address": "bc1…"
   }
   ```
 
-  `recipient_id` is our NTT manager; `safe_deposit.msg` is the `msg` its `ft_on_transfer` receives.
+  `recipient_id` is our NTT manager; `safe_deposit.msg` is the `msg` its `ft_on_transfer` receives —
+  our `TransferMsg`. Three destinations on three chains: `recipient` on Hydration (the normal path),
+  `refund_address` on Bitcoin / Zcash (Omni's refund, below), `refund_to` on NEAR (our manager's
+  refund, below).
 - **The address is derived from it:** `sha256(json(DepositMsg))` is the derivation path of an MPC key
   held by NEAR's signer network (`v1.signer`). One order, one address.
 - **It cannot be redirected:** `verify_deposit_v2` checks the transaction against the connector's
@@ -81,9 +84,19 @@ For us:
   the connector view — never derives it: the hash is over the exact JSON.
 - The relayer needs the whole order, not just the address. The `POST` presumably registers it for
   their relayer **[I]**.
-- Refunds go through the same order: if our manager refuses (paused, over the outbound limit, not
-  registered, out of gas), the mint is burned and `request_refund` pays the refund address after
-  `refund_timelock_sec` (2 days).
+- **Refunds depend on where a deposit fails** **[V `deposit.rs` `safe_mint_callback`,
+  `is_refund_required`; `bridge.rs`]**:
+  - **Our manager refuses** (paused, over the outbound limit, bad `msg`, out of gas) → `ft_on_transfer`
+    panics, `safe_mint` reports 0 used, and the connector burns the mint without adding the coin to
+    its reserve. The coin stays at the deposit address and goes back to the order's `refund_address`:
+    `request_refund` (anyone, with a NEAR deposit), then `execute_refund` after `refund_timelock_sec`
+    (2 days, anyone), then signing (open to anyone for refunds). Whether Omni's relayer runs these
+    steps itself is not verified **[I]**.
+  - **Our manager accepted, then the Wormhole publish failed** — only possible with a non-zero
+    `message_fee` → `safe_mint` already reported the whole amount used, so the connector counts the
+    deposit as done and no Zcash refund ever happens. Our manager refunds `zec.omft.near` on NEAR to
+    `TransferMsg.refund_to`, or to the sender — Omni's connector, where it is a balance attributed to
+    no one — without it. Hence `refund_to` in every order (below).
 
 ## The two routes
 
@@ -110,22 +123,42 @@ never also by `btc.omft.near`.
 | Registered on the token | `safe_mint` burns the mint if the receiver is not | Step 003 |
 | **Panic or return 0** from `ft_on_transfer` | the connector counts a partial "unused" as success and strands the rest **[V]** | Holds: both tokens are 8 dp, so trim dust is 0 — the Hydration assets must have ≥ 8 dp |
 | Fit the gas `safe_mint` forwards | a `NotEnoughGas` panic burns the mint → refund after 2 days | **ZEC verified** in the sandbox on `zec.omft.near`'s mainnet code: `safe_mint` at the connector's 90 TGas (`GAS_FOR_MINT_CALL`) publishes and reports the whole amount used (`zec_connector_safe_mint_publishes`). BTC: to measure |
-| A failed publish refunds someone reachable | the publish runs after `ft_on_transfer` returned 0, so the connector has counted the mint as consumed — its `request_refund` path does not fire, and a plain `ft_transfer` back to the connector credits no one | `TransferMsg.refund_to` exists — it must be registered on the token, or the refund is credited to the sender's (the connector's) `claimable`; which account the order names is open (Open 7) |
+| A failed publish refunds someone reachable | the publish runs after `ft_on_transfer` returned 0, so the connector has counted the mint as consumed — its `request_refund` path does not fire, and a plain `ft_transfer` back to the connector credits no one | Every order sets `TransferMsg.refund_to = hydration.sputnik-dao.near`, registered on `zec.omft.near` (tx `7sXhAdihPgRztpXj9kK7Vy1SZarWFuCWZL1uRXtmgZsF`, 2026-10-17) — an unregistered `refund_to` would fall back to the connector's `claimable` |
+
+## Resolved
+
+- **Omni's relayer finalizes safe deposits automatically** — ZEC deposits reach Hydration through this
+  route in production.
+- **Our `ntt` relayer: the NEAR → Hydration route** — built (`agents/relayer`, ZEC and NEAR routes).
+- **`safe_mint` gas forwarded to `ft_on_transfer`** — ZEC verified (see the table). The connector
+  rewrites `msg` only where it has a `utxo_id` key (`inject_utxo_id_in_msg`); `TransferMsg` has none,
+  so it arrives as sent.
+- **`refund_to` for a deposit-address user.** The user has no NEAR account, so every order names our
+  DAO, `hydration.sputnik-dao.near`, registered on `zec.omft.near`. A publish that fails after the
+  manager accepted then refunds to the DAO, which pays the user back by a Transfer proposal — the
+  `transfer_failed` event names the Hydration recipient and the amount.
+
+## Runbook — a Wormhole `message_fee` on NEAR
+
+Every publish is fail-closed while the core's `message_fee` is 0 ([near-ntt spec](../near-ntt/spec.md),
+"Message fee"). If Wormhole governance sets one (a `SetMessageFee` governance VAA submitted to
+`contract.wormhole_crypto.near`):
+
+1. **Pause `ntt-zec` (and `ntt-near`)** — owner, a DAO proposal. A paused manager publishes nothing:
+   new deposits are refused before the mint and go back to their `refund_address` on Zcash, and no
+   outbound publish can fail.
+2. **Upgrade** the manager to pay the fee on publish.
+3. **Unpause.**
+
+Between the fee going live and the pause, a deposit whose publish fails refunds to the DAO
+(`refund_to`) — a manual refund, never a loss. Watch `message_fee()` on the core so the pause starts
+early.
 
 ## Open
 
-1. **Omni's relayer finalizes safe deposits automatically** — **[I]**, confirm with Omni.
-2. **Our `ntt` relayer: a NEAR → Hydration route** — not built.
-3. **`safe_mint` gas forwarded to `ft_on_transfer`** — ZEC done (see the table); BTC to measure.
-   The connector rewrites `msg` only where it has a `utxo_id` key (`inject_utxo_id_in_msg`);
-   `TransferMsg` has none, so it arrives as sent.
-4. **BTC deployment** — `near-ntt-btc` migration (token `nbtc.bridge.near`), Hydration asset +
-   BURNING manager, `set_ntt_minter` referendum.
-5. **Bridge fee on BTC safe deposits** — read the fee path for BTC.
-6. **Deposit screen** in the app, calling the Omni API.
-7. **`refund_to` for a deposit-address user.** They have no NEAR account, so the order's `msg` can
-   only name an account we run, refunded by hand. Only reachable if the Wormhole `message_fee`
-   becomes non-zero; without `refund_to` the refund strands at the connector.
+1. **BTC** — the `near-ntt-btc` migration (token `nbtc.bridge.near`), the Hydration asset + BURNING
+   manager, the `set_ntt_minter` referendum; measure `safe_mint` gas into the manager; read the fee
+   path for BTC safe deposits.
 
 ## Other omft tokens
 

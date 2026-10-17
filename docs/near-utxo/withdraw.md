@@ -11,11 +11,7 @@ Researched 2026-10-16. **[V]** verified in code, on chain or by a live call; **[
 
 Zcash → Hydration is one transfer today ([deposit.md](deposit.md)). The way back is not:
 Hydration → NEAR NTT ([spec.md § Inbound](../near-ntt/spec.md#inbound--hydration--near)) pays a NEAR account,
-and the user ends up holding `zec.omft.near` there. The current fix routes the NTT transfer to a
-1Click deposit address, which works but:
-
-- puts a third party (1Click and its solvers) in the path of a plain withdrawal;
-- refunds into a NEAR account the user never needed, holding `zec.omft.near` they cannot use.
+and the user ends up holding `zec.omft.near` there.
 
 Omni's connector already does the Zcash leg: `ft_transfer_call(zcash-connector, Withdraw{…})` from
 whoever holds the token. The missing piece is an account that holds it on the user's behalf and can
@@ -25,10 +21,11 @@ only ever send it to their address.
 
 - **Terms are the Zcash address.** `path = "zcash:v1:" + address` → `A` via `v1.signer`, predecessor
   our contract. One address, one `A`, permanently — every later withdrawal to it reuses `A`.
-- **New on Hydration: `ZecWithdrawEmitter`.** `send(amount, zcashAddress, nearAccount)` makes the NTT
-  transfer to `sha256(A)` and emits the address, keyed on the NTT sequence. The NTT message carries
-  only `sha256(A)`, which cannot be inverted — the event is how the bot learns what to relay, from
-  chain alone.
+- **New on Hydration: `ZecUtxoEmitter`.** `send(amount, zcashAddress, nearAccount)` keeps a small
+  fee in ZEC, makes the NTT transfer of the rest to `sha256(A)` and emits the address, keyed on the
+  NTT sequence. The NTT message carries only `sha256(A)`, which cannot be inverted — the event is how
+  the bot learns what to relay, from chain alone. Governance's `refuel` turns the fees into NEAR
+  for the bot's gas.
 - **New: `UtxoWithdraw`** at `withdraw-zec.hydration-whm.near`, stateless, DAO-upgradeable like the NTT
   manager. Two methods, each signing one fixed NEAR meta-transaction for `A`.
 - **New: a bot** (no authority) redeems the NTT VAA for `A`, picks the connector coin to spend, calls
@@ -39,23 +36,47 @@ only ever send it to their address.
 ## The flow
 
 ```text
-app      address → path → A (view: v1.signer.derived_public_key)       validates the address first
-user     ZecWithdrawEmitter.send(amount, address, A)                    NTT transfer to sha256(A) + WithdrawRequested
-bot      NTT VAA (ZEC transceiver → NEAR) paired with the event by seq  checks derive(address) == A
-bot      ntt-zec.complete(vaa, A)                                       zec.omft.near lands on A
-bot      withdraw-zec.withdraw(address, coin)                           MPC signs a delegate action for A
-bot      tx { receiver: A, actions: [SignedDelegate] }                  A → zec.omft.near.ft_transfer_call(connector, Withdraw)
-Omni     relayer signs and broadcasts the Zcash tx, verifies it         address receives ZEC
+USER (Hydration)
+  ZecUtxoEmitter.send(amount, zcashAddress, nearAccount)          app derives nearAccount = A first (view: v1.signer)
+    ├─ pull amount ZEC from the user
+    ├─ keep fee (zat, owner-set)                                   ← stays in the emitter
+    ├─ require amount − fee ≥ 0.001 ZEC
+    ├─ NttManager.transfer(amount − fee, 15, sha256(A))            ZEC burned on Hydration
+    └─ emit WithdrawRequested(seq, A, sender, amount − fee, fee, zcashAddress)
+                │
+                ▼  Wormhole VAA (chain 73, ZEC transceiver, seq)
+BOT (NEAR) — relays only VAAs that have a WithdrawRequested event from our emitter (= fee paid)
+  ├─ check   sha256(hex A) == VAA recipient,  derive(zcashAddress) == A
+  ├─ ntt-zec.complete(vaa, A)                                       registers A, unlocks zec.omft.near to A
+  ├─ create A (1 yocto, first time only)
+  ├─ pick a coin (best fit, off-chain)
+  ├─ withdraw-zec.withdraw(zcashAddress, coin)                      MPC signs A's withdrawal
+  └─ relay the signed delegate                                      UnknownCoin / CoinDoesNotFit → pick again
+                │
+                ▼
+OMNI (NEAR → Zcash)
+  zcash-connector: burns, signs and broadcasts the Zcash tx
+  → zcashAddress receives (amount − fee) − 0.0001 bridge fee − 0.0001 miner fee
+
+FEE LOOP (TC, whenever it wants)
+  ZecUtxoEmitter.refuel(zecIn, minNearOut, account)                 owner = Hydration governance
+    ├─ router sell zecIn of the held fee ZEC → NEAR                 slippage ≥ minNearOut
+    └─ ntt-near transfer(NEAR, 15, sha256(account))                 account named per call
+                │
+                ▼  Wormhole VAA (chain 73, NEAR transceiver)
+  bot: ntt-near.complete(vaa, account)                              wNEAR to the bot's account
+       wrap.near.near_withdraw(amount)                              → native NEAR: gas tank refilled
 ```
 
-| Who | Does | Pays |
-| --- | --- | --- |
-| App | validates the address, derives `A` | — |
-| User | `ZecWithdrawEmitter.send` on Hydration | Hydration gas; NTT delivery price to NEAR is 0 **[V]** |
-| `ZecWithdrawEmitter` | pulls ZEC, NTT transfer, emits the address | — |
-| Bot | `complete`, creates `A` once, `withdraw`, submits the delegate | NEAR gas, `A`'s token storage (0.00125 NEAR once), 1 yocto per call |
-| `UtxoWithdraw` | derives `A`, builds and MPC-signs the delegate | — |
-| Omni connector | validates the withdrawal, signs the Zcash tx through its own MPC, burns | bridge fee and Zcash fee, out of the amount |
+| Who                       | Does                                                                    | Pays                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| App                       | validates the address, derives `A`                                      | —                                                                                                  |
+| User                      | `ZecUtxoEmitter.send` on Hydration                                      | `fee` in ZEC; Hydration gas; NTT delivery price to NEAR is 0 **[V]**                               |
+| `ZecUtxoEmitter`          | pulls ZEC, keeps `fee`, NTT transfer of the rest, emits the address     | —                                                                                                  |
+| Bot                       | `complete`, creates `A` once, `withdraw`, submits the delegate          | NEAR gas, `A`'s token storage (0.00125 NEAR once), 1 yocto per call — refilled from the fees       |
+| TC (Hydration governance) | sets `fee`; `refuel` turns the held fee ZEC into NEAR for the bot       | —                                                                                                  |
+| `UtxoWithdraw`            | derives `A`, builds and MPC-signs the delegate                          | —                                                                                                  |
+| Omni connector            | validates the withdrawal, signs the Zcash tx through its own MPC, burns | bridge fee and Zcash fee, out of the amount                                                        |
 
 ## Terms → `A`
 
@@ -71,7 +92,7 @@ NTT to  = sha256(A)                                    what the Hydration transf
   would reject every withdrawal and nothing else can move them. The app derives `A` only for an
   address that passes the same check the contract applies — base58check, 22 bytes, prefix `1cb8` or
   `1cbd` — and golden vectors pin `address → path → A` across the app and the contract.
-- **Transparent only**, as with 1Click today. The deployed connector also carries Orchard (shielded)
+- **Transparent only.** The deployed connector also carries Orchard (shielded)
   support through `chain_specific_data` **[V in code]**, which needs an Orchard bundle built off-chain;
   that is a later `v2` path prefix, with its own accounts.
 - **A different path prefix is a different account.** `v1` is frozen once the first user sends.
@@ -83,7 +104,7 @@ needs no balance for storage — an account under 770 bytes is a zero-balance ac
 balance does not need it: `complete` registers `A` on `zec.omft.near` (NEP-145, open) and pays out,
 whether or not the account exists.
 
-## Hydration — `ZecWithdrawEmitter`
+## Hydration — `ZecUtxoEmitter`
 
 The NTT message names `sha256(A)` and nothing else: no payload, and a hash the bot cannot invert
 back to `A`, let alone to the address. The address has to be on chain somewhere the bot reads, in
@@ -94,18 +115,70 @@ ever go to the address `A` derives from. No Wormhole message, nothing verified o
 ```solidity
 /// Send ZEC to `zcashAddress` through the derived NEAR account `nearAccount`.
 function send(uint256 amount, bytes22 zcashAddress, bytes32 nearAccount)
-    external payable returns (uint64 sequence);
-  require amount > 0
+    external returns (uint64 sequence);
   require zcashAddress[0..2] == 0x1cb8 (t1) or 0x1cbd (t3)
+  require nearAccount != 0
+  require amount ≥ fee + MIN_WITHDRAW (100,000 zat — the connector's minimum)
+  net = amount − fee
+  zec.safeTransferFrom(msg.sender, this, amount)            fee stays in the contract
   recipient = sha256(lowercase hex of nearAccount)          the NEAR account id is that hex
-  zec.safeTransferFrom(msg.sender, this, amount)
-  zec.forceApprove(nttManager, amount)
-  sequence = nttManager.transfer{value: msg.value}(amount, 15, recipient)
-  emit WithdrawRequested(sequence, nearAccount, msg.sender, amount, zcashAddress)
+  sequence = _bridge(zecManager, net, recipient)
+  emit WithdrawRequested(sequence, nearAccount, msg.sender, net, fee, zcashAddress)
+
+/// Owner (Hydration governance): sell `zecIn` of the held fee ZEC for NEAR and send it to `account` on NEAR.
+function refuel(uint256 zecIn, uint256 minNearOut, string account) external onlyOwner returns (uint64 sequence);
+  router sell(ZEC → NEAR, zecIn, minNearOut)                dispatch precompile, as IntentEmitter swaps;
+                                                            exact zecIn, so the floor stays with its amount
+  nearOut = NEAR balance, trimmed to 1e16                   NTT carries 8 of NEAR's 24 dp
+  sequence = _bridge(nearManager, nearOut, sha256(account)) the NEAR NTT route (ntt-near.hydration-whm.near)
+  emit Refueled(zecIn, nearOut, account, sequence)
+
+/// Both legs: quote the delivery price (0 today, paid from the contract's balance), approve, and the
+/// 3-argument NTT transfer to NEAR (chain 15).
+function _bridge(address manager, uint256 amount, bytes32 recipient) internal returns (uint64 sequence);
+
+function setFee(uint256 fee) external onlyOwner;           zat
+function setZecNttManager(address) external onlyOwner;
+function setNearNttManager(address) external onlyOwner;
+function sweep(address asset, address to, uint256 amount) external onlyOwner;   trim dust, stray tokens
 
 event WithdrawRequested(uint64 indexed sequence, bytes32 indexed nearAccount, address indexed sender,
-                        uint256 amount, bytes22 zcashAddress);
+                        uint256 amount, uint256 fee, bytes22 zcashAddress);
+event Refueled(uint256 zecIn, uint256 nearOut, string account, uint64 sequence);
 ```
+
+- **`nearAccount` is `bytes32`, `account` is a string.** `send` names an implicit account — its id is
+  the key's hex, so 32 bytes carry it. `refuel` names any account id, typically a named one
+  (`relayer.hydration-whm.near`); the contract hashes the string as given. NTT pays whatever name it
+  is given, so it must be an existing account we control.
+- **It arrives as wNEAR.** The NEAR NTT route locks and unlocks `wrap.near`; the bot unwraps with
+  `wrap.near.near_withdraw` before it can spend it on gas.
+
+### The fee — paid on Hydration, in ZEC, swept into NEAR
+
+The bot pays NEAR gas for every withdrawal (≈ 0.005–0.008 NEAR, measured on the mainnet canary). The
+user pays it back on Hydration, in the asset they are sending:
+
+```
+send      fee (zat, owner-set) stays in ZecUtxoEmitter; the NTT transfer carries amount − fee
+refuel    TC, whenever it wants: held ZEC → router sell → NEAR → ntt-near → the bot's NEAR account
+          → the bot completes its own transfer and unwraps: its gas tank is refilled
+relay     the bot relays only transfers that have a WithdrawRequested event from this contract
+```
+
+- **No price on chain.** The fee is a flat amount in zat, like Omni's own 10,000 zat. Its NEAR value
+  drifts with the ZEC/NEAR rate; a fee of ~$0.05–0.06 against ~$0.03–0.04 of cost has room for large
+  moves, and governance retunes `fee` when it needs to.
+- **Users never depend on a swap.** A per-transfer "buy exactly 0.01 NEAR" would track the cost
+  exactly but would make every user transfer depend on ZEC/NEAR liquidity on Hydration, and revert
+  when it is thin. Holding ZEC and swapping in batches moves that dependency to `refuel`, which
+  governance runs with its own `minNearOut`.
+- **The minimum moves up.** `amount` must cover `fee` and still leave the connector's 0.001 ZEC.
+- **Bypass is allowed, not subsidised.** A raw NTT transfer to `sha256(A)` skips the fee and the
+  event, so the bot ignores it. Its owner can still finish it — `complete` and `withdraw` are
+  permissionless — paying their own NEAR gas.
+- **Custody.** The contract holds the accumulated fee ZEC between `refuel` calls — small, and under the
+  same governance owner as the rest of the Hydration contracts.
 
 - **Fixed-size arguments make a bad input unrepresentable.** `zcashAddress` is the decoded
   transparent address — 2-byte prefix and 20-byte hash, no checksum to get wrong — so any value with
@@ -117,14 +190,21 @@ event WithdrawRequested(uint64 indexed sequence, bytes32 indexed nearAccount, ad
   intents relayer uses between a settlement and its instruction.
 - **The 3-argument `transfer` reverts** on a paused manager or an exhausted outbound limit rather than
   queueing, so every event has a message behind it.
-- **What it cannot check** is that `nearAccount` derives from `zcashAddress` — EVM cannot run the MPC
-  derivation. The app computes `A`; the bot rejects a mismatch and alerts. A mismatch pays the `A`
-  named, as a typo in any address would.
+- **What it cannot check** is that `nearAccount` derives from `zcashAddress`. `A` is
+  `compress(ROOT_ed25519 + tweak·G)` with `tweak = sha3("near-mpc-recovery v0.1.0 epsilon derivation:"
+‖ predecessor ‖ "," ‖ path)` — Ed25519 point arithmetic that the EVM has no precompile for. The app
+  computes `A`; the bot rejects a mismatch and alerts. A mismatch pays the `A` named, as a typo in any
+  address would. If outside integrators call this contract directly, `send(amount, zcashAddress)`
+  with the derivation in Solidity (golden vectors against `v1.signer`) is the upgrade; until then an
+  SDK helper `deriveAccount(zcashAddress)` covers them.
 - **Hydration facts [V]:** ZEC NTT manager `0xe20cED5f5798cD4FeBc7aE182309b9f51345e0cC`, BURNING, token
   `0x00000000000000000000000000000001000f478D` (8 dp, so no trim dust to NEAR's 8 dp);
-  `quoteDeliveryPrice(15, 0x00)` = 0.
-- UUPS like the other Hydration contracts; config is the manager and the token. Its migration follows
-  the usual deploy → wire → ownership order.
+  `quoteDeliveryPrice(15, 0x00)` = 0. NEAR NTT manager (for `refuel`)
+  `0x374E5239a2342Be6Bf31B410EC03984D03A8b7dE`, peered with `ntt-near.hydration-whm.near`.
+- UUPS like the other Hydration contracts; config is the ZEC and NEAR NTT managers and `fee`; the
+  tokens are read from the managers, the bot's account is named per `refuel` call. Owner is
+  Hydration governance, like `IntentEmitter`. Its migration follows the usual deploy → wire →
+  ownership order.
 
 ## `UtxoWithdraw`
 
@@ -215,13 +295,13 @@ small page would always be the same few oldest coins. So the bot picks off-chain
 **Worked example** (a live connector coin): `A` holds 0.5 ZEC; the coin `959b…c099:0` holds
 7,002,606,605 zat.
 
-| | zat |
-| --- | --- |
-| `amount` = balance(A) | 50,000,000 |
-| bridge fee, `max(0, 10,000)` | 10,000 |
-| miner fee, `FEE` | 10,000 |
-| user output → the user's address | 49,980,000 |
-| change → Omni's change address | 7,002,606,605 − 49,980,000 − 10,000 = 6,952,616,605 |
+|                                  | zat                                                 |
+| -------------------------------- | --------------------------------------------------- |
+| `amount` = balance(A)            | 50,000,000                                          |
+| bridge fee, `max(0, 10,000)`     | 10,000                                              |
+| miner fee, `FEE`                 | 10,000                                              |
+| user output → the user's address | 49,980,000                                          |
+| change → Omni's change address   | 7,002,606,605 − 49,980,000 − 10,000 = 6,952,616,605 |
 
 `A` is the hex of the derived key, so the reads wait for the key. The key comes from
 `v1.signer` itself — the same view the app uses — so it cannot drift from the key MPC signs with.
@@ -234,7 +314,7 @@ number. Amount, user output, fee, change, target, nonce and expiry all come from
 - **The user output and the fee are exact.** `coin = user output + change + fee`, with the coin's
   value, the user output and the fee all fixed — so the change is fixed too. The connector re-checks
   it all: the coin is one it holds, valued from its own records, and is removed from its set (`UTXO …
-  not exist` otherwise); outputs only to `target_btc_address` or its change address; exactly one user
+not exist` otherwise); outputs only to `target_btc_address` or its change address; exactly one user
   output; fee ≥ the ZIP-317 minimum and ≤ our `max_gas_fee` = `FEE` **[V `remove_vutxo_by_psbt`,
   `check_withdraw_psbt`, deployed commit `d2140eca`]**.
 - **Which coin is spent is Omni's business.** It changes only which part of Omni's reserve moves;
@@ -257,7 +337,7 @@ number. Amount, user output, fee, change, target, nonce and expiry all come from
   withdrawals and make the user pay the bridge fee on each. A transfer landing between the read and
   the execution is left for the next round.
 - **Nonce** `block_height × 10⁶` is always valid: the runtime requires `current < nonce <
-  execution_height × 10⁶` **[V nearcore `validate_delegate_action_key`]**; a new implicit key starts
+execution_height × 10⁶` **[V nearcore `validate_delegate_action_key`]**; a new implicit key starts
   at `(creation_height − 1) × 10⁶`, and each executed delegate leaves a nonce from an earlier block.
   Two signatures from the same block share a nonce — only one executes. A failed attempt consumes
   `A`'s nonce, so an older outstanding signature is simply re-made.
@@ -299,7 +379,8 @@ manager — account keys deleted, code changed only by an owner-gated `upgrade`,
 
 ```
 watch     ZEC transceiver VAAs to NEAR (chain 15); for each, the WithdrawRequested log with the
-          same NTT sequence — eth_getLogs by the indexed sequence, never by tx hash
+          same NTT sequence — eth_getLogs by the indexed sequence, never by tx hash; no event from
+          ZecUtxoEmitter (no fee paid) → not relayed
 check     sha256(hex(nearAccount)) == VAA recipient and derive(zcashAddress) == nearAccount, else alert
 redeem    ntt-zec.complete(vaa, A)                         deposit ≥ 0.00125 + 0.005 NEAR, excess refunded
 create    if A has no account: Transfer(1 yocto) to A       once
@@ -313,8 +394,10 @@ follow    connector GenerateBtcPendingInfo for A → Omni signs, broadcasts, ver
 
 - **No registry.** Everything the bot needs is in Hydration logs and Wormhole VAAs; it rebuilds from
   them after a restart, and scan can index the same event. A raw NTT transfer to `sha256(A)` made
-  without `send` carries no hint; it waits unredeemed and is recovered by hand (`complete`, then
-  `withdraw`).
+  without `send` carries no hint and paid no fee; the bot does not relay it, and its sender finishes
+  it themselves (`complete`, then `withdraw`).
+- **Its gas comes back as NEAR** from governance's `refuel`, as an `ntt-near` transfer to its
+  account that it completes like any other, then unwraps (`wrap.near.near_withdraw`).
 - **Retries** come from a sweep of known `A`s: any balance at or above the minimum, with nothing
   pending on the connector, is withdrawn again.
 - **Failures put the funds back in `A`.** A coin taken by a concurrent withdrawal, a stale balance, a paused connector, an amount under
@@ -328,52 +411,44 @@ follow    connector GenerateBtcPendingInfo for A → Omni signs, broadcasts, ver
 
 **[V]** live `zcash-connector.bridge.near` config, 2026-10-16 (version `0.9.7-rc.3`):
 
-| | |
-| --- | --- |
-| Minimum withdrawal | 100,000 zat (0.001 ZEC) |
-| Bridge withdraw fee | 10,000 zat flat (0.0001 ZEC) |
-| Zcash fee range | 5,000 – 1,000,000 zat; ZIP-317 minimum checked per tx |
-| Inputs per withdrawal | ≤ 25 |
-| Pending tx timeout | 86,400 s, then RBF or operator cancel |
-| Signing | trusted relayer only (`omni-relayer.bridge.near`) |
+|                       |                                                       |
+| --------------------- | ----------------------------------------------------- |
+| Minimum withdrawal    | 100,000 zat (0.001 ZEC)                               |
+| Bridge withdraw fee   | 10,000 zat flat (0.0001 ZEC)                          |
+| Zcash fee range       | 5,000 – 1,000,000 zat; ZIP-317 minimum checked per tx |
+| Inputs per withdrawal | ≤ 25                                                  |
+| Pending tx timeout    | 86,400 s, then RBF or operator cancel                 |
+| Signing               | trusted relayer only (`omni-relayer.bridge.near`)     |
 
 A balance under the minimum waits in `A` until the next transfer tops it up.
 
 **Who pays what.**
 
-| From | Pays | For |
-| --- | --- | --- |
-| The user's ZEC | bridge fee 10,000 zat flat — Omni's charge, covering its relayer | Omni signing, broadcasting, verifying |
-| The user's ZEC | Zcash miner fee: 10,000 zat, fixed by the contract (the ZIP-317 fee for ≤ 2 inputs) | the Zcash transaction |
-| Bot, NEAR | 0.00125 NEAR token storage + 1 yocto account creation, once per `A` | `A` on NEAR |
-| Bot, NEAR | gas for `complete`, `withdraw` + MPC, the delegate tx; 1 yocto deposits | each withdrawal |
+| From                         | Pays                                                                                | For                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------- |
+| The user's ZEC               | bridge fee 10,000 zat flat — Omni's charge, covering its relayer                    | Omni signing, broadcasting, verifying |
+| The user's ZEC               | Zcash miner fee: 10,000 zat, fixed by the contract (the ZIP-317 fee for ≤ 2 inputs) | the Zcash transaction                 |
+| Bot, NEAR                    | 0.00125 NEAR token storage + 1 yocto account creation, once per `A`                 | `A` on NEAR                           |
+| Bot, NEAR                    | gas for `complete`, `withdraw` + MPC, the delegate tx; 1 yocto deposits             | each withdrawal                       |
+| The user's ZEC, on Hydration | `fee` (owner-set zat), kept by `ZecUtxoEmitter`                                     | swept into NEAR to refill the bot     |
 
 **What it costs**, at NEAR ≈ $5.30 and ZEC ≈ $1,237 (CoinGecko, 2026-10-16):
 
-| Cost | Amount | USD |
-| --- | --- | --- |
-| `complete`, first for an `A` — gas + 0.00125 registration + 0.00073 replay entry | ≈ 0.0042 NEAR | ≈ $0.02 |
-| `complete`, later — gas + replay entry | ≈ 0.0029 NEAR | ≈ $0.015 |
-| Whole NEAR side per withdrawal — adds `withdraw`, MPC, the delegate tx | ≈ 0.005–0.015 NEAR (estimate) | ≈ $0.03–0.08 |
-| ZEC side — bridge fee 0.0001 + miner fee 0.0001 | ≈ 0.0002 ZEC | ≈ $0.25 |
+| Cost                                                                             | Amount             | USD          |
+| -------------------------------------------------------------------------------- | ------------------ | ------------ |
+| `complete`, first for an `A` — gas + 0.00125 registration + 0.00073 replay entry | ≈ 0.0042 NEAR      | ≈ $0.02      |
+| `complete`, later — gas + replay entry                                           | ≈ 0.0029 NEAR      | ≈ $0.015     |
+| Whole NEAR side per withdrawal — adds `withdraw`, MPC, the delegate tx           | ≈ 0.005–0.008 NEAR | ≈ $0.03–0.04 |
+| ZEC side — bridge fee 0.0001 + miner fee 0.0001                                  | ≈ 0.0002 ZEC       | ≈ $0.25      |
 
 - `complete` gas is **[V]** from two mainnet `ntt-zec` completes: 24.1 TGas burnt, 0.0022 NEAR. The
   storage comes out of the attached deposit, so explorers show only the gas as the fee. The replay
   entry is kept per VAA, forever.
-- The rest of the NEAR side is an estimate until the sandbox measures it (1 TGas = 0.0001 NEAR at the
-  minimum gas price; unused gas is refunded, less NEAR's refund penalty, so attach close to what is
-  reserved — ~100 TGas for `complete`).
+- The rest of the NEAR side is **[V]** from the mainnet canary (2026-10-16): `withdraw` 20.8 TGas,
+  the relay ~12 TGas (1 TGas = 0.0001 NEAR at the minimum gas price; unused gas is refunded, less
+  NEAR's refund penalty, so attach close to what is reserved — ~100 TGas for `complete`).
 - The bot's NEAR cost is negligible. The ZEC fees are what matter: ~$0.25 per withdrawal from the
   user's amount, about 20% of the 0.001 ZEC minimum (~$1.24) and 0.2% of 0.1 ZEC.
-
-## Compared with 1Click
-
-| | 1Click (now) | `UtxoWithdraw` |
-| --- | --- | --- |
-| Deposit target | 1Click deposit address, new per quote | `A`, one per Zcash address, reused |
-| Who moves the funds | 1Click + a solver | Omni's connector, which already backs `zec.omft.near` |
-| On failure | refund to a NEAR account the user did not need | funds stay in `A`, next attempt |
-| Trust added | 1Click, solver liveness | `UtxoWithdraw` (DAO), MPC network |
 
 ## Trust
 
@@ -382,17 +457,26 @@ DAO `rainbowbridge.sputnik-dao.near`, plus its trusted relayer for liveness — 
 the connector custodies the native ZEC behind `zec.omft.near`; the NEAR MPC network; the
 `UtxoWithdraw` DAO, which can upgrade the contract and so controls every `A`.
 
+## Verified live
+
+- **Mainnet canary, 2026-10-16.** 0.001 ZEC: Hydration NTT transfer to `sha256(A)` → `ntt-zec.complete`
+  → `withdraw-zec.withdraw` → Omni. Zcash tx
+  `a63e6119df0bd73e6160515d8f4abe15327e29df21f637245ef334d8c784ae34` (block 3,520,026): 80,000 zat to
+  `t1XVScGC…`, 99,910,000 zat change to Omni; connector record: 10,000 bridge fee, 10,000 miner fee.
+  Omni's relayer signed 12 s after the request. The connector parsed and accepted our `Withdraw`
+  message.
+- **Gas.** `withdraw_gas` = 200 TGas carries the connector's `ft_on_transfer` and its 100 TGas
+  callback; `withdraw` burns 20.8 TGas end to end on mainnet.
+- **`derived_public_key` as a cross-contract call** — on testnet and mainnet.
+- **Testnet** (`ZcashTestnet`): `claim` signed by the real `v1.signer-prod.testnet`, relayed, executed
+  by the connector as `A`; `withdraw` reads and the `BelowMinimum` stop; `upgrade` + `migrate` on a
+  keyless contract.
+- Omni's relayer signs a pending withdrawal from any account, `A` included, and pays its own NEAR gas.
+
 ## Open
 
-1. **Gas.** The SDK attaches 100 TGas to `ft_transfer_call`, but the connector's `ft_on_transfer`
-   schedules a light-client read and a 100 TGas static callback. Measure on the mainnet wasm; size
-   `withdraw_gas`, and the bot's outer transaction, from the result.
-2. **`derived_public_key` called cross-contract** from `UtxoWithdraw` — a view method, expected to work
-   as a plain function call; confirm in the sandbox.
-3. **Sandbox.** Mainnet wasm of `zec.omft.near`, `zcash-connector.bridge.near` and our `ntt-zec`; an
-   Ed25519 mock signer; the delegate executed end to end, including the failure refund and
-   `claim_lost_found`.
-4. **Mainnet canary.** 0.002 ZEC, Hydration → Zcash `t1`, with a fresh address.
-
-Resolved: Omni's relayer picks up and signs a pending withdrawal from any account, `A` included, and
-pays its own NEAR gas (confirmed with the team, 2026-10-16).
+1. **`ZecUtxoEmitter`** on Hydration — written and tested (`contracts/src/utxo/`); its migration.
+2. **The bot** — watch, `complete`, create `A`, best-fit coin, `withdraw`, relay; retry with a fresh
+   coin on `UnknownCoin` / `CoinDoesNotFit`; skip coins with large `tx_bytes`.
+3. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run the migration
+   (keys deleted, DAO accepts).
