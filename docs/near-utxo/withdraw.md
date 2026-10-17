@@ -169,8 +169,7 @@ relay     the bot relays only transfers that have a WithdrawRequested event from
 - **No price on chain — for now.** The fee is a flat 10,000 zat, like Omni's own bridge fee. Against
   the worst-case NEAR cost of a withdrawal (≈ 0.0097 NEAR, first one to an `A`; ≈ 4,200 zat at NEAR
   $5.05 / ZEC $1,156, 2026-10-17) it has ~2.4× room for ZEC/NEAR moves, and governance retunes `fee`
-  when it needs to. Later the rate comes from an oracle: the fee is priced in NEAR and converted to
-  zat at the oracle's ZEC/NEAR rate per `send`.
+  when it needs to. Later the rate comes from an oracle — see [Sizing the fee](#sizing-the-fee).
 - **Users never depend on a swap.** A per-transfer "buy exactly 0.01 NEAR" would track the cost
   exactly but would make every user transfer depend on ZEC/NEAR liquidity on Hydration, and revert
   when it is thin. Holding ZEC and swapping in batches moves that dependency to `refuel`, which
@@ -181,6 +180,34 @@ relay     the bot relays only transfers that have a WithdrawRequested event from
   permissionless — paying their own NEAR gas.
 - **Custody.** The contract holds the accumulated fee ZEC between `refuel` calls — small, and under the
   same governance owner as the rest of the Hydration contracts.
+
+### Sizing the fee
+
+What the bots spend in NEAR per withdrawal, at 1 TGas = 0.0001 NEAR (the minimum gas price, live
+2026-10-17):
+
+| Step                                                               | First to an `A` | Later       |
+| ------------------------------------------------------------------ | --------------- | ----------- |
+| `ntt-zec.complete` — 24.1 TGas + 0.00073 replay entry **[V]**      | 0.0031          | 0.0031      |
+| `A`'s registration on `zec.omft.near`, once                        | 0.00125         | —           |
+| create `A` — 1 yocto + the transfer's gas, once                    | ~0.00005        | —           |
+| `withdraw-zec.withdraw` — 20.8 TGas + 1 yocto to the signer **[V]** | 0.0021          | 0.0021      |
+| relay the delegate — ~12 TGas **[V]**                              | 0.0012          | 0.0012      |
+| refund penalty on the unused part of 150 / 300 TGas attached **[I]** | ~0.002          | ~0.002      |
+| **Total**                                                          | **≈ 0.0097 NEAR** | **≈ 0.0084 NEAR** |
+
+At NEAR $5.05 / ZEC $1,156 (CoinGecko, 2026-10-17) the worst case is ≈ $0.049 ≈ 4,200 zat. `fee` =
+10,000 zat (≈ $0.116 ≈ 0.023 NEAR) covers it ~2.4× and matches Omni's flat bridge fee; the smallest
+`send` is then 110,000 zat. A `refuel` adds the router's swap fee and one hand-completed NEAR
+transfer (~0.003 NEAR) per batch, not per withdrawal.
+
+**Later: an oracle-priced fee.** A flat zat amount only tracks the cost while ZEC/NEAR holds. The
+plan is to price the fee in NEAR and convert it per `send` at the oracle rate — ZEC/USD ÷ NEAR/USD
+from Hydration's `AggregatorV3` feeds, the same feeds the intents-v2 dispatcher reads
+([intents-v2 spec § Price feeds](../intents-v2/spec.md#4-price-feeds)). It lands as an upgrade of
+`ZecUtxoEmitter`: the proxy is UUPS and owned by the TC, so the TC upgrades it, appending the NEAR fee
+and the feed addresses to storage. Open: whether a stale feed reverts `send` (fail closed, as the
+dispatcher does) or falls back to the flat `fee`.
 
 - **Fixed-size arguments make a bad input unrepresentable.** `zcashAddress` is the decoded
   transparent address — 2-byte prefix and 20-byte hash, no checksum to get wrong — so any value with
@@ -490,3 +517,5 @@ the connector custodies the native ZEC behind `zec.omft.near`; the NEAR MPC netw
 2. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run the migration
    (keys deleted, DAO accepts).
 3. **Coins with large `tx_bytes`** — the relayer's best fit does not skip them yet.
+4. **Oracle-priced fee** — a `ZecUtxoEmitter` upgrade converting a NEAR fee at the Hydration feeds'
+   ZEC/NEAR rate ([Sizing the fee](#sizing-the-fee)); decide stale-feed behaviour first.
