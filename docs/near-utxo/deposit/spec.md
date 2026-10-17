@@ -68,8 +68,9 @@ For us:
 
 - The app takes the address from the Omni API or the connector view
   ([schema § 3](schema.md#3-getting-the-address)) — never derives it: the hash is over the exact JSON.
-- The relayer needs the whole order, not just the address. The `POST` presumably registers it for
-  their relayer **[I]**.
+- The relayer needs the whole order, not just the address. The API's `POST` registers it for their
+  relayer, with a NEAR transaction **[V]**; `agents/utxo` serves the address only after registering
+  it and checking it against the connector.
 - **Refunds depend on where a deposit fails** **[V `deposit.rs` `safe_mint_callback`,
   `is_refund_required`; `bridge.rs`]**:
   - **Our manager refuses** (paused, over the outbound limit, bad `msg`, out of gas) → `ft_on_transfer`

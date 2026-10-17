@@ -25,7 +25,7 @@ async function start(): Promise<void> {
 
   await serve({
     name: APP_NAME,
-    routes: routes(derivers),
+    routes: routes(provider, derivers),
     status: () => ({ chains: Object.fromEntries(Object.values(CHAINS).map((c) => [c.name, c.contract])) }),
   });
 }

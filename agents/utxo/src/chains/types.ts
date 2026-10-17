@@ -16,6 +16,15 @@ export interface UtxoChain {
   contract: string;
   /** An address and the account it derives under `contract`, checked at startup. */
   golden: { address: string; account: string };
+  /** Deposits onto Hydration — the chain's Omni connector, mint target and API name. */
+  deposit: {
+    /** The chain's Omni connector — the deposit address is its view of the order. */
+    connector: string;
+    /** Our NTT manager for the coin — the order's `recipient_id`. */
+    manager: string;
+    /** The Omni Bridge API's name for the chain. */
+    omniChain: string;
+  };
   /**
    * The address as the emitter takes it, and logs it as `destination`.
    *

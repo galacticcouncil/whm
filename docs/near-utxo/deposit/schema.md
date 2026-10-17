@@ -58,9 +58,14 @@ to go to it.
 
 Never derived by the app — the hash is over the exact JSON:
 
-- `POST https://mainnet.api.bridge.nearone.org/api/v3/utxo/get_user_deposit_address` (`bridge-sdk-js`)
-  — presumably also registers the order for Omni's relayer **[I]**;
-- or the connector's view with the same `DepositMsg`.
+- `POST https://mainnet.api.bridge.nearone.org/api/v3/utxo/get_user_deposit_address`
+  `{ chain, recipient, safe_deposit: { msg }, refund_address? }` → `{ address }` (`@omni-bridge/core`
+  `getUtxoDepositAddress`) — registers the order for Omni's relayer with a NEAR transaction of its own
+  **[V 2026-10-17: a nonce clash surfaced as `NEAR transaction failed … get_user_deposit_address`]**;
+  retry a 5xx;
+- or the connector's view `get_user_deposit_address({ deposit_msg })` with the same `DepositMsg` —
+  computes the address, registers nothing. `agents/utxo` (`/api/deposit/:chain/:recipient`) calls both
+  and refuses a mismatch **[V 2026-10-17: same address from both, with and without `refund_address`]**.
 
 ## 4. Refund calls
 

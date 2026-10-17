@@ -16,6 +16,11 @@ export const zcash: UtxoChain = {
     address: "t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ua",
     account: "da66533e90179ebb2e9e546afd4410e36f76e8a8b4ec0376b4e2a8825f802e11",
   },
+  deposit: {
+    connector: "zcash-connector.bridge.near",
+    manager: "ntt-zec.hydration-whm.near",
+    omniChain: "zcash",
+  },
 
   encode(address) {
     const body = decodeBase58Check(address);

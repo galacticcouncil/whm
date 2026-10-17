@@ -18,16 +18,26 @@ vector, its address codec and miner fee. A new coin is a chain file, an entry in
 ## api
 
 ```
-GET /api/:chain/:address
-  → { chain, address, account, nearAccount, destination }
+GET /api/withdraw/:chain/:address                     address on the coin's chain
+  → { chain, address, account, send: { destination, nearAccount } }
+GET /api/deposit/:chain/:recipient?refund=<address>   recipient on Hydration
+  → { chain, recipient, refund, address, order }
 GET /api/health      → { ok: true }
 GET /api/status      → { chains }
 ```
 
-`account` is the implicit NEAR account `A` that `address` derives under the chain's contract
-(`path_of`, then `v1.signer.derived_public_key`, domain 1). `nearAccount` (`bytes32`) and
-`destination` are what the coin's emitter `send` takes beside the amount. 400 for an address the
-emitter would refuse, 404 for an unknown chain. Each chain's golden vector is checked at startup.
+**Withdraw.** `account` is the implicit NEAR account `A` that `address` derives under the chain's
+contract (`path_of`, then `v1.signer.derived_public_key`, domain 1). `send` is what the coin's
+emitter `send` takes beside the amount — `destination` (the address bytes) and `nearAccount`
+(`bytes32`). 400 for an address the emitter would refuse, 404 for an unknown chain. Each chain's
+golden vector is checked at startup.
+
+**Deposit.** `address` is the chain's Omni connector's address for an order paying our NTT manager
+with `TransferMsg { recipient_chain: 73, recipient, refund_to: hydration.sputnik-dao.near }`. The
+order is registered with the Omni Bridge API — that is what lets Omni's relayer finalize the deposit —
+and the address is checked against the connector's own view of it; a mismatch is a 502, never an
+address. `refund` (the coin's chain) is part of the order and changes the address; the app should ask
+for it. `recipient` is a `0x` Hydration EVM address.
 
 ## relayer
 
