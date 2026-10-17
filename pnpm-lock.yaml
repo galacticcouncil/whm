@@ -137,6 +137,9 @@ importers:
       '@wormhole-foundation/relayer-engine':
         specifier: ^0.3.2
         version: 0.3.2(@bull-board/ui@5.23.0)(@improbable-eng/grpc-web@0.15.0(google-protobuf@3.21.4))(@types/node@25.9.5)(bufferutil@4.1.0)(google-protobuf@3.21.4)(lodash@4.18.1)(mustache@4.2.0)(typescript@6.0.3)(utf-8-validate@5.0.10)
+      near-api-js:
+        specifier: ^7.3.1
+        version: 7.3.1
       viem:
         specifier: ^2.38.3
         version: 2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@3.25.76)
@@ -183,6 +186,30 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+
+  agents/utxo:
+    dependencies:
+      '@fastify/cors':
+        specifier: ^10.0.2
+        version: 10.1.0
+      fastify:
+        specifier: ^5.2.0
+        version: 5.8.5
+      ioredis:
+        specifier: ^5.4.1
+        version: 5.11.1
+      near-api-js:
+        specifier: ^7.3.1
+        version: 7.3.1
+      polkadot-api:
+        specifier: ^2.1.0
+        version: 2.2.2(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3)
+      viem:
+        specifier: ^2.46.1
+        version: 2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76)
+      winston:
+        specifier: ^3.8.2
+        version: 3.19.0
 
   chopsticks:
     dependencies:
@@ -7046,6 +7073,41 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  '@polkadot-api/cli@0.21.10(bufferutil@4.1.0)(esbuild@0.28.0)(utf-8-validate@6.0.3)':
+    dependencies:
+      '@commander-js/extra-typings': 15.0.0(commander@15.0.0)
+      '@polkadot-api/codegen': 0.22.5
+      '@polkadot-api/ink-contracts': 0.6.3
+      '@polkadot-api/json-rpc-provider': 0.2.0
+      '@polkadot-api/known-chains': 0.12.1
+      '@polkadot-api/metadata-compatibility': 0.6.3
+      '@polkadot-api/observable-client': 0.18.8(rxjs@7.8.2)
+      '@polkadot-api/sm-provider': 0.3.8(@polkadot-api/smoldot@0.4.6(bufferutil@4.1.0)(utf-8-validate@5.0.10))
+      '@polkadot-api/smoldot': 0.4.6(bufferutil@4.1.0)(utf-8-validate@6.0.3)
+      '@polkadot-api/substrate-bindings': 0.20.3
+      '@polkadot-api/substrate-client': 0.7.0
+      '@polkadot-api/utils': 0.4.0
+      '@polkadot-api/wasm-executor': 0.2.3
+      '@polkadot-api/ws-middleware': 0.3.6(rxjs@7.8.2)
+      '@polkadot-api/ws-provider': 0.9.1(rxjs@7.8.2)
+      '@types/node': 25.9.5
+      commander: 15.0.0
+      execa: 9.6.1
+      fs.promises.exists: 1.1.4
+      ora: 9.4.1
+      read-pkg: 10.1.0
+      rollup: 4.62.5
+      rollup-plugin-esbuild: 6.2.1(esbuild@0.28.0)(rollup@4.62.5)
+      rxjs: 7.8.2
+      tsc-prog: 2.3.0(typescript@6.0.3)
+      typescript: 6.0.3
+      write-package: 7.2.0
+    transitivePeerDependencies:
+      - bufferutil
+      - esbuild
+      - supports-color
+      - utf-8-validate
+
   '@polkadot-api/cli@0.21.5(bufferutil@4.1.0)(esbuild@0.28.0)(utf-8-validate@6.0.3)':
     dependencies:
       '@commander-js/extra-typings': 15.0.0(commander@15.0.0)
@@ -7222,6 +7284,14 @@ snapshots:
     dependencies:
       '@types/node': 25.9.5
       smoldot: 3.3.2(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  '@polkadot-api/smoldot@0.4.6(bufferutil@4.1.0)(utf-8-validate@6.0.3)':
+    dependencies:
+      '@types/node': 25.9.5
+      smoldot: 3.3.2(bufferutil@4.1.0)(utf-8-validate@6.0.3)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -11030,6 +11100,34 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  polkadot-api@2.2.2(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3):
+    dependencies:
+      '@polkadot-api/cli': 0.21.10(bufferutil@4.1.0)(esbuild@0.28.0)(utf-8-validate@6.0.3)
+      '@polkadot-api/ink-contracts': 0.6.3
+      '@polkadot-api/json-rpc-provider': 0.2.0
+      '@polkadot-api/known-chains': 0.12.1
+      '@polkadot-api/logs-provider': 0.2.0
+      '@polkadot-api/metadata-builders': 0.14.3
+      '@polkadot-api/metadata-compatibility': 0.6.3
+      '@polkadot-api/observable-client': 0.18.8(rxjs@7.8.2)
+      '@polkadot-api/pjs-signer': 0.7.3
+      '@polkadot-api/polkadot-signer': 0.1.6
+      '@polkadot-api/signer': 0.3.3
+      '@polkadot-api/sm-provider': 0.3.8(@polkadot-api/smoldot@0.4.6(bufferutil@4.1.0)(utf-8-validate@5.0.10))
+      '@polkadot-api/smoldot': 0.4.6(bufferutil@4.1.0)(utf-8-validate@6.0.3)
+      '@polkadot-api/substrate-bindings': 0.20.3
+      '@polkadot-api/substrate-client': 0.7.0
+      '@polkadot-api/utils': 0.4.0
+      '@polkadot-api/ws-middleware': 0.3.6(rxjs@7.8.2)
+      '@polkadot-api/ws-provider': 0.9.1(rxjs@7.8.2)
+      '@rx-state/core': 0.1.4(rxjs@7.8.2)
+      rxjs: 7.8.2
+    transitivePeerDependencies:
+      - bufferutil
+      - esbuild
+      - supports-color
+      - utf-8-validate
+
   possible-typed-array-names@1.1.0: {}
 
   postgres-array@2.0.0: {}
@@ -11597,6 +11695,13 @@ snapshots:
   smoldot@3.3.2(bufferutil@4.1.0)(utf-8-validate@5.0.10):
     dependencies:
       ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  smoldot@3.3.2(bufferutil@4.1.0)(utf-8-validate@6.0.3):
+    dependencies:
+      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.3)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate

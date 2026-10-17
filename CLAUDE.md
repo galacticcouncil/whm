@@ -81,7 +81,8 @@ agents/
   broadcaster/            # @whm/broadcaster — Solana → Wormhole price/rate publisher
   scan/                   # @whm/scan — chain indexer; one ingest writer + a container per domain
   intent/                 # @whm/intent — intents off-chain: relay-fee quoter + 1Click notifier
-  relayer/                # @whm/relayer — Wormhole VAA relayer (hydration-ntt, intent)
+  relayer/                # @whm/relayer — Wormhole VAA relayer (hydration-ntt, intent, ntt-near)
+  utxo/                   # @whm/utxo — UTXO withdrawals: address→account api + withdraw relayer
 
 common/                   # @whm/common — shared TS (evm, args, migration)
 
@@ -123,6 +124,7 @@ agents/broadcaster
 agents/scan
 agents/relayer
 agents/intent
+agents/utxo
 ```
 
 **Agents declare ONLY runtime deps.** The TS toolchain — `typescript`, `tsx`, `esbuild`, `dotenv`, `@types/*` — lives in the **root** `package.json` and resolves from agent packages via upward `node_modules` lookup. Never add these as agent `devDependencies` (a package-specific type like `@types/pg` is the only acceptable exception). New agents follow the `broadcaster`/`scan` pattern: workspace member, runtime-deps-only `package.json`, esbuild bundle to `dist/index.js`, `node:NN-slim` Docker copying just the bundle, and a modular `src/` (`config` / `clients` / `watcher` / `api` / `endpoints` / `index`) — not one fat `index.ts`.
