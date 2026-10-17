@@ -113,12 +113,15 @@ ZEC minimum (~$1.24) and 0.2% of 0.1 ZEC.
   `v1.signer-prod.testnet`, relayed, executed by the connector as `A`; `withdraw` reads and the
   `BelowMinimum` stop; `upgrade` + `migrate` on a keyless contract.
 - Omni's relayer signs a pending withdrawal from any account, `A` included, and pays its own NEAR gas.
+- **Bots live, 2026-10-17** — `ntt-near` and the `utxo` relayer on `relayer.hydration-whm.near`, one
+  key each. `ntt-near` replayed the ZEC transceiver's 10 earlier VAAs and skipped every one (no
+  `WithdrawRequested` — they predate the emitter); the relayer read the emitter from its deployment
+  block and follows finalized blocks.
 
 ## Open
 
 1. **Hand `ZecUtxoEmitter` to the TC** — deployed 2026-10-17 with steps 001–004; the deployer still
    owns it. Set `HYDRATION_EMERGENCY_ADMIN` and re-run `utxo-emitter-zec` for step 005.
-2. **Run the bots** — `ntt-near` (agents/relayer) and the `utxo` relayer, both on
-   `relayer.hydration-whm.near`, one key each.
-3. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run
+2. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run
    `utxo-withdraw-zec` (keys deleted, DAO accepts).
+3. **First withdrawal through the bots** — a `send` of ≥ 110,000 zat, end to end.
