@@ -123,7 +123,7 @@ function send(uint256 amount, bytes22 zcashAddress, bytes32 nearAccount)
   zec.safeTransferFrom(msg.sender, this, amount)            fee stays in the contract
   recipient = sha256(lowercase hex of nearAccount)          the NEAR account id is that hex
   sequence = _bridge(zecManager, net, recipient)
-  emit WithdrawRequested(sequence, nearAccount, msg.sender, net, fee, zcashAddress)
+  emit WithdrawRequested(sequence, nearAccount, msg.sender, net, fee, abi.encodePacked(zcashAddress))
 
 /// Owner (Hydration governance): sell `zecIn` of the held fee ZEC for NEAR and send it to `account` on NEAR.
 function refuel(uint256 zecIn, uint256 minNearOut, string account) external onlyOwner returns (uint64 sequence);
@@ -131,7 +131,7 @@ function refuel(uint256 zecIn, uint256 minNearOut, string account) external only
                                                             exact zecIn, so the floor stays with its amount
   nearOut = NEAR balance, trimmed to 1e16                   NTT carries 8 of NEAR's 24 dp
   sequence = _bridge(nearManager, nearOut, sha256(account)) the NEAR NTT route (ntt-near.hydration-whm.near)
-  emit Refueled(zecIn, nearOut, account, sequence)
+  emit Refueled(sequence, zecIn, nearOut, account)
 
 /// Both legs: quote the delivery price (0 today, paid from the contract's balance), approve, and the
 /// 3-argument NTT transfer to NEAR (chain 15).
@@ -143,8 +143,8 @@ function setNearNttManager(address) external onlyOwner;
 function sweep(address asset, address to, uint256 amount) external onlyOwner;   trim dust, stray tokens
 
 event WithdrawRequested(uint64 indexed sequence, bytes32 indexed nearAccount, address indexed sender,
-                        uint256 amount, uint256 fee, bytes22 zcashAddress);
-event Refueled(uint256 zecIn, uint256 nearOut, string account, uint64 sequence);
+                        uint256 amount, uint256 fee, bytes destination);
+event Refueled(uint64 indexed sequence, uint256 zecIn, uint256 nearOut, string account);
 ```
 
 - **`nearAccount` is `bytes32`, `account` is a string.** `send` names an implicit account — its id is
@@ -377,35 +377,42 @@ manager — account keys deleted, code changed only by an owner-gated `upgrade`,
 
 ## Bot
 
+Two processes, neither with authority — each holds a NEAR gas key and nothing else:
+
 ```
-watch     ZEC transceiver VAAs to NEAR (chain 15); for each, the WithdrawRequested log with the
-          same NTT sequence — eth_getLogs by the indexed sequence, never by tx hash; no event from
-          ZecUtxoEmitter (no fee paid) → not relayed
-check     sha256(hex(nearAccount)) == VAA recipient and derive(zcashAddress) == nearAccount, else alert
-redeem    ntt-zec.complete(vaa, A)                         deposit ≥ 0.00125 + 0.005 NEAR, excess refunded
-create    if A has no account: Transfer(1 yocto) to A       once
-coin      best fit over the connector's whole set (get_utxos_paged, paged — a free view): the
-          smallest coin paying user_out + FEE exactly or leaving change ≥ min_change_amount
-sign      balance(A) ≥ min_withdraw_amount and A has no pending sign on the connector →
-          withdraw-zec.withdraw(address, coin), 1 yocto    read the signed delegate from the event
-submit    tx { signer: bot, receiver: A, actions: [Delegate(signed)] }
-follow    connector GenerateBtcPendingInfo for A → Omni signs, broadcasts, verify_withdraw_v2
+ntt-near (agents/relayer)  — the Wormhole leg
+  watch     the ZEC transceiver's VAAs (Hydration → NEAR, spy)
+  account   the source tx receipt's WithdrawRequested with the same manager sequence → A
+            (its indexed nearAccount); none → a raw transfer, its sender completes it
+  redeem    ntt-zec.complete(vaa, A)                         0.01 NEAR attached, excess refunded
+
+relayer (agents/utxo)      — the withdraw leg
+  watch     WithdrawRequested from Hydration System.Events (EVM.Log, finalized blocks) — a send made
+            as a substrate extrinsic has no ethereum receipt, so eth_getLogs would miss it
+  check     derive(destination) == nearAccount, else the record closes as mismatch
+  record    one per event, in Redis, until processed
+  poll      every 30 s: balance(A) ≥ min_withdraw_amount →
+              create A (1 yocto, once)
+              best-fit coin over the connector's whole set (get_utxos_paged — free views)
+              withdraw-zec.withdraw(address, coin), 1 yocto — read the signed delegate from the event
+              relay { signer: bot, receiver: A, actions: [Delegate(signed)] }
+  close     A's balance has left through the connector → withdrawn; else the next poll retries
 ```
 
-- **No registry.** Everything the bot needs is in Hydration logs and Wormhole VAAs; it rebuilds from
-  them after a restart, and scan can index the same event. A raw NTT transfer to `sha256(A)` made
-  without `send` carries no hint and paid no fee; the bot does not relay it, and its sender finishes
-  it themselves (`complete`, then `withdraw`).
-- **Its gas comes back as NEAR** from governance's `refuel`, as an `ntt-near` transfer to its
-  account that it completes like any other, then unwraps (`wrap.near.near_withdraw`).
-- **Retries** come from a sweep of known `A`s: any balance at or above the minimum, with nothing
-  pending on the connector, is withdrawn again.
-- **Failures put the funds back in `A`.** A coin taken by a concurrent withdrawal, a stale balance, a paused connector, an amount under
-  the minimum, or a second withdrawal while one is pending (one pending sign per account by default
-  **[V `get_max_pending_sign_txs`]**) panic in the connector; `ft_resolve_transfer` refunds `A` in
-  full. The bot calls `withdraw` again.
-- **Anyone can run it.** It holds a NEAR gas key and nothing else. Inner deposits are paid by the
-  delegate's relayer, refunded to `A` if the actions fail **[V nearcore `total_deposit`]**.
+- **One record per event, closed on the balance.** A raw NTT transfer to `sha256(A)` made without
+  `send` carries no event and paid no fee; neither process acts on it, and its sender finishes it
+  themselves (`complete`, then `withdraw`). Records of the same `A` close together — the contract
+  withdraws the whole balance.
+- **Failures put the funds back in `A`.** A coin taken by a concurrent withdrawal, a stale balance, a
+  paused connector, an amount under the minimum, or a second withdrawal while one is pending (one
+  pending sign per account by default **[V `get_max_pending_sign_txs`]**) panic in the connector;
+  `ft_resolve_transfer` refunds `A` in full, and the next poll retries with a fresh coin.
+- **Its gas comes back as NEAR** from governance's `refuel`, a NEAR-route transfer to the bot's own
+  account. Neither process completes it — the bot account holds its key and does it by hand
+  (`crates/near/scripts/ntt-manager/complete.ts --recipient <bot>`), then unwraps
+  (`wrap.near.near_withdraw`).
+- **Anyone can run them.** Inner deposits are paid by the delegate's relayer, refunded to `A` if the
+  actions fail **[V nearcore `total_deposit`]**.
 
 ## Fees and limits
 
@@ -475,8 +482,9 @@ the connector custodies the native ZEC behind `zec.omft.near`; the NEAR MPC netw
 
 ## Open
 
-1. **`ZecUtxoEmitter`** on Hydration — written and tested (`contracts/src/utxo/`); its migration.
-2. **The bot** — watch, `complete`, create `A`, best-fit coin, `withdraw`, relay; retry with a fresh
-   coin on `UnknownCoin` / `CoinDoesNotFit`; skip coins with large `tx_bytes`.
-3. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run the migration
+1. **Deploy `ZecUtxoEmitter`** — `pnpm migrate:utxo-emitter-zec` (set `ZEC_FEE` first; verified on a
+   Hydration fork). Then fill its address into `agents/relayer` `ntt-near` routes and
+   `agents/utxo` relayer routes (with its deployment block), and run both.
+2. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run the migration
    (keys deleted, DAO accepts).
+3. **Coins with large `tx_bytes`** — the relayer's best fit does not skip them yet.
