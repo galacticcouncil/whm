@@ -4,6 +4,7 @@
  */
 export const entryPoints = {
   "ntt/app": "src/apps/ntt/app.ts",
+  "ntt-near/app": "src/apps/ntt-near/app.ts",
   "oracle/app": "src/apps/oracle/app.ts",
   "oracle-robinhood/app": "src/apps/oracle-robinhood/app.ts",
   "intent/app": "src/apps/intent/app.ts",

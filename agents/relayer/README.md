@@ -16,6 +16,20 @@ Redeems NTT transfers **into Hydration** from Ethereum, Base, Solana, and Sui. W
 deployed origin transceivers ([routes.ts](src/apps/ntt/routes.ts)) and submits each transfer VAA to
 that route's Hydration transceiver.
 
+### `ntt-near`
+
+Completes UTXO withdrawals **from Hydration on NEAR** ([withdraw.md](../../docs/near-utxo/withdraw.md)).
+Each coin's emitter settles over NTT to the account its destination address derives and logs that
+account beside it; this calls `complete(vaa, account)` on the coin's NEAR manager for it. Nobody holds
+a key for a derived account, so somebody has to.
+
+Same shape as `intent`: only the settlement is subscribed to, and the account is read from the source
+transaction's `WithdrawRequested` (its indexed `sequence` and `nearAccount`), since a NEAR transfer
+names its recipient as `sha256(account_id)`. A settlement without one is a raw transfer and is
+skipped. One route per coin in [routes.ts](src/apps/ntt-near/routes.ts) — ZEC today; the app refuses
+to run on a blank one. Signs on NEAR with `NEAR_ACCOUNT_ID` / `NEAR_PRIVKEY`; each `complete`
+attaches 0.01 NEAR, the unused part refunded.
+
 ### `oracle`
 
 Relays oracle price and rate VAAs **into Hydration**. Each source chain has its own OracleReceiver
@@ -59,78 +73,25 @@ point, so it does not wait on Wormholescan for the source tx hash.
 
 ### `psm-hydration` and `psm-base`
 
-Relays the HOLLAR peg stability module's two legs (`docs/psm/spec.md`). The corridor has a
-destination on each chain, so this is the one app with two entry points, each its own process and
-wallet:
+Relays the HOLLAR peg stability module's two legs ([docs/psm/spec.md](../../docs/psm/spec.md)) — one
+app, two entry points, each its own process and wallet:
 
-- `psm-hydration` delivers **Base to Hydration**: the vault's deposits, cancels and returned
-  redemptions go to `HollarBaseFacilitator.receiveMessage`, which mints.
-- `psm-base` delivers **Hydration to Base**: the facilitator's redemptions and refunds go to
-  `HollarBaseVault.receiveMessage`, which books a credit and moves no money.
+- `psm-hydration` delivers **Base to Hydration**: deposits, cancels and returned redemptions to
+  `HollarBaseFacilitator.receiveMessage`, which mints. Signs with `PRIVKEY`.
+- `psm-base` delivers **Hydration to Base**: redemptions and refunds to
+  `HollarBaseVault.receiveMessage`, which books a credit. Signs with `PRIVKEY_BASE`, never falling
+  back to `PRIVKEY`.
 
-Both read one route table ([routes.ts](src/apps/psm/routes.ts)), keyed by destination chain. A route
-names a source emitter and chain and a destination contract and chain; nothing about direction is
-built in, so a corridor whose destinations are already served is more rows, not more code. The table
-ships blank — the addresses come from the `psm-base` migration — and both processes refuse to start
-while any address is blank, malformed or zero, a chain id is unknown, a route runs from a chain to
-itself, a served route has no return route, the two routes' contracts do not pair up, or two routes
-share a source. Once the clients exist they refuse again if either client is on another chain than
-the destination's, or if a served route's destination contract has no code. The pairing check is
-relative: it cannot tell the two real addresses from each other swapped consistently across both
-routes, and the code check proves a contract is there, not that it is the PSM contract bound to the
-route's source emitter.
+Both read one route table ([routes.ts](src/apps/psm/routes.ts)), keyed by destination chain. It ships
+blank — the addresses come from the `psm-base` migration — and both refuse to start on a blank,
+malformed or unpaired route, or a destination with no code. `MessageAlreadyProcessed` (a reorg's
+second signed copy) is done; every other revert retries, up to 250 attempts over ~5 days, long enough
+to outlast a claims pause. A job past that stays in the engine's failed set — resubmit the VAA to
+`receiveMessage` (permissionless).
 
-Reverts are named by [abi.ts](src/apps/psm/abi.ts). A second signed copy of a message a receiver
-already consumed (`MessageAlreadyProcessed`, which a source-chain reorg can cause) is done;
-everything else is retried. That includes a delivery that simulated clean and then mined as
-reverted, which the queue alone counts as done once the transaction is broadcast: the handler reads
-each receipt and throws on a revert, so the engine retries the job. The receipt has to be for the
-transaction the delivery sent. viem's receipt wait follows a transaction replaced at the same nonce
-and returns the replacement's receipt, which the handler refuses, so a replaced delivery is retried
-rather than counted as landed.
-
-The retry budget is 250 attempts with a backoff of 2^attempt x 60 s capped at 30 min, about 5.1 days,
-because a delivery can fail for as long as a claims pause lasts and the contracts keep the VAA
-replayable through it. A refusal that outlasts it leaves the job in the engine's failed set, and
-nothing re-queues it, a restart included: the spy does not replay, the missed-VAA worker already
-counts the sequence as seen, and the job id exists. Recover by submitting the VAA bytes to
-`receiveMessage` yourself (the call is permissionless), or by retrying the failed job in Redis.
-
-A receipt that does not appear within viem's 180 s default fails the attempt, and the engine retries
-the job while the first transaction may still be pending. What the retry does then depends on the
-node, because viem simulates it against the latest block but sends `eth_estimateGas` with no block
-tag, so the node's own default decides:
-
-- If that default is the latest block, the retry broadcasts a duplicate. It reverts once the first
-  transaction lands (the duplicate pays for the core's signature check, then fails at the replay
-  guard), so the cost is one reverted transaction's gas per retry that ran in that window. Nothing
-  is delivered twice: the receivers refuse a message they already consumed.
-- If that default is the pending block (anvil's is), the estimate sees the first transaction and
-  reverts as already processed, so the retry counts the job done with nothing mined. Should that
-  transaction be evicted from the pool afterwards, the delivery is lost and its job is complete;
-  recover it as a parked job is recovered, by submitting the VAA to `receiveMessage`.
-- A transaction that leaves the pool without mining leaves a gap in the wallet's nonce. The shared
-  queue reads the nonce at start and reloads it only on "nonce too low", so the gap holds back every
-  later transaction from that wallet until the process restarts. This is in the shared queue, not
-  in the psm app, and every app on the queue has it.
-
-Closing this takes two changes: the handler remembering each message's in-flight transaction, so a
-retry checks that transaction before it sends another, and the queue resynchronising its nonce when a
-sent transaction disappears from the pool.
-
-`psm-hydration` signs with `PRIVKEY`, a key of its own like every other Hydration app's; `psm-base`
-signs with `PRIVKEY_BASE`, which never falls back to `PRIVKEY`. Nothing compares the keys across
-services, so each is deployed with its own. Namespaces are `psm-hydration-relayer` and
-`psm-base-relayer`, overridden by `APP_NAME_PSM_HYDRATION` and `APP_NAME_PSM_BASE`.
-
-Both processes must be running and subscribed before the facilitator's redeem and the vault's
-deposits are unpaused. A floor of `0` does not reach an emitter's sequence `0`: the missed-VAA
-worker's look-ahead considers only sequences above the floor, and a later scan only the gaps between
-sequences it has seen. The first message each emitter publishes is therefore delivered only if the
-process was already listening.
-
-The two keeper calls the spec assigns to the relayer (`drain` on Base, `flushPendingMint` on
-Hydration) are not part of this app yet.
+Both must be subscribed before the facilitator's redeem and the vault's deposits are unpaused: a
+floor of `0` does not cover an emitter's sequence `0`. The keeper calls (`drain` on Base,
+`flushPendingMint` on Hydration) are not part of this app yet.
 
 ## Configuration
 
@@ -145,6 +106,9 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `RPC_ROBINHOOD`       | Robinhood Chain RPC (`oracle-robinhood` only)     | `https://rpc.mainnet.chain.robinhood.com` |
 | `RPC_BASE`            | Base RPC (`psm-base` only)                        | `https://mainnet.base.org`            |
 | `PRIVKEY_BASE`        | Base signing key (`psm-base` only)                | Required                              |
+| `RPC_NEAR`            | NEAR RPC (`ntt-near` only)                        | `https://free.rpc.fastnear.com`       |
+| `NEAR_ACCOUNT_ID`     | NEAR signing account (`ntt-near` only)            | Required                              |
+| `NEAR_PRIVKEY`        | Its `ed25519:` secret key (`ntt-near` only)       | Required                              |
 | `SPY_ENDPOINT`        | Wormhole Spy endpoint                             | `localhost:7073`                      |
 | `REDIS_HOST`          | Redis host                                        | `localhost`                           |
 | `REDIS_PORT`          | Redis port                                        | `6379`                                |
@@ -169,28 +133,12 @@ pnpm --filter @whm/relayer mainnet-spy
 
 ## Verification
 
-There is no test suite. Four scripts run offline against a mocked JSON-RPC transport, need no secrets,
-and exit non-zero on a failed check:
-
-```bash
-pnpm --filter @whm/relayer verify:hydration-fees  # fee pricing through submit(), per chain
-pnpm --filter @whm/relayer verify:base-clients    # Base client: chain id, key isolation, fees
-pnpm --filter @whm/relayer verify:psm-app         # psm routes: refuse-to-start, destination keying
-pnpm --filter @whm/relayer verify:psm-reverts <path to contracts>
-```
-
-`verify:psm-reverts` checks the psm app's revert handling against the PSM contracts as compiled. It
-builds them with forge into a temporary directory (a few seconds), walks the call graph from
-`receiveMessage` in the compiler's AST (virtual, `super` and library calls included) to find every
-custom error a delivery can raise, and compares that set, and each signature, with `receiverAbi`. It takes the path to a `contracts` directory (or
-`PSM_CONTRACTS_DIR`), needs Foundry and the contracts' installed dependencies, and exits 1 rather than
-skip without them.
-The type check is `tsc -p agents/relayer --noEmit` from the repo root; it covers `src/`, not `scripts/`.
+There is no test suite. The type check is `tsc -p agents/relayer --noEmit` from the repo root.
 
 ## Production
 
 ```bash
-pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,oracle-robinhood,intent,basejump,psm-hydration,psm-base}/app.js
+pnpm --filter @whm/relayer build        # → dist/{ntt,ntt-near,oracle,oracle-robinhood,intent,basejump,psm-hydration,psm-base}/app.js
 pnpm --filter @whm/relayer start:oracle
 pnpm --filter @whm/relayer docker:up
 ```
