@@ -12,13 +12,13 @@ export interface NearRoute {
 
 /**
  * Mainnet routes, one per coin — each coin has its own emitter. Transceivers from
- * deployments/prod/near-ntt-*.json; the emitters are not deployed yet.
+ * deployments/prod/near-ntt-*.json, emitters from deployments/prod/utxo-emitter-*.json.
  */
 export const ROUTES: NearRoute[] = [
   {
     token: "ZEC",
     transceiver: "0x0dd43A80C6F96019B8f5699Df1890DFa33BdDE85",
-    emitter: "" as Address,
+    emitter: "0xb3e365a6241683d5d4ef2701de6bedc16dcc259e",
     manager: "ntt-zec.hydration-whm.near",
   },
 ];

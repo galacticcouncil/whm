@@ -14,10 +14,12 @@ export interface Route {
 }
 
 /**
- * One route per coin — each coin has its own emitter. Not deployed yet: the app refuses to run
- * until a route is filled in from deployments/prod/<its migration>.json.
+ * One route per coin — each coin has its own emitter, from deployments/prod/utxo-emitter-*.json;
+ * `from` is the block its proxy was deployed in.
  */
-export const routes: Route[] = [{ chain: "zcash", emitter: "" as Address, from: 0n }];
+export const routes: Route[] = [
+  { chain: "zcash", emitter: "0xb3e365a6241683d5d4ef2701de6bedc16dcc259e", from: 15_901_846n },
+];
 
 /** Hydration reads EVM.Log out of substrate events rather than eth_getLogs — see scan. */
 export const hydration = {

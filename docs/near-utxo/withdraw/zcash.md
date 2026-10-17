@@ -9,7 +9,7 @@ and the bots are chain-agnostic ([spec.md](spec.md), [schema.md](schema.md)).
 
 | Name                       | Value                                                                |
 | -------------------------- | -------------------------------------------------------------------- |
-| Emitter                    | `ZecUtxoEmitter` — not deployed; `migrations/definitions/utxo-emitter-zec` |
+| Emitter                    | `ZecUtxoEmitter` `0xb3e365a6241683d5d4ef2701de6bedc16dcc259e` (block 15,901,846; `utxo-emitter-zec`) |
 | ZEC NttManager, Hydration  | `0xe20cED5f5798cD4FeBc7aE182309b9f51345e0cC` (BURNING)               |
 | ZEC token, Hydration       | `0x00000000000000000000000000000001000f478D` (asset 1,001,357, 8 dp) |
 | ZEC transceiver, Hydration | `0x0dd43A80C6F96019B8f5699Df1890DFa33BdDE85`                         |
@@ -116,8 +116,9 @@ ZEC minimum (~$1.24) and 0.2% of 0.1 ZEC.
 
 ## Open
 
-1. **Deploy `ZecUtxoEmitter`** — `pnpm migrate:utxo-emitter-zec` (verified on a Hydration fork). Then
-   fill its address into `agents/relayer` `ntt-near` routes and `agents/utxo` relayer routes (with its
-   deployment block), and run both.
-2. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run
+1. **Hand `ZecUtxoEmitter` to the TC** — deployed 2026-10-17 with steps 001–004; the deployer still
+   owns it. Set `HYDRATION_EMERGENCY_ADMIN` and re-run `utxo-emitter-zec` for step 005.
+2. **Run the bots** — `ntt-near` (agents/relayer) and the `utxo` relayer, both on
+   `relayer.hydration-whm.near`, one key each.
+3. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run
    `utxo-withdraw-zec` (keys deleted, DAO accepts).

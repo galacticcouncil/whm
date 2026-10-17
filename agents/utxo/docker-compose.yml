@@ -1,4 +1,3 @@
-version: "3.3"
 # One image, one service per app. The command names the entry point — nothing is selected at
 # runtime, and the banner says which app a container is.
 services:
@@ -41,15 +40,17 @@ services:
         swarmpit.service.deployment.autoredeploy: "true"
 
   redis:
-    image: redis:7-alpine
-    command: [redis-server, --appendonly, "yes"]
+    image: redis:latest
+    isolation: default
     volumes:
-      - redis-data:/data
+     - db:/data
     networks:
-      - default
+     - default
+    logging:
+      driver: json-file
 
 volumes:
-  redis-data:
+  db:
 
 networks:
   default:
