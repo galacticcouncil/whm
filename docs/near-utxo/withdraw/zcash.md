@@ -117,6 +117,12 @@ ZEC minimum (~$1.24) and 0.2% of 0.1 ZEC.
   key each. `ntt-near` replayed the ZEC transceiver's 10 earlier VAAs and skipped every one (no
   `WithdrawRequested` — they predate the emitter); the relayer read the emitter from its deployment
   block and follows finalized blocks.
+- **First withdrawal through the bots, 2026-10-17.** Settlement 9: `ntt-near` completed it for
+  `A = 0e713a…7c30` (`4K1jXZ…5psq`); the relayer stored the record 18:00:34, created `A` 18:00:58,
+  withdrew and relayed 18:01:31 (`9cVz8S…ssscVAY`, coin `91de70…4f3c:1`). Connector: 100,000 zat in,
+  10,000 bridge + 10,000 miner fee, 80,000 to `t1dbk2kN…yhncw` — Zcash tx
+  `09f0c1e949773794237a9f3bca8e70e3e3d9e8ec7e089ffb38508aa5d8c331b5`, signed 13 s after the request.
+  ~70 s Hydration → Zcash mempool. NEAR spent by the bots: ≈ 0.0139 NEAR (first to an `A`).
 
 ## Open
 
@@ -124,4 +130,3 @@ ZEC minimum (~$1.24) and 0.2% of 0.1 ZEC.
    owns it. Set `HYDRATION_EMERGENCY_ADMIN` and re-run `utxo-emitter-zec` for step 005.
 2. **Ownership handover** — `WITHDRAW_NEW_OWNER=hydration.sputnik-dao.near`, re-run
    `utxo-withdraw-zec` (keys deleted, DAO accepts).
-3. **First withdrawal through the bots** — a `send` of ≥ 110,000 zat, end to end.
