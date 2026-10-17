@@ -1,0 +1,46 @@
+{
+  "migration": "utxo-withdraw-zec",
+  "environment": "prod",
+  "startedAt": "2026-10-16T16:40:56.656Z",
+  "completedAt": null,
+  "steps": [
+    {
+      "name": "001-deploy-withdraw",
+      "status": "completed",
+      "output": {
+        "txHash": "ECZcVMWK7mUjj9dcEx1aDeAUVV3qjTpy7aE8LZpamaC1",
+        "withdrawAccount": "withdraw-zec.hydration-whm.near",
+        "owner": "hydration-whm.near",
+        "codeSha256": "b20c0b6b57c45999a9fb92fffbd1339543326f01404dc74f11341b13a43d42ec",
+        "chain": "Zcash"
+      },
+      "error": null,
+      "startedAt": "2026-10-16T16:41:57.240Z",
+      "completedAt": "2026-10-16T16:42:11.319Z"
+    },
+    {
+      "name": "002-transfer-ownership@withdraw",
+      "status": "failed",
+      "output": null,
+      "error": "Missing WITHDRAW_NEW_OWNER",
+      "startedAt": "2026-10-16T16:42:11.320Z",
+      "completedAt": null
+    },
+    {
+      "name": "003-delete-keys@withdraw",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "004-accept-ownership@withdraw",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    }
+  ]
+}

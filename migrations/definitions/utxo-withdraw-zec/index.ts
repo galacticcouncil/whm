@@ -19,7 +19,7 @@ import type { MigrationConfig } from "./types";
  * to an address derived under it, that account id is permanent, and whoever owns the contract
  * controls those funds.
  *
- * NEAR SIDE ONLY. The Hydration `ZecWithdrawEmitter` and the bot are separate.
+ * NEAR SIDE ONLY. The Hydration `ZecUtxoEmitter` and the bot are separate.
  *
  * Required PK env vars:
  *   PK_NEAR — NEAR deployer, `ed25519:…`, for NEAR_ACCOUNT (the contract is its sub-account)
