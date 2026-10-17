@@ -9,7 +9,7 @@ pragma solidity ^0.8.22;
 ///
 ///         The NTT message carries only `sha256(nearAccount)`. `WithdrawRequested` is how the bot
 ///         learns the address, from chain alone; it is a hint the bot re-derives and checks, never
-///         trusted. Design: docs/near-utxo/withdraw.md.
+///         trusted. Design: docs/near-utxo/withdraw/spec.md.
 ///
 /// @dev The fee is kept here as ZEC. The owner (Hydration governance) swaps it into NEAR for the bot's
 ///      gas — sold through the router, then sent over the NEAR NTT route to the account it names.

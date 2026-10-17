@@ -16,7 +16,7 @@ import {IZecUtxoEmitter} from "./interfaces/IZecUtxoEmitter.sol";
 /// @title ZecUtxoEmitter — Hydration → Zcash entry point
 /// @notice `send` settles ZEC over NTT to the NEAR account derived from a Zcash address and emits the
 ///         address beside it; `refuel` turns the kept fees into NEAR for the bot that finishes each
-///         withdrawal on NEAR. See docs/near-utxo/withdraw.md.
+///         withdrawal on NEAR. See docs/near-utxo/withdraw/spec.md.
 ///
 /// @dev Holds nothing between calls except the fee ZEC waiting for a swap, and NEAR below the rail's
 ///      precision.

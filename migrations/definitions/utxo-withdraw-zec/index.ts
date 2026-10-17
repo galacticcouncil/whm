@@ -5,7 +5,7 @@ import type { MigrationConfig } from "./types";
 /**
  * UTXO withdraw for Zcash — signs, for an account derived from a Zcash address, the withdrawal of
  * its `zec.omft.near` through Omni's Zcash connector to that address. Design:
- * docs/near-utxo/withdraw.md.
+ * docs/near-utxo/withdraw/spec.md.
  *
  *   001 deploy utxo-withdraw on NEAR — create, fund, deploy, init in one transaction, after
  *       checking the connector serves the chain and token

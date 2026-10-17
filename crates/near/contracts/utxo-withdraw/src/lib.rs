@@ -1,6 +1,6 @@
 //! UTXO withdraw — sends a UTXO-chain token on NEAR (`zec.omft.near`) to its native chain through
 //! Omni's connector, from an account derived from the destination address. Design:
-//! `docs/near-utxo/withdraw.md`.
+//! `docs/near-utxo/withdraw/spec.md`.
 //!
 //! ```text
 //! terms = the destination address    path = chain prefix + address    A = v1.signer key for (self, path)

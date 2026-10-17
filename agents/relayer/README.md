@@ -18,7 +18,7 @@ that route's Hydration transceiver.
 
 ### `ntt-near`
 
-Completes UTXO withdrawals **from Hydration on NEAR** ([withdraw.md](../../docs/near-utxo/withdraw.md)).
+Completes UTXO withdrawals **from Hydration on NEAR** ([withdraw](../../docs/near-utxo/withdraw/spec.md)).
 Each coin's emitter settles over NTT to the account its destination address derives and logs that
 account beside it; this calls `complete(vaa, account)` on the coin's NEAR manager for it. Nobody holds
 a key for a derived account, so somebody has to.

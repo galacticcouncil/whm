@@ -9,8 +9,8 @@ token. Its wire format is byte-for-byte EVM NTT, so the Hydration side is unmodi
 
 Design: [docs/near-ntt/spec.md](../../docs/near-ntt/spec.md) · pre-implementation checks:
 [verify.md](../../docs/near-ntt/verify.md) · build log: [progress.md](../../docs/near-ntt/progress.md) ·
-BTC / ZEC from their own chains: [deposit.md](../../docs/near-utxo/deposit.md), and back:
-[withdraw.md](../../docs/near-utxo/withdraw.md).
+BTC / ZEC from their own chains: [deposit](../../docs/near-utxo/deposit/spec.md), and back:
+[withdraw](../../docs/near-utxo/withdraw/spec.md).
 
 ## Layout
 

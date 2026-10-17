@@ -1,7 +1,7 @@
 # utxo
 
 The off-chain side of UTXO withdrawals from Hydration — ZEC to Zcash today
-([docs/near-utxo/withdraw.md](../../docs/near-utxo/withdraw.md)). One image, one container per app;
+([docs/near-utxo/withdraw/spec.md](../../docs/near-utxo/withdraw/spec.md)). One image, one container per app;
 the command names the entry point.
 
 | App       | What it does                                                                        |
