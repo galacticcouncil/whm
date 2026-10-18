@@ -6,7 +6,7 @@ import { Drain, serve } from "../flow";
 import log from "../logger";
 import type { Watch } from "../types";
 import { enabled, WATCH } from "../watch";
-import { EvmWatcher, SubstrateWatcher } from "../watchers";
+import { EvmWatcher, NearWatcher, SubstrateWatcher } from "../watchers";
 
 import { messages } from "./flows/messages";
 import { ntt } from "./flows/ntt";
@@ -34,9 +34,9 @@ async function main(): Promise<void> {
   const watchers = [...byChain].map(([name, watches]) => {
     const cfg = CHAINS[name];
     const nudge = (chain: string) => void notifyEvents(chain);
-    return cfg.kind === "evm"
-      ? new EvmWatcher(cfg, watches, nudge)
-      : new SubstrateWatcher(cfg, watches, nudge);
+    if (cfg.kind === "evm") return new EvmWatcher(cfg, watches, nudge);
+    if (cfg.kind === "near") return new NearWatcher(cfg, watches, nudge);
+    return new SubstrateWatcher(cfg, watches, nudge);
   });
 
   for (const [name, watches] of byChain) {

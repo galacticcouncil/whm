@@ -1,9 +1,11 @@
 import type { PoolClient } from "pg";
-import { decodeEventLog, toEventSelector } from "viem";
+import { decodeEventLog } from "viem";
 
+import { legTopic } from "../abi";
 import log from "../logger";
 import {
   advanceReader,
+  applyRebuild,
   deadLetter,
   listenEvents,
   pool,
@@ -51,7 +53,7 @@ export class Drain {
     const chains = new Set<string>();
     for (const flow of flows) {
       for (const leg of flow.legs) {
-        const topic0 = toEventSelector(leg.abi);
+        const topic0 = legTopic(leg);
         for (const w of watches.filter((x) => x.role === leg.role)) {
           chains.add(w.chain);
           for (const address of w.at) {
@@ -101,6 +103,7 @@ export class Drain {
     try {
       do {
         this.again = false;
+        await this.rebuild();
         for (const chain of this.chains) {
           try {
             await this.drainChain(chain);
@@ -111,6 +114,24 @@ export class Drain {
       } while (this.again);
     } finally {
       this.busy = false;
+    }
+  }
+
+  /** Honour a rebuild asked for this reader: its tables emptied, the store replayed from the start. */
+  private async rebuild(): Promise<void> {
+    try {
+      if (
+        await applyRebuild(
+          this.name,
+          this.flows.map((f) => f.table),
+        )
+      ) {
+        log.warn(
+          `[${this.name}] rebuilding ${this.flows.map((f) => f.table).join(", ")} from the start`,
+        );
+      }
+    } catch (e) {
+      log.error(`[${this.name}] rebuild: ${(e as Error).message}`);
     }
   }
 
@@ -195,11 +216,7 @@ export class Drain {
 
     const out: RecordChange[] = [];
     for (const { flow, leg } of routes) {
-      const { eventName, args } = decodeEventLog({
-        abi: [leg.abi],
-        topics: row.topics as [`0x${string}`, ...`0x${string}`[]],
-        data: row.data as `0x${string}`,
-      });
+      const { eventName, args } = decode(leg, row);
 
       const ev: LogEvent = {
         chain: row.chain,
@@ -214,7 +231,7 @@ export class Drain {
           logIndex: row.log_index,
         },
         eventName,
-        args: args as Record<string, unknown>,
+        args,
       };
 
       const key = await leg.key(ev.args, ev, client);
@@ -234,6 +251,23 @@ export class Drain {
 
 interface RecordChange extends Applied {
   flow: string;
+}
+
+/**
+ * Decode a stored event for a leg: an EVM log by its ABI, a NEAR event from the JSON the watcher
+ * stored.
+ *
+ * @param leg The leg claiming it.
+ * @param row The stored event.
+ */
+function decode(leg: Leg, row: EventRow): { eventName: string; args: Record<string, unknown> } {
+  if (leg.near) return { eventName: leg.near.event, args: JSON.parse(row.data) };
+  const { eventName, args } = decodeEventLog({
+    abi: [leg.abi!],
+    topics: row.topics as [`0x${string}`, ...`0x${string}`[]],
+    data: row.data as `0x${string}`,
+  });
+  return { eventName, args: args as Record<string, unknown> };
 }
 
 /**

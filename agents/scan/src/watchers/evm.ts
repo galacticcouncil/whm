@@ -2,8 +2,9 @@ import { createPublicClient, webSocket, type PublicClient, type WebSocketTranspo
 import { watchBlockNumber } from "viem/actions";
 
 import log from "../logger";
-import { insertEvents, loadCursor, saveCursor, type RawEvent } from "../db";
+import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../db";
 import { BoundedQueue } from "../utils";
+import { cursorId } from "./cursor";
 import { liveIntervalMs } from "../config";
 import type { EvmChain, Watch } from "../types";
 
@@ -94,6 +95,7 @@ export class EvmWatcher {
         !stale && this.tip !== undefined && this.tip > this.cfg.confirmations
           ? this.tip - this.cfg.confirmations
           : await this.latestSafe();
+      await applyRewinds(this.cfg.name, this.watches.map(cursorId));
       // Sequential across roles: each already fans out internally, and normally every role is at
       // the tip so this is one small range each.
       for (const w of this.watches) await this.tick(w, safe);
@@ -109,10 +111,10 @@ export class EvmWatcher {
   }
 
   private async tick(w: Watch, safe: bigint): Promise<void> {
-    const cursor = (await loadCursor(this.cfg.name, w.role)) ?? w.from - 1n;
+    const cursor = (await loadCursor(this.cfg.name, cursorId(w))) ?? w.from - 1n;
     if (safe <= cursor) return;
     const backfill = safe - cursor > this.cfg.chunkSize;
-    if (backfill) log.info(`[${this.cfg.name}/${w.role}] indexing ${cursor + 1n}..${safe}`);
+    if (backfill) log.info(`[${this.cfg.name}/${cursorId(w)}] indexing ${cursor + 1n}..${safe}`);
 
     // Two decoupled pipelines: the fetcher pulls chunks of logs concurrently, the writer inserts
     // them in cursor order and checkpoints per chunk.
@@ -150,20 +152,20 @@ export class EvmWatcher {
       const start = Date.now();
       for (let chunk = await queue.take(); chunk; chunk = await queue.take()) {
         const n = await this.write(w, chunk.logs);
-        await saveCursor(this.cfg.name, w.role, chunk.endBlock);
+        await saveCursor(this.cfg.name, cursorId(w), chunk.endBlock);
         if (n > 0) this.onIngest?.(this.cfg.name);
         ingested += n;
         if (backfill && chunk.endBlock < safe) {
           const done = Number(chunk.endBlock - cursor);
           const bps = Math.round(done / ((Date.now() - start) / 1000));
           log.info(
-            `[${this.cfg.name}/${w.role}] at ${chunk.endBlock} (${done} blocks, ${ingested} events, ${bps} blk/s)`,
+            `[${this.cfg.name}/${cursorId(w)}] at ${chunk.endBlock} (${done} blocks, ${ingested} events, ${bps} blk/s)`,
           );
         }
       }
       if (fetchErr.e) throw fetchErr.e;
       if (backfill || ingested > 0) {
-        log.info(`[${this.cfg.name}/${w.role}] ingested ${ingested} events, at ${safe}`);
+        log.info(`[${this.cfg.name}/${cursorId(w)}] ingested ${ingested} events, at ${safe}`);
       }
     };
 
@@ -250,7 +252,7 @@ export class EvmWatcher {
       method: "eth_getLogs",
       params: [
         {
-          address: w.at,
+          address: w.at as `0x${string}`[],
           topics: w.topics ?? [],
           fromBlock: `0x${from.toString(16)}`,
           toBlock: `0x${to.toString(16)}`,

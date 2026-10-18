@@ -4,8 +4,9 @@ import { getWsProvider } from "polkadot-api/ws";
 import { bytesToHex } from "viem";
 
 import log from "../logger";
-import { insertEvents, loadCursor, saveCursor, type RawEvent } from "../db";
+import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../db";
 import { BoundedQueue } from "../utils";
+import { cursorId } from "./cursor";
 import { liveIntervalMs } from "../config";
 import type { SubstrateChain, Watch } from "../types";
 
@@ -145,12 +146,13 @@ export class SubstrateWatcher {
   private async cursors(): Promise<Map<string, bigint>> {
     const out = new Map<string, bigint>();
     for (const w of this.watches) {
-      out.set(w.role, (await loadCursor(this.cfg.name, w.role)) ?? w.from - 1n);
+      out.set(cursorId(w), (await loadCursor(this.cfg.name, cursorId(w))) ?? w.from - 1n);
     }
     return out;
   }
 
   private async tick(safe: bigint): Promise<void> {
+    await applyRewinds(this.cfg.name, this.watches.map(cursorId));
     const cursors = await this.cursors();
     const from = [...cursors.values()].reduce((a, b) => (b < a ? b : a));
     if (safe <= from) return;
@@ -231,17 +233,17 @@ export class SubstrateWatcher {
   /** Advance every role that has actually been covered up to `block`. */
   private async checkpoint(block: bigint, cursors: Map<string, bigint>): Promise<void> {
     for (const w of this.watches) {
-      const at = cursors.get(w.role)!;
+      const at = cursors.get(cursorId(w))!;
       if (block <= at) continue;
-      await saveCursor(this.cfg.name, w.role, block);
-      cursors.set(w.role, block);
+      await saveCursor(this.cfg.name, cursorId(w), block);
+      cursors.set(cursorId(w), block);
     }
   }
 
   /** Whether a log belongs to a watch that has not already covered this block. */
   private wanted(l: IndexedLog, block: bigint, cursors: Map<string, bigint>): boolean {
     const matches = this.targets.get(l.address) ?? [];
-    return matches.some((w) => cursors.get(w.role)! < block && topicsMatch(w, l.topics));
+    return matches.some((w) => cursors.get(cursorId(w))! < block && topicsMatch(w, l.topics));
   }
 
   private async fetchBlock(n: bigint): Promise<Block> {

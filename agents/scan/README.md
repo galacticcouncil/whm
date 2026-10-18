@@ -24,7 +24,9 @@ src/
   chains.ts        chain registry — ids, Wormhole ids, tuning
   watch.ts         WHAT to index: contracts, roles, start blocks
   db.ts            the shared event store
-  watchers/        evm.ts (getLogs), substrate.ts (EVM.Log out of System.Events)
+  watchers/        evm.ts (getLogs), substrate.ts (EVM.Log out of System.Events),
+                   near.ts (FastNEAR account histories)
+  admin.ts         rewind a chain, rebuild a reader
   flow/            the reconciler: types, DDL generation, upsert, drain, serve
   ingest/          the writer, plus the wh_messages and ntt_transfers flows
   apps/<domain>/   one per container: flows, api, workers, entry point
@@ -43,6 +45,7 @@ deployment cannot silently point at the wrong contract.
 | ------------------- | -------------------------------------------------------------- |
 | `RPC_ETHEREUM_WSS`  | Websocket. Heads arrive over `eth_subscribe`, never by polling. |
 | `RPC_HYDRATION_WSS` | Must be the substrate path, not the EVM one — see below.        |
+| `RPC_NEAR_TX`       | FastNEAR's transaction API, `https://tx.main.fastnear.com`.     |
 | `DATABASE_URL`      | Postgres.                                                       |
 | `ONECLICK_JWT`      | The intents domain's off-chain leg.                             |
 | `PORT`              | Defaults to 8080.                                               |
@@ -60,6 +63,13 @@ watcher buffers logs and assigns the hash when it arrives. The XCM-driven delive
 event, and keep a `blockHash-eventIndex` identity instead, which is the only name they have. The UI
 links the first kind to `/extrinsic/<hash>` and the second to `/event/<block>-<index>`.
 
+NEAR has no log filter, so it is read through FastNEAR's transaction index: the history of the
+accounts we own, then those transactions whole. A shared contract — the Wormhole core, Omni's
+connector — is read through the accounts of ours that call it (`via`), never through its own
+history. A NEP-297 log is stored like an EVM log, `topic0 = keccak256("<standard>:<event>")` and the
+event's JSON as data; a call named in `calls` is stored the same way under the standard `call`,
+carrying its arguments. A leg names `near: { standard, event }` instead of `abi`.
+
 ## Adding something to index
 
 Append a watch entry:
@@ -73,8 +83,25 @@ backfills from its own `from` while everything already indexed stays at the tip.
 the `role`, never an address, which is what lets a redeployment or a second deployment of the same
 role be a one-line change.
 
-Adding an **event** to something already watched needs no re-scan: the raw log is already stored,
-so a new leg picks it up on the next drain.
+A role that gains contracts later gets a second entry with its own `id` — the cursor's name — so
+the new contracts backfill from their own `from` while the first entry stays at the tip.
+
+## Re-indexing
+
+Two kinds, both filed as requests that the running processes apply at their next tick — nothing is
+stopped, and nothing races a watcher's or a reader's own writes:
+
+```sh
+node admin.js cursors [chain]                     # how far every cursor has got
+node admin.js rewind <chain> <block> [cursor...]  # re-scan from <block>; no cursor = all on the chain
+node admin.js rebuild <reader>                    # empty a reader's tables, replay the store
+```
+
+- **Rewind** re-reads a chain. Events already stored are skipped, so it is free to overshoot; events
+  found for the first time reach every reader as new.
+- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `transfers`) — for a new leg
+  or changed flow logic over events already stored. Its tables are emptied and refilled; anything a
+  poller wrote is re-fetched as the rows come back.
 
 ## Adding a flow
 

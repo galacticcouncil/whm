@@ -8,11 +8,44 @@ import { CHAINS } from "../../chains";
 import type { Flow, LogEvent } from "../../types";
 import { parseNttTransfer } from "../payload";
 import { vaaId } from "../vaa";
+import { NEAR_PUBLISH, type NearPublished } from "./messages";
 
 interface Published {
   sender: `0x${string}`;
   sequence: bigint;
   payload: `0x${string}`;
+}
+
+/** `ntt-<token>.transfer_received` / `transfer_queued_inbound` — NEAR's delivery, digest in hex. */
+interface NearDelivered {
+  digest: string;
+  account: string;
+}
+
+/**
+ * A published transfer's row, whichever chain published it.
+ *
+ * @param payload The transceiver payload.
+ * @param emitter The emitter, as the VAA names it.
+ * @param sequence The emitter's sequence.
+ * @param ev The publishing event.
+ */
+function published(payload: string, emitter: string, sequence: bigint, ev: LogEvent) {
+  const wormholeId = CHAINS[ev.chain].wormholeId;
+  const t = parseNttTransfer(payload, wormholeId)!;
+  return {
+    vaa_id: vaaId(wormholeId, emitter, sequence),
+    source_chain: ev.chain,
+    source_manager: t.sourceManager,
+    recipient_manager: t.recipientManager,
+    manager_sequence: t.sequence.toString(),
+    amount: t.amount.toString(),
+    decimals: t.decimals,
+    source_token: t.sourceToken,
+    recipient: t.to,
+    to_chain: t.toChain,
+    published: ev.ref,
+  };
 }
 
 interface Received {
@@ -60,6 +93,8 @@ export const ntt: Flow = {
     source_token: "TEXT",
     /** As the 32 bytes the message carries; only an EVM destination trims to an address. */
     recipient: "TEXT",
+    /** A NEAR recipient's account — the 32 bytes are its hash, so only the delivery can name it. */
+    recipient_account: "TEXT",
     to_chain: "INTEGER",
     /** What the transceiver marks consumed. A different hash from the digest, and both matter. */
     vaa_hash: "TEXT",
@@ -79,22 +114,16 @@ export const ntt: Flow = {
       // The same transceiver publishes peer and init broadcasts; only transfers parse.
       key: (a: Published, ev: LogEvent) =>
         parseNttTransfer(a.payload, CHAINS[ev.chain].wormholeId)?.digest ?? null,
-      patch: (a: Published, ev: LogEvent) => {
-        const t = parseNttTransfer(a.payload, CHAINS[ev.chain].wormholeId)!;
-        return {
-          vaa_id: vaaId(CHAINS[ev.chain].wormholeId, a.sender, a.sequence),
-          source_chain: ev.chain,
-          source_manager: t.sourceManager,
-          recipient_manager: t.recipientManager,
-          manager_sequence: t.sequence.toString(),
-          amount: t.amount.toString(),
-          decimals: t.decimals,
-          source_token: t.sourceToken,
-          recipient: t.to,
-          to_chain: t.toChain,
-          published: ev.ref,
-        };
-      },
+      patch: (a: Published, ev: LogEvent) => published(a.payload, a.sender, a.sequence, ev),
+    },
+    {
+      role: "wormhole-core",
+      near: NEAR_PUBLISH,
+      state: "published",
+      key: (a: NearPublished, ev: LogEvent) =>
+        parseNttTransfer(`0x${a.data}`, CHAINS[ev.chain].wormholeId)?.digest ?? null,
+      patch: (a: NearPublished, ev: LogEvent) =>
+        published(`0x${a.data}`, a.emitter, BigInt(a.seq), ev),
     },
     {
       // The one leg that names the VAA rather than the digest, so it addresses the row the other
@@ -122,6 +151,30 @@ export const ntt: Flow = {
       keyBy: "digest",
       key: (a: { digest: `0x${string}` }) => a.digest,
       patch: (_a: unknown, ev: LogEvent) => ({ settled: ev.ref }),
+    },
+    {
+      // NEAR verifies and releases in one call, so its delivery is the redemption — and it names
+      // the account the recipient's 32 bytes only hash.
+      role: "ntt",
+      near: { standard: "whm-ntt", event: "transfer_received" },
+      state: "redeemed",
+      keyBy: "digest",
+      key: (a: NearDelivered) => `0x${a.digest}`,
+      patch: (a: NearDelivered, ev: LogEvent) => ({
+        recipient_account: a.account,
+        settled: ev.ref,
+      }),
+    },
+    {
+      role: "ntt",
+      near: { standard: "whm-ntt", event: "transfer_queued_inbound" },
+      state: "queued",
+      keyBy: "digest",
+      key: (a: NearDelivered) => `0x${a.digest}`,
+      patch: (a: NearDelivered, ev: LogEvent) => ({
+        recipient_account: a.account,
+        settled: ev.ref,
+      }),
     },
   ],
 };

@@ -2,7 +2,7 @@ import type { AbiEvent, Chain as ViemChain } from "viem";
 
 // ─── Chains ──────────────────────────────────────────────────────
 
-export type ChainKind = "evm" | "substrate";
+export type ChainKind = "evm" | "substrate" | "near";
 
 interface ChainBase {
   name: string;
@@ -30,7 +30,19 @@ export interface SubstrateChain extends ChainBase {
   checkpointEvery: number;
 }
 
-export type ChainCfg = EvmChain | SubstrateChain;
+/**
+ * NEAR has no log filter and no head subscription worth the name, so it is read through FastNEAR's
+ * transaction index: the history of the accounts we own, then those transactions whole.
+ */
+export interface NearChain extends ChainBase {
+  kind: "near";
+  /** FastNEAR transactions API — `/v0/account` and `/v0/transactions`. */
+  txApi: string;
+  /** How often the histories are re-read. */
+  pollMs: number;
+}
+
+export type ChainCfg = EvmChain | SubstrateChain | NearChain;
 
 // ─── Ingest ──────────────────────────────────────────────────────
 
@@ -42,8 +54,25 @@ export interface Watch {
   chain: string;
   /** Stable name a flow addresses this contract set by; never an address. */
   role: string;
+  /**
+   * The cursor's name, defaulting to `role`. A role that gains contracts later gets a second entry
+   * under its own id, so those backfill from their own `from` while the first stays at the tip.
+   */
+  id?: string;
   from: bigint;
-  at: `0x${string}`[];
+  /** Contracts whose events are kept — addresses, or account ids on NEAR. */
+  at: string[];
+  /**
+   * NEAR only: accounts whose transaction history surfaces `at`'s events, defaulting to `at`. A
+   * shared contract — the Wormhole core, a connector — is read through the accounts of ours that
+   * call it, never through its own history.
+   */
+  via?: string[];
+  /**
+   * NEAR only: calls into `at` kept as events carrying their arguments, for what a call says and no
+   * log does.
+   */
+  calls?: string[];
   /** Positional topic filter. An array in a slot is an OR; a null matches anything. */
   topics?: (`0x${string}` | `0x${string}`[] | null)[];
   /**
@@ -94,11 +123,20 @@ export interface LogEvent<A = Record<string, unknown>> {
  */
 export interface Leg<A = any> {
   role: string;
-  abi: AbiEvent;
+  /** The EVM event. Exactly one of `abi` and `near`. */
+  abi?: AbiEvent;
+  /** The NEP-297 event, or a call kept as one (`standard: "call"`, `event`: the method). */
+  near?: NearEvent;
   state: string;
   keyBy?: string;
   key: (args: A, ev: LogEvent<A>, db: Queryable) => string | null | Promise<string | null>;
   patch: (args: A, ev: LogEvent<A>) => Record<string, unknown>;
+}
+
+/** A NEAR event's identity — NEP-297's `standard` and `event`. */
+export interface NearEvent {
+  standard: string;
+  event: string;
 }
 
 /** The subset of a pg client a leg may use — enough to read, never enough to manage a transaction. */

@@ -1,7 +1,7 @@
 import { mainnet } from "viem/chains";
 import type { Chain } from "viem";
 
-import type { ChainCfg, EvmChain, SubstrateChain } from "./types";
+import type { ChainCfg, EvmChain, NearChain, SubstrateChain } from "./types";
 
 /**
  * Chain registry. Chain ids, Wormhole ids and tuning live here; only the endpoint comes from env,
@@ -55,16 +55,35 @@ function hydration(): SubstrateChain | null {
   };
 }
 
+/**
+ * NEAR, read through FastNEAR's transaction index — `RPC_NEAR_TX`, e.g. https://tx.main.fastnear.com.
+ * It has no chain id of its own beyond the Wormhole one.
+ */
+function near(): NearChain | null {
+  const txApi = process.env.RPC_NEAR_TX;
+  if (!txApi) return null;
+  return {
+    name: "near",
+    kind: "near",
+    wormholeId: 15,
+    txApi: txApi.replace(/\/$/, ""),
+    confirmations: 0n,
+    concurrency: Number(process.env.CONCURRENCY_NEAR ?? 3),
+    pollMs: Number(process.env.POLL_MS_NEAR ?? 10_000),
+  };
+}
+
 export const CHAINS: Record<string, ChainCfg> = {};
-for (const c of [evm("ethereum", mainnet, 2, "ETHEREUM"), hydration()]) {
+for (const c of [evm("ethereum", mainnet, 2, "ETHEREUM"), hydration(), near()]) {
   if (c) CHAINS[c.name] = c;
 }
 
 /**
- * A chain's own id, whichever kind it is — what /api/status reports.
+ * A chain's own id, whichever kind it is — what /api/status reports. NEAR has none.
  *
  * @param c Chain config.
  */
-export function chainId(c: ChainCfg): number {
-  return c.kind === "evm" ? c.chain.id : c.chainId;
+export function chainId(c: ChainCfg): number | null {
+  if (c.kind === "evm") return c.chain.id;
+  return c.kind === "substrate" ? c.chainId : null;
 }

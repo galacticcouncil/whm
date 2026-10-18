@@ -46,6 +46,22 @@ CREATE TABLE IF NOT EXISTS readers (
   PRIMARY KEY (name, chain)
 );
 
+-- Asked-for re-scans: the watcher owning the chain lowers the named cursors ('*' for all of them)
+-- to just before block_number at its next tick, then clears the row.
+CREATE TABLE IF NOT EXISTS rewinds (
+  chain        TEXT NOT NULL,
+  cursor       TEXT NOT NULL,
+  block_number BIGINT NOT NULL,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (chain, cursor)
+);
+
+-- Asked-for rebuilds: the named reader empties its tables and replays the store from the start.
+CREATE TABLE IF NOT EXISTS rebuilds (
+  reader       TEXT PRIMARY KEY,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS dead_events (
   reader    TEXT NOT NULL,
   chain     TEXT NOT NULL,
@@ -143,6 +159,41 @@ export async function chainCursors(chain: string): Promise<Record<string, string
   return Object.fromEntries(r.rows.map((x) => [x.role, x.block_number]));
 }
 
+/**
+ * Apply and clear the rewinds asked for on a chain. A cursor only ever moves back here, never
+ * forward, and one with no row yet starts from its watch entry's `from` anyway.
+ *
+ * Run by the watcher at the start of its tick, so it never races the watcher's own cursor writes.
+ *
+ * @param chain Chain name.
+ * @param ids Every cursor the watcher keeps on it — what `*` expands to.
+ */
+export async function applyRewinds(chain: string, ids: string[]): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const r = await client.query(
+      `DELETE FROM rewinds WHERE chain = $1 RETURNING cursor, block_number`,
+      [chain],
+    );
+    for (const { cursor, block_number } of r.rows) {
+      const targets = cursor === "*" ? ids : [cursor];
+      await client.query(
+        `UPDATE cursors SET block_number = LEAST(block_number, $3::bigint - 1)
+          WHERE chain = $1 AND role = ANY($2)`,
+        [chain, targets, block_number],
+      );
+      log.info(`[${chain}] rewind ${cursor} to ${block_number}`);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // ─── Reader side ─────────────────────────────────────────────────
 
 /** Tell readers a chain has new events. Best-effort: the backstop interval covers a missed nudge. */
@@ -222,6 +273,37 @@ export async function deadLetter(
      VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
     [name, row.chain, row.seq, row.tx_hash, row.log_index, error.slice(0, 2_000)],
   );
+}
+
+/**
+ * Apply and clear a rebuild asked for a reader: empty its tables, drop its progress and its parked
+ * events, all in one transaction. The drain runs it before draining, so nothing of its own is in
+ * flight.
+ *
+ * @param name Reader name.
+ * @param tables The tables it owns.
+ * @returns Whether a rebuild was asked for.
+ */
+export async function applyRebuild(name: string, tables: string[]): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const r = await client.query(`DELETE FROM rebuilds WHERE reader = $1`, [name]);
+    if (!r.rowCount) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(`TRUNCATE ${tables.join(", ")}`);
+    await client.query(`DELETE FROM readers WHERE name = $1`, [name]);
+    await client.query(`DELETE FROM dead_events WHERE reader = $1`, [name]);
+    await client.query("COMMIT");
+    return true;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /** Reader progress for /api/status. */

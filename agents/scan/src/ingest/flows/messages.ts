@@ -3,6 +3,17 @@ import { CHAINS } from "../../chains";
 import type { Flow, LogEvent } from "../../types";
 import { vaaId } from "../vaa";
 
+/** NEAR's Wormhole core logs its own flat event: payload, emitter and sequence as hex and numbers. */
+export interface NearPublished {
+  data: string;
+  nonce: number;
+  emitter: string;
+  seq: number;
+}
+
+/** What NEAR's core logs a publish as. */
+export const NEAR_PUBLISH = { standard: "wormhole", event: "publish" };
+
 interface Published {
   sender: `0x${string}`;
   sequence: bigint;
@@ -54,6 +65,22 @@ export const messages: Flow = {
         nonce: a.nonce,
         consistency: a.consistencyLevel,
         payload: a.payload,
+        published: ev.ref,
+      }),
+    },
+    {
+      // NEAR's core names no consistency level: a message there is final when its block is.
+      role: "wormhole-core",
+      near: NEAR_PUBLISH,
+      state: "published",
+      key: (a: NearPublished, ev: LogEvent) =>
+        vaaId(CHAINS[ev.chain].wormholeId, a.emitter, BigInt(a.seq)),
+      patch: (a: NearPublished, ev: LogEvent) => ({
+        chain: ev.chain,
+        emitter: `0x${a.emitter}`,
+        sequence: String(a.seq),
+        nonce: a.nonce,
+        payload: `0x${a.data}`,
         published: ev.ref,
       }),
     },

@@ -52,6 +52,8 @@ services:
       # Hydration MUST be the substrate path — the landing's deliveries are XCM-driven pallet_evm
       # calls with no eth receipt, so only Frontier EVM.Log substrate events expose them.
       - RPC_HYDRATION_WSS=
+      # NEAR is read through FastNEAR's transaction index — account histories, then whole txs.
+      - RPC_NEAR_TX=https://tx.main.fastnear.com
       - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
     depends_on:
       - postgres
