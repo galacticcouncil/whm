@@ -21,9 +21,9 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
 
-  app-transfers:
+  app-xchain:
     image: galacticcouncil/scan:latest
-    command: [node, transfers/app.js]
+    command: [node, xchain/app.js]
     environment:
       - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
     ports:

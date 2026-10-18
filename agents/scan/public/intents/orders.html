@@ -14,10 +14,8 @@
           document.documentElement.setAttribute("data-theme", t);
       } catch (e) {}
     </script>
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
-    />
+    <link rel="preload" href="/fonts/GazpachoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/GeistMonoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/shared/style.css" />
   </head>
   <body>
@@ -44,10 +42,7 @@
         vaaLink,
       } from "/shared/app.js";
 
-      topbar("intents", [
-        ["/", "Orders"],
-        ["/quotes", "Quotes"],
-      ]);
+      topbar("intents", [["/", "Orders"]]);
 
       // Also answers the bare `/orders`, which has nothing to show — the list is the root.
       const sequence = decodeURIComponent(
@@ -153,7 +148,7 @@
             rows: [
               [
                 "",
-                `sold ${asset(o.amount_in, inMeta, `#${o.asset_in ?? "?"}`, assetIcon(o.asset_in))}`,
+                `sold ${asset(o.amount_in, inMeta, `#${o.asset_in ?? "?"}`, assetIcon(tokens.hydration[o.asset_in]?.icon ?? o.asset_in))}`,
               ],
             ],
           }),
@@ -208,7 +203,7 @@
               o.amount_in,
               inMeta,
               `#${o.asset_in ?? "?"}`,
-              assetIcon(o.asset_in),
+              assetIcon(tokens.hydration[o.asset_in]?.icon ?? o.asset_in),
             ),
           ),
           // What the user ended up with, which is not always the asset they ordered: a refund comes
@@ -265,12 +260,6 @@
           ),
           kv("settlement vaa", vaaLink(o.vaa_id)),
           kv("instruction vaa", vaaLink(o.instruction_vaa)),
-          kv(
-            "consistency",
-            o.wormhole_consistency
-              ? esc(String(o.wormhole_consistency))
-              : '<span class="dim">—</span>',
-          ),
           kv("ntt digest", mono(short(o.digest, 14, 10))),
         ].join("");
 

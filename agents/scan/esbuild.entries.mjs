@@ -5,7 +5,7 @@
 export const entryPoints = {
   "ingest/app": "src/ingest/app.ts",
   "intents/app": "src/apps/intents/app.ts",
-  "transfers/app": "src/apps/transfers/app.ts",
+  "xchain/app": "src/apps/xchain/app.ts",
   admin: "src/admin.ts",
 };
 

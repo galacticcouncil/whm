@@ -2,251 +2,259 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
-    />
-    <title>Hydration intents</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Orders · Hydration intents</title>
     <script>
       try {
         var t = localStorage.getItem("explorer-theme");
-        if (t === "light" || t === "dark")
-          document.documentElement.setAttribute("data-theme", t);
+        if (t !== "light" && t !== "dark") {
+          t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
       } catch (e) {}
     </script>
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
-    />
+    <link rel="preload" href="/fonts/GazpachoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/GeistMonoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/shared/style.css" />
   </head>
   <body>
     <main class="wrap">
-      <h1 class="page-title">Orders <span class="sub" id="subtitle"></span></h1>
+      <label class="search xl">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input id="q" type="text" placeholder="Search by address or tx hash" autocomplete="off" spellcheck="false" />
+        <span class="hint">↵</span>
+      </label>
 
-      <div class="bar">
-        <input
-          type="search"
-          id="q"
-          placeholder="caller, deposit address, or destination recipient"
-        />
-        <select id="state">
-          <option value="">any state</option>
-          <option value="placed">placed</option>
-          <option value="processed">processed</option>
-          <option value="settled">settled</option>
-          <option value="refunded">refunded</option>
-          <option value="failed">failed</option>
-        </select>
+      <div class="list-head">
+        <div class="list-title"><span class="conn"><span class="dot"></span></span>Live orders</div>
+        <div class="fbar" id="fbar"><button type="button" class="freset" id="reset" hidden>Reset</button></div>
       </div>
 
       <div class="panel">
-        <div class="scroll">
-          <table class="tbl">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Time</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Assets</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="rows">
-              <tr>
-                <td class="table-error" colspan="6">loading…</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="pager">
-          <span class="count" id="count"></span>
-          <div class="btns">
-            <button id="prev" type="button" title="Newer">←</button>
-            <button id="next" type="button" title="Older">→</button>
-          </div>
-        </div>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Time</th>
+              <th>From</th>
+              <th>To</th>
+              <th>Assets</th>
+              <th class="r">Status</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="pager" id="pager"></div>
       </div>
     </main>
 
     <script type="module">
       import {
         addrLink,
-        ago,
+        agoLong,
         asset,
         assetIcon,
-        chainIcon,
         at,
         badge,
+        chainBadge,
+        chainIcon,
         esc,
+        filterDrop,
+        filterToggle,
         json,
         live,
+        pager,
         topbar,
       } from "/shared/app.js";
 
-      topbar("intents", [
-        ["/", "Orders"],
-        ["/quotes", "Quotes"],
-      ]);
+      topbar("intents", [["/", "Orders"]], { conn: false });
 
-      const LIMIT = 50;
-      let offset = 0;
-      let tokens = { hydration: {}, dest: {} };
-
+      const LIMIT = 25;
+      const STATES = ["placed", "processed", "settled", "refunded", "failed"];
       const el = (id) => document.getElementById(id);
 
-      /**
-       * Which chain the user's asset actually landed on, per 1Click's token list. Whatever the
-       * quote named — there is no default, so an asset we have no metadata for links nowhere
-       * rather than being guessed at.
-       */
+      let tokens = { hydration: {}, dest: {} };
+
+      /** Which chain the user's asset landed on, per 1Click's token list — never guessed. */
       const destChain = (r) => tokens.dest[r.dest_asset]?.chain ?? null;
 
       /** The rail's own unit, not a destination — a refund comes back in it. */
       const ETH = { symbol: "ETH", decimals: 18 };
 
+      // ─── State, mirrored in the URL so a filtered view can be shared ───
+
+      const url = new URLSearchParams(location.search);
+      const state = { state: new Set((url.get("state") ?? "").split(",").filter(Boolean)) };
+      let page = Math.max(1, Number(url.get("page") ?? 1));
+      el("q").value = url.get("q") ?? "";
+      const toggle = filterToggle(el("fbar"));
+
+      function sync() {
+        const p = new URLSearchParams();
+        const q = el("q").value.trim();
+        if (q) p.set("q", q);
+        if (state.state.size) p.set("state", [...state.state].join(","));
+        if (page > 1) p.set("page", page);
+        history.replaceState(null, "", p.size ? `?${p}` : location.pathname);
+        el("reset").hidden = !q && state.state.size === 0;
+        toggle.count(state.state.size ? 1 : 0);
+        return { q, states: [...state.state] };
+      }
+
+      // ─── Rows ───
+
+      const when = (ms) =>
+        ms
+          ? `<span class="mono muted" title="${esc(at(ms))}">${agoLong(ms)}</span>`
+          : '<span class="dim">—</span>';
+
+      const end = (chain, address) =>
+        `<span class="end-row">${chain ? chainBadge(chain) : ""}${addrLink(address, chain)}</span>`;
+
       /**
-       * What the order actually did.
-       *
-       * The user sold an asset on Hydration and received one somewhere else entirely — ETH is only
-       * the rail in between, so it does not belong in this column. Except on a refund, where the
-       * ETH is the whole story and the asset the order named was never delivered.
+       * What the order did: the asset sold on Hydration, and what arrived elsewhere — ETH is only the
+       * rail between, so it is not shown. Except on a refund, where the ETH is the whole story.
        */
       function assets(r) {
-        const inSide = asset(
-          r.amount_in,
-          tokens.hydration[r.asset_in],
-          `#${r.asset_in ?? "?"}`,
-          assetIcon(r.asset_in),
-        );
+        const meta = tokens.hydration[r.asset_in];
+        const inSide = asset(r.amount_in, meta, `#${r.asset_in ?? "?"}`, assetIcon(meta?.icon ?? r.asset_in));
         if (r.state === "refunded") {
-          const back = r.refund_amount
-            ? asset(r.refund_amount, ETH)
-            : '<span class="dim">refunded</span>';
+          const back = r.refund_amount ? asset(r.refund_amount, ETH) : '<span class="dim">refunded</span>';
           return `<span class="assets">${inSide}<span class="arrow">↩</span>${back}</span>`;
         }
         // Only a settled order has an amount; anything else is the quote, which is an expectation.
         const amount = r.state === "settled" ? r.dest_amount : r.quoted_amount;
         const out = amount
-          ? asset(
-              amount,
-              tokens.dest[r.dest_asset],
-              r.dest_asset ?? "",
-              chainIcon(destChain(r)),
-            )
+          ? asset(amount, tokens.dest[r.dest_asset], r.dest_asset ?? "", chainIcon(destChain(r)))
           : '<span class="dim">pending</span>';
         return `<span class="assets">${inSide}<span class="arrow">→</span>${out}</span>`;
       }
 
-      /**
-       * The order's state, plus the rail's when the rail is what is holding things up. `queued`
-       * means the destination rate limiter has the settlement and nothing has been credited.
-       */
-      function status(r) {
-        const rail = r.rail_state === "queued" ? ` ${badge("queued")}` : "";
-        return `${badge(r.state)}${rail}`;
-      }
+      /** The order's state, plus the rail's when the rail is what holds it up. */
+      const status = (r) => `${badge(r.state)}${r.rail_state === "queued" ? ` ${badge("queued")}` : ""}`;
 
-      function render(items) {
+      let shown = new Set();
+
+      function render(items, fresh) {
         if (!items.length) {
-          el("rows").innerHTML =
-            '<tr><td class="table-error" colspan="6">no orders</td></tr>';
+          el("rows").innerHTML = '<tr><td class="table-error" colspan="6">No orders match.</td></tr>';
+          shown = new Set();
           return;
         }
         el("rows").innerHTML = items
           .map((r) => {
-            const ts = r.placed?.blockTimestamp;
             const href = `/orders/${encodeURIComponent(r.transfer_sequence)}`;
-            return `<tr class="clickable" data-href="${href}">
-              <td class="mono" data-label="#"><a class="link" href="${href}">${esc(r.settlement_sequence ?? "—")}</a></td>
-              <td data-label="Time" title="${at(ts)}">${ago(ts)}</td>
-              <td class="mono" data-label="From">${addrLink(r.caller, "hydration")}</td>
-              <td class="mono" data-label="To">${addrLink(r.dest_address, destChain(r))}</td>
+            const isNew = fresh && !shown.has(r.transfer_sequence);
+            return `<tr class="clickable${isNew ? " row-new" : ""}" data-href="${href}">
+              <td class="mono" data-label="Order"><a class="hash" href="${href}">#${esc(r.settlement_sequence ?? r.transfer_sequence)}</a></td>
+              <td data-label="Time">${when(r.placed?.blockTimestamp)}</td>
+              <td data-label="From">${end("hydration", r.caller)}</td>
+              <td data-label="To">${end(destChain(r), r.dest_address)}</td>
               <td data-label="Assets">${assets(r)}</td>
-              <td data-label="Status">${status(r)}</td>
+              <td class="r" data-label="Status">${status(r)}</td>
             </tr>`;
           })
           .join("");
+        shown = new Set(items.map((r) => r.transfer_sequence));
       }
 
-      // Whole-row navigation, except where a real link was clicked.
+      function skeleton() {
+        const widths = ["58%", "42%", "70%", "36%", "52%", "48%", "64%", "40%"];
+        el("rows").innerHTML = Array.from(
+          { length: 8 },
+          (_, i) =>
+            `<tr class="sk-tr">${Array.from({ length: 6 }, (_, j) => `<td style="--w:${widths[(i + j) % widths.length]}"></td>`).join("")}</tr>`,
+        ).join("");
+      }
+
+      // Whole-row navigation, except where a link or a button was clicked.
       el("rows").addEventListener("click", (e) => {
-        if (e.target.closest("a")) return;
+        if (e.target.closest("a, button")) return;
         const href = e.target.closest("tr")?.dataset.href;
         if (href) location.href = href;
       });
 
-      async function load() {
-        const params = new URLSearchParams({ limit: LIMIT, offset });
-        const q = el("q").value.trim();
-        const state = el("state").value;
-        if (q) params.set("address", q);
-        if (state) params.set("state", state);
-
-        const data = (await json(`/api/orders?${params}`)) ?? {
-          items: [],
-          total: 0,
-        };
-        render(data.items);
-        const from = data.total ? offset + 1 : 0;
-        el("count").textContent =
-          `${from}–${Math.min(offset + LIMIT, data.total)} of ${data.total}`;
-        el("prev").disabled = offset === 0;
-        el("next").disabled = offset + LIMIT >= data.total;
+      async function load(fresh = false) {
+        const { q, states } = sync();
+        const p = new URLSearchParams({ limit: LIMIT, offset: (page - 1) * LIMIT });
+        if (q) p.set("address", q);
+        if (states.length) p.set("state", states.join(","));
+        el("rows").classList.add("rows-pending");
+        const data = await json(`/api/orders?${p}`);
+        el("rows").classList.remove("rows-pending");
+        if (!data) {
+          el("rows").innerHTML =
+            '<tr><td class="table-error" colspan="6"><strong>Could not load orders.</strong></td></tr>';
+          return;
+        }
+        render(data.items, fresh);
+        el("pager").innerHTML = pager(page, Math.max(1, Math.ceil(data.total / LIMIT)));
       }
 
-      async function loadSummary() {
-        const s = await json("/api/status");
-        if (!s) return;
-        const counts = s.flows?.orders ?? {};
-        el("subtitle").textContent = Object.entries(counts)
-          .filter(([, n]) => n > 0)
-          .map(([k, n]) => `${n} ${k}`)
-          .join(" · ");
-      }
-
-      el("prev").onclick = () => {
-        offset = Math.max(0, offset - LIMIT);
-        load();
-      };
-      el("next").onclick = () => {
-        offset += LIMIT;
-        load();
-      };
-      el("state").onchange = () => {
-        offset = 0;
-        load();
-      };
-      let typing;
-      el("q").oninput = () => {
-        clearTimeout(typing);
-        typing = setTimeout(() => {
-          offset = 0;
-          load();
-        }, 250);
-      };
-
-      // A change anywhere reloads the visible page rather than patching one row — the list is
-      // small, ordered by when the order was placed, and a stale neighbour is worse than a redraw.
-      live(
-        "orders",
-        () => {
-          if (offset === 0) load();
-          loadSummary();
-        },
-        () => {
-          load();
-          loadSummary();
-        },
-      );
-
-      json("/api/tokens").then((t) => {
-        if (t) tokens = t;
+      el("pager").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-page]");
+        if (!b || b.disabled) return;
+        page = Number(b.dataset.page);
         load();
       });
-      loadSummary();
-      setInterval(loadSummary, 15000);
+
+      const refilter = () => {
+        page = 1;
+        load();
+      };
+
+      let typing;
+      el("q").addEventListener("input", () => {
+        clearTimeout(typing);
+        typing = setTimeout(refilter, 300);
+      });
+      el("q").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          clearTimeout(typing);
+          refilter();
+        }
+      });
+
+      // ─── Status filter ───
+
+      const host = document.createElement("div");
+      el("fbar").insertBefore(host, el("reset"));
+      const drop = filterDrop(
+        host,
+        {
+          label: "Status",
+          cols: [{ key: "state", options: STATES.map((s) => ({ value: s, label: s, html: badge(s) })) }],
+        },
+        state,
+        refilter,
+      );
+      el("reset").addEventListener("click", () => {
+        el("q").value = "";
+        state.state.clear();
+        drop.paint();
+        refilter();
+      });
+
+      // ─── Live ───
+
+      // A change anywhere reloads the first page, and what arrived flashes. A burst coalesces.
+      let pending;
+      skeleton();
+      json("/api/tokens").then((t) => {
+        if (t) tokens = t;
+        live(
+          "orders",
+          () => {
+            if (page !== 1) return;
+            clearTimeout(pending);
+            pending = setTimeout(() => load(true), 300);
+          },
+          () => load(),
+        );
+      });
     </script>
   </body>
 </html>

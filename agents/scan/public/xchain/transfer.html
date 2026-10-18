@@ -2,22 +2,19 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
-    />
-    <title>Transfer · Hydration</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Transfer · Hydration xchain</title>
     <script>
       try {
         var t = localStorage.getItem("explorer-theme");
-        if (t === "light" || t === "dark")
-          document.documentElement.setAttribute("data-theme", t);
+        if (t !== "light" && t !== "dark") {
+          t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
       } catch (e) {}
     </script>
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
-    />
+    <link rel="preload" href="/fonts/GazpachoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/GeistMonoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/shared/style.css" />
   </head>
   <body>
@@ -28,27 +25,38 @@
     <script type="module">
       import {
         addrLink,
-        amount,
+        at,
+        agoLong,
         badge,
+        chainBadge,
+        chainLabel,
+        dl,
         esc,
+        eventLink,
         json,
-        kv,
         legCard,
         live,
+        refId,
+        refLink,
         short,
+        statusBadge,
+        tokenAmount,
+        amount,
         topbar,
         txLink,
         vaaLink,
+        copyBtn,
       } from "/shared/app.js";
 
-      topbar("transfers", [["/", "Transfers"]]);
+      topbar("xchain", [["/", "Transfers"]]);
 
       // Also answers the bare `/transfer`, which has nothing to show — the list is the root.
       const id = decodeURIComponent(location.pathname.split("/")[2] ?? "");
       if (!id) location.replace("/");
 
       const main = document.getElementById("main");
-      const mono = (v) => (v !== null && v !== undefined && v !== "" ? esc(v) : '<span class="dim">—</span>');
+      const dim = '<span class="dim">—</span>';
+      const mono = (v) => (v !== null && v !== undefined && v !== "" ? `<span class="mono">${esc(v)}</span>` : dim);
 
       const TYPE = {
         transfer: "Transfer",
@@ -58,17 +66,49 @@
         basejump: "Basejump",
       };
 
-      /** An amount at the view's precision, with its symbol. */
-      const money = (raw, v, dp) =>
-        raw === null || raw === undefined
-          ? '<span class="dim">—</span>'
-          : `<span class="asset-chip">${esc(amount(raw, dp ?? v.decimals ?? 18, 8))}${v.symbol ? `<span class="sym">${esc(v.symbol)}</span>` : ""}</span>`;
+      let assets = [];
+
+      /** The view's token, drawn the explorer's way: icon, symbol, amount. */
+      const money = (raw, v) => {
+        const m = assets.find((a) => a.symbol === v.symbol) ?? { symbol: v.symbol, assetId: null };
+        return tokenAmount(raw, { ...m, decimals: v.decimals ?? 18 }, 8);
+      };
+
+      /**
+       * Every fee a transfer paid: the total, and — where more than one party took a cut — a tree
+       * under it branching out to each, so the parts visibly add up to the total.
+       *
+       * @param v The view — symbol and precision.
+       * @param parts `[who, raw]`; an absent or zero part is left out.
+       */
+      function fees(v, parts) {
+        const paidParts = parts.filter(([, raw]) => raw !== null && raw !== undefined && BigInt(raw) > 0n);
+        if (!paidParts.length) return dim;
+        const total = paidParts.reduce((s, [, raw]) => s + BigInt(raw), 0n).toString();
+        const dp = v.decimals ?? 18;
+        const tree =
+          paidParts.length > 1
+            ? `<div class="fee-tree">${paidParts
+                .map(
+                  ([who, raw]) =>
+                    `<div class="br"><span class="who">${esc(who)}</span><span class="amt">${esc(amount(raw, dp, 8))}</span></div>`,
+                )
+                .join("")}</div>`
+            : "";
+        return `${money(total, v)}${tree}`;
+      }
 
       /** A withdrawal's whole cost: what crossed plus the emitter's fee, as raw units. */
       const paid = (r) =>
-        r.amount === null || r.amount === undefined
-          ? null
-          : (BigInt(r.amount) + BigInt(r.fee ?? 0)).toString();
+        r.amount === null || r.amount === undefined ? null : (BigInt(r.amount) + BigInt(r.fee ?? 0)).toString();
+
+      /**
+       * An event reference: its transaction linked, with a copy button and the explorer as a chip. A
+       * Hydration event that came in as a substrate call has no transaction, only its block-and-event
+       * identity — eventLink renders that, so it is passed the whole reference, never just a hash.
+       */
+      const ref = (r) =>
+        r ? `<span class="txl">${eventLink(r)}${copyBtn(refId(r))}</span>${refLink(r)}` : dim;
 
       /** The NTT hop every rail but Basejump rides: published, then delivered. */
       function rail(v, r, since, prefix = "rail_") {
@@ -116,8 +156,7 @@
                 where: r.chain,
                 kind: "paid",
                 rows: [
-                  ["tx", txLink(r.utxo_tx, r.chain)],
-                  ["to", addrLink(r.deposit_address, r.chain)],
+                  ["", txLink(r.utxo_tx, r.chain)],
                   ["", money(r.amount, v)],
                 ],
               }),
@@ -183,63 +222,74 @@
         },
       };
 
-      /** The detail panels, per rail. */
+      /** The detail cards, per rail: [title, [[label, html]]]. */
       const PANELS = {
         ntt: (v, r) => [
           [
             "Transfer",
             [
-              kv("amount", money(v.amount, v)),
-              kv("from", addrLink(v.from_address, v.from_chain)),
-              kv("to", addrLink(v.to_address, v.to_chain)),
+              ["Amount", money(v.amount, v)],
+              ["From", `${chainBadge(v.from_chain)}${addrLink(v.from_address, v.from_chain)}`],
+              ["To", `${chainBadge(v.to_chain)}${addrLink(v.to_address, v.to_chain)}`],
+              ["Origin transaction", ref(r.published)],
+              ["Destination transaction", ref(r.settled)],
             ],
           ],
           [
             "NTT",
             [
-              kv("vaa", vaaLink(r.vaa_id)),
-              kv("digest", mono(short(r.digest, 14, 10))),
-              kv("manager sequence", mono(r.manager_sequence)),
-              kv("consistency", mono(r.wormhole_consistency)),
+              ["State", badge(r.state)],
+              ["VAA", vaaLink(r.vaa_id)],
+              ["Digest", r.digest ? `${mono(short(r.digest, 14, 10))}${copyBtn(r.digest)}` : dim],
+              ["Manager sequence", mono(r.manager_sequence)],
             ],
           ],
         ],
 
         utxo: (v, r) => {
           const coin = r.chain;
-          const transfer =
+          // Amount, fees, received — the same three rows every transfer has. A deposit's Omni fee is
+          // taken inside the mint, so what crosses to Hydration is the NTT amount.
+          const rows =
             v.type === "deposit"
               ? [
-                  kv("amount", money(r.amount, v)),
-                  kv("paid from", addrLink(r.sender, coin)),
-                  kv("deposit address", addrLink(r.deposit_address, coin)),
-                  kv("recipient", addrLink(r.recipient, "hydration")),
-                  kv("refund address", addrLink(r.refund_address, coin)),
-                  kv(`${coin} tx`, txLink(r.utxo_tx, coin)),
-                  kv("bridge fee", money(r.bridge_fee, v)),
+                  ["Amount", money(r.amount, v)],
+                  ["Fees", fees(v, [["Omni (bridge)", r.bridge_fee]])],
+                  ["Received", money(r.rail_amount ?? r.amount, v)],
+                  ["Paid from", `${chainBadge(coin)}${addrLink(r.sender, coin)}`],
+                  ["Deposit address", addrLink(r.deposit_address, coin)],
+                  ["Refund address", addrLink(r.refund_address, coin)],
+                  ["Recipient", `${chainBadge("hydration")}${addrLink(r.recipient, "hydration")}`],
+                  [`${coin} transaction`, txLink(r.utxo_tx, coin)],
+                  ["NEAR proof", ref(r.deposited)],
+                  ["Hydration delivery", ref(r.rail_settled)],
                 ]
               : [
-                  // Top to bottom, what the user paid becomes what they receive: each fee comes off
-                  // the line above it.
-                  kv("paid", money(paid(r), v)),
-                  kv("fee (hydration)", money(r.fee, v)),
-                  kv("bridged", money(r.amount, v)),
-                  kv("bridge fee (omni)", money(r.bridge_fee, v)),
-                  kv(`miner fee (${coin})`, money(r.miner_fee, v)),
-                  kv("received", money(r.received, v)),
-                  kv("sender", addrLink(r.sender, "hydration")),
-                  kv("recipient", addrLink(r.recipient, coin)),
-                  kv("near account", addrLink(r.near_account, "near")),
-                  kv(`${coin} tx`, txLink(r.utxo_tx, coin)),
+                  ["Amount", money(paid(r), v)],
+                  [
+                    "Fees",
+                    // What each cut pays for: the bots' NEAR costs, Omni's bridge, the payout's miners.
+                    fees(v, [
+                      ["Hydration (relay)", r.fee],
+                      ["Omni (bridge)", r.bridge_fee],
+                      [`${chainLabel(coin)} (miner)`, r.miner_fee],
+                    ]),
+                  ],
+                  ["Received", money(r.received, v)],
+                  ["Sender", `${chainBadge("hydration")}${addrLink(r.sender, "hydration")}`],
+                  ["Recipient", `${chainBadge(coin)}${addrLink(r.recipient, coin)}`],
+                  ["NEAR account", addrLink(r.near_account, "near")],
+                  ["Hydration transaction", ref(r.requested)],
+                  [`${coin} payout`, txLink(r.utxo_tx, coin)],
                 ];
           return [
-            [v.type === "deposit" ? "Deposit" : "Withdrawal", transfer],
+            [v.type === "deposit" ? "Deposit" : "Withdrawal", rows],
             [
               "NTT",
               [
-                kv("state", r.rail_state ? badge(r.rail_state) : '<span class="dim">—</span>'),
-                kv("vaa", vaaLink(r.vaa_id)),
-                kv("digest", mono(short(r.digest, 14, 10))),
+                ["State", r.rail_state ? badge(r.rail_state) : dim],
+                ["VAA", vaaLink(r.vaa_id)],
+                ["Digest", r.digest ? `${mono(short(r.digest, 14, 10))}${copyBtn(r.digest)}` : dim],
               ],
             ],
           ];
@@ -249,26 +299,20 @@
           [
             "Transfer",
             [
-              kv("sender", addrLink(r.sender, v.from_chain)),
-              kv("recipient", addrLink(r.recipient, v.to_chain)),
-              kv("source asset", addrLink(r.source_asset, v.from_chain)),
-              kv("destination asset", addrLink(r.dest_asset, v.to_chain)),
-            ],
-          ],
-          [
-            "Amounts",
-            [
-              kv("gross", money(r.gross_amount, v)),
-              kv("fee", money(r.fee, v)),
-              kv("paid out", money(r.net_amount, v)),
+              ["Amount", money(r.gross_amount, v)],
+              ["Fees", fees(v, [["Basejump (fast path)", r.fee]])],
+              ["Received", money(r.net_amount, v)],
+              ["Sender", `${chainBadge(v.from_chain)}${addrLink(r.sender, v.from_chain)}`],
+              ["Recipient", `${chainBadge(v.to_chain)}${addrLink(r.recipient, v.to_chain)}`],
+              ["Origin transaction", ref(r.initiated)],
             ],
           ],
           [
             "Settlement",
             [
-              kv("ntt sequence", mono(r.transfer_sequence)),
-              kv("message sequence", mono(r.message_sequence)),
-              kv("pending queue id", mono(r.pending_id)),
+              ["NTT sequence", mono(r.transfer_sequence)],
+              ["Message sequence", mono(r.message_sequence)],
+              ["Pending queue id", mono(r.pending_id)],
             ],
           ],
         ],
@@ -276,22 +320,32 @@
 
       function render(t) {
         if (!t) {
-          main.innerHTML = `<div class="panel"><div class="table-error">no transfer ${esc(id)}</div></div>`;
+          main.innerHTML = `<div class="panel"><div class="table-error">No transfer ${esc(id)}.</div></div>`;
           return;
         }
         const { view: v, record: r } = t;
-        const panels = PANELS[v.kind](v, r)
+        const title = TYPE[v.type] ?? v.type;
+        const cards = PANELS[v.kind](v, r)
           .map(
-            ([title, rows]) => `<div class="panel">
-              <div class="panel-head"><span class="t">${esc(title)}</span></div>
-              ${rows.join("")}
+            ([head, body]) => `<div class="detail-card">
+              <div class="panel-head"><span class="t">${esc(head)}</span></div>
+              ${typeof body === "string" ? body : dl(body)}
             </div>`,
           )
           .join("");
+        // Up to four steps share a row; five or six break into two rows of three.
+        const legs = ROUTE[v.kind](v, r).filter(Boolean);
+        const cols = legs.length <= 4 ? legs.length : 3;
+        document.title = `${title} · Hydration xchain`;
         main.innerHTML = `
-          <h1 class="page-title">${esc(TYPE[v.type] ?? v.type)} <span class="sub">${badge(v.status)} ${badge(v.stage)}</span></h1>
-          <div class="legs">${ROUTE[v.kind](v, r).filter(Boolean).join("")}</div>
-          ${panels}`;
+          <div class="crumbs"><a href="/">Transfers</a><span class="sep">/</span><span>${esc(title)}</span></div>
+          <h1 class="page-title">${esc(title)}
+            <span class="sub">${chainBadge(v.from_chain)}<span class="dim">→</span>${chainBadge(v.to_chain)}</span>
+            ${statusBadge(v.status, { title: v.stage })}
+          </h1>
+          <div class="sec-title">Sent ${esc(agoLong(v.time))}${v.time ? ` <span class="dim">· ${esc(at(v.time))}</span>` : ""}</div>
+          <div class="legs" style="--cols:${cols}">${legs.join("")}</div>
+          ${cards}`;
       }
 
       async function load() {
@@ -301,14 +355,17 @@
       // Every rail's changes: this page cannot tell from a notice which of its rows moved, and a
       // refetch is one request.
       let pending;
-      live(
-        "ntt,utxo,utxo-signs,basejump",
-        () => {
-          clearTimeout(pending);
-          pending = setTimeout(load, 300);
-        },
-        load,
-      );
+      json("/api/filters").then((f) => {
+        assets = f?.assets ?? [];
+        live(
+          "ntt,utxo,utxo-signs,basejump",
+          () => {
+            clearTimeout(pending);
+            pending = setTimeout(load, 300);
+          },
+          load,
+        );
+      });
     </script>
   </body>
 </html>

@@ -20,7 +20,11 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
 };
+
+/** Served as bytes, not text. */
+const BINARY = /^(image|font)\//;
 
 /** The part of a watcher /api/status needs; only ingest has any. */
 export interface WatcherLike {
@@ -168,6 +172,7 @@ export async function serve(opts: ServeOptions): Promise<FastifyInstance> {
  */
 function pages(app: FastifyInstance, name: string): void {
   serveDir(app, resolve("public", "shared"), "/shared");
+  serveDir(app, resolve("public", "fonts"), "/fonts");
 
   const dir = resolve("public", name);
   if (!existsSync(dir)) {
@@ -212,9 +217,15 @@ function asset(dir: string, file: string) {
   const type = MIME[extname(file)];
   if (!type) return null;
   const path = resolve(dir, file);
-  const body = type.startsWith("image/") ? readFileSync(path) : readFileSync(path, "utf-8");
-  return async (_req: unknown, reply: { type(t: string): void }) => {
+  const body = BINARY.test(type) ? readFileSync(path) : readFileSync(path, "utf-8");
+  return async (
+    _req: unknown,
+    reply: { type(t: string): void; header(k: string, v: string): void },
+  ) => {
     reply.type(type);
+    // Fonts never change under a name; everything else is re-read on deploy, so keep it fresh.
+    if (type.startsWith("font/"))
+      reply.header("Cache-Control", "public, max-age=31536000, immutable");
     return body;
   };
 }

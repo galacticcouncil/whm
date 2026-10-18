@@ -2,9 +2,20 @@ import { createHash } from "node:crypto";
 
 import { NTT } from "../../deployments";
 
+import { ROUTES } from "./utxo/routes";
+
 export interface Token {
   symbol: string;
   decimals: number;
+}
+
+/** What the pages need to draw a token: its symbol, its Hydration asset (the icon), its home chain. */
+export interface TokenMeta {
+  symbol: string;
+  /** Hydration asset id — the registry keys icons by it. */
+  assetId: number;
+  /** Where it is native: the corner of its icon. */
+  home: string;
 }
 
 /**
@@ -16,38 +27,48 @@ export interface Token {
 const nearManager = (account: string) =>
   `0x${createHash("sha256").update(account).digest("hex").slice(24)}`;
 
-/** Each NTT token's symbol. */
-const SYMBOLS: Record<keyof typeof NTT, string> = {
-  weth: "WETH",
-  usdc: "USDC",
-  usdt: "USDT",
-  dai: "DAI",
-  wbtc: "WBTC",
-  susds: "sUSDS",
-  eurc: "EURC",
-  hdx: "HDX",
-  hollar: "HOLLAR",
-  spy: "SPY",
-  hype: "HYPE",
-  near: "NEAR",
-  zec: "ZEC",
+/**
+ * Each NTT token: symbol, Hydration asset id and home chain. The asset id is the last four bytes of
+ * the token's Hydration precompile address in hydration-ntt's deployment.json; HOLLAR is an ERC20
+ * there, asset 222.
+ */
+export const NTT_TOKENS: Record<keyof typeof NTT, TokenMeta> = {
+  weth: { symbol: "WETH", assetId: 20, home: "ethereum" },
+  usdc: { symbol: "USDC", assetId: 21, home: "ethereum" },
+  usdt: { symbol: "USDT", assetId: 23, home: "ethereum" },
+  dai: { symbol: "DAI", assetId: 18, home: "ethereum" },
+  wbtc: { symbol: "WBTC", assetId: 19, home: "ethereum" },
+  susds: { symbol: "sUSDS", assetId: 1_000_745, home: "ethereum" },
+  eurc: { symbol: "EURC", assetId: 44, home: "base" },
+  hdx: { symbol: "HDX", assetId: 0, home: "hydration" },
+  hollar: { symbol: "HOLLAR", assetId: 222, home: "hydration" },
+  spy: { symbol: "SPY", assetId: 1_001_356, home: "robinhood" },
+  hype: { symbol: "HYPE", assetId: 1_001_355, home: "hyperevm" },
+  near: { symbol: "NEAR", assetId: 1_001_358, home: "near" },
+  zec: { symbol: "ZEC", assetId: 1_001_357, home: "zcash" },
 };
+
+/** Every token by symbol — what a page draws a row's amount with. */
+export const TOKENS: TokenMeta[] = Object.values(NTT_TOKENS);
+
+/** The keys a token appears under in the transfers union's `token` column, by symbol. */
+const KEYS = new Map<string, string[]>();
+const addKey = (symbol: string, key: string) =>
+  KEYS.set(symbol, [...(KEYS.get(symbol) ?? []), key.toLowerCase()]);
 
 /**
  * Symbols by any of a token's managers, on any chain. The amount a transfer carries is already at
  * the rail's precision — its own `decimals` — so only the symbol comes from here.
  */
-const BY_MANAGER = new Map(
-  Object.entries(NTT).flatMap(([token, legs]) =>
-    Object.values(legs as Record<string, { manager: string } | string>).map(
-      (leg) =>
-        [
-          typeof leg === "string" ? nearManager(leg) : leg.manager.toLowerCase(),
-          SYMBOLS[token as keyof typeof NTT],
-        ] as const,
-    ),
-  ),
-);
+const BY_MANAGER = new Map<string, string>();
+for (const [token, legs] of Object.entries(NTT)) {
+  const symbol = NTT_TOKENS[token as keyof typeof NTT].symbol;
+  for (const leg of Object.values(legs as Record<string, { manager: string } | string>)) {
+    const manager = typeof leg === "string" ? nearManager(leg) : leg.manager.toLowerCase();
+    BY_MANAGER.set(manager, symbol);
+    addKey(symbol, manager);
+  }
+}
 
 /**
  * An NTT transfer's symbol, by its source manager.
@@ -61,3 +82,14 @@ export const nttSymbol = (manager: string | null) =>
 export const BASEJUMP_ASSETS: Record<string, Token> = {
   "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": { symbol: "USDC", decimals: 6 },
 };
+
+for (const [asset, t] of Object.entries(BASEJUMP_ASSETS)) addKey(t.symbol, asset);
+for (const r of ROUTES) addKey(r.symbol, r.chain);
+
+/**
+ * The `token` keys that mean any of these symbols — an NTT manager, a Basejump asset, a UTXO coin's
+ * chain — for an asset filter.
+ *
+ * @param symbols Symbols, as the pages show them.
+ */
+export const tokenKeys = (symbols: string[]) => symbols.flatMap((s) => KEYS.get(s) ?? []);

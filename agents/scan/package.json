@@ -5,12 +5,13 @@
   "scripts": {
     "start:ingest": "node dist/ingest/app.js",
     "start:intents": "node dist/intents/app.js",
-    "start:transfers": "node dist/transfers/app.js",
+    "start:xchain": "node dist/xchain/app.js",
     "prebuild": "npm run clean",
     "build": "node ./esbuild.dist.mjs",
     "clean": "rm -rf dist/",
     "dev": "node ./esbuild.dev.mjs",
     "dev:db": "docker compose -f docker-compose.dev.yml up -d",
+    "admin": "esbuild src/admin.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/admin.js --log-level=warning && node --env-file=.env dist/admin.js",
     "docker:build": "docker build -t galacticcouncil/scan:latest .",
     "docker:deploy": "docker buildx build --platform linux/amd64 -t galacticcouncil/scan:latest --push .",
     "docker:up": "docker stack deploy -c docker-compose.yml scan"

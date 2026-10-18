@@ -9,8 +9,8 @@ ingest wrote, owns its own tables, and serves its own pages.
 
 ```
 ingest      chains → events → wh_messages + ntt_transfers      (no UI)
-intents     intent_orders + intent_quotes + 1Click             :8080
-transfers   every transfer: NTT, UTXO coins via Omni, Basejump :8081
+intents     intent_orders + 1Click                             :8080
+xchain      every transfer: NTT, UTXO coins via Omni, Basejump :8081
 ```
 
 Chains are indexed **in parallel and at wildly different speeds**, so events arrive in no
@@ -106,7 +106,7 @@ node admin.js rebuild <reader>                    # empty a reader's tables, rep
 
 - **Rewind** re-reads a chain. Events already stored are skipped, so it is free to overshoot; events
   found for the first time reach every reader as new.
-- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `transfers`) — for a new leg
+- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `xchain`) — for a new leg
   or changed flow logic over events already stored. Its tables are emptied and refilled; anything a
   poller wrote is re-fetched as the rows come back.
 
@@ -143,7 +143,7 @@ here. The table, its indexes and its state-rank function are generated from the 
 ```sh
 pnpm dev:db                 # postgres on :5432
 pnpm build
-pnpm dev ingest             # or: intents, transfers
+pnpm dev ingest             # or: intents, xchain
 ```
 
 `pnpm dev <domain>` rebuilds and runs one container's worth — they are separate processes, so run
@@ -167,7 +167,7 @@ where a destination chain runs ahead of its source it can find nothing to update
 hash and a timestamp, and live operation publishes ~15 minutes before it delivers, so this is a
 cold-start artifact rather than a running concern.
 
-## Transfers
+## Transfers (the xchain app)
 
 One list for everything Hydration moves, whichever rail carries it, and one detail page per
 transfer. `/api/transfers` unions three sources into one shape — time, type, both ends, amount, fee,
@@ -176,7 +176,7 @@ status — and `/api/transfers/:id` returns that view beside the rail's own row.
 - **NTT** — `ntt_transfers`, read as ingest wrote it: WETH (Ethereum), NEAR and ZEC (the NEAR hub).
   A transfer another rail claims is listed under that rail instead.
 - **UTXO coins** — `utxo_transfers`, keyed by the source transaction; each coin is a route in
-  `apps/transfers/utxo/routes.ts`.
+  `apps/xchain/utxo/routes.ts`.
   - A **deposit** is one NEAR transaction: Omni's relayer proves the coin's payment
     (`verify_deposit_v2`, whose arguments carry the raw transaction — so who paid, and to which
     deposit address), the connector mints into the coin's NTT manager, and the manager publishes.

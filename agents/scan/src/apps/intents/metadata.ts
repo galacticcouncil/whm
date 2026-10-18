@@ -11,6 +11,8 @@ export interface AssetMeta {
   symbol: string;
   decimals: number;
   chain?: string;
+  /** The Hydration asset whose icon it is drawn with — itself, or an aToken's underlying asset. */
+  icon?: number;
 }
 
 /**
@@ -34,7 +36,16 @@ export const hydrationAssets = once(async (): Promise<Record<number, AssetMeta>>
   const client = createClient(getWsProvider(cfg.wssUrl));
   try {
     const assets = await new sdkClient.AssetClient(client).getSupported();
-    for (const a of assets) out[a.id] = { symbol: a.symbol, decimals: a.decimals };
+    // An aToken (aDOT, aUSDC, avDOT…) has no icon of its own; like the explorer, draw it as the
+    // asset it wraps — the lowest-id plain token of that symbol, where the registry has duplicates.
+    const bySymbol = new Map<string, number>();
+    for (const a of [...assets].sort((x, y) => x.id - y.id)) {
+      if (a.type !== "Erc20" && !bySymbol.has(a.symbol)) bySymbol.set(a.symbol, a.id);
+    }
+    for (const a of assets) {
+      const underlying = /^a[A-Za-z]/.test(a.symbol) ? bySymbol.get(a.symbol.slice(1)) : undefined;
+      out[a.id] = { symbol: a.symbol, decimals: a.decimals, icon: underlying ?? a.id };
+    }
   } catch (e) {
     log.warn(`[intents] hydration assets: ${(e as Error).message}`);
   } finally {
