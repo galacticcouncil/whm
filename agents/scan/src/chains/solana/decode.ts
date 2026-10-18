@@ -15,7 +15,14 @@ import {
   type Publish,
 } from "../events";
 
-import { CORE_POSTS, PER_INSTRUCTION, TOKEN_PAYOUTS, TOKEN_PROGRAMS } from "./consts";
+import {
+  CORE_POSTS,
+  EVENT_IX_TAG,
+  PER_INSTRUCTION,
+  POST_MESSAGE_SHIM,
+  TOKEN_PAYOUTS,
+  TOKEN_PROGRAMS,
+} from "./consts";
 import type { Instruction, RawInstruction, Tx } from "./types";
 
 /**
@@ -33,6 +40,12 @@ const RELEASES = new Set([
   discriminator("release_inbound_unlock"),
   discriminator("release_inbound_mint"),
 ]);
+
+/** The shim's `post_message`. */
+const SHIM_POST = discriminator("post_message");
+
+/** What a shim post carries that its core post does not. */
+type Shimmed = Pick<Publish, "data" | "nonce" | "consistency" | "timestamp">;
 
 /** A decoded event, before the watcher makes it a row. */
 export interface Decoded {
@@ -105,7 +118,8 @@ export function postedVaas(ixs: Instruction[], programs: ReadonlySet<string>): s
  * delivery our programs received, released or held.
  *
  * A publish keeps its emitter as a topic, for the watch entry to filter on; which programs called
- * the core is not this function's business. A delivery is keyed by its digest, and — because a
+ * the core is not this function's business. One posted through the shim takes its payload from the
+ * shim, since the core is handed an empty one. A delivery is keyed by its digest, and — because a
  * release names no VAA — by the inbox item that digest derives, which is all a release carries.
  *
  * @param tx The transaction, whole.
@@ -128,12 +142,20 @@ export function decode(
     .map((l) => /^Program log: Sequence: (\d+)$/.exec(l)?.[1])
     .filter((s): s is string => s !== undefined);
   let posted = 0;
+  // Depth-first, so a shim post is met before the core post it makes.
+  const shimmed = new Map<Instruction, Shimmed>();
 
   for (const ix of ixs) {
+    if (ix.program === POST_MESSAGE_SHIM && tag(ix) === SHIM_POST) {
+      const post = ix.children.find((c) => c.program === core && CORE_POSTS.has(c.data[0]));
+      const s = shim(ix);
+      if (post && s) shimmed.set(post, s);
+      continue;
+    }
     if (ix.program === core && CORE_POSTS.has(ix.data[0])) {
       // Every post logs its sequence, in the order the posts ran.
       const seq = sequences[posted++];
-      const p = publish(ix, seq);
+      const p = publish(ix, seq, shimmed.get(ix));
       if (p) {
         out.push({
           program: core,
@@ -184,8 +206,9 @@ const tag = (ix: Instruction) => Buffer.from(ix.data.subarray(0, 8)).toString("h
  *
  * @param ix The post.
  * @param seq The sequence the core logged for it.
+ * @param via What the shim that made it carried, if one did.
  */
-function publish(ix: Instruction, seq: string | undefined): Publish | null {
+function publish(ix: Instruction, seq: string | undefined, via?: Shimmed): Publish | null {
   if (seq === undefined || ix.data.length < 10) return null;
   const b = Buffer.from(ix.data);
   const len = b.readUInt32LE(5);
@@ -196,6 +219,29 @@ function publish(ix: Instruction, seq: string | undefined): Publish | null {
     emitter: Buffer.from(base58.decode(ix.accounts[2])).toString("hex"),
     seq,
     consistency: b[9 + len],
+    ...via,
+  };
+}
+
+/**
+ * A shim post: `[discriminator][nonce u32][finality u8][payload: u32 length, bytes]`, and the event
+ * it emits beneath itself — emitter, sequence, and the submission time the VAA is stamped with.
+ *
+ * @param ix The shim's `post_message`.
+ */
+function shim(ix: Instruction): Shimmed | null {
+  const b = Buffer.from(ix.data);
+  if (b.length < 17) return null;
+  const len = b.readUInt32LE(13);
+  if (b.length < 17 + len) return null;
+  const event = ix.children.find(
+    (c) => c.program === POST_MESSAGE_SHIM && tag(c) === EVENT_IX_TAG && c.data.length >= 60,
+  );
+  return {
+    data: b.subarray(17, 17 + len).toString("hex"),
+    nonce: b.readUInt32LE(8),
+    consistency: b[12],
+    ...(event && { timestamp: Buffer.from(event.data).readUInt32LE(56) }),
   };
 }
 

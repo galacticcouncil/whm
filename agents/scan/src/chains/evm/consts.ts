@@ -38,11 +38,16 @@ export const HYPEREVM: EvmChainDef = {
   chunkSize: 1_000n,
   concurrency: 1,
 };
+/**
+ * 100ms blocks — 864k a day — so the default range would take thousands of calls; its public RPC
+ * answers a filtered getLogs over 5M blocks.
+ */
 export const ROBINHOOD: EvmChainDef = {
   name: "robinhood",
   chain: robinhood,
   wormholeId: 72,
   prefix: "ROBINHOOD",
+  chunkSize: 1_000_000n,
 };
 
 export const EVM_CHAINS: EvmChainDef[] = [ETHEREUM, BASE, HYPEREVM, ROBINHOOD];

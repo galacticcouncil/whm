@@ -595,6 +595,17 @@ const STATUS = {
     label: "Held",
     svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><line x1="10" y1="9" x2="10" y2="15"/><line x1="14" y1="9" x2="14" y2="15"/></svg>',
   },
+  // An oracle update: written by its receiver, or past the window in which it still could be.
+  delivered: {
+    cls: "ok",
+    label: "Delivered",
+    svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>',
+  },
+  expired: {
+    cls: "expired",
+    label: "Expired",
+    svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 2h12M6 22h12M7 2c0 6 10 6 10 10S7 16 7 22M17 2c0 6-10 6-10 10s10 4 10 10"/></svg>',
+  },
 };
 
 /** A status's label, for filters. */
@@ -604,7 +615,8 @@ export const statusLabel = (s) => STATUS[s]?.label ?? s;
  * Where a transfer is, as the explorer's status badge: done green, in flight sky, held amber,
  * failed red. `compact` is the round icon-only form a list column uses.
  *
- * @param {string} status `completed`, `pending`, `held`, `failed`.
+ * @param {string} status `completed`, `pending`, `held`, `failed` — or an oracle update's
+ *   `delivered`, `expired`.
  * @param {{compact?: boolean, title?: string}} [opts]
  */
 export function statusBadge(status, opts = {}) {

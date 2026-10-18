@@ -11,6 +11,7 @@ ingest wrote, owns its own tables, and serves its own pages.
 ingest      chains → events → wh_messages + ntt_transfers      (no UI)
 intents     intent_orders + 1Click                             :8080
 xchain      every transfer: NTT, UTXO coins via Omni, Basejump :8081
+oracles     oracle relay updates, each feed's value over time  :8082
 ```
 
 Chains are indexed **in parallel and at wildly different speeds**, so events arrive in no
@@ -26,6 +27,9 @@ src/
     evm/             consts, factory (config from env), types, watcher (getLogs)
     substrate/       same, for Hydration — EVM.Log out of System.Events
     near/            same, plus fastnear.ts — account histories and whole transactions
+    solana/          same, plus rpc.ts and decode.ts — program signatures, instructions decoded
+    sui/             same, plus graphql.ts and decode.ts — a state's transactions, calls decoded
+    events.ts        the JSON events the Solana and Sui watchers decode into
   watch.ts         WHAT to index: contracts, roles, start blocks
   db.ts            the shared event store
   admin.ts         rewind a chain, rebuild a reader
@@ -43,20 +47,20 @@ Endpoints and secrets are env. **Everything else is code** — chain ids, contra
 start blocks live in [src/chains/](src/chains/) and [src/watch.ts](src/watch.ts), so a
 deployment cannot silently point at the wrong contract.
 
-| Variable            | Meaning                                                        |
-| ------------------- | -------------------------------------------------------------- |
-| `RPC_ETHEREUM_WSS`  | Websocket. Heads arrive over `eth_subscribe`, never by polling. |
-| `RPC_BASE_WSS`      | Same, for Base.                                                 |
-| `RPC_ROBINHOOD_HTTP`| Robinhood's public RPC has no websocket: `_HTTP` polls heads.   |
-| `RPC_HYPEREVM_HTTP` | Same; its public RPC caps getLogs at 1,000 blocks — the default here. |
-| `RPC_HYDRATION_WSS` | Must be the substrate path, not the EVM one — see below.        |
-| `RPC_NEAR_TX`       | Optional. FastNEAR's transaction API; defaults to the public one. |
-| `RPC_SOLANA_HTTP`   | Optional. Solana JSON-RPC; defaults to the public one.          |
-| `RPC_SOLANA_WSS`    | Optional. Its `logsSubscribe` wakes the watcher before the poll. |
-| `RPC_SUI_GRAPHQL`   | Optional. Sui's GraphQL service; defaults to the public one.    |
-| `DATABASE_URL`      | Postgres.                                                       |
-| `ONECLICK_JWT`      | The intents domain's off-chain leg.                             |
-| `PORT`              | Defaults to 8080.                                               |
+| Variable             | Meaning                                                               |
+| -------------------- | --------------------------------------------------------------------- |
+| `RPC_ETHEREUM_WSS`   | Websocket. Heads arrive over `eth_subscribe`, never by polling.       |
+| `RPC_BASE_WSS`       | Same, for Base.                                                       |
+| `RPC_ROBINHOOD_HTTP` | Robinhood's public RPC has no websocket: `_HTTP` polls heads.         |
+| `RPC_HYPEREVM_HTTP`  | Same; its public RPC caps getLogs at 1,000 blocks — the default here. |
+| `RPC_HYDRATION_WSS`  | Must be the substrate path, not the EVM one — see below.              |
+| `RPC_NEAR_TX`        | Optional. FastNEAR's transaction API; defaults to the public one.     |
+| `RPC_SOLANA_HTTP`    | Optional. Solana JSON-RPC; defaults to the public one.                |
+| `RPC_SOLANA_WSS`     | Optional. Its `logsSubscribe` wakes the watcher before the poll.      |
+| `RPC_SUI_GRAPHQL`    | Optional. Sui's GraphQL service; defaults to the public one.          |
+| `DATABASE_URL`       | Postgres.                                                             |
+| `ONECLICK_JWT`       | The intents domain's off-chain leg.                                   |
+| `PORT`               | Defaults to 8080.                                                     |
 
 Every EVM chain takes `RPC_<CHAIN>_WSS` or, where its endpoint has no websocket, `RPC_<CHAIN>_HTTP`.
 A chain is enabled by the presence of its RPC and disabled by its absence; watch entries on a chain
@@ -74,7 +78,7 @@ Hydration must be read over substrate: the Basejump landing's deliveries are XCM
 `EVM.Log` events expose them.
 
 That has a consequence worth knowing. An `EVM.Log` never names its own transaction, so the hash
-comes from the `Ethereum.Executed` that Frontier emits *after* the logs of each ethereum call — the
+comes from the `Ethereum.Executed` that Frontier emits _after_ the logs of each ethereum call — the
 watcher buffers logs and assigns the hash when it arrives. The XCM-driven deliveries have no such
 event, and keep a `blockHash-eventIndex` identity instead, which is the only name they have. The UI
 links the first kind to `/extrinsic/<hash>` and the second to `/event/<block>-<index>`.
@@ -115,9 +119,30 @@ node admin.js rebuild <reader>                    # empty a reader's tables, rep
 
 - **Rewind** re-reads a chain. Events already stored are skipped, so it is free to overshoot; events
   found for the first time reach every reader as new.
-- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `xchain`) — for a new leg
+- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `xchain`, `oracles`) — for a new leg
   or changed flow logic over events already stored. Its tables are emptied and refilled; anything a
   poller wrote is re-fetched as the rows come back.
+
+## Storage
+
+Small. Measured on 2026-10-18 over 18 days of every watched chain, from 2026-10-01:
+
+| What                     | Rows  | Size      |
+| ------------------------ | ----- | --------- |
+| `events` — the raw store | 7,394 | 6.8 MB    |
+| `wh_messages`            | 2,305 | 2.7 MB    |
+| `oracle_updates`         | 1,721 | 2.6 MB    |
+| `ntt_transfers`          | 551   | 1.2 MB    |
+| everything else          | < 100 | < 1 MB    |
+| **database**             |       | **22 MB** |
+
+About 1.2 MB a day — some 35 MB a month, 450 MB a year at that rate. The volume on disk reads more
+(81 MB) because Postgres's own catalogs and WAL come first. By chain, the store holds Hydration's
+4,011 events, Solana's 1,634, Robinhood's 528, Ethereum's 518, HyperEVM's 362, Base's 234 and
+NEAR's 107.
+
+Only `oracle_updates` grows fast enough to want one, and the oracles app
+prunes it to 30 days itself; everything else is kept, so any reader can be rebuilt from the store.
 
 ## Adding a flow
 
@@ -152,7 +177,7 @@ here. The table, its indexes and its state-rank function are generated from the 
 ```sh
 pnpm dev:db                 # postgres on :5432
 pnpm build
-pnpm dev ingest             # or: intents, xchain
+pnpm dev ingest             # or: intents, xchain, oracles
 ```
 
 `pnpm dev <domain>` rebuilds and runs one container's worth — they are separate processes, so run
@@ -162,7 +187,7 @@ ingest alongside whichever domain you are working on.
 
 `ntt_transfers` is keyed on the digest NTT settles delivery on, because it is the one name every
 delivery event carries. Nothing on-chain publishes that digest beside its VAA — the transceiver's
-`ReceivedMessage` carries the VAA *hash*, which is a different value — so it is derived from the
+`ReceivedMessage` carries the VAA _hash_, which is a different value — so it is derived from the
 published payload exactly as NTT computes it,
 `keccak256(sourceChainId ++ encodedNttManagerMessage)`.
 
@@ -201,3 +226,26 @@ status — and `/api/transfers/:id` returns that view beside the rail's own row.
 Stages: NTT `published → received → redeemed | queued`; a deposit `deposited → published →
 redeemed`; a withdrawal `requested → received → signed → withdrawn → confirmed`.
 
+## Oracles (the oracles app)
+
+Every update the oracle relays carry, and each feed's value over time. A relay is a source-chain
+emitter publishing `(action, assetId, value, timestamp)` through Wormhole, and an `OracleReceiver`
+on the destination writing it into the oracle there — Ethereum, Solana and Robinhood into
+Hydration, Hydration into Robinhood (`ORACLE` in `deployments.ts`; feeds in
+`apps/oracles/feeds.ts`).
+
+- The emitters are read off their chain's Wormhole core under a cursor of their own,
+  `oracle-core`, so they backfill without moving the core's NTT cursor. Solana's emitter posts
+  through Wormhole's post-message shim, whose instruction carries the payload and whose event the
+  VAA's timestamp.
+- `PriceReceived` names no VAA, only its timestamp — the publishing block's, or the shim's — so
+  `oracle_updates` is keyed by source, asset and that timestamp, and either end may land first.
+- A receiver refuses an update older than five minutes or out of order, so a publish that never
+  delivers is shown **expired** once it is past that window.
+- A feed's value, its age and its charts are the oracle's own: what the receiver wrote, and when. A
+  feed nothing has been delivered to for a week is **dead** — once its destination is indexed that
+  far, so a chain still backfilling does not kill every feed landing on it.
+- Postgres has no TTL, so the app prunes `oracle_updates` to the last 30 days, hourly.
+
+`/` is a card per feed — latest value, a week's sparkline — and `/feed/:id` its chart (24H, 7D, 30D)
+above every update published, delivered or not.

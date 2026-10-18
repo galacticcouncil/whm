@@ -24,6 +24,11 @@ export interface Publish {
   /** A u64, so a string. */
   seq: string;
   consistency: number;
+  /**
+   * The VAA's timestamp, unix seconds, where the transaction states it — Solana's post-message
+   * shim does. Elsewhere it is the block's.
+   */
+  timestamp?: number;
 }
 
 /** A VAA verified by an NTT manager: attested, not yet released. */

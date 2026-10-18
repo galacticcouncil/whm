@@ -10,6 +10,9 @@ import { decode, instructions, postedVaas, type Decoded } from "./decode";
 import { SolanaRpc } from "./rpc";
 import type { SolanaChain, Tx } from "./types";
 
+/** How often a pass saves how far it has got, and says so. */
+const CHECKPOINT_MS = 15_000;
+
 /** A transaction found among the signatures, and the addresses whose signatures it was found in. */
 interface Found {
   slot: bigint;
@@ -148,6 +151,12 @@ export class SolanaWatcher {
       a.slot === b.slot ? sa.localeCompare(sb) : a.slot < b.slot ? -1 : 1,
     );
 
+    // A long pass saves its progress as it goes, so one that fails — the public RPC throttles — or a
+    // restart resumes there rather than from the start. Transactions run oldest slot first, so every
+    // slot below the last one written is done; that slot itself may have more to come. The cursors
+    // the pass filters by stay as they were: only what is saved moves.
+    const saved = new Map(cursors);
+    let checkpointAt = Date.now();
     let ingested = 0;
     for (let i = 0; i < ordered.length; i += this.cfg.concurrency) {
       const batch = ordered.slice(i, i + this.cfg.concurrency);
@@ -166,6 +175,18 @@ export class SolanaWatcher {
         const n = await insertEvents(this.cfg.name, events);
         if (n > 0) this.onIngest?.(this.cfg.name);
         ingested += n;
+      }
+      if (Date.now() - checkpointAt >= CHECKPOINT_MS) {
+        const done = batch[batch.length - 1][1].slot - 1n;
+        for (const w of this.watches) {
+          if (done <= saved.get(cursorId(w))!) continue;
+          await saveCursor(this.cfg.name, cursorId(w), done);
+          saved.set(cursorId(w), done);
+        }
+        checkpointAt = Date.now();
+        log.info(
+          `[${this.cfg.name}] at ${done} (${i + batch.length}/${ordered.length} txs, ${ingested} events)`,
+        );
       }
     }
 

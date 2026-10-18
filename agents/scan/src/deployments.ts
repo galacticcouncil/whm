@@ -256,3 +256,34 @@ export const UTXO = {
     connector: "zcash-connector.bridge.near",
   },
 } as const;
+
+/** Where a relay's updates land: the `OracleReceiver` on the destination chain. */
+export interface OracleReceiver {
+  chain: string;
+  address: string;
+}
+
+/**
+ * Oracle relays, keyed by the source chain (deployments/prod/oracle-relay-<chain>.json): the emitter
+ * publishing each update, and the receiver writing it into the destination's oracles. Solana's
+ * emitter is a program publishing as its emitter PDA.
+ */
+export const ORACLE = {
+  ethereum: {
+    emitter: "0xfbf682642a6a28760e717b637f12d014bd5db4b9",
+    receiver: { chain: "hydration", address: "0x6913770466fed4dbc24337cd7f1ae92af4321083" },
+  },
+  solana: {
+    program: "2knjvgqZKtU3nV1r9RaLshS9JYWMerZ1ysSFcDyTVsdn",
+    emitter: "3FVzVAw85CaMEN8aLXi1qQN3GDGL45SbFFvb4DMZjwJ2",
+    receiver: { chain: "hydration", address: "0x582e2fac5af62dc024396b5e7f549c72273a69c3" },
+  },
+  robinhood: {
+    emitter: "0x9fbd9f16ce7fa17097e91cc36dc1b7b47adca9de",
+    receiver: { chain: "hydration", address: "0x3b6e3469d8e64e306f235838e0fdf7b4d60a39ce" },
+  },
+  hydration: {
+    emitter: "0x3f5cc44141a52529323f9be42dbb98fda7c1d066",
+    receiver: { chain: "robinhood", address: "0x060f1ef6bb1c7ab31d2bbc3d2ae47e590952b958" },
+  },
+} as const;

@@ -4,6 +4,7 @@ import { pad } from "viem";
 import { WORMHOLE_CHAINS } from "../../chains";
 import { pool } from "../../db";
 import { validLegs } from "../../flow";
+import { parseNttTransfer } from "../../ingest/payload";
 import { bytes32ToAddress, normalizeRecipient } from "../../utils";
 import { INTENT } from "../../deployments";
 
@@ -200,7 +201,11 @@ export async function getTransfer(
     basejump: `SELECT * FROM basejump_transfers WHERE id = $1`,
   };
   const r = await pool.query(sql[view.kind], [key]);
-  return { view, record: r.rows[0] ?? {} };
+  const record = r.rows[0] ?? {};
+  if (view.kind === "ntt" && record.source_chain === "solana") {
+    record.outbox_item = await outboxItem(record.vaa_id);
+  }
+  return { view, record };
 }
 
 /**
@@ -266,4 +271,17 @@ function solanaKey(text: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A Solana transfer's outbox item — the account its manager message is named by, where an EVM or
+ * NEAR one carries a sequence. Read off the published payload rather than stored twice.
+ *
+ * @param vaaId The transfer's VAA.
+ */
+async function outboxItem(vaaId: string | null): Promise<string | null> {
+  if (!vaaId) return null;
+  const m = await pool.query(`SELECT payload FROM wh_messages WHERE vaa_id = $1`, [vaaId]);
+  const t = m.rows[0] && parseNttTransfer(m.rows[0].payload, 1);
+  return t ? base58.encode(Buffer.from(t.id.slice(2), "hex")) : null;
 }

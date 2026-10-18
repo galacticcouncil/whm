@@ -9,6 +9,7 @@ import {
   INTENT,
   NTT,
   nttLegs,
+  ORACLE,
   UTXO,
   WORMHOLE_CORE,
   type EvmLeg,
@@ -57,25 +58,30 @@ const OCT_1 = {
   sui: 328_848_249n,
 };
 
+const FROM_CHAIN = OCT_1;
+const FROM_CHAIN_ORA = OCT_1;
+
 /** Where each cursor starts, by chain, then by what it indexes. */
 const FROM = {
   hydration: {
-    ntt: SEPT_1.hydration,
-    intents: SEPT_1.hydration,
-    basejump: SEPT_1.hydration,
+    ntt: FROM_CHAIN.hydration,
+    intents: FROM_CHAIN.hydration,
+    basejump: FROM_CHAIN.hydration,
+    oracles: FROM_CHAIN_ORA.hydration,
     /** ZecUtxoEmitter's deploy. */
     utxoZec: 15_901_846n,
   },
   ethereum: {
-    ntt: SEPT_1.ethereum,
-    intents: SEPT_1.ethereum,
-    basejump: SEPT_1.ethereum,
+    ntt: FROM_CHAIN.ethereum,
+    intents: FROM_CHAIN.ethereum,
+    basejump: FROM_CHAIN.ethereum,
+    oracles: FROM_CHAIN_ORA.ethereum,
   },
-  base: { ntt: SEPT_1.base },
-  robinhood: { ntt: SEPT_1.robinhood },
-  hyperevm: { ntt: SEPT_1.hyperevm },
-  solana: { ntt: SEPT_1.solana },
-  sui: { ntt: SEPT_1.sui },
+  base: { ntt: FROM_CHAIN.base },
+  robinhood: { ntt: FROM_CHAIN.robinhood, oracles: FROM_CHAIN_ORA.robinhood },
+  hyperevm: { ntt: FROM_CHAIN.hyperevm },
+  solana: { ntt: FROM_CHAIN.solana, oracles: FROM_CHAIN_ORA.solana },
+  sui: { ntt: FROM_CHAIN.sui },
   near: {
     /** ntt-near's deploy, the earlier of the two NEAR managers. */
     ntt: 219_438_351n,
@@ -259,12 +265,49 @@ const UTXO_ZEC: Watch[] = [
   },
 ];
 
+/**
+ * Oracle relays: each source's emitter, read off its chain's Wormhole core under a cursor of its
+ * own — so the relays backfill from their own start while the core's NTT cursor stays where it is —
+ * and the receivers on each destination.
+ */
+const ORACLES: Watch[] = [
+  ...(["ethereum", "robinhood", "hydration"] as const).map((chain) => ({
+    chain,
+    role: "wormhole-core",
+    id: "oracle-core",
+    from: FROM[chain].oracles,
+    at: [WORMHOLE_CORE[chain]],
+    topics: published([ORACLE[chain].emitter]),
+  })),
+  {
+    chain: "solana",
+    role: "wormhole-core",
+    id: "oracle-core",
+    from: FROM.solana.oracles,
+    at: [WORMHOLE_CORE.solana],
+    via: [ORACLE.solana.program],
+    topics: published(
+      [`0x${Buffer.from(base58.decode(ORACLE.solana.emitter)).toString("hex")}`],
+      nearTopic(PUBLISH),
+    ),
+  },
+  ...(["hydration", "robinhood"] as const).map((chain) => ({
+    chain,
+    role: "oracle-receiver",
+    from: FROM[chain].oracles,
+    at: Object.values(ORACLE)
+      .filter((r) => r.receiver.chain === chain)
+      .map((r) => r.receiver.address),
+  })),
+];
+
 export const WATCH: Watch[] = [
   ...WORMHOLE,
   ...NTT_LEGS,
   ...INTENTS,
   ...BASEJUMPS,
   ...UTXO_ZEC,
+  ...ORACLES,
 ].filter((w) => w.at.length > 0);
 
 /** The watch entries on chains this process has an endpoint for. */

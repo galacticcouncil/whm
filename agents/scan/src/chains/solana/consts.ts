@@ -21,5 +21,14 @@ export const TOKEN_PROGRAMS = new Set([
 /** SPL token instructions that move or mint: `Transfer`, `MintTo`, `TransferChecked`, `MintToChecked`. */
 export const TOKEN_PAYOUTS = new Set([3, 7, 12, 14]);
 
+/**
+ * Wormhole's post-message shim: it posts through the core with an empty payload, carrying the real
+ * one in its own instruction and the VAA's timestamp in its event.
+ */
+export const POST_MESSAGE_SHIM = "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX";
+
+/** Anchor's tag for an event emitted by self-invocation, ahead of the event's own discriminator. */
+export const EVENT_IX_TAG = "e445a52e51cb9a1d";
+
 /** The Wormhole core's `PostMessage` and `PostMessageUnreliable`, each logging `Sequence: <n>`. */
 export const CORE_POSTS = new Set([1, 8]);

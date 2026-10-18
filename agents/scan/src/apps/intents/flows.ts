@@ -155,6 +155,7 @@ export const orders: Flow = {
        * without needing the transaction it shared with `OrderPlaced`.
        */
       role: "wormhole-core",
+      chains: ["hydration"],
       abi: LogMessagePublishedEvt,
       state: "placed",
       key: (a: Published) => {

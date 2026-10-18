@@ -38,6 +38,23 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
 
+  app-oracles:
+    image: galacticcouncil/scan:latest
+    command: [node, oracles/app.js]
+    environment:
+      - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
+    ports:
+      - "8082:8080"
+    depends_on:
+      - postgres
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
   # One image, one service per domain. The command names the entry point — nothing is selected at
   # runtime. Only ingest writes to `events`, `wh_messages` and `ntt_transfers`; the rest read them.
   #

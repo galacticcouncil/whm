@@ -168,6 +168,7 @@ export const utxo: Flow = {
     },
     {
       role: "wormhole-core",
+      chains: ["hydration"],
       abi: LogMessagePublishedEvt,
       state: "requested",
       key: (a: Published, ev: LogEvent) =>
@@ -230,6 +231,7 @@ export const utxo: Flow = {
     },
     {
       role: "wormhole-core",
+      chains: ["near"],
       near: NEAR_PUBLISH,
       state: "deposited",
       key: (a: NearPublished, ev: LogEvent) =>

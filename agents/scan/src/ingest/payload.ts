@@ -32,6 +32,8 @@ export interface NttTransfer {
    * any delivery event arrives, and the legs that carry nothing else can simply find it.
    */
   digest: `0x${string}`;
+  /** The manager message's id, all 32 bytes: a sequence on EVM and NEAR, an account on Solana. */
+  id: `0x${string}`;
   /**
    * The NTT manager's sequence — `NttManager.transfer`'s return value. Not a Wormhole sequence. Null
    * where the message id is not one: Solana's is its outbox item's key.
@@ -90,6 +92,7 @@ export function parseNttTransfer(payload: string, sourceChainId: number): NttTra
 
   return {
     digest,
+    id: hex(manager, 0, 32),
     sequence,
     sender: hex(manager, 32, 32),
     sourceManager: address(sourceManager),

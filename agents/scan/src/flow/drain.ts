@@ -55,11 +55,17 @@ export class Drain {
     for (const flow of flows) {
       for (const leg of flow.legs) {
         const topic0 = legTopic(leg);
-        for (const w of watches.filter((x) => x.role === leg.role)) {
+        const on = (x: Watch) =>
+          x.role === leg.role && (!leg.chains || leg.chains.includes(x.chain));
+        for (const w of watches.filter(on)) {
           chains.add(w.chain);
           for (const address of w.at) {
+            // Two entries may share a contract under one role — a second cursor for what was added
+            // later — and the leg must still apply once.
             const key = routeKey(w.chain, address, topic0);
-            this.routes.set(key, [...(this.routes.get(key) ?? []), { flow, leg }]);
+            const routes = this.routes.get(key) ?? [];
+            if (!routes.some((r) => r.leg === leg))
+              this.routes.set(key, [...routes, { flow, leg }]);
           }
         }
       }

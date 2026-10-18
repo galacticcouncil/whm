@@ -61,6 +61,7 @@
   --orange-soft: rgba(255, 138, 69, 0.14);
   --neutral: #9aa3b5;
   --neutral-cool: #8399bf;
+  --chart-neutral: #6b7488;
   color-scheme: dark;
 }
 
@@ -94,6 +95,7 @@
   --orange-soft: rgba(160, 69, 8, 0.12);
   --neutral: #5f5b67;
   --neutral-cool: #3f5570;
+  --chart-neutral: #7b8298;
   color-scheme: light;
 }
 
@@ -897,6 +899,11 @@ a.addr-pill:hover .ext-site {
 .badge.held {
   background: var(--amber-soft);
   color: var(--amber);
+}
+
+.badge.expired {
+  background: var(--panel-hover);
+  color: var(--text-low);
 }
 
 .badge.refunded {
@@ -1994,5 +2001,342 @@ body.noscroll {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* ─── Oracles ───────────────────────────────────────────────── */
+
+/* The explorer's chart: a neutral line over a fading area, a crosshair and a tooltip on hover. */
+
+.feed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.feed-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--separator);
+  border-radius: 18px;
+  color: inherit;
+  transition:
+    border-color 0.15s,
+    transform 0.15s var(--ease-standard);
+}
+
+.feed-card:hover {
+  border-color: var(--border);
+}
+
+.feed-card:active {
+  transform: scale(0.99);
+}
+
+/* The dead feeds' heading: the live one's, with a skull where its dot is. */
+.list-title .skull {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-low);
+}
+
+.list-title .skull svg {
+  width: 18px;
+  height: 18px;
+}
+
+.list-note {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+/* Nothing delivered this week: still there to open, but out of the way. */
+.feed-card.dead {
+  opacity: 0.6;
+}
+
+.feed-card.dead:hover {
+  opacity: 1;
+}
+
+.feed-card .fc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.feed-card .fc-name {
+  font-family: "Gazpacho", serif;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.feed-card .fc-route {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.feed-card .fc-route .chain-badge {
+  font-size: 9.5px;
+  padding: 2px 6px;
+}
+
+.fc-value {
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.fc-value .unit {
+  margin-left: 6px;
+  color: var(--text-low);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.fc-sub {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 52px;
+  margin-top: 6px;
+  overflow: visible;
+}
+
+.spark-empty {
+  display: grid;
+  place-items: center;
+  height: 52px;
+  margin-top: 6px;
+  color: var(--text-lowest);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+/* Stat cards across the top of a feed. */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+}
+
+.stat-card .k {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.stat-card .v {
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.stat-card .s {
+  color: var(--text-low);
+  font-size: 11.5px;
+}
+
+.pf-card {
+  margin-top: 14px;
+  padding: 18px 20px;
+  background: var(--bg-elev);
+  border: 1px solid var(--separator);
+  border-radius: 18px;
+}
+
+.pf-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.pf-head .t {
+  margin-right: auto;
+  font-family: "Gazpacho", serif;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+/* The range control: the explorer's segmented pill. */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+}
+
+.seg button {
+  padding: 4px 11px;
+  border: 0;
+  border-radius: 9999px;
+  background: none;
+  color: var(--text-medium);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--bg-elev2);
+  color: var(--text-high);
+}
+
+.apx-wrap {
+  position: relative;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.apx-chart {
+  display: block;
+  width: 100%;
+  height: 220px;
+  overflow: visible;
+}
+
+.apx-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10.5px;
+}
+
+.apx-y {
+  position: absolute;
+  left: 0;
+  color: var(--text-lowest);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.apx-cross {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.apx-vline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text-medium);
+  opacity: 0.55;
+  transform: translateX(-0.5px);
+}
+
+.apx-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--bg-elev);
+  border-radius: 50%;
+  background: var(--text-high);
+  transform: translate(-50%, -50%);
+}
+
+.apx-tip {
+  position: absolute;
+  top: 4px;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+  padding: 5px 9px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: tipIn 120ms ease-out;
+}
+
+.apx-tip .t-d {
+  color: var(--text-low);
+}
+
+@keyframes tipIn {
+  from {
+    opacity: 0;
+  }
+}
+
+.apx-empty {
+  display: grid;
+  place-items: center;
+  height: 220px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+  color: var(--text-medium);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.chart-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+@media (max-width: 720px) {
+  .feed-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .apx-chart {
+    height: 180px;
+  }
+
+  .pf-card {
+    padding: 14px;
   }
 }

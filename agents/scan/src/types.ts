@@ -90,6 +90,12 @@ export interface LogEvent<A = Record<string, unknown>> {
  */
 export interface Leg<A = any> {
   role: string;
+  /**
+   * The chains this leg reads its role on, where the role spans more than it needs. The Wormhole
+   * core is watched on every chain, but a feature's own emitter publishes on one or two — without
+   * this, its reader would drain every chain's core for events it then drops.
+   */
+  chains?: string[];
   /** The EVM event. Exactly one of `abi` and `near`. */
   abi?: AbiEvent;
   /**

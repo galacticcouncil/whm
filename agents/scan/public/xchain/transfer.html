@@ -241,7 +241,10 @@
               ["State", badge(r.state)],
               ["VAA", vaaLink(r.vaa_id)],
               ["Digest", r.digest ? `${mono(short(r.digest, 14, 10))}${copyBtn(r.digest)}` : dim],
-              ["Manager sequence", mono(r.manager_sequence)],
+              // Solana names a manager message by its outbox item account, not a sequence.
+              r.outbox_item
+                ? ["Outbox item", addrLink(r.outbox_item, "solana")]
+                : ["Manager sequence", mono(r.manager_sequence)],
             ],
           ],
         ],
