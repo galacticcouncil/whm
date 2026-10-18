@@ -49,6 +49,11 @@ export interface EventRef {
   blockTimestamp: number;
   txHash: string;
   logIndex: number;
+  /**
+   * Substrate only: `<block>-<index>` of the extrinsic it ran in. What a Hydration event without an
+   * ethereum transaction is linked by — it came in as a substrate call.
+   */
+  extrinsic?: string;
 }
 
 /** A decoded log, handed to a leg. */

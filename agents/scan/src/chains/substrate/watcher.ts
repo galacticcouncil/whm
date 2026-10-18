@@ -32,6 +32,8 @@ interface IndexedLog {
   txHash?: string;
   /** Who sent that transaction. Free here, unlike on an EVM chain. */
   sender?: string;
+  /** The extrinsic it ran in, by index in the block — absent for a hook's work, like an XCM delivery. */
+  extrinsic?: number;
 }
 
 type Block = { number: bigint; hash: `0x${string}`; timestamp: number; logs: IndexedLog[] };
@@ -217,6 +219,7 @@ export class SubstrateWatcher {
             topics: l.topics,
             data: l.data,
             sender: l.sender,
+            extrinsic: l.extrinsic === undefined ? undefined : `${block.number}-${l.extrinsic}`,
           }));
         const n = await insertEvents(this.cfg.name, events);
         if (n > 0) this.onIngest?.(this.cfg.name);
@@ -388,8 +391,10 @@ export class SubstrateWatcher {
       const address = (log.address as string).toLowerCase();
       if (!this.targets.has(address)) continue;
 
+      const phase = records[i].phase;
       const entry: IndexedLog = {
         index: i,
+        extrinsic: phase?.type === "ApplyExtrinsic" ? Number(phase.value) : undefined,
         address,
         topics: log.topics.map((t) => t as `0x${string}`),
         data: bytesToHex(log.data),
@@ -437,6 +442,7 @@ function withTimeout<T>(p: Promise<T>, what: string): Promise<T> {
 }
 
 type RawRecord = {
+  phase?: { type: string; value?: unknown };
   event: { type: string; value: { type: string; value: unknown } };
 };
 

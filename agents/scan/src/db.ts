@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_seq ON events (chain, seq);
 
+-- Substrate only: the extrinsic an event ran in, as "<block>-<index>" — the one name a call that came
+-- in without an ethereum transaction has. Added after the fact, so a re-scan fills it in.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS extrinsic TEXT;
+
 CREATE TABLE IF NOT EXISTS cursors (
   chain        TEXT NOT NULL,
   role         TEXT NOT NULL,
@@ -93,6 +97,7 @@ export interface EventRow {
   topics: string[];
   data: string;
   sender: string | null;
+  extrinsic: string | null;
 }
 
 /** One raw log, as ingest writes it. */
@@ -105,10 +110,14 @@ export interface RawEvent {
   topics: readonly string[];
   data: string;
   sender?: string;
+  /** Substrate only: `<block>-<index>` of the extrinsic it ran in. */
+  extrinsic?: string;
 }
 
 /**
- * Write a batch of logs. Duplicates are ignored, so a re-scan of the same range is free.
+ * Write a batch of logs. Duplicates are ignored, so a re-scan of the same range is free — except that
+ * a re-scan fills in an extrinsic the first pass did not record. That fills a column and nothing
+ * else: the event keeps its `seq`, so readers re-read it only on a rebuild.
  *
  * @param chain Chain name.
  * @param events The logs, in block then log-index order.
@@ -118,8 +127,10 @@ export async function insertEvents(chain: string, events: RawEvent[]): Promise<n
   let inserted = 0;
   for (const e of events) {
     const r = await pool.query(
-      `INSERT INTO events (chain, tx_hash, log_index, address, block_number, block_timestamp, topics, data, sender)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING`,
+      `INSERT INTO events (chain, tx_hash, log_index, address, block_number, block_timestamp, topics, data, sender, extrinsic)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (chain, tx_hash, log_index) DO UPDATE SET extrinsic = EXCLUDED.extrinsic
+         WHERE events.extrinsic IS NULL AND EXCLUDED.extrinsic IS NOT NULL`,
       [
         chain,
         e.txHash,
@@ -130,6 +141,7 @@ export async function insertEvents(chain: string, events: RawEvent[]): Promise<n
         e.topics,
         e.data,
         e.sender?.toLowerCase() ?? null,
+        e.extrinsic ?? null,
       ],
     );
     inserted += r.rowCount ?? 0;
@@ -313,11 +325,7 @@ export async function advanceReader(
 }
 
 /** Park an event a reader cannot process, so one bad log never wedges the queue. */
-export async function deadLetter(
-  name: string,
-  row: EventRow,
-  error: string,
-): Promise<void> {
+export async function deadLetter(name: string, row: EventRow, error: string): Promise<void> {
   await pool.query(
     `INSERT INTO dead_events (reader, chain, seq, tx_hash, log_index, error)
      VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,

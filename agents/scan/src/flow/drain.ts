@@ -234,6 +234,7 @@ export class Drain {
           blockTimestamp: Number(row.block_timestamp),
           txHash: row.tx_hash,
           logIndex: row.log_index,
+          ...(row.extrinsic && { extrinsic: row.extrinsic }),
         },
         eventName,
         args,

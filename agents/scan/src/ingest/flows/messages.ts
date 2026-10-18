@@ -56,8 +56,7 @@ export const messages: Flow = {
       role: "wormhole-core",
       abi: LogMessagePublishedEvt,
       state: "published",
-      key: (a: Published, ev: LogEvent) =>
-        vaaId(CHAINS[ev.chain].wormholeId, a.sender, a.sequence),
+      key: (a: Published, ev: LogEvent) => vaaId(CHAINS[ev.chain].wormholeId, a.sender, a.sequence),
       patch: (a: Published, ev: LogEvent) => ({
         chain: ev.chain,
         emitter: a.sender.toLowerCase(),
@@ -69,7 +68,8 @@ export const messages: Flow = {
       }),
     },
     {
-      // NEAR's core names no consistency level: a message there is final when its block is.
+      // NEAR's core logs no consistency level: the guardians observe only final NEAR blocks and
+      // sign every NEAR message at 0, so that is what its VAA carries.
       role: "wormhole-core",
       near: NEAR_PUBLISH,
       state: "published",
@@ -80,6 +80,7 @@ export const messages: Flow = {
         emitter: `0x${a.emitter}`,
         sequence: String(a.seq),
         nonce: a.nonce,
+        consistency: 0,
         payload: `0x${a.data}`,
         published: ev.ref,
       }),
