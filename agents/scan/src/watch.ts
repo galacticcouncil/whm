@@ -14,7 +14,6 @@ import {
   WORMHOLE_CORE,
   type EvmLeg,
   type SolanaLeg,
-  type SuiLeg,
 } from "./deployments";
 import type { Watch } from "./types";
 
@@ -35,7 +34,7 @@ import type { Watch } from "./types";
  * 2026-09-29.
  *
  * Full history starts 2026-07-28: hydration 13_349_127, base 49_203_727; solana from
- * SOL's first transaction (436_017_983), sui from its deploy (305_105_552).
+ * SOL's first transaction (436_017_983).
  */
 const SEPT_1 = {
   hydration: 14_056_293n,
@@ -44,7 +43,6 @@ const SEPT_1 = {
   robinhood: 54_675_547n,
   hyperevm: 47_156_536n,
   solana: 443_282_098n,
-  sui: 317_287_616n,
 };
 
 /** 2026-10-01 00:00 UTC on each chain — the smaller dataset indexing was tested on. */
@@ -55,7 +53,6 @@ const OCT_1 = {
   robinhood: 76_928_654n,
   hyperevm: 47_332_216n,
   solana: 452_119_504n,
-  sui: 328_848_249n,
 };
 
 const FROM_CHAIN = OCT_1;
@@ -81,7 +78,6 @@ const FROM = {
   robinhood: { ntt: FROM_CHAIN.robinhood, oracles: FROM_CHAIN_ORA.robinhood },
   hyperevm: { ntt: FROM_CHAIN.hyperevm },
   solana: { ntt: FROM_CHAIN.solana, oracles: FROM_CHAIN_ORA.solana },
-  sui: { ntt: FROM_CHAIN.sui },
   near: {
     /** ntt-near's deploy, the earlier of the two NEAR managers. */
     ntt: 219_438_351n,
@@ -113,17 +109,14 @@ const evmLegs = (chain: string) =>
 /** Every Solana leg. */
 const solanaLegs = () => nttLegs("solana") as SolanaLeg[];
 
-/** Every Sui leg. */
-const suiLegs = () => nttLegs("sui") as SuiLeg[];
-
 /** Every NEAR leg's account. */
 const nearLegs = () => nttLegs("near").filter((l): l is string => typeof l === "string");
 
 /**
  * The Wormhole cores, filtered to the emitters we own: every token's transceiver, plus the intent
- * emitter on Hydration. NEAR's, Solana's and Sui's cores are shared, so each is read through the
- * managers' own histories — and on Solana and Sui still filtered by emitter, since anything else a
- * transaction of ours publishes is not ours.
+ * emitter on Hydration. NEAR's and Solana's cores are shared, so each is read through the managers'
+ * own histories — and on Solana still filtered by emitter, since anything else a transaction of
+ * ours publishes is not ours.
  */
 const WORMHOLE: Watch[] = [
   ...NTT_EVM.map((chain) => ({
@@ -151,17 +144,6 @@ const WORMHOLE: Watch[] = [
     via: solanaLegs().map((l) => l.program),
     topics: published(
       solanaLegs().map((l) => `0x${Buffer.from(base58.decode(l.emitter)).toString("hex")}`),
-      nearTopic(PUBLISH),
-    ),
-  },
-  {
-    chain: "sui",
-    role: "wormhole-core",
-    from: FROM.sui.ntt,
-    at: [WORMHOLE_CORE.sui],
-    via: suiLegs().map((l) => l.state),
-    topics: published(
-      suiLegs().map((l) => l.emitter),
       nearTopic(PUBLISH),
     ),
   },
@@ -193,12 +175,6 @@ const NTT_LEGS: Watch[] = [
     role: "ntt",
     from: FROM.solana.ntt,
     at: solanaLegs().map((l) => l.program),
-  },
-  {
-    chain: "sui",
-    role: "ntt",
-    from: FROM.sui.ntt,
-    at: suiLegs().map((l) => l.state),
   },
 ];
 

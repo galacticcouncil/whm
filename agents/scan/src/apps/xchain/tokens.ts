@@ -22,8 +22,7 @@ export interface TokenMeta {
 
 /**
  * A manager as a transfer's `source_manager` names it: its 32 bytes trimmed to the last 20, the way
- * every manager is. NEAR's 32 bytes are `sha256(account)`; Solana's, the program's key; Sui's, the
- * state object's id.
+ * every manager is. NEAR's 32 bytes are `sha256(account)`; Solana's, the program's key.
  *
  * @param leg The token's leg on one chain.
  */
@@ -32,7 +31,6 @@ function managerKey(leg: NttLeg): string {
     return `0x${createHash("sha256").update(leg).digest("hex").slice(24)}`;
   if ("program" in leg)
     return `0x${Buffer.from(base58.decode(leg.program)).toString("hex").slice(24)}`;
-  if ("state" in leg) return `0x${leg.state.slice(-40)}`;
   return leg.manager.toLowerCase();
 }
 
@@ -58,7 +56,6 @@ export const NTT_TOKENS: Record<keyof typeof NTT, TokenMeta> = {
   sol: { symbol: "SOL", assetId: 1_000_752, home: "solana" },
   jitosol: { symbol: "JitoSOL", assetId: 40, home: "solana" },
   prime: { symbol: "PRIME", assetId: 43, home: "solana" },
-  sui: { symbol: "SUI", assetId: 1_000_753, home: "sui" },
 };
 
 /** Every token by symbol — what a page draws a row's amount with. */

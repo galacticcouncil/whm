@@ -2,9 +2,8 @@ import type { EvmChain } from "./evm/types";
 import type { NearChain } from "./near/types";
 import type { SolanaChain } from "./solana/types";
 import type { SubstrateChain } from "./substrate/types";
-import type { SuiChain } from "./sui/types";
 
-export type ChainKind = "evm" | "substrate" | "near" | "solana" | "sui";
+export type ChainKind = "evm" | "substrate" | "near" | "solana";
 
 export interface ChainBase {
   name: string;
@@ -16,7 +15,7 @@ export interface ChainBase {
   concurrency: number;
 }
 
-export type ChainCfg = EvmChain | SubstrateChain | NearChain | SolanaChain | SuiChain;
+export type ChainCfg = EvmChain | SubstrateChain | NearChain | SolanaChain;
 
 /** What every watcher is to ingest and to /api/status. */
 export interface Watcher {

@@ -214,7 +214,7 @@ export const ntt: Flow = {
       }),
     },
     {
-      // Solana and Sui, decoded by their watchers: a verified VAA, by the digest it derives. It may
+      // Solana, decoded by its watcher: a verified VAA, by the digest it derives. It may
       // land before the source is indexed, so it binds the VAA id and, on Solana, the inbox item a
       // release will name.
       role: "ntt",
@@ -233,8 +233,8 @@ export const ntt: Flow = {
 };
 
 /**
- * A release or a hold, from Solana or Sui: by its digest where the transaction names one, else — a
- * Solana release, which names only its inbox item — by the item its delivery bound.
+ * A release or a hold, from Solana: by its digest where the transaction names one, else — a release,
+ * which names only its inbox item — by the item its delivery bound.
  *
  * @param event The decoded event.
  * @param state The state it moves the transfer to.

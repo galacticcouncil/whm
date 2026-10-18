@@ -218,13 +218,6 @@ const CHAINS = {
     tx: (r) => `https://solscan.io/tx/${r.txHash}`,
     addr: (a) => `https://solscan.io/account/${a}`,
   },
-  sui: {
-    label: "Sui",
-    c: ["#4DA2FF", "#1f6fd1"],
-    icon: "https://s2.coinmarketcap.com/static/img/coins/64x64/20947.png",
-    tx: (r) => `https://suiscan.xyz/mainnet/tx/${r.txHash}`,
-    addr: (a) => `https://suiscan.xyz/mainnet/account/${a}`,
-  },
   near: {
     label: "NEAR",
     c: ["#00c586", "#00875c"],
@@ -259,7 +252,6 @@ const SITES = [
   ["basescan.org", "Basescan"],
   ["hyperevmscan.io", "HyperEVMScan"],
   ["solscan.io", "Solscan"],
-  ["suiscan.xyz", "Suiscan"],
 ];
 
 /** @param {string} url */

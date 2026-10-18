@@ -245,14 +245,14 @@ function present(r: Record<string, any>): TransferView {
 /**
  * An address as its own chain writes it. NTT carries 32 bytes: an EVM address left-padded, a
  * Hydration account either padded or whole, a NEAR account hashed — which stays a hash until the
- * delivery names it — a Solana key in base58, a Sui address whole.
+ * delivery names it — a Solana key in base58.
  *
  * @param chain The chain it is on.
  * @param v The address, as stored.
  */
 function readable(chain: string, v: string | null): string | null {
   if (!v || !/^0x[0-9a-f]{64}$/i.test(v)) return v;
-  if (chain === "near" || chain === "sui") return v;
+  if (chain === "near") return v;
   if (chain === "solana") return base58.encode(Buffer.from(v.slice(2), "hex"));
   if (/^0x0{24}/i.test(v)) return bytes32ToAddress(v);
   return chain === "hydration" ? normalizeRecipient(v) : v;

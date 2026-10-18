@@ -1,12 +1,12 @@
 import type { NearEvent } from "../types";
 
 /**
- * The events the Solana and Sui watchers store.
+ * The events the Solana watcher stores.
  *
- * Neither chain's NTT logs anything of its own, so a watcher decodes what the transaction did — the
- * instructions on Solana, the calls and their inputs on Sui — into these, and stores them as NEAR's
- * are: JSON, under `keccak256("<standard>:<event>")`. A leg reads them through `near`, which names an
- * event of that shape whichever chain wrote it.
+ * Solana's NTT logs nothing of its own, so the watcher decodes what the transaction did, instruction
+ * by instruction, into these, and stores them as NEAR's are: JSON, under
+ * `keccak256("<standard>:<event>")`. A leg reads them through `near`, which names an event of that
+ * shape whichever chain wrote it.
  */
 
 /**

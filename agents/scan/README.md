@@ -28,8 +28,7 @@ src/
     substrate/       same, for Hydration — EVM.Log out of System.Events
     near/            same, plus fastnear.ts — account histories and whole transactions
     solana/          same, plus rpc.ts and decode.ts — program signatures, instructions decoded
-    sui/             same, plus graphql.ts and decode.ts — a state's transactions, calls decoded
-    events.ts        the JSON events the Solana and Sui watchers decode into
+    events.ts        the JSON events the Solana watcher decodes into
   watch.ts         WHAT to index: contracts, roles, start blocks
   db.ts            the shared event store
   admin.ts         rewind a chain, rebuild a reader
@@ -57,19 +56,17 @@ deployment cannot silently point at the wrong contract.
 | `RPC_NEAR_TX`        | Optional. FastNEAR's transaction API; defaults to the public one.     |
 | `RPC_SOLANA_HTTP`    | Optional. Solana JSON-RPC; defaults to the public one.                |
 | `RPC_SOLANA_WSS`     | Optional. Its `logsSubscribe` wakes the watcher before the poll.      |
-| `RPC_SUI_GRAPHQL`    | Optional. Sui's GraphQL service; defaults to the public one.          |
 | `DATABASE_URL`       | Postgres.                                                             |
 | `ONECLICK_JWT`       | The intents domain's off-chain leg.                                   |
 | `PORT`               | Defaults to 8080.                                                     |
 
 Every EVM chain takes `RPC_<CHAIN>_WSS` or, where its endpoint has no websocket, `RPC_<CHAIN>_HTTP`.
 A chain is enabled by the presence of its RPC and disabled by its absence; watch entries on a chain
-with no endpoint are skipped. NEAR, Solana and Sui are the exception: their public endpoints need
-no key, and NTT puts little enough through them that those are enough, so they are always on.
+with no endpoint are skipped. NEAR and Solana are the exception: their public endpoints need no key,
+and NTT puts little enough through them that those are enough, so they are always on.
 
-NTT on Solana and Sui logs nothing of its own. Their watchers read the transactions that touch our
-managers and decode them — instructions on Solana, calls and inputs on Sui — into JSON events stored
-like NEAR's ([src/chains/events.ts](src/chains/events.ts)): Wormhole publishes in NEAR's core's
+NTT on Solana logs nothing of its own. Its watcher reads the transactions that touch our managers
+and decodes them instruction by instruction into JSON events stored like NEAR's ([src/chains/events.ts](src/chains/events.ts)): Wormhole publishes in NEAR's core's
 shape, and deliveries by the digest their VAA derives. A Solana release names no VAA, only the
 inbox item that digest derives, so that is what it is matched by.
 

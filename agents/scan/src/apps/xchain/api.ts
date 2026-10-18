@@ -7,17 +7,7 @@ import { TOKENS } from "./tokens";
 import { ROUTES } from "./utxo/routes";
 
 /** Hydration first — every transfer has it at one end — then by how much traffic each carries. */
-const ORDER = [
-  "hydration",
-  "ethereum",
-  "solana",
-  "base",
-  "robinhood",
-  "hyperevm",
-  "sui",
-  "near",
-  "zcash",
-];
+const ORDER = ["hydration", "ethereum", "solana", "base", "robinhood", "hyperevm", "near", "zcash"];
 const rank = (c: string) => (ORDER.includes(c) ? ORDER.indexOf(c) : ORDER.length);
 
 /** A comma-separated query parameter as its values, or undefined when absent. */

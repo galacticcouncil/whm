@@ -6,8 +6,7 @@
  */
 
 /**
- * The Wormhole cores. NEAR's, Solana's and Sui's are only ever read through our own accounts — on
- * Sui, the package its events are typed by.
+ * The Wormhole cores. NEAR's and Solana's are only ever read through our own accounts.
  */
 export const WORMHOLE_CORE = {
   hydration: "0x3792a6d63c31941B2805181771795D9176fA82A1",
@@ -17,7 +16,6 @@ export const WORMHOLE_CORE = {
   robinhood: "0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB",
   near: "contract.wormhole_crypto.near",
   solana: "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth",
-  sui: "0x5306f64e312b581766351c07af79c72fcb1cd25147157fdc2f8ad76de9a3fb6a",
 } as const;
 
 /** A token's NTT leg on an EVM chain. */
@@ -32,14 +30,8 @@ export interface SolanaLeg {
   emitter: string;
 }
 
-/** On Sui: the manager's shared state, and the emitter cap its transceiver publishes as. */
-export interface SuiLeg {
-  state: string;
-  emitter: string;
-}
-
 /** A token's leg on any chain — a NEAR leg is its account. */
-export type NttLeg = EvmLeg | SolanaLeg | SuiLeg | string;
+export type NttLeg = EvmLeg | SolanaLeg | string;
 
 /**
  * NTT corridors, one per token, keyed by chain — from hydration-ntt's ops/tokens/<token>/deployment.json.
@@ -203,16 +195,6 @@ export const NTT = {
     solana: {
       program: "4T5m5NtRVewiCVzP2mnfeUoMYRqncfkrS21X2dhVCNRT",
       emitter: "GiTY93vtrK4jZZchrxdV9r28JByRs7Ary2rsTPyPabJc",
-    },
-  },
-  sui: {
-    hydration: {
-      manager: "0x978443f00cAB6b09445140321EC73a221ebFF5F8",
-      transceiver: "0xA224D6f4e0E276b34D91bfE6c3A5fE6838322AF7",
-    },
-    sui: {
-      state: "0xa0bc45e0384140dc125f273eda89cad1434f5dee430726cf6364bdcceba1e9a3",
-      emitter: "0x25437da9f99dfab32c1a275663f51cd5c99eb867ab4d1f630e3799c5e68215da",
     },
   },
 } as const;
