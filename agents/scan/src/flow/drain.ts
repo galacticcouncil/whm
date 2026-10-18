@@ -8,6 +8,7 @@ import {
   applyRebuild,
   deadLetter,
   listenEvents,
+  notifyRow,
   pool,
   readerSeq,
   takeEvents,
@@ -145,10 +146,14 @@ export class Drain {
       // A batch that failed as a whole is retried row by row, which isolates the one bad event
       // instead of stalling every event behind it.
       for (const u of updates ?? (await this.applyEachRow(chain, rows))) {
-        broadcast({
+        const kind = u.created ? "created" : "updated";
+        broadcast({ flow: u.flow, kind, record: u.row, previousState: u.previousState });
+        const key = this.flows.find((f) => f.name === u.flow)!.key.column;
+        void notifyRow({
           flow: u.flow,
-          kind: u.created ? "created" : "updated",
-          record: u.row,
+          kind,
+          id: String(u.row[key]),
+          state: u.row.state,
           previousState: u.previousState,
         });
       }

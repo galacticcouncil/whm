@@ -3,8 +3,10 @@ import type { Watch } from "../types";
 import { EVM_CHAINS } from "./evm/consts";
 import { evm } from "./evm/factory";
 import { EvmWatcher } from "./evm/watcher";
+import { NEAR } from "./near/consts";
 import { near } from "./near/factory";
 import { NearWatcher } from "./near/watcher";
+import { HYDRATION } from "./substrate/consts";
 import { hydration } from "./substrate/factory";
 import { SubstrateWatcher } from "./substrate/watcher";
 import type { ChainCfg, Watcher } from "./types";
@@ -24,6 +26,25 @@ export type { SubstrateChain } from "./substrate/types";
 export const CHAINS: Record<string, ChainCfg> = {};
 for (const c of [...EVM_CHAINS.map(evm), hydration(), near()]) {
   if (c) CHAINS[c.name] = c;
+}
+
+/**
+ * Every chain a Wormhole message may name, by its Wormhole id. Static — unlike `CHAINS`, it does not
+ * depend on which endpoints this process was given.
+ */
+export const WORMHOLE_CHAINS: Record<number, string> = Object.fromEntries(
+  [...EVM_CHAINS, HYDRATION, NEAR].map((c) => [c.wormholeId, c.name]),
+);
+
+/**
+ * A chain's Wormhole id by name, endpoint or not — for readers, which have none.
+ *
+ * @param name Chain name.
+ */
+export function wormholeId(name: string): number {
+  const id = Object.entries(WORMHOLE_CHAINS).find(([, n]) => n === name)?.[0];
+  if (id === undefined) throw new Error(`no Wormhole id for ${name}`);
+  return Number(id);
 }
 
 /**

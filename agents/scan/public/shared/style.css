@@ -411,6 +411,63 @@ main.wrap {
   color: var(--text-medium);
 }
 
+/* ─── Transfers grid ────────────────────────────────────────── */
+
+/* Stacked cells: the main line, and a quieter one under it. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stack .under {
+  color: var(--text-medium);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+/* A transfer's end: the chain with its mark, the address under it. */
+.end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tbl td.when {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Where it is, as one glyph: done, moving, held, failed. */
+.status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.status-icon.completed {
+  color: var(--green);
+}
+
+.status-icon.pending {
+  color: var(--sky);
+  border-style: dashed;
+}
+
+.status-icon.held {
+  color: var(--amber);
+}
+
+.status-icon.failed {
+  color: var(--red);
+}
+
 /* ─── Key / value ───────────────────────────────────────────── */
 
 .kv-row {
@@ -542,13 +599,18 @@ main.wrap {
 /* Lifecycle colouring, shared by every flow: in flight is cool, done is green, held is amber. */
 .badge.placed,
 .badge.initiated,
-.badge.published {
+.badge.published,
+.badge.requested,
+.badge.deposited,
+.badge.pending {
   background: var(--sky-soft);
   color: var(--sky);
 }
 
 .badge.processed,
 .badge.received,
+.badge.signed,
+.badge.withdrawn,
 .badge.completed {
   background: var(--lavender-soft);
   color: var(--lavender);
@@ -556,12 +618,14 @@ main.wrap {
 
 .badge.settled,
 .badge.redeemed,
-.badge.fulfilled {
+.badge.fulfilled,
+.badge.confirmed {
   background: var(--green-soft);
   color: var(--green);
 }
 
-.badge.queued {
+.badge.queued,
+.badge.held {
   background: var(--amber-soft);
   color: var(--amber);
 }

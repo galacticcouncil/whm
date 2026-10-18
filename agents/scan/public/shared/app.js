@@ -134,6 +134,9 @@ const EVENT_URL = {
       : `${HYDRATION_EXPLORER}/event/${r.blockNumber}-${r.logIndex}`,
   ethereum: (r) => `https://etherscan.io/tx/${r.txHash}`,
   base: (r) => `https://basescan.org/tx/${r.txHash}`,
+  near: (r) => `https://nearblocks.io/txns/${r.txHash}`,
+  zcash: (r) => `https://blockchair.com/zcash/transaction/${r.txHash}`,
+  hyperevm: (r) => `https://hyperevmscan.io/tx/${r.txHash}`,
 };
 
 const EVENT_LABEL = {
@@ -141,12 +144,19 @@ const EVENT_LABEL = {
     hasTx(r) ? short(r.txHash, 10, 8) : `${r.blockNumber}-${r.logIndex}`,
   ethereum: (r) => short(r.txHash, 10, 8),
   base: (r) => short(r.txHash, 10, 8),
+  near: (r) => short(r.txHash, 8, 6),
+  zcash: (r) => short(r.txHash, 10, 8),
+  hyperevm: (r) => short(r.txHash, 10, 8),
+  robinhood: (r) => short(r.txHash, 10, 8),
 };
 
 const ADDR_URL = {
   hydration: (a) => `${HYDRATION_EXPLORER}/account/${encodeURIComponent(a)}`,
   ethereum: (a) => `https://etherscan.io/address/${a}`,
   base: (a) => `https://basescan.org/address/${a}`,
+  near: (a) => `https://nearblocks.io/address/${a}`,
+  zcash: (a) => `https://blockchair.com/zcash/address/${a}`,
+  hyperevm: (a) => `https://hyperevmscan.io/address/${a}`,
 };
 
 /**
@@ -184,12 +194,16 @@ const METADATA =
 const CHAIN_ICON = {
   hydration: `${METADATA}/polkadot/2034/icon.svg`,
   ethereum: `${METADATA}/ethereum/1/icon.svg`,
-  base: `${METADATA}/ethereum/8453/icon.svg`,
+  // The registry has no Base mark.
+  base: "https://cdn.jsdelivr.net/gh/trustwallet/assets@master/blockchains/base/info/logo.png",
+  hyperevm: `${METADATA}/ethereum/999/icon.svg`,
+  robinhood: `${METADATA}/ethereum/4663/icon.svg`,
   wormhole:
     "https://cdn.jsdelivr.net/gh/sodazone/intergalactic-asset-metadata/v2/wormhole/1/icon.svg",
   eth: `${METADATA}/ethereum/1/icon.svg`,
   near: "https://s2.coinmarketcap.com/static/img/coins/64x64/6535.png",
   zec: "https://s2.coinmarketcap.com/static/img/coins/64x64/1437.png",
+  zcash: "https://s2.coinmarketcap.com/static/img/coins/64x64/1437.png",
   btc: "https://s2.coinmarketcap.com/static/img/coins/64x64/1.png",
 };
 
@@ -259,6 +273,18 @@ export function addrLink(address, chain) {
   return url
     ? `<a class="link" href="${url}" target="_blank" rel="noreferrer">${text}</a>`
     : text;
+}
+
+/**
+ * Link a transaction on a chain that has no event reference for it — a coin's payout, a deposit
+ * paid on its own chain.
+ *
+ * @param {string|null} hash
+ * @param {string} chain
+ */
+export function txLink(hash, chain) {
+  if (!hash) return '<span class="dim">—</span>';
+  return eventLink({ chain, txHash: hash, blockNumber: "", logIndex: 0 });
 }
 
 /** Wormholescan for a VAA id, which is already in `chain/emitter/sequence` form. */

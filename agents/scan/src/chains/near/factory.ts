@@ -1,13 +1,12 @@
-import { NEAR } from "./consts";
+import { FASTNEAR_TX_API, NEAR } from "./consts";
 import type { NearChain } from "./types";
 
 /**
- * NEAR's config from env, or null when unset — `RPC_NEAR_TX`, FastNEAR's transaction API, e.g.
- * https://tx.main.fastnear.com. It has no chain id of its own beyond the Wormhole one.
+ * NEAR's config. Always on: FastNEAR's public API needs no key, so `RPC_NEAR_TX` only overrides it.
+ * It has no chain id of its own beyond the Wormhole one.
  */
-export function near(): NearChain | null {
-  const txApi = process.env.RPC_NEAR_TX;
-  if (!txApi) return null;
+export function near(): NearChain {
+  const txApi = process.env.RPC_NEAR_TX || FASTNEAR_TX_API;
   return {
     ...NEAR,
     kind: "near",

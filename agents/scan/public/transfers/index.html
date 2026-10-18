@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Transfers · Hydration</title>
+    <script>
+      try {
+        var t = localStorage.getItem("explorer-theme");
+        if (t === "light" || t === "dark")
+          document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+    />
+    <link rel="stylesheet" href="/shared/style.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1 class="page-title">Transfers <span class="sub" id="subtitle"></span></h1>
+
+      <div class="bar">
+        <input type="search" id="q" placeholder="address on either end — 0x…, t1…, NEAR account" />
+        <select id="type">
+          <option value="">any type</option>
+          <option value="transfer">transfer</option>
+          <option value="deposit">deposit</option>
+          <option value="withdraw">withdraw</option>
+          <option value="intent">intent</option>
+          <option value="basejump">basejump</option>
+        </select>
+        <select id="status">
+          <option value="">any status</option>
+          <option value="pending">pending</option>
+          <option value="held">held</option>
+          <option value="completed">completed</option>
+          <option value="failed">failed</option>
+        </select>
+      </div>
+
+      <div class="panel">
+        <div class="scroll">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Amount</th>
+                <th class="r">Status</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr>
+                <td class="table-error" colspan="6">loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span class="count" id="count"></span>
+          <div class="btns">
+            <button id="prev" type="button" title="Newer">←</button>
+            <button id="next" type="button" title="Older">→</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { addrLink, amount, chainIcon, esc, icon, json, live, topbar } from "/shared/app.js";
+
+      topbar("transfers", [["/", "Transfers"]]);
+
+      const LIMIT = 50;
+      let offset = 0;
+      const el = (id) => document.getElementById(id);
+
+      const TYPE = {
+        transfer: "Transfer",
+        intent: "Intent",
+        deposit: "Deposit",
+        withdraw: "Withdraw",
+        basejump: "Basejump",
+      };
+
+      const GLYPH = { completed: "✓", pending: "…", held: "!", failed: "✕" };
+
+      /** `HH:MM:SS` over `YYYY-MM-DD`, in UTC — the moment it was sent. */
+      function when(ms) {
+        if (!ms) return '<span class="dim">—</span>';
+        const iso = new Date(Number(ms)).toISOString();
+        return `<div class="stack"><span>${iso.slice(11, 19)}</span><span class="under">${iso.slice(0, 10)}</span></div>`;
+      }
+
+      /** One end: the chain with its mark, the address under it. */
+      function end(chain, address) {
+        return `<div class="stack">
+          <span class="end">${icon(chainIcon(chain), chain, chain)}<span>${esc(chain)}</span></span>
+          <span class="under">${addrLink(address, chain)}</span>
+        </div>`;
+      }
+
+      /** The amount, and under it the fee where the rail takes one. */
+      function amounts(r) {
+        const dp = r.decimals ?? 18;
+        const main = `<span class="asset-chip">${esc(amount(r.amount, dp, 6))}${r.symbol ? `<span class="sym">${esc(r.symbol)}</span>` : ""}</span>`;
+        const fee =
+          r.fee && r.fee !== "0"
+            ? `<span class="under">fee ${esc(amount(r.fee, dp, 4))} ${esc(r.symbol ?? "")}</span>`
+            : "";
+        return `<div class="stack">${main}${fee}</div>`;
+      }
+
+      function status(r) {
+        return `<span class="status-icon ${esc(r.status)}" title="${esc(r.stage)}">${GLYPH[r.status] ?? "?"}</span>`;
+      }
+
+      function render(items) {
+        if (!items.length) {
+          el("rows").innerHTML = '<tr><td class="table-error" colspan="6">no transfers</td></tr>';
+          return;
+        }
+        el("rows").innerHTML = items
+          .map((r) => {
+            const href = `/transfer/${encodeURIComponent(r.id)}`;
+            return `<tr class="clickable" data-href="${href}">
+              <td class="when" data-label="Time">${when(r.time)}</td>
+              <td data-label="Type"><a class="link" href="${href}">${esc(TYPE[r.type] ?? r.type)}</a></td>
+              <td data-label="From">${end(r.from_chain, r.from_address)}</td>
+              <td data-label="To">${end(r.to_chain, r.to_address)}</td>
+              <td data-label="Amount">${amounts(r)}</td>
+              <td class="r" data-label="Status">${status(r)}</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      // Whole-row navigation, except where a real link was clicked.
+      el("rows").addEventListener("click", (e) => {
+        if (e.target.closest("a")) return;
+        const href = e.target.closest("tr")?.dataset.href;
+        if (href) location.href = href;
+      });
+
+      async function load() {
+        const params = new URLSearchParams({ limit: LIMIT, offset });
+        const q = el("q").value.trim();
+        if (q) params.set("address", q);
+        if (el("type").value) params.set("type", el("type").value);
+        if (el("status").value) params.set("status", el("status").value);
+
+        const data = (await json(`/api/transfers?${params}`)) ?? { items: [], total: 0 };
+        render(data.items);
+        const from = data.total ? offset + 1 : 0;
+        el("count").textContent = `${from}–${Math.min(offset + LIMIT, data.total)} of ${data.total}`;
+        el("subtitle").textContent = data.total ? `${data.total}` : "";
+        el("prev").disabled = offset === 0;
+        el("next").disabled = offset + LIMIT >= data.total;
+      }
+
+      el("prev").onclick = () => {
+        offset = Math.max(0, offset - LIMIT);
+        load();
+      };
+      el("next").onclick = () => {
+        offset += LIMIT;
+        load();
+      };
+      el("type").onchange = el("status").onchange = () => {
+        offset = 0;
+        load();
+      };
+      let typing;
+      el("q").oninput = () => {
+        clearTimeout(typing);
+        typing = setTimeout(() => {
+          offset = 0;
+          load();
+        }, 250);
+      };
+
+      // Any rail's change reloads the first page — rows come from three tables and a redraw is cheaper
+      // than working out which one moved. A burst of changes coalesces into one reload.
+      let pending;
+      live(
+        "ntt,utxo,utxo-signs,basejump",
+        () => {
+          if (offset !== 0) return;
+          clearTimeout(pending);
+          pending = setTimeout(load, 300);
+        },
+        load,
+      );
+    </script>
+  </body>
+</html>

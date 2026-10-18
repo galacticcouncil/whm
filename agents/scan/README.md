@@ -10,7 +10,7 @@ ingest wrote, owns its own tables, and serves its own pages.
 ```
 ingest      chains → events → wh_messages + ntt_transfers      (no UI)
 intents     intent_orders + intent_quotes + 1Click             :8080
-basejump    transfers                                          :8081
+transfers   every transfer: NTT, UTXO coins via Omni, Basejump :8081
 ```
 
 Chains are indexed **in parallel and at wildly different speeds**, so events arrive in no
@@ -46,14 +46,19 @@ deployment cannot silently point at the wrong contract.
 | Variable            | Meaning                                                        |
 | ------------------- | -------------------------------------------------------------- |
 | `RPC_ETHEREUM_WSS`  | Websocket. Heads arrive over `eth_subscribe`, never by polling. |
+| `RPC_BASE_WSS`      | Same, for Base.                                                 |
+| `RPC_ROBINHOOD_HTTP`| Robinhood's public RPC has no websocket: `_HTTP` polls heads.   |
+| `RPC_HYPEREVM_HTTP` | Same; its public RPC caps getLogs at 1,000 blocks — the default here. |
 | `RPC_HYDRATION_WSS` | Must be the substrate path, not the EVM one — see below.        |
-| `RPC_NEAR_TX`       | FastNEAR's transaction API, `https://tx.main.fastnear.com`.     |
+| `RPC_NEAR_TX`       | Optional. FastNEAR's transaction API; defaults to the public one. |
 | `DATABASE_URL`      | Postgres.                                                       |
 | `ONECLICK_JWT`      | The intents domain's off-chain leg.                             |
 | `PORT`              | Defaults to 8080.                                               |
 
+Every EVM chain takes `RPC_<CHAIN>_WSS` or, where its endpoint has no websocket, `RPC_<CHAIN>_HTTP`.
 A chain is enabled by the presence of its RPC and disabled by its absence; watch entries on a chain
-with no endpoint are skipped.
+with no endpoint are skipped. NEAR is the exception: FastNEAR's public API needs no key, so it is
+always on.
 
 Hydration must be read over substrate: the Basejump landing's deliveries are XCM-driven
 `pallet_evm` calls with no ethereum receipt, so `eth_getLogs` cannot see them at all. Only Frontier
@@ -138,7 +143,7 @@ here. The table, its indexes and its state-rank function are generated from the 
 ```sh
 pnpm dev:db                 # postgres on :5432
 pnpm build
-pnpm dev ingest             # or: intents, basejump
+pnpm dev ingest             # or: intents, transfers
 ```
 
 `pnpm dev <domain>` rebuilds and runs one container's worth — they are separate processes, so run
@@ -161,3 +166,29 @@ One consequence worth knowing: `ReceivedMessage` addresses its row by VAA id, so
 where a destination chain runs ahead of its source it can find nothing to update. It carries only a
 hash and a timestamp, and live operation publishes ~15 minutes before it delivers, so this is a
 cold-start artifact rather than a running concern.
+
+## Transfers
+
+One list for everything Hydration moves, whichever rail carries it, and one detail page per
+transfer. `/api/transfers` unions three sources into one shape — time, type, both ends, amount, fee,
+status — and `/api/transfers/:id` returns that view beside the rail's own row.
+
+- **NTT** — `ntt_transfers`, read as ingest wrote it: WETH (Ethereum), NEAR and ZEC (the NEAR hub).
+  A transfer another rail claims is listed under that rail instead.
+- **UTXO coins** — `utxo_transfers`, keyed by the source transaction; each coin is a route in
+  `apps/transfers/utxo/routes.ts`.
+  - A **deposit** is one NEAR transaction: Omni's relayer proves the coin's payment
+    (`verify_deposit_v2`, whose arguments carry the raw transaction — so who paid, and to which
+    deposit address), the connector mints into the coin's NTT manager, and the manager publishes.
+    Its NTT transfer is recognised by its sender, `sha256(connector)`.
+  - A **withdrawal** starts as one Hydration transaction — the emitter's `WithdrawRequested` and the
+    NTT publish, recognised by its sender, the emitter. NEAR delivers to the account its destination
+    derives (`ntt_transfers`), `withdraw-zec` signs (`utxo_signs`), anyone relays, and the coin pays
+    out on its own chain. The last two are on no watched account, so two pollers carry them: the
+    derived account's history for the connector's `generate_btc_pending_info` (the payout txid), and
+    Blockchair for the payout's block, once a minute.
+- **Basejump** — `basejump_transfers`, the fast path out of the landing pool.
+
+Stages: NTT `published → received → redeemed | queued`; a deposit `deposited → published →
+redeemed`; a withdrawal `requested → received → signed → withdrawn → confirmed`.
+

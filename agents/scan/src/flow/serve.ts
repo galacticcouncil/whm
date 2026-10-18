@@ -5,13 +5,13 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { CHAINS, chainId } from "../chains";
-import { chainCursors, pool, readerState } from "../db";
+import { chainCursors, listenRows, pool, readerState } from "../db";
 import { WATCH } from "../watch";
 import log from "../logger";
 import { port } from "../config";
 import type { Flow } from "../types";
 import { validLegs } from "./schema";
-import { subscribe } from "./subscribers";
+import { broadcast, subscribe } from "./subscribers";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -35,6 +35,11 @@ export interface ServeOptions {
   /** The domain's own endpoints, conventionally under `/api/`. */
   routes?: (app: FastifyInstance) => void;
   watchers?: WatcherLike[];
+  /**
+   * Flows another process owns whose changes this domain's pages also follow — relayed onto its own
+   * stream as `{ id, state }`, for the page to refetch.
+   */
+  follow?: string[];
 }
 
 /**
@@ -99,7 +104,20 @@ export async function serve(opts: ServeOptions): Promise<FastifyInstance> {
     };
   });
 
-  // Server-sent row changes. `?flow=` narrows a page to the one table it renders.
+  if (opts.follow?.length) {
+    const follow = new Set(opts.follow);
+    listenRows((n) => {
+      if (!follow.has(n.flow)) return;
+      broadcast({
+        flow: n.flow,
+        kind: n.kind,
+        record: { id: n.id, state: n.state },
+        previousState: n.previousState,
+      });
+    });
+  }
+
+  // Server-sent row changes. `?flow=` narrows a page to the tables it renders, comma-separated.
   app.get<{ Querystring: { flow?: string } }>("/api/events", (req, reply) => {
     reply.hijack();
     const raw = reply.raw;
@@ -113,9 +131,9 @@ export async function serve(opts: ServeOptions): Promise<FastifyInstance> {
     raw.write("retry: 3000\n\n");
     raw.write(": connected\n\n");
 
-    const want = req.query.flow;
+    const want = req.query.flow ? new Set(req.query.flow.split(",")) : null;
     const unsubscribe = subscribe((u) => {
-      if (want && u.flow !== want) return;
+      if (want && !want.has(u.flow)) return;
       raw.write(`event: ${u.kind}\ndata: ${JSON.stringify(u)}\n\n`);
     });
     const heartbeat = setInterval(() => raw.write(": heartbeat\n\n"), 15_000);

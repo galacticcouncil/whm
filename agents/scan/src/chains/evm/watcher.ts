@@ -1,4 +1,10 @@
-import { createPublicClient, webSocket, type PublicClient, type WebSocketTransport } from "viem";
+import {
+  createPublicClient,
+  http,
+  webSocket,
+  type PublicClient,
+  type WebSocketTransport,
+} from "viem";
 import { watchBlockNumber } from "viem/actions";
 
 import { liveIntervalMs } from "../../config";
@@ -25,9 +31,10 @@ interface RawLog {
 type Chunk = { endBlock: bigint; logs: RawLog[] };
 
 /**
- * Backfills and live-tails an EVM chain. New heads arrive over a websocket subscription and update
- * a cached tip; ingestion runs off that tip on a backstop interval, so the node is never polled for
- * a block number.
+ * Backfills and live-tails an EVM chain. Over a websocket, new heads arrive by subscription and
+ * update a cached tip; ingestion runs off that tip on a backstop interval, so the node is never
+ * polled for a block number. Over HTTP — a chain whose endpoint has no websocket — the sweep asks
+ * for the head instead.
  *
  * Each watch entry is indexed independently against its own cursor. That is what lets a contract be
  * added later and backfilled from its own deploy block while everything else stays at the tip.
@@ -48,10 +55,12 @@ export class EvmWatcher {
   ) {
     this.client = createPublicClient({
       chain: cfg.chain,
-      transport: webSocket(cfg.rpcUrl, {
-        keepAlive: { interval: 30_000 },
-        reconnect: { attempts: Infinity, delay: 2_000 },
-      }),
+      transport: cfg.rpcUrl.startsWith("ws")
+        ? webSocket(cfg.rpcUrl, {
+            keepAlive: { interval: 30_000 },
+            reconnect: { attempts: Infinity, delay: 2_000 },
+          })
+        : http(cfg.rpcUrl),
     });
   }
 
@@ -60,12 +69,18 @@ export class EvmWatcher {
     return tip > this.cfg.confirmations ? tip - this.cfg.confirmations : 0n;
   }
 
+  /** Whether heads arrive by subscription, or each sweep asks for one. */
+  private get subscribed(): boolean {
+    return this.cfg.rpcUrl.startsWith("ws");
+  }
+
   async start(): Promise<void> {
     this.lastHeadAt = Date.now();
-    this.watch();
+    if (this.subscribed) this.watch();
     await this.ingest();
     this.timer = setInterval(() => void this.ingest(), liveIntervalMs);
-    log.info(`[${this.cfg.name}] live: new-heads subscription (sweep every ${liveIntervalMs}ms)`);
+    const live = this.subscribed ? "new-heads subscription" : "polled heads";
+    log.info(`[${this.cfg.name}] live: ${live} (sweep every ${liveIntervalMs}ms)`);
   }
 
   stop(): void {
@@ -92,9 +107,9 @@ export class EvmWatcher {
     if (this.busy) return;
     this.busy = true;
     try {
-      const stale = Date.now() - this.lastHeadAt > HEAD_STALE_MS;
+      const stale = this.subscribed && Date.now() - this.lastHeadAt > HEAD_STALE_MS;
       const safe =
-        !stale && this.tip !== undefined && this.tip > this.cfg.confirmations
+        this.subscribed && !stale && this.tip !== undefined && this.tip > this.cfg.confirmations
           ? this.tip - this.cfg.confirmations
           : await this.latestSafe();
       await applyRewinds(this.cfg.name, this.watches.map(cursorId));

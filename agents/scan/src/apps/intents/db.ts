@@ -1,6 +1,6 @@
 import { pool } from "../../db";
 import { validLegs } from "../../flow";
-import { WETH_MANAGER_HYDRATION } from "../../watch";
+import { NTT } from "../../deployments";
 
 import { orders } from "./flows";
 
@@ -12,7 +12,7 @@ import { orders } from "./flows";
 const RAIL = `
   LEFT JOIN ntt_transfers n
     ON n.source_chain = 'hydration'
-   AND n.source_manager = '${WETH_MANAGER_HYDRATION}'
+   AND n.source_manager = '${NTT.weth.hydration.manager}'
    AND n.manager_sequence = o.transfer_sequence
   LEFT JOIN wh_messages m ON m.vaa_id = n.vaa_id
 `;

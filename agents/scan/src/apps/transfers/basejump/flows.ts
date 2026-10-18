@@ -1,5 +1,5 @@
-import type { Flow, LogEvent, Queryable } from "../../types";
-import { normalizeRecipient } from "../../utils";
+import type { Flow, LogEvent, Queryable } from "../../../types";
+import { normalizeRecipient } from "../../../utils";
 
 import {
   BridgeInitiatedEvt,
@@ -56,7 +56,7 @@ async function findInitiated(
   netAmount: string,
 ): Promise<string | null> {
   const r = await db.query(
-    `SELECT id FROM transfers
+    `SELECT id FROM basejump_transfers
        WHERE lower(source_asset) = lower($1)
          AND lower(recipient) = lower($2)
          AND net_amount = $3::numeric
@@ -78,9 +78,9 @@ async function findInitiated(
  * them. The settlement leg riding NTT beside all of this is `ntt_transfers`, joined rather than
  * duplicated.
  */
-export const transfers: Flow = {
-  name: "transfers",
-  table: "transfers",
+export const basejump: Flow = {
+  name: "basejump",
+  table: "basejump_transfers",
   key: { column: "id", type: "TEXT" },
   states: { initiated: 0, completed: 1, queued: 1, fulfilled: 2 },
   requires: { completed: "initiated", queued: "initiated", fulfilled: "queued" },
@@ -104,11 +104,11 @@ export const transfers: Flow = {
     fulfilled: "JSONB",
   },
   indexes: [
-    `CREATE INDEX IF NOT EXISTS idx_transfers_correlation ON transfers (source_asset, recipient, net_amount);`,
-    `CREATE INDEX IF NOT EXISTS idx_transfers_recipient ON transfers (recipient);`,
-    `CREATE INDEX IF NOT EXISTS idx_transfers_sender ON transfers (sender);`,
-    `CREATE INDEX IF NOT EXISTS idx_transfers_pending ON transfers (pending_id) WHERE pending_id IS NOT NULL;`,
-    `CREATE INDEX IF NOT EXISTS idx_transfers_initiated ON transfers (((initiated->>'blockTimestamp')::numeric) DESC);`,
+    `CREATE INDEX IF NOT EXISTS idx_basejump_transfers_correlation ON basejump_transfers (source_asset, recipient, net_amount);`,
+    `CREATE INDEX IF NOT EXISTS idx_basejump_transfers_recipient ON basejump_transfers (recipient);`,
+    `CREATE INDEX IF NOT EXISTS idx_basejump_transfers_sender ON basejump_transfers (sender);`,
+    `CREATE INDEX IF NOT EXISTS idx_basejump_transfers_pending ON basejump_transfers (pending_id) WHERE pending_id IS NOT NULL;`,
+    `CREATE INDEX IF NOT EXISTS idx_basejump_transfers_initiated ON basejump_transfers (((initiated->>'blockTimestamp')::numeric) DESC);`,
   ],
   legs: [
     {
@@ -134,12 +134,9 @@ export const transfers: Flow = {
       abi: TransferExecutedEvt,
       state: "completed",
       key: (a: Delivery, ev: LogEvent, db: Queryable) =>
-        findInitiated(
-          db,
-          a.sourceAsset,
-          normalizeRecipient(a.recipient),
-          a.amount.toString(),
-        ).then((id) => id ?? orphan(ev, "exec")),
+        findInitiated(db, a.sourceAsset, normalizeRecipient(a.recipient), a.amount.toString()).then(
+          (id) => id ?? orphan(ev, "exec"),
+        ),
       patch: (a: Delivery, ev: LogEvent) => ({
         dest_chain: ev.chain,
         dest_asset: a.destAsset.toLowerCase(),
@@ -154,12 +151,9 @@ export const transfers: Flow = {
       abi: TransferQueuedEvt,
       state: "queued",
       key: (a: Queued, ev: LogEvent, db: Queryable) =>
-        findInitiated(
-          db,
-          a.sourceAsset,
-          normalizeRecipient(a.recipient),
-          a.amount.toString(),
-        ).then((id) => id ?? orphan(ev, "queue")),
+        findInitiated(db, a.sourceAsset, normalizeRecipient(a.recipient), a.amount.toString()).then(
+          (id) => id ?? orphan(ev, "queue"),
+        ),
       patch: (a: Queued, ev: LogEvent) => ({
         dest_chain: ev.chain,
         dest_asset: a.destAsset.toLowerCase(),
@@ -178,7 +172,7 @@ export const transfers: Flow = {
       state: "fulfilled",
       key: async (a: Queued, ev: LogEvent, db: Queryable) => {
         const r = await db.query(
-          `SELECT id FROM transfers WHERE pending_id = $1 AND fulfilled IS NULL LIMIT 1`,
+          `SELECT id FROM basejump_transfers WHERE pending_id = $1 AND fulfilled IS NULL LIMIT 1`,
           [pendingKey(ev, a.id)],
         );
         return r.rows[0]?.id ?? orphan(ev, "fulfill");

@@ -5,7 +5,7 @@ import type { ChainBase } from "../types";
 export interface EvmChain extends ChainBase {
   kind: "evm";
   chain: ViemChain;
-  /** Websocket — new heads arrive over eth_subscribe, never by polling. */
+  /** A websocket subscribes to new heads; an HTTP url is polled for them. */
   rpcUrl: string;
   chunkSize: bigint;
 }

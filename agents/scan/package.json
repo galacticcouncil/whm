@@ -5,7 +5,7 @@
   "scripts": {
     "start:ingest": "node dist/ingest/app.js",
     "start:intents": "node dist/intents/app.js",
-    "start:basejump": "node dist/basejump/app.js",
+    "start:transfers": "node dist/transfers/app.js",
     "prebuild": "npm run clean",
     "build": "node ./esbuild.dist.mjs",
     "clean": "rm -rf dist/",

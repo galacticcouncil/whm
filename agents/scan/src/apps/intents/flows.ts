@@ -4,7 +4,7 @@ import { LogMessagePublishedEvt } from "../../abi";
 import { CHAINS } from "../../chains";
 import { vaaId } from "../../ingest/vaa";
 import type { Flow, LogEvent } from "../../types";
-import { INTENT_EMITTER } from "../../watch";
+import { INTENT } from "../../deployments";
 
 import { OrderPlacedEvt, OrderProcessedEvt, QuotePublishedEvt, RelayFeePaidEvt } from "./abi";
 
@@ -166,7 +166,7 @@ export const orders: Flow = {
       abi: LogMessagePublishedEvt,
       state: "placed",
       key: (a: Published) => {
-        if (a.sender.toLowerCase() !== INTENT_EMITTER.toLowerCase()) return null;
+        if (a.sender.toLowerCase() !== INTENT.emitter.toLowerCase()) return null;
         try {
           return decodeAbiParameters(INSTRUCTION, a.payload)[0].toString();
         } catch {

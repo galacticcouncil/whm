@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <title>Transfer · Hydration basejump</title>
+    <title>Transfer · Hydration</title>
     <script>
       try {
         var t = localStorage.getItem("explorer-theme");
@@ -35,147 +35,280 @@
         kv,
         legCard,
         live,
+        short,
         topbar,
+        txLink,
+        vaaLink,
       } from "/shared/app.js";
 
-      topbar("basejump");
+      topbar("transfers", [["/", "Transfers"]]);
 
-      // Also answers the bare `/transfers`, which has nothing to show — the list is the root.
+      // Also answers the bare `/transfer`, which has nothing to show — the list is the root.
       const id = decodeURIComponent(location.pathname.split("/")[2] ?? "");
       if (!id) location.replace("/");
 
       const main = document.getElementById("main");
-      const mono = (v) => (v ? esc(v) : '<span class="dim">—</span>');
+      const mono = (v) => (v !== null && v !== undefined && v !== "" ? esc(v) : '<span class="dim">—</span>');
 
-      /**
-       * The route, start to end.
-       *
-       * The fast path is the point: the payout leaves the landing pool long before the settlement
-       * that replenishes it arrives, and the fee is what buys that head start. A shortfall turns
-       * the middle hop into a queue, which is where a transfer visibly stalls.
-       */
-      function route(t) {
-        const startedAt = t.initiated?.blockTimestamp;
-        const wasQueued = !!t.queued;
+      const TYPE = {
+        transfer: "Transfer",
+        intent: "Intent",
+        deposit: "Deposit",
+        withdraw: "Withdraw",
+        basejump: "Basejump",
+      };
+
+      /** An amount at the view's precision, with its symbol. */
+      const money = (raw, v, dp) =>
+        raw === null || raw === undefined
+          ? '<span class="dim">—</span>'
+          : `<span class="asset-chip">${esc(amount(raw, dp ?? v.decimals ?? 18, 8))}${v.symbol ? `<span class="sym">${esc(v.symbol)}</span>` : ""}</span>`;
+
+      /** A withdrawal's whole cost: what crossed plus the emitter's fee, as raw units. */
+      const paid = (r) =>
+        r.amount === null || r.amount === undefined
+          ? null
+          : (BigInt(r.amount) + BigInt(r.fee ?? 0)).toString();
+
+      /** The NTT hop every rail but Basejump rides: published, then delivered. */
+      function rail(v, r, since, prefix = "rail_") {
+        const published = r[`${prefix}published`] ?? r.published;
+        const settled = r[`${prefix}settled`] ?? r.settled;
+        const state = r[`${prefix}state`] ?? r.state;
+        const held = state === "queued";
         return [
           legCard({
-            where: t.source_chain ?? "source",
-            kind: "initiated",
-            ref: t.initiated,
-            rows: [
+            where: "wormhole",
+            kind: "published",
+            ref: published,
+            rows: r.vaa_id ? [["vaa", vaaLink(r.vaa_id)]] : [],
+            since,
+          }),
+          legCard({
+            where: v.kind === "utxo" && v.type === "withdraw" ? "near" : v.to_chain,
+            kind: held ? "rate limited" : "delivered",
+            ref: settled,
+            held,
+            rows: held ? [["", '<span class="dim">held by the inbound rate limiter</span>']] : [],
+            since,
+          }),
+        ];
+      }
+
+      /**
+       * The route, start to end, for each rail. A hop not yet taken is dimmed rather than dropped —
+       * where a transfer stopped is the thing worth seeing.
+       */
+      const ROUTE = {
+        ntt(v, r) {
+          const since = r.published?.blockTimestamp;
+          return [
+            legCard({ where: v.from_chain, kind: "sent", ref: r.published, rows: [["", money(v.amount, v)]] }),
+            ...rail(v, r, since, ""),
+          ];
+        },
+
+        utxo(v, r) {
+          if (v.type === "deposit") {
+            const since = r.deposited?.blockTimestamp;
+            return [
+              legCard({
+                where: r.chain,
+                kind: "paid",
+                rows: [
+                  ["tx", txLink(r.utxo_tx, r.chain)],
+                  ["to", addrLink(r.deposit_address, r.chain)],
+                  ["", money(r.amount, v)],
+                ],
+              }),
+              legCard({
+                where: "near",
+                kind: r.deposit_ok === false ? "refused" : "proven",
+                ref: r.deposited,
+                held: r.deposit_ok === false,
+                rows:
+                  r.deposit_ok === false
+                    ? [["", '<span class="dim">the manager refused the mint — refundable to the refund address</span>']]
+                    : [],
+                since,
+              }),
+              ...rail(v, r, since),
+            ];
+          }
+          const since = r.requested?.blockTimestamp;
+          return [
+            legCard({ where: "hydration", kind: "sent", ref: r.requested, rows: [["", money(paid(r), v)]] }),
+            ...rail(v, r, since),
+            legCard({
+              where: "near",
+              kind: "signed",
+              ref: r.sign,
+              rows: r.sign_amount ? [["", money(r.sign_amount, v)]] : [],
+              since,
+            }),
+            legCard({
+              where: "near",
+              kind: "withdrawn",
+              ref: r.withdrawn,
+              rows: r.utxo_tx ? [["payout", txLink(r.utxo_tx, r.chain)]] : [],
+              since,
+            }),
+            legCard({
+              where: r.chain,
+              kind: "confirmed",
+              ref: r.confirmed,
+              rows: r.received ? [["", money(r.received, v)]] : [],
+              since,
+            }),
+          ];
+        },
+
+        basejump(v, r) {
+          const since = r.initiated?.blockTimestamp;
+          const queued = !!r.queued;
+          return [
+            legCard({ where: v.from_chain, kind: "initiated", ref: r.initiated, rows: [["", money(r.gross_amount, v)]] }),
+            legCard({
+              where: v.to_chain,
+              kind: queued ? "queued" : "paid out",
+              ref: queued ? r.queued : r.completed,
+              held: queued && !r.fulfilled,
+              rows: queued ? [["", '<span class="dim">landing pool was short</span>']] : [["", money(r.net_amount, v)]],
+              since,
+            }),
+            queued
+              ? legCard({ where: v.to_chain, kind: "fulfilled", ref: r.fulfilled, rows: [["", money(r.net_amount, v)]], since })
+              : "",
+          ];
+        },
+      };
+
+      /** The detail panels, per rail. */
+      const PANELS = {
+        ntt: (v, r) => [
+          [
+            "Transfer",
+            [
+              kv("amount", money(v.amount, v)),
+              kv("from", addrLink(v.from_address, v.from_chain)),
+              kv("to", addrLink(v.to_address, v.to_chain)),
+            ],
+          ],
+          [
+            "NTT",
+            [
+              kv("vaa", vaaLink(r.vaa_id)),
+              kv("digest", mono(short(r.digest, 14, 10))),
+              kv("manager sequence", mono(r.manager_sequence)),
+              kv("consistency", mono(r.wormhole_consistency)),
+            ],
+          ],
+        ],
+
+        utxo: (v, r) => {
+          const coin = r.chain;
+          const transfer =
+            v.type === "deposit"
+              ? [
+                  kv("amount", money(r.amount, v)),
+                  kv("paid from", addrLink(r.sender, coin)),
+                  kv("deposit address", addrLink(r.deposit_address, coin)),
+                  kv("recipient", addrLink(r.recipient, "hydration")),
+                  kv("refund address", addrLink(r.refund_address, coin)),
+                  kv(`${coin} tx`, txLink(r.utxo_tx, coin)),
+                  kv("bridge fee", money(r.bridge_fee, v)),
+                ]
+              : [
+                  // Top to bottom, what the user paid becomes what they receive: each fee comes off
+                  // the line above it.
+                  kv("paid", money(paid(r), v)),
+                  kv("fee (hydration)", money(r.fee, v)),
+                  kv("bridged", money(r.amount, v)),
+                  kv("bridge fee (omni)", money(r.bridge_fee, v)),
+                  kv(`miner fee (${coin})`, money(r.miner_fee, v)),
+                  kv("received", money(r.received, v)),
+                  kv("sender", addrLink(r.sender, "hydration")),
+                  kv("recipient", addrLink(r.recipient, coin)),
+                  kv("near account", addrLink(r.near_account, "near")),
+                  kv(`${coin} tx`, txLink(r.utxo_tx, coin)),
+                ];
+          return [
+            [v.type === "deposit" ? "Deposit" : "Withdrawal", transfer],
+            [
+              "NTT",
               [
-                "",
-                `<span class="mono">${amount(t.gross_amount, 18, 6)}</span>`,
+                kv("state", r.rail_state ? badge(r.rail_state) : '<span class="dim">—</span>'),
+                kv("vaa", vaaLink(r.vaa_id)),
+                kv("digest", mono(short(r.digest, 14, 10))),
               ],
             ],
-          }),
-          wasQueued
-            ? legCard({
-                where: t.dest_chain ?? "hydration",
-                kind: "queued",
-                ref: t.queued,
-                held: !t.fulfilled,
-                rows: [["", '<span class="dim">landing pool was short</span>']],
-                since: startedAt,
-              })
-            : legCard({
-                where: t.dest_chain ?? "hydration",
-                kind: "paid out",
-                ref: t.completed,
-                rows: [
-                  [
-                    "",
-                    `<span class="mono">${amount(t.net_amount, 18, 6)}</span>`,
-                  ],
-                ],
-                since: startedAt,
-              }),
-          wasQueued
-            ? legCard({
-                where: t.dest_chain ?? "hydration",
-                kind: "fulfilled",
-                ref: t.fulfilled,
-                rows: [
-                  [
-                    "",
-                    `<span class="mono">${amount(t.net_amount, 18, 6)}</span>`,
-                  ],
-                ],
-                since: startedAt,
-              })
-            : "",
-        ]
-          .filter(Boolean)
-          .join("");
-      }
+          ];
+        },
+
+        basejump: (v, r) => [
+          [
+            "Transfer",
+            [
+              kv("sender", addrLink(r.sender, v.from_chain)),
+              kv("recipient", addrLink(r.recipient, v.to_chain)),
+              kv("source asset", addrLink(r.source_asset, v.from_chain)),
+              kv("destination asset", addrLink(r.dest_asset, v.to_chain)),
+            ],
+          ],
+          [
+            "Amounts",
+            [
+              kv("gross", money(r.gross_amount, v)),
+              kv("fee", money(r.fee, v)),
+              kv("paid out", money(r.net_amount, v)),
+            ],
+          ],
+          [
+            "Settlement",
+            [
+              kv("ntt sequence", mono(r.transfer_sequence)),
+              kv("message sequence", mono(r.message_sequence)),
+              kv("pending queue id", mono(r.pending_id)),
+            ],
+          ],
+        ],
+      };
 
       function render(t) {
         if (!t) {
           main.innerHTML = `<div class="panel"><div class="table-error">no transfer ${esc(id)}</div></div>`;
           return;
         }
-
-        const detail = [
-          kv(
-            "route",
-            `<span class="dim">${esc(t.source_chain ?? "?")} →</span> ${esc(t.dest_chain ?? "…")}`,
-          ),
-          kv("sender", addrLink(t.sender, t.source_chain)),
-          kv("recipient", addrLink(t.recipient, t.dest_chain)),
-          kv("source asset", addrLink(t.source_asset, t.source_chain)),
-          kv("destination asset", addrLink(t.dest_asset, t.dest_chain)),
-          kv("id", mono(t.id)),
-        ].join("");
-
-        // Gross is what left the source; the fee buys the head start, and the rest is paid out of
-        // the landing pool before the settlement replenishing it has arrived.
-        const amounts = [
-          kv(
-            "gross",
-            `<span class="mono">${amount(t.gross_amount, 18, 8)}</span>`,
-          ),
-          kv("fee", `<span class="mono">${amount(t.fee, 18, 8)}</span>`),
-          kv(
-            "paid out",
-            `<span class="mono">${amount(t.net_amount, 18, 8)}</span>`,
-          ),
-        ].join("");
-
-        const settlement = [
-          kv("ntt sequence", mono(t.transfer_sequence)),
-          kv("message sequence", mono(t.message_sequence)),
-          kv("pending queue id", mono(t.pending_id)),
-        ].join("");
-
+        const { view: v, record: r } = t;
+        const panels = PANELS[v.kind](v, r)
+          .map(
+            ([title, rows]) => `<div class="panel">
+              <div class="panel-head"><span class="t">${esc(title)}</span></div>
+              ${rows.join("")}
+            </div>`,
+          )
+          .join("");
         main.innerHTML = `
-          <h1 class="page-title">Transfer <span class="sub">${badge(t.state)}</span></h1>
-          <div class="legs">${route(t)}</div>
-          <div class="panel">
-            <div class="panel-head"><span class="t">Transfer</span></div>
-            ${detail}
-          </div>
-          <div class="panel">
-            <div class="panel-head"><span class="t">Amounts</span><span class="note">paid out ahead of settlement</span></div>
-            ${amounts}
-          </div>
-          <div class="panel">
-            <div class="panel-head"><span class="t">Settlement</span></div>
-            ${settlement}
-          </div>`;
+          <h1 class="page-title">${esc(TYPE[v.type] ?? v.type)} <span class="sub">${badge(v.status)} ${badge(v.stage)}</span></h1>
+          <div class="legs">${ROUTE[v.kind](v, r).filter(Boolean).join("")}</div>
+          ${panels}`;
       }
 
       async function load() {
         render(await json(`/api/transfers/${encodeURIComponent(id)}`));
       }
 
+      // Every rail's changes: this page cannot tell from a notice which of its rows moved, and a
+      // refetch is one request.
+      let pending;
       live(
-        "transfers",
-        (u) => {
-          if (u.record?.id === id) load();
+        "ntt,utxo,utxo-signs,basejump",
+        () => {
+          clearTimeout(pending);
+          pending = setTimeout(load, 300);
         },
         load,
       );
-      load();
     </script>
   </body>
 </html>

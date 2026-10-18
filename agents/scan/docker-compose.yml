@@ -21,9 +21,9 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
 
-  app-basejump:
+  app-transfers:
     image: galacticcouncil/scan:latest
-    command: [node, basejump/app.js]
+    command: [node, transfers/app.js]
     environment:
       - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
     ports:
@@ -49,11 +49,13 @@ services:
     environment:
       # EVM RPCs must be websocket: heads arrive over eth_subscribe, never by polling.
       - RPC_ETHEREUM_WSS=
+      - RPC_BASE_WSS=
+      # No public websocket on these two: `_HTTP` polls heads on the sweep.
+      - RPC_ROBINHOOD_HTTP=https://rpc.mainnet.chain.robinhood.com
+      - RPC_HYPEREVM_HTTP=https://rpc.hyperliquid.xyz/evm
       # Hydration MUST be the substrate path — the landing's deliveries are XCM-driven pallet_evm
       # calls with no eth receipt, so only Frontier EVM.Log substrate events expose them.
       - RPC_HYDRATION_WSS=
-      # NEAR is read through FastNEAR's transaction index — account histories, then whole txs.
-      - RPC_NEAR_TX=https://tx.main.fastnear.com
       - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
     depends_on:
       - postgres

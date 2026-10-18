@@ -206,25 +206,75 @@ export async function notifyEvents(chain: string): Promise<void> {
 }
 
 /**
- * Subscribe to ingest's nudges on a dedicated connection — LISTEN holds its session, so it cannot
- * share the pool. Reconnects on its own; the caller's backstop interval covers the gap.
+ * Subscribe to ingest's nudges.
  *
  * @param onEvent Called with the chain name that gained events.
  */
 export function listenEvents(onEvent: (chain: string) => void): void {
+  listen(EVENTS_CHANNEL, onEvent);
+}
+
+/** Channel every reader announces its row changes on, for pages served by another process. */
+export const ROWS_CHANNEL = "scan_rows";
+
+/** A row change, small enough for a notification: which row, and where its state went. */
+export interface RowNotice {
+  flow: string;
+  kind: "created" | "updated";
+  id: string;
+  state: string;
+  previousState: string | null;
+}
+
+/**
+ * Announce a row change. Best-effort, like the nudge.
+ *
+ * @param n The change.
+ */
+export async function notifyRow(n: RowNotice): Promise<void> {
+  try {
+    await pool.query(`SELECT pg_notify($1, $2)`, [ROWS_CHANNEL, JSON.stringify(n)]);
+  } catch {
+    // a page refetches on reconnect; a lost notice only delays it
+  }
+}
+
+/**
+ * Subscribe to other readers' row changes.
+ *
+ * @param onRow Called with each change.
+ */
+export function listenRows(onRow: (n: RowNotice) => void): void {
+  listen(ROWS_CHANNEL, (payload) => {
+    try {
+      onRow(JSON.parse(payload));
+    } catch {
+      // not ours to parse
+    }
+  });
+}
+
+/**
+ * LISTEN on a dedicated connection — it holds its session, so it cannot share the pool. Reconnects
+ * on its own; callers have a backstop for the gap.
+ *
+ * @param channel The channel.
+ * @param onPayload Called with each notification's payload.
+ */
+function listen(channel: string, onPayload: (payload: string) => void): void {
   const connect = (): void => {
     const client = new pg.Client({ connectionString: databaseUrl });
-    client.on("notification", (n) => onEvent(n.payload ?? ""));
+    client.on("notification", (n) => onPayload(n.payload ?? ""));
     client.on("error", (e) => {
-      log.warn(`listener: ${e.message}`);
+      log.warn(`listener ${channel}: ${e.message}`);
       client.end().catch(() => {});
       setTimeout(connect, 5_000);
     });
     client
       .connect()
-      .then(() => client.query(`LISTEN ${EVENTS_CHANNEL}`))
+      .then(() => client.query(`LISTEN ${channel}`))
       .catch((e) => {
-        log.warn(`listener: ${(e as Error).message}`);
+        log.warn(`listener ${channel}: ${(e as Error).message}`);
         setTimeout(connect, 5_000);
       });
   };
