@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   InboundTransferQueuedEvt,
   LogMessagePublishedEvt,
@@ -14,6 +16,12 @@ interface Published {
   sender: `0x${string}`;
   sequence: bigint;
   payload: `0x${string}`;
+}
+
+/** `ntt-<token>.transfer_sent` — names the NEAR account that sent, which the message only hashes. */
+interface NearSent {
+  sender: string;
+  wormhole_sequence: number;
 }
 
 /** `ntt-<token>.transfer_received` / `transfer_queued_inbound` — NEAR's delivery, digest in hex. */
@@ -39,6 +47,7 @@ function published(payload: string, emitter: string, sequence: bigint, ev: LogEv
     source_manager: t.sourceManager,
     recipient_manager: t.recipientManager,
     manager_sequence: t.sequence.toString(),
+    sender: t.sender,
     amount: t.amount.toString(),
     decimals: t.decimals,
     source_token: t.sourceToken,
@@ -91,6 +100,10 @@ export const ntt: Flow = {
     amount: "NUMERIC",
     decimals: "SMALLINT",
     source_token: "TEXT",
+    /** As the 32 bytes the message carries: an EVM caller padded, a NEAR one hashed. */
+    sender: "TEXT",
+    /** A NEAR sender's account — named only by its `transfer_sent`. */
+    sender_account: "TEXT",
     /** As the 32 bytes the message carries; only an EVM destination trims to an address. */
     recipient: "TEXT",
     /** A NEAR recipient's account — the 32 bytes are its hash, so only the delivery can name it. */
@@ -151,6 +164,21 @@ export const ntt: Flow = {
       keyBy: "digest",
       key: (a: { digest: `0x${string}` }) => a.digest,
       patch: (_a: unknown, ev: LogEvent) => ({ settled: ev.ref }),
+    },
+    {
+      // Same transaction as the publish, after it — so the row is there to find by its VAA, whose
+      // emitter is the manager's own account hashed.
+      role: "ntt",
+      near: { standard: "whm-ntt", event: "transfer_sent" },
+      state: "published",
+      keyBy: "vaa_id",
+      key: (a: NearSent, ev: LogEvent) =>
+        vaaId(
+          CHAINS[ev.chain].wormholeId,
+          createHash("sha256").update(ev.address).digest("hex"),
+          BigInt(a.wormhole_sequence),
+        ),
+      patch: (a: NearSent) => ({ sender_account: a.sender }),
     },
     {
       // NEAR verifies and releases in one call, so its delivery is the redemption — and it names

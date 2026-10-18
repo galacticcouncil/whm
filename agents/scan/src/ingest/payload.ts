@@ -34,6 +34,12 @@ export interface NttTransfer {
   digest: `0x${string}`;
   /** The NTT manager's sequence — `NttManager.transfer`'s return value. Not a Wormhole sequence. */
   sequence: bigint;
+  /**
+   * Who called the manager, as the 32 bytes the message carries: an EVM caller left-padded, a NEAR
+   * one as `sha256(account_id)`. A contract riding the rail — an emitter, a connector — is named
+   * here rather than its user.
+   */
+  sender: `0x${string}`;
   sourceManager: `0x${string}`;
   recipientManager: `0x${string}`;
   /** Trimmed to `decimals` places, which is the precision the rail actually carries. */
@@ -79,6 +85,7 @@ export function parseNttTransfer(payload: string, sourceChainId: number): NttTra
   return {
     digest,
     sequence,
+    sender: hex(manager, 32, 32),
     sourceManager: address(sourceManager),
     recipientManager: address(recipientManager),
     decimals: inner.readUInt8(4),
