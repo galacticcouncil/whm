@@ -21,11 +21,13 @@ regresses, and every other column merges rather than overwrites.
 
 ```
 src/
-  chains.ts        chain registry — ids, Wormhole ids, tuning
+  chains/          one folder per chain kind — everything chain-specific is in it
+    index.ts         the registry (CHAINS), and the watcher for a chain by its kind
+    evm/             consts, factory (config from env), types, watcher (getLogs)
+    substrate/       same, for Hydration — EVM.Log out of System.Events
+    near/            same, plus fastnear.ts — account histories and whole transactions
   watch.ts         WHAT to index: contracts, roles, start blocks
   db.ts            the shared event store
-  watchers/        evm.ts (getLogs), substrate.ts (EVM.Log out of System.Events),
-                   near.ts (FastNEAR account histories)
   admin.ts         rewind a chain, rebuild a reader
   flow/            the reconciler: types, DDL generation, upsert, drain, serve
   ingest/          the writer, plus the wh_messages and ntt_transfers flows
@@ -38,7 +40,7 @@ public/
 ## Configuration
 
 Endpoints and secrets are env. **Everything else is code** — chain ids, contract addresses and
-start blocks live in [src/chains.ts](src/chains.ts) and [src/watch.ts](src/watch.ts), so a
+start blocks live in [src/chains/](src/chains/) and [src/watch.ts](src/watch.ts), so a
 deployment cannot silently point at the wrong contract.
 
 | Variable            | Meaning                                                        |

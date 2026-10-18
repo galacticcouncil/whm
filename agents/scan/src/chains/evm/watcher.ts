@@ -1,12 +1,14 @@
 import { createPublicClient, webSocket, type PublicClient, type WebSocketTransport } from "viem";
 import { watchBlockNumber } from "viem/actions";
 
-import log from "../logger";
-import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../db";
-import { BoundedQueue } from "../utils";
-import { cursorId } from "./cursor";
-import { liveIntervalMs } from "../config";
-import type { EvmChain, Watch } from "../types";
+import { liveIntervalMs } from "../../config";
+import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../../db";
+import log from "../../logger";
+import type { Watch } from "../../types";
+import { BoundedQueue } from "../../utils";
+import { cursorId } from "../cursor";
+
+import type { EvmChain } from "./types";
 
 const HEAD_STALE_MS = 60_000;
 const TIME_CACHE_MAX = 20_000;

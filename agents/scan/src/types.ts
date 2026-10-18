@@ -1,48 +1,4 @@
-import type { AbiEvent, Chain as ViemChain } from "viem";
-
-// ─── Chains ──────────────────────────────────────────────────────
-
-export type ChainKind = "evm" | "substrate" | "near";
-
-interface ChainBase {
-  name: string;
-  kind: ChainKind;
-  /** Wormhole chain id — the first component of a VAA id. */
-  wormholeId: number;
-  /** Blocks behind the head that ingest treats as final. */
-  confirmations: bigint;
-  concurrency: number;
-}
-
-export interface EvmChain extends ChainBase {
-  kind: "evm";
-  chain: ViemChain;
-  /** Websocket — new heads arrive over eth_subscribe, never by polling. */
-  rpcUrl: string;
-  chunkSize: bigint;
-}
-
-export interface SubstrateChain extends ChainBase {
-  kind: "substrate";
-  chainId: number;
-  wssUrl: string;
-  /** Blocks between cursor writes during a backfill. */
-  checkpointEvery: number;
-}
-
-/**
- * NEAR has no log filter and no head subscription worth the name, so it is read through FastNEAR's
- * transaction index: the history of the accounts we own, then those transactions whole.
- */
-export interface NearChain extends ChainBase {
-  kind: "near";
-  /** FastNEAR transactions API — `/v0/account` and `/v0/transactions`. */
-  txApi: string;
-  /** How often the histories are re-read. */
-  pollMs: number;
-}
-
-export type ChainCfg = EvmChain | SubstrateChain | NearChain;
+import type { AbiEvent } from "viem";
 
 // ─── Ingest ──────────────────────────────────────────────────────
 

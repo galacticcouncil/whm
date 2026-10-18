@@ -3,12 +3,14 @@ import { createClient, PolkadotClient } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { bytesToHex } from "viem";
 
-import log from "../logger";
-import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../db";
-import { BoundedQueue } from "../utils";
-import { cursorId } from "./cursor";
-import { liveIntervalMs } from "../config";
-import type { SubstrateChain, Watch } from "../types";
+import { liveIntervalMs } from "../../config";
+import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../../db";
+import log from "../../logger";
+import type { Watch } from "../../types";
+import { BoundedQueue } from "../../utils";
+import { cursorId } from "../cursor";
+
+import type { SubstrateChain } from "./types";
 
 const FINALIZED_STALE_MS = 60_000;
 
@@ -223,7 +225,9 @@ export class SubstrateWatcher {
       if (fetchErr.e) throw fetchErr.e;
       await this.checkpoint(safe, cursors);
       if (backfill || ingested > 0) {
-        log.info(`[${this.cfg.name}] ingested ${ingested} events in ${processed} blocks, at ${safe}`);
+        log.info(
+          `[${this.cfg.name}] ingested ${ingested} events in ${processed} blocks, at ${safe}`,
+        );
       }
     };
 
