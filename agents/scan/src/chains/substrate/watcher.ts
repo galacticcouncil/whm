@@ -10,6 +10,7 @@ import type { Watch } from "../../types";
 import { BoundedQueue } from "../../utils";
 import { cursorId } from "../cursor";
 
+import { PROGRESS_LOG_MS, RANGE, SYSTEM_EVENTS_KEY } from "./consts";
 import type { SubstrateChain } from "./types";
 
 const FINALIZED_STALE_MS = 60_000;
@@ -54,6 +55,8 @@ export class SubstrateWatcher {
   private progressAt = 0;
   /** Watch entries by emitting address — one address may serve several roles. */
   private readonly targets = new Map<string, Watch[]>();
+  /** The same addresses as bare hex, searched for in a block's raw events before decoding them. */
+  private readonly needles: string[];
 
   constructor(
     public readonly cfg: SubstrateChain,
@@ -67,6 +70,7 @@ export class SubstrateWatcher {
         this.targets.set(key, [...(this.targets.get(key) ?? []), w]);
       }
     }
+    this.needles = [...this.targets.keys()].map((a) => a.replace(/^0x/, ""));
   }
 
   async latestSafe(): Promise<bigint> {
@@ -167,16 +171,21 @@ export class SubstrateWatcher {
     const fetchErr: { e?: Error } = {};
 
     const fetcher = async () => {
-      const inflight: Promise<Block>[] = [];
+      // Ranges in flight, sized off the per-block concurrency the config already names.
+      const parallel = Math.max(1, Math.ceil(this.cfg.concurrency / 20));
+      const inflight: Promise<Block[]>[] = [];
       try {
         let next = from + 1n;
-        while (inflight.length < this.cfg.concurrency && next <= safe) {
-          inflight.push(this.fetchBlock(next++));
-        }
+        const kickoff = (): void => {
+          if (next > safe) return;
+          const end = next + RANGE - 1n > safe ? safe : next + RANGE - 1n;
+          inflight.push(this.fetchRange(next, end));
+          next = end + 1n;
+        };
+        while (inflight.length < parallel && next <= safe) kickoff();
         while (inflight.length > 0) {
-          const block = await inflight.shift()!;
-          await queue.push(block);
-          if (next <= safe) inflight.push(this.fetchBlock(next++));
+          for (const block of await inflight.shift()!) await queue.push(block);
+          kickoff();
         }
       } catch (e) {
         fetchErr.e = e as Error;
@@ -192,6 +201,7 @@ export class SubstrateWatcher {
       let processed = 0;
       let lastCheckpoint = from;
       const start = Date.now();
+      let loggedAt = start;
       for (let block = await queue.take(); block; block = await queue.take()) {
         const events: RawEvent[] = block.logs
           .filter((l) => this.wanted(l, block.number, cursors))
@@ -215,11 +225,14 @@ export class SubstrateWatcher {
         this.progressAt = Date.now();
         if (block.number - lastCheckpoint >= BigInt(this.cfg.checkpointEvery)) {
           await this.checkpoint(block.number, cursors);
-          const bps = Math.round(processed / ((Date.now() - start) / 1000));
-          log.info(
-            `[${this.cfg.name}] at ${block.number} (${processed} blocks, ${ingested} events, ${bps} blk/s)`,
-          );
           lastCheckpoint = block.number;
+          if (Date.now() - loggedAt >= PROGRESS_LOG_MS) {
+            const bps = Math.round(processed / ((Date.now() - start) / 1000));
+            log.info(
+              `[${this.cfg.name}] at ${block.number} (${processed} blocks, ${ingested} events, ${bps} blk/s)`,
+            );
+            loggedAt = Date.now();
+          }
         }
       }
       if (fetchErr.e) throw fetchErr.e;
@@ -250,13 +263,80 @@ export class SubstrateWatcher {
     return matches.some((w) => cursors.get(cursorId(w))! < block && topicsMatch(w, l.topics));
   }
 
-  private async fetchBlock(n: bigint): Promise<Block> {
-    const hash = await withTimeout(
-      this.client._request<string>("chain_getBlockHash", [Number(n)]),
-      `block #${n} hash`,
+  /**
+   * A range of blocks: their hashes in one call, their events in one more.
+   *
+   * `state_queryStorage` returns `System.Events` for every block in the range where it changed, so
+   * a block it leaves out held the same bytes as the one before it. A node that refuses the call is
+   * read one block at a time instead — slower, never wrong.
+   *
+   * @param start First block.
+   * @param end Last block, inclusive.
+   */
+  private async fetchRange(start: bigint, end: bigint): Promise<Block[]> {
+    const numbers: number[] = [];
+    for (let n = start; n <= end; n++) numbers.push(Number(n));
+    const hashes = await withTimeout(
+      this.client._request<(string | null)[]>("chain_getBlockHash", [numbers]),
+      `blocks #${start}..${end} hashes`,
     );
-    if (!hash) throw new Error(`block #${n}: no hash`);
-    const at = hash as `0x${string}`;
+    hashes.forEach((h, i) => {
+      if (!h) throw new Error(`block #${numbers[i]}: no hash`);
+    });
+
+    let raw: Map<string, string | null>;
+    try {
+      const sets = await withTimeout(
+        this.client._request<{ block: string; changes: [string, string | null][] }[]>(
+          "state_queryStorage",
+          [[SYSTEM_EVENTS_KEY], hashes[0], hashes[hashes.length - 1]],
+        ),
+        `blocks #${start}..${end} events`,
+      );
+      raw = new Map(sets.map((c) => [c.block, c.changes[0]?.[1] ?? null]));
+      if (!raw.has(hashes[0]!)) raw.set(hashes[0]!, await this.rawEvents(hashes[0]!, start));
+    } catch (e) {
+      log.warn(`[${this.cfg.name}] #${start}..${end}: ${(e as Error).message}, reading per block`);
+      raw = new Map(
+        await Promise.all(
+          hashes.map(async (h, i) => [h!, await this.rawEvents(h!, BigInt(numbers[i]))] as const),
+        ),
+      );
+    }
+
+    let last: string | null = null;
+    return Promise.all(
+      hashes.map((h, i) => {
+        if (raw.has(h!)) last = raw.get(h!)!;
+        return this.block(BigInt(numbers[i]), h as `0x${string}`, last);
+      }),
+    );
+  }
+
+  /** One block's `System.Events`, raw. */
+  private rawEvents(at: string, n: bigint): Promise<string | null> {
+    return withTimeout(
+      this.client._request<string | null>("state_getStorage", [SYSTEM_EVENTS_KEY, at]),
+      `block #${n} events`,
+    );
+  }
+
+  /**
+   * One block from its raw events. Nearly every block has nothing for us, so the events are decoded
+   * only when a watched address appears in their bytes — an `EVM.Log` carries its emitter as the
+   * raw 20 bytes, so a block without them cannot hold one. A match on other bytes only costs a
+   * decode.
+   *
+   * @param n The block.
+   * @param at Its hash.
+   * @param raw Its `System.Events`, raw.
+   */
+  private async block(n: bigint, at: `0x${string}`, raw: string | null): Promise<Block> {
+    const hex = raw?.toLowerCase() ?? "";
+    if (!this.needles.some((x) => hex.includes(x))) {
+      return { number: n, hash: at, timestamp: 0, logs: [] };
+    }
+
     const records = await withTimeout(
       this.client.getUnsafeApi().query.System.Events.getValue({ at }),
       `block #${n} events`,
