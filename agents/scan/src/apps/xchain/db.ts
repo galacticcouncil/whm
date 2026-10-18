@@ -1,3 +1,4 @@
+import { base58 } from "@scure/base";
 import { pad } from "viem";
 
 import { WORMHOLE_CHAINS } from "../../chains";
@@ -118,7 +119,10 @@ export interface TransferFilter {
   asset?: string[];
   type?: string[];
   status?: string[];
-  /** An address on either end — an EVM one also as the 32 bytes NTT carries — or any leg's tx. */
+  /**
+   * An address on either end — an EVM one also as the 32 bytes NTT carries, a Solana one as the
+   * bytes its base58 spells — or any leg's tx.
+   */
   q?: string;
   limit: number;
   offset: number;
@@ -149,6 +153,8 @@ export async function listTransfers(
   if (filter.q) {
     const a = filter.q.trim().toLowerCase();
     const forms = /^0x[0-9a-f]{40}$/.test(a) ? [a, pad(a as `0x${string}`, { size: 32 })] : [a];
+    const key = solanaKey(filter.q.trim());
+    if (key) forms.push(key);
     params.push(forms);
     const n = params.length;
     conds.push(
@@ -234,14 +240,30 @@ function present(r: Record<string, any>): TransferView {
 /**
  * An address as its own chain writes it. NTT carries 32 bytes: an EVM address left-padded, a
  * Hydration account either padded or whole, a NEAR account hashed — which stays a hash until the
- * delivery names it.
+ * delivery names it — a Solana key in base58, a Sui address whole.
  *
  * @param chain The chain it is on.
  * @param v The address, as stored.
  */
 function readable(chain: string, v: string | null): string | null {
   if (!v || !/^0x[0-9a-f]{64}$/i.test(v)) return v;
-  if (chain === "near") return v;
+  if (chain === "near" || chain === "sui") return v;
+  if (chain === "solana") return base58.encode(Buffer.from(v.slice(2), "hex"));
   if (/^0x0{24}/i.test(v)) return bytes32ToAddress(v);
   return chain === "hydration" ? normalizeRecipient(v) : v;
+}
+
+/**
+ * A Solana key as the 32 bytes NTT carries, or null when the text is not one.
+ *
+ * @param text Search text.
+ */
+function solanaKey(text: string): string | null {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text)) return null;
+  try {
+    const b = base58.decode(text);
+    return b.length === 32 ? `0x${Buffer.from(b).toString("hex")}` : null;
+  } catch {
+    return null;
+  }
 }

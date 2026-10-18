@@ -2,11 +2,13 @@
  * What is deployed where, one object per protocol, keyed by chain. Addresses only — where indexing
  * starts belongs to a watch entry, in watch.ts.
  *
- * Only the corridors actually running are listed. NTT has eleven tokens deployed; the rest go in
- * when something reads them.
+ * Only the corridors actually running are listed.
  */
 
-/** The Wormhole cores. NEAR's is shared, so it is only ever read through our own accounts. */
+/**
+ * The Wormhole cores. NEAR's, Solana's and Sui's are only ever read through our own accounts — on
+ * Sui, the package its events are typed by.
+ */
 export const WORMHOLE_CORE = {
   hydration: "0x3792a6d63c31941B2805181771795D9176fA82A1",
   ethereum: "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B",
@@ -14,6 +16,8 @@ export const WORMHOLE_CORE = {
   hyperevm: "0x7C0faFc4384551f063e05aee704ab943b8B53aB3",
   robinhood: "0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB",
   near: "contract.wormhole_crypto.near",
+  solana: "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth",
+  sui: "0x5306f64e312b581766351c07af79c72fcb1cd25147157fdc2f8ad76de9a3fb6a",
 } as const;
 
 /** A token's NTT leg on an EVM chain. */
@@ -22,10 +26,25 @@ export interface EvmLeg {
   transceiver: string;
 }
 
+/** On Solana: the manager program, which is its own transceiver, and the emitter PDA it publishes as. */
+export interface SolanaLeg {
+  program: string;
+  emitter: string;
+}
+
+/** On Sui: the manager's shared state, and the emitter cap its transceiver publishes as. */
+export interface SuiLeg {
+  state: string;
+  emitter: string;
+}
+
+/** A token's leg on any chain — a NEAR leg is its account. */
+export type NttLeg = EvmLeg | SolanaLeg | SuiLeg | string;
+
 /**
  * NTT corridors, one per token, keyed by chain — from hydration-ntt's ops/tokens/<token>/deployment.json.
  * The home chain locks, Hydration burns. NEAR's legs are one account each, manager and transceiver in
- * one. Solana and Sui legs are not indexed yet, so not listed.
+ * one.
  */
 export const NTT = {
   weth: {
@@ -156,12 +175,52 @@ export const NTT = {
     },
     near: "ntt-zec.hydration-whm.near",
   },
+  sol: {
+    hydration: {
+      manager: "0x9e200C0f28D92D296b201D96C8269d3CAFFfA9FF",
+      transceiver: "0x2F04AcF249091425d51e67EeA3C3161ccE283202",
+    },
+    solana: {
+      program: "DiGxk55uAQNVzzg2FucPgdrQ4azb5SDvWQvzpzJD3o7J",
+      emitter: "5J12e7mMcbbN3VkCrUPfZp2bDHMH3t1rKvxGcwuN53wx",
+    },
+  },
+  jitosol: {
+    hydration: {
+      manager: "0xcE73C15B9ED02413066DE5B904A36F8e8f9B5331",
+      transceiver: "0xF38D9C3bA6999Dc331b32B416083Fd7e02D17B04",
+    },
+    solana: {
+      program: "9HFvXujdkXubvmf93gyzkH1g3VPowDrmp85sWsfdcBTh",
+      emitter: "HgxvrPomT84AxgxknddAcC1iW9ysqHxmeoiKNZmQcovs",
+    },
+  },
+  prime: {
+    hydration: {
+      manager: "0xFCaF4aA069C565d25539028970703F01e47D3E0B",
+      transceiver: "0x4e7b1E55D2354d4Dc6ABD876096Dc201de0541D1",
+    },
+    solana: {
+      program: "4T5m5NtRVewiCVzP2mnfeUoMYRqncfkrS21X2dhVCNRT",
+      emitter: "GiTY93vtrK4jZZchrxdV9r28JByRs7Ary2rsTPyPabJc",
+    },
+  },
+  sui: {
+    hydration: {
+      manager: "0x978443f00cAB6b09445140321EC73a221ebFF5F8",
+      transceiver: "0xA224D6f4e0E276b34D91bfE6c3A5fE6838322AF7",
+    },
+    sui: {
+      state: "0xa0bc45e0384140dc125f273eda89cad1434f5dee430726cf6364bdcceba1e9a3",
+      emitter: "0x25437da9f99dfab32c1a275663f51cd5c99eb867ab4d1f630e3799c5e68215da",
+    },
+  },
 } as const;
 
-/** Every token's leg on a chain: an EVM leg's contracts, or a NEAR leg's account. */
-export function nttLegs(chain: string): (EvmLeg | string)[] {
+/** Every token's leg on a chain. */
+export function nttLegs(chain: string): NttLeg[] {
   return Object.values(NTT).flatMap((t) => {
-    const leg = (t as Record<string, EvmLeg | string>)[chain];
+    const leg = (t as Record<string, NttLeg>)[chain];
     return leg ? [leg] : [];
   });
 }

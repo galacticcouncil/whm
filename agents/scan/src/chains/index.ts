@@ -6,16 +6,24 @@ import { EvmWatcher } from "./evm/watcher";
 import { NEAR } from "./near/consts";
 import { near } from "./near/factory";
 import { NearWatcher } from "./near/watcher";
+import { SOLANA } from "./solana/consts";
+import { solana } from "./solana/factory";
+import { SolanaWatcher } from "./solana/watcher";
 import { HYDRATION } from "./substrate/consts";
 import { hydration } from "./substrate/factory";
 import { SubstrateWatcher } from "./substrate/watcher";
+import { SUI } from "./sui/consts";
+import { sui } from "./sui/factory";
+import { SuiWatcher } from "./sui/watcher";
 import type { ChainCfg, Watcher } from "./types";
 
 export * from "./cursor";
 export * from "./types";
 export type { EvmChain } from "./evm/types";
 export type { NearChain } from "./near/types";
+export type { SolanaChain } from "./solana/types";
 export type { SubstrateChain } from "./substrate/types";
+export type { SuiChain } from "./sui/types";
 
 /**
  * Chain registry. Chain ids, Wormhole ids and tuning live in each chain's `consts`; only the
@@ -24,7 +32,7 @@ export type { SubstrateChain } from "./substrate/types";
  * what a cursor is kept for.
  */
 export const CHAINS: Record<string, ChainCfg> = {};
-for (const c of [...EVM_CHAINS.map(evm), hydration(), near()]) {
+for (const c of [...EVM_CHAINS.map(evm), hydration(), near(), solana(), sui()]) {
   if (c) CHAINS[c.name] = c;
 }
 
@@ -33,7 +41,7 @@ for (const c of [...EVM_CHAINS.map(evm), hydration(), near()]) {
  * depend on which endpoints this process was given.
  */
 export const WORMHOLE_CHAINS: Record<number, string> = Object.fromEntries(
-  [...EVM_CHAINS, HYDRATION, NEAR].map((c) => [c.wormholeId, c.name]),
+  [...EVM_CHAINS, HYDRATION, NEAR, SOLANA, SUI].map((c) => [c.wormholeId, c.name]),
 );
 
 /**
@@ -48,7 +56,7 @@ export function wormholeId(name: string): number {
 }
 
 /**
- * A chain's own id, whichever kind it is — what /api/status reports. NEAR has none.
+ * A chain's own id, whichever kind it is — what /api/status reports. NEAR, Solana and Sui have none.
  *
  * @param c Chain config.
  */
@@ -71,5 +79,7 @@ export function watcher(
 ): Watcher {
   if (cfg.kind === "evm") return new EvmWatcher(cfg, watches, onIngest);
   if (cfg.kind === "near") return new NearWatcher(cfg, watches, onIngest);
+  if (cfg.kind === "solana") return new SolanaWatcher(cfg, watches, onIngest);
+  if (cfg.kind === "sui") return new SuiWatcher(cfg, watches, onIngest);
   return new SubstrateWatcher(cfg, watches, onIngest);
 }

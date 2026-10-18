@@ -211,6 +211,20 @@ const CHAINS = {
     tx: (r) => `https://hyperevmscan.io/tx/${r.txHash}`,
     addr: (a) => `https://hyperevmscan.io/address/${a}`,
   },
+  solana: {
+    label: "Solana",
+    c: ["#9945FF", "#5b21b6"],
+    icon: "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+    tx: (r) => `https://solscan.io/tx/${r.txHash}`,
+    addr: (a) => `https://solscan.io/account/${a}`,
+  },
+  sui: {
+    label: "Sui",
+    c: ["#4DA2FF", "#1f6fd1"],
+    icon: "https://s2.coinmarketcap.com/static/img/coins/64x64/20947.png",
+    tx: (r) => `https://suiscan.xyz/mainnet/tx/${r.txHash}`,
+    addr: (a) => `https://suiscan.xyz/mainnet/account/${a}`,
+  },
   near: {
     label: "NEAR",
     c: ["#00c586", "#00875c"],
@@ -233,7 +247,7 @@ const CHAINS = {
 };
 
 /** 1Click's `blockchain` values, where the intents domain names a destination chain. */
-const ALIAS = { eth: "ethereum", zec: "zcash" };
+const ALIAS = { eth: "ethereum", zec: "zcash", sol: "solana" };
 const chainOf = (c) => CHAINS[c] ?? CHAINS[ALIAS[c]];
 
 /** The explorer's label for a host, so an external account says where it links. */
@@ -244,6 +258,8 @@ const SITES = [
   ["etherscan.io", "Etherscan"],
   ["basescan.org", "Basescan"],
   ["hyperevmscan.io", "HyperEVMScan"],
+  ["solscan.io", "Solscan"],
+  ["suiscan.xyz", "Suiscan"],
 ];
 
 /** @param {string} url */

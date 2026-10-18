@@ -3,15 +3,20 @@ import { CHAINS } from "../../chains";
 import type { Flow, LogEvent } from "../../types";
 import { vaaId } from "../vaa";
 
-/** NEAR's Wormhole core logs its own flat event: payload, emitter and sequence as hex and numbers. */
+/**
+ * NEAR's Wormhole core logs its own flat event: payload, emitter and sequence as hex and numbers.
+ * Solana's and Sui's watchers store their publishes in the same shape, with the consistency NEAR's
+ * omits.
+ */
 export interface NearPublished {
   data: string;
   nonce: number;
   emitter: string;
-  seq: number;
+  seq: number | string;
+  consistency?: number;
 }
 
-/** What NEAR's core logs a publish as. */
+/** What NEAR's core logs a publish as — and what Solana's and Sui's are stored as. */
 export const NEAR_PUBLISH = { standard: "wormhole", event: "publish" };
 
 interface Published {
@@ -69,7 +74,7 @@ export const messages: Flow = {
     },
     {
       // NEAR's core logs no consistency level: the guardians observe only final NEAR blocks and
-      // sign every NEAR message at 0, so that is what its VAA carries.
+      // sign every NEAR message at 0, so that is what its VAA carries. Solana and Sui say theirs.
       role: "wormhole-core",
       near: NEAR_PUBLISH,
       state: "published",
@@ -80,7 +85,7 @@ export const messages: Flow = {
         emitter: `0x${a.emitter}`,
         sequence: String(a.seq),
         nonce: a.nonce,
-        consistency: 0,
+        consistency: a.consistency ?? 0,
         payload: `0x${a.data}`,
         published: ev.ref,
       }),

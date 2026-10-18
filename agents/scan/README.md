@@ -51,14 +51,23 @@ deployment cannot silently point at the wrong contract.
 | `RPC_HYPEREVM_HTTP` | Same; its public RPC caps getLogs at 1,000 blocks — the default here. |
 | `RPC_HYDRATION_WSS` | Must be the substrate path, not the EVM one — see below.        |
 | `RPC_NEAR_TX`       | Optional. FastNEAR's transaction API; defaults to the public one. |
+| `RPC_SOLANA_HTTP`   | Optional. Solana JSON-RPC; defaults to the public one.          |
+| `RPC_SOLANA_WSS`    | Optional. Its `logsSubscribe` wakes the watcher before the poll. |
+| `RPC_SUI_GRAPHQL`   | Optional. Sui's GraphQL service; defaults to the public one.    |
 | `DATABASE_URL`      | Postgres.                                                       |
 | `ONECLICK_JWT`      | The intents domain's off-chain leg.                             |
 | `PORT`              | Defaults to 8080.                                               |
 
 Every EVM chain takes `RPC_<CHAIN>_WSS` or, where its endpoint has no websocket, `RPC_<CHAIN>_HTTP`.
 A chain is enabled by the presence of its RPC and disabled by its absence; watch entries on a chain
-with no endpoint are skipped. NEAR is the exception: FastNEAR's public API needs no key, so it is
-always on.
+with no endpoint are skipped. NEAR, Solana and Sui are the exception: their public endpoints need
+no key, and NTT puts little enough through them that those are enough, so they are always on.
+
+NTT on Solana and Sui logs nothing of its own. Their watchers read the transactions that touch our
+managers and decode them — instructions on Solana, calls and inputs on Sui — into JSON events stored
+like NEAR's ([src/chains/events.ts](src/chains/events.ts)): Wormhole publishes in NEAR's core's
+shape, and deliveries by the digest their VAA derives. A Solana release names no VAA, only the
+inbox item that digest derives, so that is what it is matched by.
 
 Hydration must be read over substrate: the Basejump landing's deliveries are XCM-driven
 `pallet_evm` calls with no ethereum receipt, so `eth_getLogs` cannot see them at all. Only Frontier

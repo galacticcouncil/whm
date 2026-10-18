@@ -16,12 +16,15 @@ export interface Watch {
    */
   id?: string;
   from: bigint;
-  /** Contracts whose events are kept — addresses, or account ids on NEAR. */
+  /**
+   * Contracts whose events are kept — addresses; account ids on NEAR; programs on Solana; on Sui,
+   * the NTT state objects and the core's package.
+   */
   at: string[];
   /**
-   * NEAR only: accounts whose transaction history surfaces `at`'s events, defaulting to `at`. A
-   * shared contract — the Wormhole core, a connector — is read through the accounts of ours that
-   * call it, never through its own history.
+   * NEAR, Solana and Sui: accounts whose transaction history surfaces `at`'s events, defaulting to
+   * `at`. A shared contract — the Wormhole core, a connector — is read through the accounts of ours
+   * that call it, never through its own history.
    */
   via?: string[];
   /**
@@ -29,7 +32,10 @@ export interface Watch {
    * log does.
    */
   calls?: string[];
-  /** Positional topic filter. An array in a slot is an OR; a null matches anything. */
+  /**
+   * Positional topic filter. An array in a slot is an OR; a null matches anything. On Solana and Sui
+   * it is applied to the topics their watchers store — a publish's emitter is its second.
+   */
   topics?: (`0x${string}` | `0x${string}`[] | null)[];
   /**
    * Resolve who sent the transaction, for events that do not say. Costs a receipt lookup per
@@ -86,7 +92,10 @@ export interface Leg<A = any> {
   role: string;
   /** The EVM event. Exactly one of `abi` and `near`. */
   abi?: AbiEvent;
-  /** The NEP-297 event, or a call kept as one (`standard: "call"`, `event`: the method). */
+  /**
+   * A JSON event: NEP-297, a NEAR call kept as one (`standard: "call"`, `event`: the method), or
+   * what the Solana and Sui watchers decode a transaction into (`chains/events.ts`).
+   */
   near?: NearEvent;
   state: string;
   keyBy?: string;

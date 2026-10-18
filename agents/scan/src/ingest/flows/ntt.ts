@@ -7,7 +7,14 @@ import {
   TransferRedeemedEvt,
 } from "../../abi";
 import { CHAINS } from "../../chains";
-import type { Flow, LogEvent } from "../../types";
+import {
+  NTT_QUEUED,
+  NTT_RECEIVED,
+  NTT_RELEASED,
+  type NttReceived,
+  type NttSettled,
+} from "../../chains/events";
+import type { Flow, Leg, LogEvent, NearEvent } from "../../types";
 import { parseNttTransfer } from "../payload";
 import { vaaId } from "../vaa";
 import { NEAR_PUBLISH, type NearPublished } from "./messages";
@@ -46,7 +53,7 @@ function published(payload: string, emitter: string, sequence: bigint, ev: LogEv
     source_chain: ev.chain,
     source_manager: t.sourceManager,
     recipient_manager: t.recipientManager,
-    manager_sequence: t.sequence.toString(),
+    manager_sequence: t.sequence?.toString() ?? null,
     sender: t.sender,
     amount: t.amount.toString(),
     decimals: t.decimals,
@@ -86,7 +93,7 @@ export const ntt: Flow = {
   name: "ntt",
   table: "ntt_transfers",
   key: { column: "digest", type: "TEXT" },
-  unique: ["vaa_id"],
+  unique: ["vaa_id", "inbox_item"],
   states: { published: 0, received: 1, queued: 2, redeemed: 3 },
   columns: {
     /** The VAA carrying it, in `chain/emitter/sequence` form. Joins to `wh_messages`. */
@@ -94,7 +101,7 @@ export const ntt: Flow = {
     source_chain: "TEXT",
     source_manager: "TEXT",
     recipient_manager: "TEXT",
-    /** The manager's own sequence — what a feature riding this rail correlates on. */
+    /** The manager's own sequence — what a feature riding this rail correlates on. None on Solana. */
     manager_sequence: "BIGINT",
     /** Trimmed to `decimals`, the precision the rail carries rather than the token's. */
     amount: "NUMERIC",
@@ -111,6 +118,8 @@ export const ntt: Flow = {
     to_chain: "INTEGER",
     /** What the transceiver marks consumed. A different hash from the digest, and both matter. */
     vaa_hash: "TEXT",
+    /** Solana only: the inbox item a release names — all it names, so what it is matched by. */
+    inbox_item: "TEXT",
     published: "JSONB",
     received: "JSONB",
     settled: "JSONB",
@@ -204,5 +213,50 @@ export const ntt: Flow = {
         settled: ev.ref,
       }),
     },
+    {
+      // Solana and Sui, decoded by their watchers: a verified VAA, by the digest it derives. It may
+      // land before the source is indexed, so it binds the VAA id and, on Solana, the inbox item a
+      // release will name.
+      role: "ntt",
+      near: NTT_RECEIVED,
+      state: "received",
+      key: (a: NttReceived) => a.digest,
+      patch: (a: NttReceived, ev: LogEvent) => ({
+        vaa_id: a.vaaId,
+        inbox_item: a.inboxItem ?? null,
+        received: ev.ref,
+      }),
+    },
+    ...settledLegs(NTT_RELEASED, "redeemed"),
+    ...settledLegs(NTT_QUEUED, "queued"),
   ],
 };
+
+/**
+ * A release or a hold, from Solana or Sui: by its digest where the transaction names one, else — a
+ * Solana release, which names only its inbox item — by the item its delivery bound.
+ *
+ * @param event The decoded event.
+ * @param state The state it moves the transfer to.
+ */
+function settledLegs(event: NearEvent, state: string): Leg[] {
+  const patch = (_a: NttSettled, ev: LogEvent) => ({ settled: ev.ref });
+  return [
+    {
+      role: "ntt",
+      near: event,
+      state,
+      keyBy: "digest",
+      key: (a: NttSettled) => a.digest ?? null,
+      patch,
+    },
+    {
+      role: "ntt",
+      near: event,
+      state,
+      keyBy: "inbox_item",
+      key: (a: NttSettled) => (a.digest ? null : (a.inboxItem ?? null)),
+      patch,
+    },
+  ];
+}

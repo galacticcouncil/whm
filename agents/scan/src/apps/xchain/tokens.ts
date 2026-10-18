@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
-import { NTT } from "../../deployments";
+import { base58 } from "@scure/base";
+
+import { NTT, type NttLeg } from "../../deployments";
 
 import { ROUTES } from "./utxo/routes";
 
@@ -19,13 +21,20 @@ export interface TokenMeta {
 }
 
 /**
- * A NEAR manager as a transfer's `source_manager` names it: its emitter, `sha256(account)`, trimmed
- * to the last 20 bytes the way every manager is.
+ * A manager as a transfer's `source_manager` names it: its 32 bytes trimmed to the last 20, the way
+ * every manager is. NEAR's 32 bytes are `sha256(account)`; Solana's, the program's key; Sui's, the
+ * state object's id.
  *
- * @param account The manager's account.
+ * @param leg The token's leg on one chain.
  */
-const nearManager = (account: string) =>
-  `0x${createHash("sha256").update(account).digest("hex").slice(24)}`;
+function managerKey(leg: NttLeg): string {
+  if (typeof leg === "string")
+    return `0x${createHash("sha256").update(leg).digest("hex").slice(24)}`;
+  if ("program" in leg)
+    return `0x${Buffer.from(base58.decode(leg.program)).toString("hex").slice(24)}`;
+  if ("state" in leg) return `0x${leg.state.slice(-40)}`;
+  return leg.manager.toLowerCase();
+}
 
 /**
  * Each NTT token: symbol, Hydration asset id and home chain. The asset id is the last four bytes of
@@ -46,6 +55,10 @@ export const NTT_TOKENS: Record<keyof typeof NTT, TokenMeta> = {
   hype: { symbol: "HYPE", assetId: 1_001_355, home: "hyperevm" },
   near: { symbol: "NEAR", assetId: 1_001_358, home: "near" },
   zec: { symbol: "ZEC", assetId: 1_001_357, home: "zcash" },
+  sol: { symbol: "SOL", assetId: 1_000_752, home: "solana" },
+  jitosol: { symbol: "JitoSOL", assetId: 40, home: "solana" },
+  prime: { symbol: "PRIME", assetId: 43, home: "solana" },
+  sui: { symbol: "SUI", assetId: 1_000_753, home: "sui" },
 };
 
 /** Every token by symbol — what a page draws a row's amount with. */
@@ -63,8 +76,8 @@ const addKey = (symbol: string, key: string) =>
 const BY_MANAGER = new Map<string, string>();
 for (const [token, legs] of Object.entries(NTT)) {
   const symbol = NTT_TOKENS[token as keyof typeof NTT].symbol;
-  for (const leg of Object.values(legs as Record<string, { manager: string } | string>)) {
-    const manager = typeof leg === "string" ? nearManager(leg) : leg.manager.toLowerCase();
+  for (const leg of Object.values(legs as Record<string, NttLeg>)) {
+    const manager = managerKey(leg);
     BY_MANAGER.set(manager, symbol);
     addKey(symbol, manager);
   }
