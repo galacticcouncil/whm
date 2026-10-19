@@ -13,6 +13,7 @@ import log from "../../logger";
 import type { Watch } from "../../types";
 import { BoundedQueue } from "../../utils";
 import { cursorId } from "../cursor";
+import { Recovery } from "../recovery";
 
 import type { EvmChain } from "./types";
 
@@ -47,12 +48,16 @@ export class EvmWatcher {
   private lastHeadAt = 0;
   private busy = false;
   private times = new Map<bigint, number>();
+  private readonly sweep: Recovery;
+  private readonly heads: Recovery;
 
   constructor(
     public readonly cfg: EvmChain,
     private readonly watches: Watch[],
     private readonly onIngest?: (chain: string) => void,
   ) {
+    this.sweep = new Recovery(cfg.name, "sweep");
+    this.heads = new Recovery(cfg.name, "heads");
     this.client = createPublicClient({
       chain: cfg.chain,
       transport: cfg.rpcUrl.startsWith("ws")
@@ -95,8 +100,10 @@ export class EvmWatcher {
       onBlockNumber: (n) => {
         this.tip = n;
         this.lastHeadAt = Date.now();
+        this.heads.ok(`at ${n}`);
       },
       onError: (e) => {
+        this.heads.fail();
         log.error(`[${this.cfg.name}] ws: ${e.message}`);
         setTimeout(() => this.watch(), 5_000);
       },
@@ -116,11 +123,14 @@ export class EvmWatcher {
       // Sequential across roles: each already fans out internally, and normally every role is at
       // the tip so this is one small range each.
       for (const w of this.watches) await this.tick(w, safe);
+      this.sweep.ok(`at ${safe}`);
       if (stale) {
+        this.heads.fail();
         log.warn(`[${this.cfg.name}] heads stale, re-subscribing`);
         this.watch();
       }
     } catch (e) {
+      this.sweep.fail();
       log.error(`[${this.cfg.name}] ingest: ${(e as Error).stack ?? String(e)}`);
     } finally {
       this.busy = false;

@@ -3,6 +3,7 @@ import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } fro
 import log from "../../logger";
 import type { Watch } from "../../types";
 import { cursorId } from "../cursor";
+import { Recovery } from "../recovery";
 
 import { TX_BATCH } from "./consts";
 import { FastNear, nearLogs } from "./fastnear";
@@ -29,6 +30,7 @@ interface Found {
 export class NearWatcher {
   private timer?: NodeJS.Timeout;
   private busy = false;
+  private readonly recovery: Recovery;
   /** The highest block the index has shown us — NEAR's stand-in for a safe head. */
   private tip = 0n;
   /** Watch entries by the account whose history surfaces them. */
@@ -42,6 +44,7 @@ export class NearWatcher {
     private readonly watches: Watch[],
     private readonly onIngest?: (chain: string) => void,
   ) {
+    this.recovery = new Recovery(cfg.name, "drain");
     for (const w of watches) {
       for (const a of w.via ?? w.at) this.sources.set(a, [...(this.sources.get(a) ?? []), w]);
     }
@@ -68,7 +71,9 @@ export class NearWatcher {
     this.busy = true;
     try {
       await this.tick();
+      this.recovery.ok();
     } catch (e) {
+      this.recovery.fail();
       log.error(`[${this.cfg.name}] drain: ${(e as Error).stack ?? String(e)}`);
     } finally {
       this.busy = false;

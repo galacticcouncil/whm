@@ -49,8 +49,13 @@ interface DepositDetails {
   success: boolean;
 }
 
-/** A row's key: the source transaction, on the chain it was sent from. */
-const source = (ev: LogEvent) => `${ev.chain}:${ev.ref.txHash}`;
+/**
+ * A row's key: the source transaction, on the chain it was sent from. A Hydration call that came in
+ * as a substrate extrinsic has no ethereum transaction — each of its events carries its own
+ * block-and-event identity instead — so it is keyed by the extrinsic, which all of them share.
+ */
+const source = (ev: LogEvent) =>
+  `${ev.chain}:${ev.ref.extrinsic && ev.ref.txHash.includes("-") ? ev.ref.extrinsic : ev.ref.txHash}`;
 
 /** NTT senders that mark a transfer as one of ours, by direction. */
 const WITHDRAW_SENDERS = new Set(ROUTES.map(withdrawSender));

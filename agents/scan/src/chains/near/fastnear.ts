@@ -41,8 +41,12 @@ export class FastNear {
   }
 
   /**
-   * Transactions whole, in batches of `TX_BATCH`. Throws when one is missing, so nothing is stepped
-   * over for want of it.
+   * Transactions whole, in batches of `TX_BATCH`, one per hash. Throws when one is missing, so
+   * nothing is stepped over for want of it.
+   *
+   * The index can hold a transaction twice — a stale copy short of its last receipts beside the
+   * whole one — so of the copies, the one with the most receipts is kept: a transaction's receipts
+   * only grow as it executes.
    *
    * @param hashes Any number.
    */
@@ -53,11 +57,19 @@ export class FastNear {
       const r = await this.post<{ transactions?: (Tx | null)[] }>("/v0/transactions", {
         tx_hashes: slice,
       });
-      const txs = (r.transactions ?? []).filter((t): t is Tx => t !== null);
-      if (txs.length !== slice.length) {
-        throw new Error(`transactions: asked for ${slice.length}, got ${txs.length}`);
+      const whole = new Map<string, Tx>();
+      for (const t of r.transactions ?? []) {
+        if (!t) continue;
+        const seen = whole.get(t.transaction.hash);
+        if (!seen || t.receipts.length > seen.receipts.length) whole.set(t.transaction.hash, t);
       }
-      out.push(...txs);
+      const missing = slice.filter((h) => !whole.has(h));
+      if (missing.length) {
+        throw new Error(
+          `transactions: ${missing.length} of ${slice.length} missing (${missing[0]})`,
+        );
+      }
+      out.push(...slice.map((h) => whole.get(h)!));
     }
     return out;
   }

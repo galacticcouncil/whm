@@ -4,6 +4,7 @@ import { WORMHOLE_CORE } from "../../deployments";
 import log from "../../logger";
 import type { Watch } from "../../types";
 import { cursorId } from "../cursor";
+import { Recovery } from "../recovery";
 import { topicsMatch } from "../events";
 
 import { decode, instructions, postedVaas, type Decoded } from "./decode";
@@ -32,6 +33,8 @@ export class SolanaWatcher {
   private timer?: NodeJS.Timeout;
   private socket?: WebSocket;
   private busy = false;
+  private readonly recovery: Recovery;
+  private readonly socketHealth: Recovery;
   private again = false;
   private tip = 0n;
   /** Watch entries by the address whose signatures surface them. */
@@ -45,6 +48,8 @@ export class SolanaWatcher {
     private readonly watches: Watch[],
     private readonly onIngest?: (chain: string) => void,
   ) {
+    this.recovery = new Recovery(cfg.name, "drain");
+    this.socketHealth = new Recovery(cfg.name, "websocket");
     for (const w of watches) {
       for (const a of w.via ?? w.at) this.sources.set(a, [...(this.sources.get(a) ?? []), w]);
     }
@@ -81,6 +86,7 @@ export class SolanaWatcher {
     this.socket = ws;
     let id = 0;
     ws.onopen = () => {
+      this.socketHealth.ok();
       for (const a of this.sources.keys()) {
         ws.send(
           JSON.stringify({
@@ -99,7 +105,10 @@ export class SolanaWatcher {
       if (this.socket !== ws) return;
       setTimeout(() => this.subscribe(url), 5_000);
     };
-    ws.onerror = () => log.warn(`[${this.cfg.name}] websocket error — polling until it reconnects`);
+    ws.onerror = () => {
+      this.socketHealth.fail();
+      log.warn(`[${this.cfg.name}] websocket error — polling until it reconnects`);
+    };
   }
 
   private async drain(): Promise<void> {
@@ -113,7 +122,9 @@ export class SolanaWatcher {
         this.again = false;
         await this.tick();
       } while (this.again);
+      this.recovery.ok();
     } catch (e) {
+      this.recovery.fail();
       log.error(`[${this.cfg.name}] drain: ${(e as Error).stack ?? String(e)}`);
     } finally {
       this.busy = false;

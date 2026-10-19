@@ -85,7 +85,11 @@ const UNION = `
          -- A deposit's sender is who the order names to refund, not whichever coins the wallet spent.
          CASE u.direction WHEN 'deposit' THEN COALESCE(u.refund_address, u.sender) ELSE u.sender END,
          CASE u.direction WHEN 'deposit' THEN 'hydration' ELSE u.chain END, u.recipient,
-         u.chain, COALESCE(n.amount, u.amount), NULL, u.fee,
+         -- What the sender sent, as the detail page's Amount: a withdrawal pays its fee on top of
+         -- what crosses, a deposit is what was paid on its own chain.
+         u.chain,
+         CASE u.direction WHEN 'withdraw' THEN u.amount + COALESCE(u.fee, 0) ELSE u.amount END,
+         NULL, u.fee,
          CASE WHEN u.deposit_ok = false THEN 'failed'
               WHEN u.direction = 'deposit' AND n.state = 'redeemed' THEN 'completed'
               WHEN u.state = 'confirmed' THEN 'completed'
@@ -99,11 +103,13 @@ const UNION = `
          ${refs("u.requested", "u.deposited", "u.withdrawn", "n.settled")} || ARRAY_REMOVE(ARRAY[lower(u.utxo_tx)], NULL)
     FROM utxo_transfers u LEFT JOIN ntt_transfers n ON n.digest = u.digest
     ${SIGN}
+   -- A row only exists as a transfer once its start does: a request, or a proven deposit.
+   WHERE u.requested IS NOT NULL OR u.deposited IS NOT NULL
   UNION ALL
   SELECT 'basejump:' || b.id, 'basejump', 'basejump',
          COALESCE((b.initiated->>'blockTimestamp')::bigint, (b.completed->>'blockTimestamp')::bigint),
          COALESCE(b.source_chain, 'ethereum'), b.sender, COALESCE(b.dest_chain, 'hydration'), b.recipient,
-         b.source_asset, b.net_amount, NULL, b.fee,
+         b.source_asset, COALESCE(b.gross_amount, b.net_amount), NULL, b.fee,
          CASE WHEN b.state IN ('completed', 'fulfilled') THEN 'completed'
               WHEN b.state = 'queued' THEN 'held' ELSE 'pending' END,
          b.state,

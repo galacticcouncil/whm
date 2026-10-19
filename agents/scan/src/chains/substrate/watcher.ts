@@ -9,6 +9,7 @@ import log from "../../logger";
 import type { Watch } from "../../types";
 import { BoundedQueue } from "../../utils";
 import { cursorId } from "../cursor";
+import { Recovery } from "../recovery";
 
 import { PROGRESS_LOG_MS, RANGE, SYSTEM_EVENTS_KEY } from "./consts";
 import type { SubstrateChain } from "./types";
@@ -52,6 +53,8 @@ export class SubstrateWatcher {
   private sub?: { unsubscribe(): void };
   private pendingSafe?: bigint;
   private lastBlockAt = 0;
+  private readonly recovery: Recovery;
+  private readonly stream: Recovery;
   private busy = false;
   /** Last time a drain started or wrote a block — what the watchdog measures a stall against. */
   private progressAt = 0;
@@ -65,6 +68,8 @@ export class SubstrateWatcher {
     private readonly watches: Watch[],
     private readonly onIngest?: (chain: string) => void,
   ) {
+    this.recovery = new Recovery(cfg.name, "drain");
+    this.stream = new Recovery(cfg.name, "finalized stream");
     this.client = createClient(getWsProvider(cfg.wssUrl));
     for (const w of watches) {
       for (const a of w.at) {
@@ -106,9 +111,11 @@ export class SubstrateWatcher {
         const n = BigInt(b.number);
         this.pendingSafe = n > this.cfg.confirmations ? n - this.cfg.confirmations : 0n;
         this.lastBlockAt = Date.now();
+        this.stream.ok(`at ${n}`);
         void this.drain();
       },
       error: (e) => {
+        this.stream.fail();
         log.error(`[${this.cfg.name}] finalizedBlock$: ${(e as Error)?.message ?? String(e)}`);
         setTimeout(() => this.subscribe(), 5_000);
       },
@@ -139,11 +146,14 @@ export class SubstrateWatcher {
         this.pendingSafe = undefined;
         await this.tick(safe);
       }
+      this.recovery.ok();
       if (stale) {
+        this.stream.fail();
         log.warn(`[${this.cfg.name}] finalized stream stale, re-subscribing`);
         this.subscribe();
       }
     } catch (e) {
+      this.recovery.fail();
       log.error(`[${this.cfg.name}] drain: ${(e as Error).stack ?? String(e)}`);
     } finally {
       this.busy = false;

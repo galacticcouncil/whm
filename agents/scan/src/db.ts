@@ -5,6 +5,12 @@ import { databaseUrl } from "./config";
 
 export const pool = new pg.Pool({ connectionString: databaseUrl });
 
+// An idle connection killed under the pool — Postgres restarting, a failover — is reported here, and
+// unheard it would take the process down. The pool drops it and opens a fresh one on the next query.
+pool.on("error", (e) =>
+  log.warn(`db: idle connection lost (${e.message}) — reconnecting on demand`),
+);
+
 /**
  * Core schema, owned by ingest and read by every flow.
  *
