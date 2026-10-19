@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Feeds · Hydration oracles</title>
+    <title>Feeds · Hydration scan</title>
     <script>
       try {
         var t = localStorage.getItem("explorer-theme");
@@ -41,10 +41,23 @@
     </main>
 
     <script type="module">
-      import { agoLong, at, chainBadge, esc, json, live, tokenIcon, topbar } from "/shared/app.js";
+      import {
+        NAV,
+        agoLong,
+        at,
+        chainBadge,
+        esc,
+        json,
+        live,
+        tokenIcon,
+        topbar,
+      } from "/shared/app.js";
       import { fmt, sparkline } from "/chart.js";
 
-      topbar("oracles", [["/", "Feeds"]], { conn: false });
+      topbar("scan", NAV, { conn: false });
+
+      /** This section's app, through the UI's proxy. */
+      const API = "/api/feeds";
 
       const el = (id) => document.getElementById(id);
 
@@ -91,7 +104,7 @@
       ).join("");
 
       async function load() {
-        const feeds = await json("/api/feeds");
+        const feeds = await json(`${API}/feeds`);
         if (!feeds) {
           el("grid").innerHTML =
             '<div class="panel"><div class="table-error"><strong>Could not load feeds.</strong></div></div>';
@@ -116,6 +129,7 @@
           pending = setTimeout(load, 500);
         },
         load,
+        API,
       );
       setInterval(load, 30_000);
     </script>

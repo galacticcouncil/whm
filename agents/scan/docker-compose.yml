@@ -21,9 +21,9 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
 
-  app-xchain:
+  app-transfers:
     image: galacticcouncil/scan:latest
-    command: [node, xchain/app.js]
+    command: [node, transfers/app.js]
     environment:
       - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
     ports:
@@ -38,15 +38,38 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
 
-  app-oracles:
+  app-feeds:
     image: galacticcouncil/scan:latest
-    command: [node, oracles/app.js]
+    command: [node, feeds/app.js]
     environment:
       - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
     ports:
       - "8082:8080"
     depends_on:
       - postgres
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
+  # Every page, on one origin: Transfers, Orders, Feeds. Each section's API calls are proxied to its
+  # app over the compose network; the apps keep their own ports for anyone using the APIs directly.
+  ui:
+    image: galacticcouncil/scan:latest
+    command: [node, ui/app.js]
+    environment:
+      - TRANSFERS_API=http://app-transfers:8080
+      - ORDERS_API=http://app-intents:8080
+      - FEEDS_API=http://app-feeds:8080
+    ports:
+      - "8083:8080"
+    depends_on:
+      - app-transfers
+      - app-intents
+      - app-feeds
     networks:
       - default
     logging:

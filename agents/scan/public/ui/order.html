@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <title>Order · Hydration intents</title>
+    <title>Order · Hydration scan</title>
     <script>
       try {
         var t = localStorage.getItem("explorer-theme");
@@ -25,11 +25,12 @@
 
     <script type="module">
       import {
+        NAV,
         addrLink,
         asset,
         assetIcon,
-        chainIcon,
         badge,
+        chainIcon,
         destTxLink,
         esc,
         json,
@@ -42,7 +43,10 @@
         vaaLink,
       } from "/shared/app.js";
 
-      topbar("intents", [["/", "Orders"]]);
+      topbar("scan", NAV);
+
+      /** This section's app, through the UI's proxy. */
+      const API = "/api/orders";
 
       // Also answers the bare `/orders`, which has nothing to show — the list is the root.
       const sequence = decodeURIComponent(
@@ -281,7 +285,7 @@
       }
 
       async function load() {
-        render(await json(`/api/orders/${encodeURIComponent(sequence)}`));
+        render(await json(`${API}/orders/${encodeURIComponent(sequence)}`));
       }
 
       live(
@@ -290,9 +294,10 @@
           if (String(u.record?.transfer_sequence) === sequence) load();
         },
         load,
+        API,
       );
 
-      json("/api/tokens").then((t) => {
+      json(`${API}/tokens`).then((t) => {
         if (t) tokens = t;
         load();
       });

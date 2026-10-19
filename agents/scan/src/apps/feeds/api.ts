@@ -6,7 +6,7 @@ import { deliveredUpTo, overview, RANGES, series, updatesOf } from "./db";
 import { feed, FEEDS } from "./feeds";
 
 /**
- * Register the oracles read API: every feed at a glance, one feed's chart, and its updates.
+ * Register the feeds read API: every feed at a glance, one feed's chart, and its updates.
  *
  * @param app Fastify instance.
  */

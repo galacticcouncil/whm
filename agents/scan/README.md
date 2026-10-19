@@ -4,15 +4,22 @@ Indexes the chains this repo's contracts run on, and serves what it finds.
 
 One image, several entry points. **Ingest** is the only writer: it reads every watched contract into
 a shared event store, then folds that store into the two tables no feature owns — the Wormhole
-messages our emitters publish, and the NTT transfers riding them. Every other container reads what
-ingest wrote, owns its own tables, and serves its own pages.
+messages our emitters publish, and the NTT transfers riding them. Every app reads what ingest
+wrote, owns its own tables, and serves its own open API — reads, and a live stream at `/api/events`
+anyone may subscribe to. The **UI** is one site over all of them.
 
 ```
-ingest      chains → events → wh_messages + ntt_transfers      (no UI)
-intents     intent_orders + 1Click                             :8080
-xchain      every transfer: NTT, UTXO coins via Omni, Basejump :8081
-oracles     oracle relay updates, each feed's value over time  :8082
+ingest           chains → events → wh_messages + ntt_transfers      (no UI)
+app-intents      intent_orders + 1Click                             :8080
+app-transfers    every transfer: NTT, UTXO coins via Omni, Basejump :8081
+app-feeds        oracle relay updates, each feed's value over time  :8082
+ui               Hydration scan: Transfers · Orders · Feeds         :8083
 ```
+
+The UI holds no state and touches no database. It serves every page, and passes `/api/<section>/…`
+through to that section's app — `transfers`, `orders`, `feeds` — live streams included, so the pages
+are one origin while the apps stay public on their own ports. `TRANSFERS_API`, `ORDERS_API` and
+`FEEDS_API` name the apps; they default to the ports above on this host.
 
 Chains are indexed **in parallel and at wildly different speeds**, so events arrive in no
 particular order. Every flow is built to come out ordered anyway: state advances by rank and never
@@ -35,9 +42,10 @@ src/
   flow/            the reconciler: types, DDL generation, upsert, drain, serve
   ingest/          the writer, plus the wh_messages and ntt_transfers flows
   apps/<domain>/   one per container: flows, api, workers, entry point
+  ui/              the site: every page, and a proxy to each section's app
 public/
-  shared/          styling every domain's pages use
-  <domain>/        that domain's pages
+  shared/          styling and helpers every page uses
+  ui/              the pages — transfers, orders, feeds, and a detail page for each
 ```
 
 ## Configuration
@@ -116,7 +124,7 @@ node admin.js rebuild <reader>                    # empty a reader's tables, rep
 
 - **Rewind** re-reads a chain. Events already stored are skipped, so it is free to overshoot; events
   found for the first time reach every reader as new.
-- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `xchain`, `oracles`) — for a new leg
+- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `transfers`, `feeds`) — for a new leg
   or changed flow logic over events already stored. Its tables are emptied and refilled; anything a
   poller wrote is re-fetched as the rows come back.
 
@@ -138,7 +146,7 @@ About 1.2 MB a day — some 35 MB a month, 450 MB a year at that rate. The volum
 4,011 events, Solana's 1,634, Robinhood's 528, Ethereum's 518, HyperEVM's 362, Base's 234 and
 NEAR's 107.
 
-Only `oracle_updates` grows fast enough to want one, and the oracles app
+Only `oracle_updates` grows fast enough to want one, and the feeds app
 prunes it to 30 days itself; everything else is kept, so any reader can be rebuilt from the store.
 
 ## Adding a flow
@@ -174,11 +182,13 @@ here. The table, its indexes and its state-rank function are generated from the 
 ```sh
 pnpm dev:db                 # postgres on :5432
 pnpm build
-pnpm dev ingest             # or: intents, xchain, oracles
+pnpm dev ingest             # or: intents, transfers, feeds, ui
 ```
 
 `pnpm dev <domain>` rebuilds and runs one container's worth — they are separate processes, so run
-ingest alongside whichever domain you are working on.
+ingest alongside whichever domain you are working on, and `ui` to see its pages. Locally the apps
+run on ports of your choosing, so point the UI at them with `TRANSFERS_API`, `ORDERS_API` and
+`FEEDS_API` in `.env`.
 
 ## Notes on the NTT rail
 
@@ -198,7 +208,7 @@ where a destination chain runs ahead of its source it can find nothing to update
 hash and a timestamp, and live operation publishes ~15 minutes before it delivers, so this is a
 cold-start artifact rather than a running concern.
 
-## Transfers (the xchain app)
+## Transfers (the transfers app)
 
 One list for everything Hydration moves, whichever rail carries it, and one detail page per
 transfer. `/api/transfers` unions three sources into one shape — time, type, both ends, amount, fee,
@@ -207,7 +217,7 @@ status — and `/api/transfers/:id` returns that view beside the rail's own row.
 - **NTT** — `ntt_transfers`, read as ingest wrote it: WETH (Ethereum), NEAR and ZEC (the NEAR hub).
   A transfer another rail claims is listed under that rail instead.
 - **UTXO coins** — `utxo_transfers`, keyed by the source transaction; each coin is a route in
-  `apps/xchain/utxo/routes.ts`.
+  `apps/transfers/utxo/routes.ts`.
   - A **deposit** is one NEAR transaction: Omni's relayer proves the coin's payment
     (`verify_deposit_v2`, whose arguments carry the raw transaction — so who paid, and to which
     deposit address), the connector mints into the coin's NTT manager, and the manager publishes.
@@ -223,13 +233,13 @@ status — and `/api/transfers/:id` returns that view beside the rail's own row.
 Stages: NTT `published → received → redeemed | queued`; a deposit `deposited → published →
 redeemed`; a withdrawal `requested → received → signed → withdrawn → confirmed`.
 
-## Oracles (the oracles app)
+## Oracles (the feeds app)
 
 Every update the oracle relays carry, and each feed's value over time. A relay is a source-chain
 emitter publishing `(action, assetId, value, timestamp)` through Wormhole, and an `OracleReceiver`
 on the destination writing it into the oracle there — Ethereum, Solana and Robinhood into
 Hydration, Hydration into Robinhood (`ORACLE` in `deployments.ts`; feeds in
-`apps/oracles/feeds.ts`).
+`apps/feeds/feeds.ts`).
 
 - The emitters are read off their chain's Wormhole core under a cursor of their own,
   `oracle-core`, so they backfill without moving the core's NTT cursor. Solana's emitter posts
@@ -244,5 +254,5 @@ Hydration, Hydration into Robinhood (`ORACLE` in `deployments.ts`; feeds in
   far, so a chain still backfilling does not kill every feed landing on it.
 - Postgres has no TTL, so the app prunes `oracle_updates` to the last 30 days, hourly.
 
-`/` is a card per feed — latest value, a week's sparkline — and `/feed/:id` its chart (24H, 7D, 30D)
-above every update published, delivered or not.
+In the UI, `/feeds` is a card per feed — latest value, a week's sparkline — and `/feed/:id` its
+chart (24H, 7D, 30D) above every update published, delivered or not.

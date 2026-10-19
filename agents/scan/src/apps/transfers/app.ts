@@ -12,7 +12,7 @@ import { ConfirmPoller } from "./utxo/confirms";
 import { signs, utxo } from "./utxo/flows";
 import { WithdrawPoller } from "./utxo/withdraws";
 
-const NAME = "xchain";
+const NAME = "transfers";
 const FLOWS = [basejump, utxo, signs];
 
 /**
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   new WithdrawPoller(new FastNear(near().txApi)).start();
   new ConfirmPoller().start();
 
-  log.info("xchain ready.");
+  log.info("transfers ready.");
 }
 
 main().catch((err) => {

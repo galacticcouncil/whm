@@ -8,7 +8,7 @@ import { routes } from "./api";
 import { prune } from "./db";
 import { updates } from "./flows";
 
-const NAME = "oracles";
+const NAME = "feeds";
 const FLOWS = [updates];
 const PRUNE_MS = 60 * 60_000;
 
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   void pruneOld();
   setInterval(pruneOld, PRUNE_MS);
 
-  log.info("oracles ready.");
+  log.info("feeds ready.");
 }
 
 main().catch((err) => {

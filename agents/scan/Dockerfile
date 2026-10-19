@@ -10,7 +10,6 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY dist/ ./
-# Every domain's pages, in public/<domain>/. Each container serves only its own.
 COPY public ./public
 
 EXPOSE 8080

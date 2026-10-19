@@ -5,8 +5,9 @@
   "scripts": {
     "start:ingest": "node dist/ingest/app.js",
     "start:intents": "node dist/intents/app.js",
-    "start:xchain": "node dist/xchain/app.js",
-    "start:oracles": "node dist/oracles/app.js",
+    "start:transfers": "node dist/transfers/app.js",
+    "start:feeds": "node dist/feeds/app.js",
+    "start:ui": "node dist/ui/app.js",
     "prebuild": "npm run clean",
     "build": "node ./esbuild.dist.mjs",
     "clean": "rm -rf dist/",

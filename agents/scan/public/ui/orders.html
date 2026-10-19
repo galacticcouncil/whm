@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Orders · Hydration intents</title>
+    <title>Orders · Hydration scan</title>
     <script>
       try {
         var t = localStorage.getItem("explorer-theme");
@@ -53,6 +53,7 @@
 
     <script type="module">
       import {
+        NAV,
         addrLink,
         agoLong,
         asset,
@@ -70,7 +71,10 @@
         topbar,
       } from "/shared/app.js";
 
-      topbar("intents", [["/", "Orders"]], { conn: false });
+      topbar("scan", NAV, { conn: false });
+
+      /** This section's app, through the UI's proxy. */
+      const API = "/api/orders";
 
       const LIMIT = 25;
       const STATES = ["placed", "processed", "settled", "refunded", "failed"];
@@ -146,7 +150,7 @@
         }
         el("rows").innerHTML = items
           .map((r) => {
-            const href = `/orders/${encodeURIComponent(r.transfer_sequence)}`;
+            const href = `/order/${encodeURIComponent(r.transfer_sequence)}`;
             const isNew = fresh && !shown.has(r.transfer_sequence);
             return `<tr class="clickable${isNew ? " row-new" : ""}" data-href="${href}">
               <td class="mono" data-label="Order"><a class="hash" href="${href}">#${esc(r.settlement_sequence ?? r.transfer_sequence)}</a></td>
@@ -183,7 +187,7 @@
         if (q) p.set("address", q);
         if (states.length) p.set("state", states.join(","));
         el("rows").classList.add("rows-pending");
-        const data = await json(`/api/orders?${p}`);
+        const data = await json(`${API}/orders?${p}`);
         el("rows").classList.remove("rows-pending");
         if (!data) {
           el("rows").innerHTML =
@@ -243,7 +247,7 @@
       // A change anywhere reloads the first page, and what arrived flashes. A burst coalesces.
       let pending;
       skeleton();
-      json("/api/tokens").then((t) => {
+      json(`${API}/tokens`).then((t) => {
         if (t) tokens = t;
         live(
           "orders",
@@ -253,6 +257,7 @@
             pending = setTimeout(() => load(true), 300);
           },
           () => load(),
+          API,
         );
       });
     </script>

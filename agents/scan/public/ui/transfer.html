@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Transfer · Hydration xchain</title>
+    <title>Transfer · Hydration scan</title>
     <script>
       try {
         var t = localStorage.getItem("explorer-theme");
@@ -24,12 +24,15 @@
 
     <script type="module">
       import {
+        NAV,
         addrLink,
-        at,
         agoLong,
+        amount,
+        at,
         badge,
         chainBadge,
         chainLabel,
+        copyBtn,
         dl,
         esc,
         eventLink,
@@ -41,14 +44,15 @@
         short,
         statusBadge,
         tokenAmount,
-        amount,
         topbar,
         txLink,
         vaaLink,
-        copyBtn,
       } from "/shared/app.js";
 
-      topbar("xchain", [["/", "Transfers"]]);
+      topbar("scan", NAV);
+
+      /** This section's app, through the UI's proxy. */
+      const API = "/api/transfers";
 
       // Also answers the bare `/transfer`, which has nothing to show — the list is the root.
       const id = decodeURIComponent(location.pathname.split("/")[2] ?? "");
@@ -339,9 +343,9 @@
         // Up to four steps share a row; five or six break into two rows of three.
         const legs = ROUTE[v.kind](v, r).filter(Boolean);
         const cols = legs.length <= 4 ? legs.length : 3;
-        document.title = `${title} · Hydration xchain`;
+        document.title = `${title} · Hydration scan`;
         main.innerHTML = `
-          <div class="crumbs"><a href="/">Transfers</a><span class="sep">/</span><span>${esc(title)}</span></div>
+          <div class="crumbs"><a href="/transfers">Transfers</a><span class="sep">/</span><span>${esc(title)}</span></div>
           <h1 class="page-title">${esc(title)}
             <span class="sub">${chainBadge(v.from_chain)}<span class="dim">→</span>${chainBadge(v.to_chain)}</span>
             ${statusBadge(v.status, { title: v.stage })}
@@ -352,13 +356,13 @@
       }
 
       async function load() {
-        render(await json(`/api/transfers/${encodeURIComponent(id)}`));
+        render(await json(`${API}/transfers/${encodeURIComponent(id)}`));
       }
 
       // Every rail's changes: this page cannot tell from a notice which of its rows moved, and a
       // refetch is one request.
       let pending;
-      json("/api/filters").then((f) => {
+      json(`${API}/filters`).then((f) => {
         assets = f?.assets ?? [];
         live(
           "ntt,utxo,utxo-signs,basejump",
@@ -367,6 +371,7 @@
             pending = setTimeout(load, 300);
           },
           load,
+          API,
         );
       });
     </script>

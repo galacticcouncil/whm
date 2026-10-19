@@ -12,18 +12,27 @@
 
 const HDX_LOGO = `<svg class="logo" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M18.0532 11.3604C18.2827 11.1319 18.5778 10.8381 18.8718 10.5463C19.5265 9.89543 19.5265 8.83853 18.8718 8.18664L18.1782 7.49598C15.6959 9.96786 11.982 10.4637 9.00484 8.98646C11.017 9.35678 13.1028 9.06807 14.951 8.0785C16.1876 7.41641 16.4222 5.74741 15.4295 4.75886L11.3366 0.683262C10.4217 -0.227754 8.93928 -0.227754 8.02542 0.683262L3.61392 5.07613C6.51941 3.84682 10.0089 4.4171 12.3714 6.78594C8.76716 5.04349 4.30136 5.66171 1.3088 8.64164C1.07931 8.87016 0.78323 9.16499 0.490223 9.45676C-0.163408 10.1086 -0.163408 11.1645 0.490223 11.8154L1.18279 12.505C3.66515 10.0332 7.37896 9.53735 10.3562 11.0146C8.34404 10.6442 6.25816 10.933 4.40996 11.9225C3.17339 12.5846 2.93878 14.2536 3.93152 15.2422L8.0244 19.3178C8.93928 20.2288 10.4217 20.2288 11.3356 19.3178L15.7471 14.9249C12.8416 16.1542 9.35215 15.5839 6.98965 13.2151C10.5938 14.9575 15.0596 14.3393 18.0522 11.3594L18.0532 11.3604Z"></path></svg>`;
 
+/** The sections, one per app: the top bar's nav on every page. */
+export const NAV = [
+  ["/transfers", "Transfers"],
+  ["/orders", "Orders"],
+  ["/feeds", "Feeds"],
+];
+
 /**
  * Render the top bar. Same shape as the explorer's — mark, wordmark, pill nav, right-hand cluster.
  *
  * @param {string} domain Wordmark suffix, where the explorer says "Explorer".
- * @param {Array<[string, string]>} links `[href, label]`; the one matching the path is current.
+ * @param {Array<[string, string]>} links `[href, label]`; the one matching the path is current — a
+ *   section's detail pages too, `/transfer/…` under `/transfers`.
  * @param {{conn?: boolean}} [opts] `conn: false` when the page shows its live state itself.
  */
 export function topbar(domain, links = [], opts = {}) {
   const here = location.pathname;
   const nav = links
     .map(([href, label]) => {
-      const active = href === "/" ? here === "/" : here.startsWith(href);
+      const active =
+        href === "/" ? here === "/" : here.startsWith(href) || here.startsWith(`${href.replace(/s$/, "")}/`);
       return `<a href="${href}"${active ? ' aria-current="page"' : ""}>${esc(label)}</a>`;
     })
     .join("");
@@ -129,9 +138,10 @@ export async function json(url) {
  * @param {string} flows Flow names to follow, comma-separated.
  * @param {(update: object) => void} onUpdate
  * @param {() => void} [onOpen] Called on every successful connect, first one included.
+ * @param {string} [api] The app's API base — a section's, through the UI's proxy.
  */
-export function live(flows, onUpdate, onOpen) {
-  const es = new EventSource(`/api/events?flow=${encodeURIComponent(flows)}`);
+export function live(flows, onUpdate, onOpen, api = "/api") {
+  const es = new EventSource(`${api}/events?flow=${encodeURIComponent(flows)}`);
   const mark = (up) => {
     for (const dot of document.querySelectorAll(".conn .dot")) dot.classList.toggle("live", up);
     for (const label of document.querySelectorAll(".conn .label")) {

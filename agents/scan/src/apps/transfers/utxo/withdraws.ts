@@ -50,7 +50,7 @@ export class WithdrawPoller {
   start(): void {
     void this.tick();
     this.timer = setInterval(() => void this.tick(), POLL_MS);
-    log.info(`[xchain] withdraw poller: every ${POLL_MS}ms`);
+    log.info(`[transfers] withdraw poller: every ${POLL_MS}ms`);
   }
 
   stop(): void {
@@ -75,7 +75,7 @@ export class WithdrawPoller {
         byAccount.set(p.near_account, [...(byAccount.get(p.near_account) ?? []), p]);
       for (const [account, rows] of byAccount) await this.settle(account, rows);
     } catch (e) {
-      log.error(`[xchain] withdraw poller: ${(e as Error).stack ?? String(e)}`);
+      log.error(`[transfers] withdraw poller: ${(e as Error).stack ?? String(e)}`);
     } finally {
       this.busy = false;
     }

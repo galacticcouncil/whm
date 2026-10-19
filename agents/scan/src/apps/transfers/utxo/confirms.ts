@@ -19,7 +19,7 @@ export class ConfirmPoller {
   start(): void {
     void this.tick();
     this.timer = setInterval(() => void this.tick(), POLL_MS);
-    log.info(`[xchain] confirm poller: every ${POLL_MS}ms`);
+    log.info(`[transfers] confirm poller: every ${POLL_MS}ms`);
   }
 
   stop(): void {
@@ -64,7 +64,7 @@ export class ConfirmPoller {
         }
       }
     } catch (e) {
-      log.error(`[xchain] confirm poller: ${(e as Error).stack ?? String(e)}`);
+      log.error(`[transfers] confirm poller: ${(e as Error).stack ?? String(e)}`);
     } finally {
       this.busy = false;
     }
