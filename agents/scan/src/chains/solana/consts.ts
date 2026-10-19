@@ -6,6 +6,13 @@ export const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
 /** `getSignaturesForAddress`'s page size, which is also its cap. */
 export const SIGNATURE_PAGE = 1_000;
 
+/**
+ * Slots below the head the cursor stays — about two minutes, read again every pass. The RPC is
+ * many nodes behind one url, and the one listing signatures can lag the one giving the head, so a
+ * transaction just below the head may not be listed yet.
+ */
+export const REREAD_SLOTS = 300n;
+
 /** `getMultipleAccounts`' cap. */
 export const ACCOUNT_BATCH = 100;
 

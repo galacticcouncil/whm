@@ -7,6 +7,7 @@ import { cursorId } from "../cursor";
 import { Recovery } from "../recovery";
 import { topicsMatch } from "../events";
 
+import { REREAD_SLOTS } from "./consts";
 import { decode, instructions, postedVaas, type Decoded } from "./decode";
 import { SolanaRpc } from "./rpc";
 import type { SolanaChain, Tx } from "./types";
@@ -202,9 +203,11 @@ export class SolanaWatcher {
     }
 
     const top = ordered.reduce((m, [, f]) => (f.slot > m ? f.slot : m), head);
+    // Behind the head rather than at it, so what a lagging node had not listed yet is read next pass.
+    const to = head > REREAD_SLOTS ? head - REREAD_SLOTS : 0n;
     for (const w of this.watches) {
-      if (top <= cursors.get(cursorId(w))!) continue;
-      await saveCursor(this.cfg.name, cursorId(w), top);
+      if (to <= cursors.get(cursorId(w))!) continue;
+      await saveCursor(this.cfg.name, cursorId(w), to);
     }
     this.tip = top;
     if (found.size > 0) {
