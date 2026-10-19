@@ -5,8 +5,8 @@ import type { Watch } from "../../types";
 import { cursorId } from "../cursor";
 import { Recovery } from "../recovery";
 
-import { TX_BATCH } from "./consts";
-import { FastNear, nearLogs } from "./fastnear";
+import { HOLD_BLOCKS, TX_BATCH } from "./consts";
+import { FastNear, finished, nearLogs } from "./fastnear";
 import type { NearChain, Tx } from "./types";
 
 /** A transaction found in the history, and the accounts whose history it was found in. */
@@ -113,6 +113,8 @@ export class NearWatcher {
     const top = ordered[ordered.length - 1][1].height;
 
     let ingested = 0;
+    // Below the first transaction still running, so the next drain reads it again once it is whole.
+    let hold: bigint | undefined;
     const step = TX_BATCH * this.cfg.concurrency;
     for (let i = 0; i < ordered.length; i += step) {
       const slices: string[][] = [];
@@ -127,22 +129,31 @@ export class NearWatcher {
       // In history order, so `seq` follows the chain as closely as one transaction at a time can.
       for (const hashes of slices) {
         for (const h of hashes) {
-          const n = await insertEvents(
-            this.cfg.name,
-            this.extract(fetched.get(h)!, found.get(h)!, cursors),
-          );
+          const tx = fetched.get(h)!;
+          const f = found.get(h)!;
+          if (!finished(tx)) {
+            if (top - f.height < HOLD_BLOCKS) {
+              hold ??= f.height - 1n;
+              continue;
+            }
+            log.warn(`[${this.cfg.name}] ${h} unfinished ${HOLD_BLOCKS} blocks on — taken as it stands`);
+          }
+          const n = await insertEvents(this.cfg.name, this.extract(tx, f, cursors));
           if (n > 0) this.onIngest?.(this.cfg.name);
           ingested += n;
         }
       }
     }
 
+    const to = hold ?? top;
     for (const w of this.watches) {
-      if (top <= cursors.get(cursorId(w))!) continue;
-      await saveCursor(this.cfg.name, cursorId(w), top);
+      if (to <= cursors.get(cursorId(w))!) continue;
+      await saveCursor(this.cfg.name, cursorId(w), to);
     }
     if (top > this.tip) this.tip = top;
-    log.info(`[${this.cfg.name}] ingested ${ingested} events from ${found.size} txs, at ${top}`);
+    log.info(
+      `[${this.cfg.name}] ingested ${ingested} events from ${found.size} txs, at ${to}${hold === undefined ? "" : ` (held for ${top - hold} blocks)`}`,
+    );
   }
 
   /**

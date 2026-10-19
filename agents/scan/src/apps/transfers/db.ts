@@ -49,15 +49,19 @@ const refs = (...cols: string[]) =>
   `ARRAY_REMOVE(ARRAY[${cols.map((c) => `lower(${c}->>'txHash')`).join(", ")}], NULL)`;
 
 /**
- * The sign a withdrawal was paid out under: the first for its account after NEAR delivered to it.
- * One sign takes the whole balance, so it may cover several withdrawals.
+ * The sign a withdrawal was paid out under: the last for its account after NEAR delivered to it,
+ * and before it was withdrawn. A relay that fails — its coin spent by someone else first — leaves
+ * its sign behind, and the next pass signs again. One sign takes the whole balance, so it may cover
+ * several withdrawals.
  */
 const SIGN = `
   LEFT JOIN LATERAL (
     SELECT s.* FROM utxo_signs s
      WHERE u.direction = 'withdraw' AND s.account = u.near_account AND s.action = 'withdraw'
        AND (s.signed->>'blockTimestamp')::bigint >= (n.settled->>'blockTimestamp')::bigint
-     ORDER BY (s.signed->>'blockTimestamp')::bigint LIMIT 1
+       AND (u.withdrawn IS NULL
+            OR (s.signed->>'blockTimestamp')::bigint <= (u.withdrawn->>'blockTimestamp')::bigint)
+     ORDER BY (s.signed->>'blockTimestamp')::bigint DESC LIMIT 1
   ) s ON TRUE`;
 
 /**

@@ -87,6 +87,19 @@ export class FastNear {
 }
 
 /**
+ * Whether a transaction has finished executing: every receipt it spawned is in it. One that waits on
+ * another contract — a signer's yielded receipt — is indexed while it runs, short of the receipts
+ * that log what it did.
+ *
+ * @param tx The transaction, as the index has it.
+ * @returns False while any spawned receipt is missing.
+ */
+export function finished(tx: Tx): boolean {
+  const have = new Set(tx.receipts.map((r) => r.receipt.receipt_id));
+  return tx.receipts.every((r) => r.execution_outcome.outcome.receipt_ids.every((id) => have.has(id)));
+}
+
+/**
  * Every event a transaction's successful receipts logged, in receipt order — plus, for the methods
  * named, the calls themselves with their arguments.
  *

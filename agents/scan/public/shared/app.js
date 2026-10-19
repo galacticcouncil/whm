@@ -493,10 +493,43 @@ function letterLogo(symbol, size) {
 }
 
 /**
+ * Icon urls that failed to load, by when — kept across renders and page loads, since an asset's
+ * mark is an svg or a png and a missing svg takes the CDN seconds to refuse, every time a row is
+ * drawn. Forgotten after a day, so a failure that was only the network does not stick.
+ */
+const MISSING_KEY = "scan:missing-icons";
+const MISSING_TTL_MS = 86_400_000;
+const missingAt = (() => {
+  try {
+    const now = Date.now();
+    const kept = Object.entries(JSON.parse(localStorage.getItem(MISSING_KEY) ?? "{}"));
+    return new Map(kept.filter(([, at]) => now - at < MISSING_TTL_MS));
+  } catch {
+    return new Map();
+  }
+})();
+
+/**
+ * Remember an icon url as missing.
+ *
+ * @param {string} url The url that failed.
+ */
+function markMissing(url) {
+  if (!url || missingAt.has(url)) return;
+  missingAt.set(url, Date.now());
+  try {
+    localStorage.setItem(MISSING_KEY, JSON.stringify(Object.fromEntries(missingAt)));
+  } catch {
+    // Storage blocked: remembered for this page only.
+  }
+}
+
+/**
  * Try the next candidate for an icon, then the letter disc. Inline `onerror` handlers call this, so
  * it lives on `window`.
  */
 window.__nextIcon = (img) => {
+  markMissing(img.getAttribute("src"));
   const rest = (img.dataset.next ?? "").split("|").filter(Boolean);
   if (rest.length) {
     img.dataset.next = rest.slice(1).join("|");
@@ -517,8 +550,9 @@ export function tokenIcon(meta, size = 20) {
   const symbol = meta?.symbol ?? "?";
   const id = meta?.assetId;
   const base = id === null || id === undefined ? null : `${METADATA}/polkadot/2034/assets/${id}/icon`;
-  const img = base
-    ? `<img src="${base}.svg" data-next="${base}.png" data-sym="${esc(symbol)}" data-size="${size}" alt="" loading="lazy" width="${size}" height="${size}" onerror="__nextIcon(this)">`
+  const [first, ...rest] = base ? [`${base}.svg`, `${base}.png`].filter((u) => !missingAt.has(u)) : [];
+  const img = first
+    ? `<img src="${first}" data-next="${rest.join("|")}" data-sym="${esc(symbol)}" data-size="${size}" alt="" loading="lazy" width="${size}" height="${size}" onerror="__nextIcon(this)">`
     : letterLogo(symbol, size);
   const home = meta?.home && meta.home !== "hydration" ? chainIcon(meta.home) : null;
   const corner = Math.max(10, Math.round(size * 0.42));

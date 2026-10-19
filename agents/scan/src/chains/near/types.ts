@@ -23,7 +23,13 @@ export interface Outcome {
   /** Nanoseconds. */
   block_timestamp: number;
   index: number;
-  outcome: { executor_id: string; logs: string[]; status: Record<string, unknown> };
+  outcome: {
+    executor_id: string;
+    logs: string[];
+    /** The receipts this one spawned. */
+    receipt_ids: string[];
+    status: Record<string, unknown>;
+  };
 }
 
 export interface Action {
@@ -31,7 +37,11 @@ export interface Action {
 }
 
 export interface Receipt {
-  receipt: { predecessor_id: string; receipt: { Action?: { actions: (Action | string)[] } } };
+  receipt: {
+    receipt_id: string;
+    predecessor_id: string;
+    receipt: { Action?: { actions: (Action | string)[] } };
+  };
   execution_outcome: Outcome;
 }
 
