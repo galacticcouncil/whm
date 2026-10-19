@@ -200,6 +200,8 @@
               where: r.chain,
               kind: "confirmed",
               ref: r.confirmed,
+              // Known once it is withdrawn; confirmed only once the coin's chain has it.
+              pending: !r.confirmed,
               rows: r.received ? [["", money(r.received, v)]] : [],
               since,
             }),
@@ -215,12 +217,14 @@
               where: v.to_chain,
               kind: queued ? "queued" : "paid out",
               ref: queued ? r.queued : r.completed,
+              // The amount is known from the source; the payout is done only once it has happened.
+              pending: !(queued ? r.queued : r.completed),
               held: queued && !r.fulfilled,
               rows: queued ? [["", '<span class="dim">landing pool was short</span>']] : [["", money(r.net_amount, v)]],
               since,
             }),
             queued
-              ? legCard({ where: v.to_chain, kind: "fulfilled", ref: r.fulfilled, rows: [["", money(r.net_amount, v)]], since })
+              ? legCard({ where: v.to_chain, kind: "fulfilled", ref: r.fulfilled, rows: [["", money(r.net_amount, v)]], pending: !r.fulfilled, since })
               : "",
           ];
         },

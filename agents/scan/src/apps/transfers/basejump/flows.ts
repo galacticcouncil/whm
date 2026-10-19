@@ -34,11 +34,44 @@ type Queued = Delivery & { id: bigint };
 const pendingKey = (ev: LogEvent, id: bigint) => `${ev.address.toLowerCase()}:${id}`;
 
 /**
- * A delivery that matched nothing. Kept rather than dropped — a payout with no source is worth
- * seeing — but it has no `initiated`, so the orphan rule keeps it out of the list.
+ * A delivery that matched nothing. Kept rather than dropped — its source may not be read yet, and
+ * adopts it when it is — but it has no `initiated`, so the orphan rule keeps it out of the list.
  */
 const orphan = (ev: LogEvent, kind: string) =>
   `orphan-${kind}-${ev.chain}-${ev.ref.txHash}-${ev.ref.logIndex}`;
+
+/**
+ * A source's row: its own key, taking over the oldest orphan delivery it pays for.
+ *
+ * The fast path can pay out before the source chain is read — its VAA is instant, the source is
+ * read behind its head — and that payout found no source, so it waits as an orphan. Renaming the
+ * orphan to the source's key lets the source's patch merge into it, payout and all.
+ *
+ * @param db The drain's transaction.
+ * @param id The source's key.
+ */
+async function adoptOrphan(
+  db: Queryable,
+  id: string,
+  sourceAsset: string,
+  recipient: string,
+  netAmount: string,
+): Promise<string> {
+  await db.query(
+    `UPDATE basejump_transfers SET id = $1
+      WHERE id = (SELECT id FROM basejump_transfers
+                   WHERE (id LIKE 'orphan-exec-%' OR id LIKE 'orphan-queue-%')
+                     AND initiated IS NULL
+                     AND lower(source_asset) = lower($2)
+                     AND lower(recipient) = lower($3)
+                     AND net_amount = $4::numeric
+                   ORDER BY COALESCE((completed->>'blockNumber')::numeric, (queued->>'blockNumber')::numeric)
+                   LIMIT 1)
+        AND NOT EXISTS (SELECT 1 FROM basejump_transfers WHERE id = $1)`,
+    [id, sourceAsset, recipient, netAmount],
+  );
+  return id;
+}
 
 /**
  * Match a delivery to the oldest source still awaiting one.
@@ -115,7 +148,14 @@ export const basejump: Flow = {
       role: "basejump-source",
       abi: BridgeInitiatedEvt,
       state: "initiated",
-      key: (a: Initiated, ev: LogEvent) => `init-${ev.chain}-${a.transferSequence}`,
+      key: (a: Initiated, ev: LogEvent, db: Queryable) =>
+        adoptOrphan(
+          db,
+          `init-${ev.chain}-${a.transferSequence}`,
+          a.asset,
+          normalizeRecipient(a.recipient),
+          (a.amount - a.fee).toString(),
+        ),
       patch: (a: Initiated, ev: LogEvent) => ({
         source_chain: ev.chain,
         source_asset: a.asset.toLowerCase(),
