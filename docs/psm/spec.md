@@ -60,8 +60,8 @@ Holds the reserve. Inherits `MessageReceiver` (UUPS + Wormhole verification + re
 - **`claimUnpayable(recipient)`** — pays out a credit that was retired because its recipient could
   not receive USDC, once that clears. A recipient's retired credits are one balance, and it pays as
   much of it as it can: the smallest of the balance, the reserve's liquidity and the payout
-  allowance. The rest stays owed for a later call. It spends the payout limit like any other
-  payment.
+  allowance. The rest stays owed for a later call. No part is below `MIN_UNPAYABLE_PART`, 2 USDC,
+  and none leaves less than that owed. It spends the payout limit like any other payment.
 - **`emergencyUnwindAave(amount)`** — guardian; pulls the reserve out of Aave and stops deposits
   from re-supplying it until `setInvestPaused(false)`.
 
@@ -187,8 +187,10 @@ recipient one.
 A retired credit is senior to every live entry — it was ahead of all of them when it retired — so
 `claimUnpayable` draws on the reserve without regard to the queue. It competes with the queue for
 the payout allowance and the reserve's liquidity, and pays in parts. Each call pays the smallest
-of the balance, the liquidity and the allowance, and reverts for liquidity or allowance only when
-there is none. So a retired balance of any size is paid, at most the allowance per call. With the
+of the balance, the liquidity and the allowance, held to the floor below, and reverts for
+liquidity or allowance only when they cannot cover the smallest part the balance can take. So,
+with the payout capacity at or above its bound under Parameters, a retired balance of any size is
+paid, at most the allowance per call. With the
 reserve liquid and nothing else spending the allowance, a balance `B` is paid in full within
 about `ceil(B ÷ capacity)` windows. Credits retired to the same recipient while Circle blocks them
 add to `B` and lengthen that. While the recipient can receive, nothing retires into their
@@ -200,12 +202,16 @@ more liquidity has come back, however long that takes. That is per cleared balan
 add up. Either way an origin's cancel can open before a waiting head is paid. The money always
 goes to the recipient.
 
-It can arrive in many small parts. While the allowance or the liquidity is below a cleared
-balance, anyone can call `claimUnpayable` each time either grows: every block, for the allowance.
-At launch values a 2 s Base block refills about 0.23 USDC, so a balance of 5,997 can arrive as
-about 25,900 transfers over about 14 hours. All of it still arrives and the caller pays the gas,
-but an address that credits only deposits above a minimum, an exchange deposit address for
-example, may not credit them automatically.
+It can arrive in parts, but none below a floor. While the allowance or the liquidity is below a
+cleared balance, anyone can call `claimUnpayable` each time either grows: every block, for the
+allowance. At launch values a 2 s Base block refills about 0.23 USDC. Without a floor, a balance of
+5,997 could arrive as about 25,900 transfers over about 14 hours, and an address that credits only
+deposits at or above a minimum, an exchange or off-ramp deposit address for example, would credit
+none of them. So no part is below `MIN_UNPAYABLE_PART`, 2 USDC, and no part leaves less than that
+owed. The calls in between are refused, and the same balance arrives as at most about 3,000
+transfers. Such an address credits every part if its minimum is at most 2 USDC. A balance below
+twice the floor is paid only whole, once the reserve and the allowance cover it, and one below the
+floor is still paid.
 
 Retirement is terminal: the fee
 is released then, and there is no cancel back from `unpayable` — a recipient Circle never clears
@@ -293,8 +299,8 @@ so every credit still lands and the burn on Hydration never fails for want of al
 payment waits. `drain` stops at a head the allowance cannot cover, in order and without
 reverting. `claim` reverts with `InsufficientPayoutAllowance`, and `claimable` reads zero for such
 a head. `claimUnpayable` pays what the allowance covers and reverts with
-`InsufficientPayoutAllowance` only once it is spent. The overflow pays as the window refills the
-allowance.
+`InsufficientPayoutAllowance` only when what is left is below the smallest part the balance can
+take (above). The overflow pays as the window refills the allowance.
 
 It bounds the cash, not the books. A forged or faulty credit still books at once and takes
 `principal`, as it did before the limit, so once such credits have taken it, honest redemptions
@@ -317,8 +323,9 @@ The capacity moves with the other two: raising either without it strands the lar
 `ORIGIN_CANCEL_DELAY`, or the origin's cancel can open before a waiting head is payable. A credit
 above the capacity is never covered and stalls the head, as a head larger than the reserve can
 release does, and the exit is the same: `cancelQueuedRedemption`, or the admin's copy. A
-recipient's retired credits merge into one `unpayable` balance with no cancel, and a balance above
-the capacity is paid in parts, at most the allowance per call. The residual is time: a balance `B`
+recipient's retired credits merge into one `unpayable` balance with no cancel. With the capacity at
+or above twice `MIN_UNPAYABLE_PART`, a balance above the capacity is paid in parts, at most the
+allowance per call. The residual is time: a balance `B`
 is paid within about `ceil(B ÷ capacity)` windows when the reserve is liquid and nothing else
 spends the allowance, and credits retired to the same recipient meanwhile lengthen that. A raise
 shortens it, though a finite raise grants nothing at once, as the level refills toward the new
@@ -497,7 +504,7 @@ Launch values, `migrations/envs/<context>/psm-base.env`:
 |---|---|---|
 | bucket capacity | 10,000 HOLLAR | Total outstanding. Granted on Substrate, **not by this migration**. |
 | `DEPOSIT_LIMIT_CAPACITY` | 10,000 / 24 h | Inflow. Worst case over an arbitrary window is 2× capacity. |
-| `PAYOUT_LIMIT_CAPACITY` | 10,000 / 24 h | Outflow against credits. Gross: nothing refills it, and only USDC that leaves is charged, so a retirement is not. Worst case over an arbitrary window is 2× capacity. Ships closed, like the deposit limit: step 003 sets it and `setPayoutLimit` changes it. Not below `OUTBOUND_CAPACITY` or `DEPOSIT_LIMIT_CAPACITY`: a credit above it is never paid. `PAYOUT_LIMIT_WINDOW <= ORIGIN_CANCEL_DELAY`: a longer window lets the origin's cancel open before a waiting head is payable. |
+| `PAYOUT_LIMIT_CAPACITY` | 10,000 / 24 h | Outflow against credits. Gross: nothing refills it, and only USDC that leaves is charged, so a retirement is not. Worst case over an arbitrary window is 2× capacity. Ships closed, like the deposit limit: step 003 sets it and `setPayoutLimit` changes it. Not below `OUTBOUND_CAPACITY` or `DEPOSIT_LIMIT_CAPACITY`: a credit above it is never paid. Not below twice `MIN_UNPAYABLE_PART`, 4 USDC: a retired balance below that is paid only whole, so a smaller capacity never pays one above the capacity and below 4 USDC, and below 2 USDC it pays no balance above the capacity. `PAYOUT_LIMIT_WINDOW <= ORIGIN_CANCEL_DELAY`: a longer window lets the origin's cancel open before a waiting head is payable. |
 | `INBOUND_CAPACITY` / `OUTBOUND_CAPACITY` | 10,000 / 24 h | Mint / redeem velocity, net: a mint refills outbound and a burn refills inbound, each capped at capacity. Outbound deliberately not tighter — this is the primary redemption route. It bounds burns; a cancelled re-mint is not charged to it (that value burned under the limit already), nor stopped by `redeemPaused` — the vault's `claimsPaused` holds what it books. |
 | `REDEEM_FEE_BPS` | 5 | Charged when USDC leaves: a redemption, or a cancelled re-mint. A cancelled deposit's refund carries none. Capped at 500. |
 | `SURPLUS_FLOOR_BPS` | 25 | Held back from the treasurer. Capped at 10,000. |

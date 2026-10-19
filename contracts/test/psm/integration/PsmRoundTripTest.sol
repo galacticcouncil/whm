@@ -840,8 +840,8 @@ contract PsmRoundTripTest is Test {
     /// @dev Two redemptions name the same Base payee, who cannot receive USDC when they are paid: a
     ///      whole outbound window at launch values, 9,995 net, and then 6 HOLLAR from another
     ///      holder. Both retire into one balance, above the payout capacity. Once Circle clears the
-    ///      payee, the balance is paid in parts with no admin action: the capacity in the first
-    ///      window, the rest from the refill.
+    ///      payee, the balance is paid in parts with no admin action: the first window pays all but
+    ///      the floor, since a part never leaves less than the floor owed, and the refill pays that.
     function test_roundTrip_aRetiredBalanceAboveThePayoutCapacityIsPaidInParts() public {
         _limitedWithAliceHolding();
         vm.prank(admin);
@@ -876,11 +876,15 @@ contract PsmRoundTripTest is Test {
         assertEq(vault.payoutAllowance(), WINDOW, "and retiring spent nothing");
 
         vm.clearMockedCalls();
+        uint256 floor = vault.MIN_UNPAYABLE_PART();
+        assertLt(merged - WINDOW, floor, "the whole capacity would leave less than the floor owed");
         vault.claimUnpayable(payee);
-        assertEq(usdc.balanceOf(payee), WINDOW, "the whole capacity in the first window");
-        assertEq(vault.unpayable(payee), merged - WINDOW, "the rest still owed");
+        assertEq(usdc.balanceOf(payee), merged - floor, "all but the floor in the first window");
+        assertEq(vault.unpayable(payee), floor, "the floor still owed");
         vm.expectRevert(
-            abi.encodeWithSelector(IHollarBaseVault.InsufficientPayoutAllowance.selector, merged - WINDOW, 0)
+            abi.encodeWithSelector(
+                IHollarBaseVault.InsufficientPayoutAllowance.selector, floor, WINDOW - (merged - floor)
+            )
         );
         vault.claimUnpayable(payee);
 

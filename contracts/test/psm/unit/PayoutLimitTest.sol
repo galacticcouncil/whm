@@ -1020,11 +1020,11 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
         assertEq(vault.totalUnpayable(), vault.unpayable(mallory), "the total is the sum of the balances");
     }
 
-    /// @dev It refuses only when nothing can be paid, in a fixed order: the pause, an empty
-    ///      balance, a reserve that can release nothing, then a spent allowance. Liquidity is checked
-    ///      before the allowance, so with neither it reports the liquidity. Each error reports the
-    ///      whole balance as requested.
-    function test_claimUnpayable_revertsOnlyWhenNothingCanBePaid() public {
+    /// @dev It refuses only when no part can be paid, in a fixed order: the pause, an empty
+    ///      balance, a reserve that cannot release the floor, then an allowance below the floor.
+    ///      Liquidity is checked before the allowance, so with neither it reports the liquidity.
+    ///      Each error reports the whole balance as requested.
+    function test_claimUnpayable_revertsOnlyWhenNoPartCanBePaid() public {
         _deposit(alice, 100_000e6);
         _credit(mallory, 6_000e6, 1);
         _blacklist(mallory);
@@ -1080,6 +1080,130 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
         _claimUnpayableExpecting(mallory, balance);
     }
 
+    /// @dev Retires `gross` for mallory, and returns her balance.
+    function _retireForMallory(uint256 gross, uint256 salt) internal returns (uint256) {
+        _blacklist(mallory);
+        _credit(mallory, gross, salt);
+        vault.drain(10);
+        vm.clearMockedCalls();
+        return vault.unpayable(mallory);
+    }
+
+    /// @dev A full allowance of exactly `amount`: a finite limit set after `UNLIMITED` starts full.
+    function _allowanceOf(uint256 amount) internal {
+        vm.startPrank(admin);
+        vault.setPayoutLimit(RateLimiter.UNLIMITED, 0);
+        vault.setPayoutLimit(amount, WINDOW);
+        vm.stopPrank();
+        assertEq(vault.payoutAllowance(), amount);
+    }
+
+    /// @dev The split the floor exists for. The window is spent and a cleared 50 USDC balance is
+    ///      claimed every 2 s block as the allowance refills, about 0.23 USDC a block at launch
+    ///      values. Without the floor each block would pay that much, and an address that credits
+    ///      only deposits above a minimum would credit none of it. With it, the calls in between
+    ///      are refused, every part is at least the floor, and all of it still arrives.
+    function test_claimUnpayable_neverPaysAPartBelowTheFloor() public {
+        _deposit(alice, 100_000e6);
+        uint256 balance = _retireForMallory(50e6, 1);
+        _credit(dave, 10_000e6, 2);
+        assertEq(vault.drain(10), _net(10_000e6), "dave spends the window");
+        uint256 floor = vault.MIN_UNPAYABLE_PART();
+        uint256 held = usdc.balanceOf(mallory);
+
+        uint256 clock = T0;
+        uint256 parts;
+        uint256 refused;
+        while (vault.unpayable(mallory) > 0) {
+            uint256 before = usdc.balanceOf(mallory);
+            try vault.claimUnpayable(mallory) {
+                uint256 part = usdc.balanceOf(mallory) - before;
+                uint256 left = vault.unpayable(mallory);
+                assertGe(part, floor, "no part below the floor");
+                assertTrue(left == 0 || left >= floor, "no part leaves less than the floor owed");
+                parts++;
+            } catch {
+                refused++;
+            }
+            clock += 2;
+            vm.warp(clock);
+        }
+
+        assertEq(usdc.balanceOf(mallory) - held, balance, "all of it arrives");
+        assertGt(refused, parts, "most blocks refill less than the floor and are refused");
+        assertLe(parts, balance / floor, "so it arrives in parts of at least the floor");
+        _assertSolvent();
+    }
+
+    /// @dev A part is capped so it leaves at least the floor owed. With 4.9975 owed and 3.9975 of
+    ///      allowance, it pays 2.9975 and leaves 2, rather than leave 1 that a later part would pay
+    ///      below the floor. The unspent 1 stays in the allowance. The 2 left pay whole once the
+    ///      window has refilled.
+    function test_claimUnpayable_aPartLeavesAtLeastTheFloorOwed() public {
+        _deposit(alice, 100_000e6);
+        uint256 balance = _retireForMallory(5e6, 1);
+        uint256 floor = vault.MIN_UNPAYABLE_PART();
+        assertEq(balance, _net(5e6));
+        _allowanceOf(balance - 1e6);
+
+        _claimUnpayableExpecting(mallory, balance - floor);
+        assertEq(vault.unpayable(mallory), floor, "the floor still owed");
+        assertEq(vault.payoutAllowance(), 1e6, "the rest of the allowance unspent");
+
+        vm.warp(T0 + WINDOW);
+        _claimUnpayableExpecting(mallory, floor);
+        assertEq(vault.totalUnpayable(), 0);
+        _assertSolvent();
+    }
+
+    /// @dev A balance below twice the floor has no part that is at least the floor and leaves at
+    ///      least the floor, so it is paid only whole. One below the floor is still paid, whole.
+    ///      Short of the whole, either side reports the whole balance.
+    function test_claimUnpayable_aBalanceBelowTwiceTheFloorPaysOnlyWhole() public {
+        _deposit(alice, 100_000e6);
+        uint256 floor = vault.MIN_UNPAYABLE_PART();
+        uint256 balance = _retireForMallory(4e6, 1);
+        assertLt(balance, 2 * floor);
+        assertGt(balance, floor);
+
+        _allowanceOf(balance - 1);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientPayoutAllowance.selector, balance, balance - 1));
+        vault.claimUnpayable(mallory);
+        assertEq(vault.unpayable(mallory), balance, "nothing moved");
+
+        _allowanceOf(balance);
+        _claimUnpayableExpecting(mallory, balance);
+
+        // Below the floor: paid whole. Retiring waits for allowance it does not spend, so refill first.
+        _allowanceOf(CAPACITY);
+        uint256 dust = _retireForMallory(1e6, 2);
+        assertLt(dust, floor);
+        _claimUnpayableExpecting(mallory, dust);
+        assertEq(vault.totalUnpayable(), 0);
+    }
+
+    /// @dev The liquidity side of the floor: a reserve that can release some, but less than the
+    ///      floor, pays nothing and reports the whole balance. Once it can release the floor, it pays.
+    function test_claimUnpayable_liquidityBelowTheFloorPaysNothing() public {
+        _deposit(alice, 100_000e6);
+        uint256 balance = _retireForMallory(50e6, 1);
+        uint256 floor = vault.MIN_UNPAYABLE_PART();
+        vm.prank(guardian);
+        vault.setInvestPaused(false); // what the retirement withdrew goes back to Aave
+
+        uint256 borrowed = usdc.balanceOf(address(aUsdc)) - (floor - 1);
+        vm.prank(borrower);
+        pool.drainForBorrow(borrowed);
+        assertEq(_liquidity(), floor - 1);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientLiquidity.selector, balance, floor - 1));
+        vault.claimUnpayable(mallory);
+
+        vm.prank(borrower);
+        usdc.transfer(address(aUsdc), 1);
+        _claimUnpayableExpecting(mallory, floor);
+        _assertSolvent();
+    }
+
     // Fuzz bookkeeping. Every run starts from the state `setUp` leaves, these included.
     address[2] internal fzWho;
     mapping(address => bool) internal fzListed;
@@ -1094,8 +1218,9 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
     ///      payments competing for the allowance, liquidity coming and going, and waiting:
     ///      - every unit retired is paid once or still owed, and the event reports what was paid;
     ///      - `totalUnpayable` is the sum of the balances;
-    ///      - a claim pays the smallest of balance, liquidity and allowance, and is refused only
-    ///        when its recipient is blocked or that smallest is zero;
+    ///      - a claim pays the whole balance, or a part of at least the floor that leaves at least
+    ///        the floor owed: the largest such amount within the smallest of balance, liquidity and
+    ///        allowance. It is refused only when its recipient is blocked or there is no such amount;
     ///      - over any span, nothing is paid past the capacity plus the refill over that span.
     ///      Then, with every block lifted and nothing else spending, every balance is paid within
     ///      ceil(B / capacity) windows.
@@ -1149,22 +1274,33 @@ contract PayoutLimitTest is Test, IHollarBaseVault {
         }
     }
 
-    /// @dev Claims for `who`, and checks the call against the smallest of balance, liquidity and
-    ///      allowance read just before it. Books what reached them and what the event said.
+    /// @dev Claims for `who`, and checks the call against the balance, liquidity and allowance read
+    ///      just before it. A payment is allowed if it is the whole balance, or at least the floor
+    ///      and leaves at least the floor owed. The call pays the largest allowed payment within the
+    ///      smallest of the three, and is refused only when there is none. Books what reached them
+    ///      and what the event said.
     function _fzClaimUnpayable(address who) internal {
-        uint256 expected = vault.unpayable(who);
+        uint256 balance = vault.unpayable(who);
+        uint256 cover = balance;
         uint256 liquidity = _liquidity();
         uint256 allowance = vault.payoutAllowance();
-        if (liquidity < expected) expected = liquidity;
-        if (allowance < expected) expected = allowance;
+        if (liquidity < cover) cover = liquidity;
+        if (allowance < cover) cover = allowance;
+        uint256 floor = vault.MIN_UNPAYABLE_PART();
+        uint256 largest;
+        if (cover == balance) largest = balance;
+        else if (balance >= 2 * floor) largest = cover < balance - floor ? cover : balance - floor;
+        if (largest < balance && largest < floor) largest = 0;
         uint256 held = usdc.balanceOf(who);
 
         vm.recordLogs();
         try vault.claimUnpayable(who) {
+            uint256 paid = usdc.balanceOf(who) - held;
             assertFalse(fzListed[who], "a blocked recipient is never paid");
-            assertEq(usdc.balanceOf(who) - held, expected, "pays the smallest of balance, liquidity and allowance");
+            assertTrue(paid == balance || (paid >= floor && balance - paid >= floor), "no part below the floor");
+            assertEq(paid, largest, "pays the largest allowed part of what can be covered");
         } catch {
-            assertTrue(fzListed[who] || expected == 0, "refused only when nothing could be paid");
+            assertTrue(fzListed[who] || largest == 0, "refused only when no allowed part could be paid");
         }
         fzPaid[who] += usdc.balanceOf(who) - held;
 

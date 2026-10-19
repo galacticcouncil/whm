@@ -59,7 +59,7 @@ interface IHollarBaseVault {
     event CreditUnpayable(uint256 indexed index, address indexed recipient, uint256 amount);
     /// @dev `amount` is what this call paid. `claimUnpayable` pays in part when the reserve or the
     ///      payout allowance cannot cover the whole balance, so paying one balance can take several
-    ///      calls.
+    ///      calls. A part is never below `MIN_UNPAYABLE_PART`; only a whole balance can be.
     event UnpayableClaimed(address indexed recipient, uint256 amount);
     event Invested(uint256 amount);
     event Unwound(uint256 amount);

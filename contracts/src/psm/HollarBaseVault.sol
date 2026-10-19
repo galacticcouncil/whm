@@ -47,6 +47,11 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     /// @notice How long a redemption must sit at the head unpaid before its origin may cancel it.
     uint256 public constant ORIGIN_CANCEL_DELAY = 1 days;
 
+    /// @notice The smallest part `claimUnpayable` pays of a retired balance, and the least a part
+    ///         leaves owed: 2 USDC. An address that credits only deposits at or above a minimum, an
+    ///         off-ramp's deposit address for one, credits every part if its minimum is at most this.
+    uint256 public constant MIN_UNPAYABLE_PART = 2e6;
+
     /// @notice Deposits publish immediately — guardians sign on inclusion. See `_publish`.
     uint8 internal constant CONSISTENCY_INSTANT = 200;
     /// @notice Exits wait for finality. Wormhole reads any level but 200 and 201 as finalized; 1
@@ -451,12 +456,13 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///
     ///      This pays a credit, so it spends the payout limit like `claim` does. Unlike `claim` it
     ///      pays in part: the smallest of the balance, what the reserve can release and the
-    ///      allowance. The rest stays owed. A recipient's retired credits are one balance with no
-    ///      cancel, so paying it whole would hold a balance above the limit's capacity until an
-    ///      admin raised the capacity. In parts, a balance `B` is paid in full within about
-    ///      `ceil(B / capacity)` windows when the reserve is liquid and nothing else spends the
-    ///      allowance. While the recipient can receive, nothing retires into their balance, so the
-    ///      remainder only shrinks.
+    ///      allowance, held to the floor below. The rest stays owed. A recipient's retired credits
+    ///      are one balance with no cancel, so paying it whole would hold a balance above the
+    ///      limit's capacity until an admin raised the capacity. In parts, with a capacity of at
+    ///      least twice the floor, a balance `B` is paid in full within about `ceil(B / capacity)`
+    ///      windows when the reserve is liquid and nothing else spends the allowance. While the
+    ///      recipient can receive, nothing retires into their balance, so the remainder only
+    ///      shrinks.
     ///
     ///      The cost falls on the queue, whose heads are paid whole. Anyone may call this whenever
     ///      anything can be paid, so a retired balance takes the allowance and the returning
@@ -465,27 +471,38 @@ contract HollarBaseVault is MessageReceiver, AccessControlUpgradeable, IHollarBa
     ///      liquidity binds, it waits until `B` more liquidity has come back, however long that
     ///      takes. Either way its origin's cancel can open first.
     ///
-    ///      While the allowance or the liquidity is short of a balance, anyone may also split it
-    ///      into many small transfers, calling this each time either grows: every block, for the
-    ///      allowance. All of it still arrives, at the caller's gas, but an address that credits
-    ///      only deposits above a minimum may not credit them.
+    ///      No part is below `MIN_UNPAYABLE_PART`, and no part leaves less than that owed, so a
+    ///      balance below twice the floor is paid only whole. Without the floor, anyone could split
+    ///      a balance the allowance or the liquidity is short of into many small transfers, calling
+    ///      this each time either grows: every block, for the allowance. An address that credits
+    ///      only deposits at or above a minimum would credit none of them. With it, every transfer
+    ///      is at least the floor. With a capacity of at least twice the floor, a balance of any
+    ///      size still pays: one below twice the floor pays whole once the reserve and the
+    ///      allowance cover it. A smaller capacity never covers a balance above it and below twice
+    ///      the floor.
     ///
-    ///      It reverts for liquidity or allowance only when there is none: `InsufficientLiquidity`
-    ///      when the reserve can release nothing, checked first, then `InsufficientPayoutAllowance`
-    ///      when the allowance is spent. Both report the whole balance as requested.
+    ///      It reverts when the reserve or the allowance cannot cover the smallest part the balance
+    ///      can take, the whole of it below twice the floor and the floor otherwise:
+    ///      `InsufficientLiquidity` checked first, then `InsufficientPayoutAllowance`. Both report
+    ///      the whole balance as requested.
     function claimUnpayable(address recipient) external {
         if (claimsPaused) revert ClaimsPaused();
 
         uint256 balance = unpayable[recipient];
         if (balance == 0) revert NothingUnpayable(recipient);
 
+        uint256 least = balance < 2 * MIN_UNPAYABLE_PART ? balance : MIN_UNPAYABLE_PART;
+
         uint256 available = _reserveLiquidity();
-        if (available == 0) revert InsufficientLiquidity(balance, available);
+        if (available < least) revert InsufficientLiquidity(balance, available);
         uint256 allowance = payoutLimit.available();
-        if (allowance == 0) revert InsufficientPayoutAllowance(balance, allowance);
+        if (allowance < least) revert InsufficientPayoutAllowance(balance, allowance);
 
         uint256 amount = balance < available ? balance : available;
         if (allowance < amount) amount = allowance;
+        // A part means `least` was the floor, so the balance is at least twice it: no underflow,
+        // and the part stays at or above the floor.
+        if (amount < balance && balance - amount < MIN_UNPAYABLE_PART) amount = balance - MIN_UNPAYABLE_PART;
 
         unpayable[recipient] = balance - amount;
         totalUnpayable -= amount;
