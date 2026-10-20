@@ -2,7 +2,7 @@
   "migration": "utxo-withdraw-zec",
   "environment": "prod",
   "startedAt": "2026-10-16T16:40:56.656Z",
-  "completedAt": null,
+  "completedAt": "2026-10-20T10:04:46.042Z",
   "steps": [
     {
       "name": "001-deploy-withdraw",
@@ -20,27 +20,38 @@
     },
     {
       "name": "002-transfer-ownership@withdraw",
-      "status": "failed",
-      "output": null,
-      "error": "Missing WITHDRAW_NEW_OWNER",
-      "startedAt": "2026-10-16T16:42:11.320Z",
-      "completedAt": null
+      "status": "completed",
+      "output": {
+        "txHash": "2tQi6BzJ9fJ4UgdLRMVEzMe5U7kk1MunQxY2fvQmcjLv",
+        "newOwner": "hydration.sputnik-dao.near"
+      },
+      "error": null,
+      "startedAt": "2026-10-19T12:47:15.156Z",
+      "completedAt": "2026-10-19T12:47:25.499Z"
     },
     {
       "name": "003-delete-keys@withdraw",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "txHash": "DwF2yzJNGqeqKLJ2jZdbQpLKnoxFgVaDgEVFCgscLBDs",
+        "deletedKeys": "ed25519:9hziFbfcBtkDvWuKJXxqZGM1EXKHUQn1bcAF8M4NxCxQ",
+        "owner": "hydration-whm.near",
+        "codeSha256": "b20c0b6b57c45999a9fb92fffbd1339543326f01404dc74f11341b13a43d42ec"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-10-19T12:47:25.501Z",
+      "completedAt": "2026-10-19T12:47:47.731Z"
     },
     {
       "name": "004-accept-ownership@withdraw",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "txHash": "",
+        "owner": "hydration.sputnik-dao.near"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-10-20T10:04:38.941Z",
+      "completedAt": "2026-10-20T10:04:46.041Z"
     }
   ]
 }

@@ -2,7 +2,7 @@
   "migration": "utxo-emitter-zec",
   "environment": "prod",
   "startedAt": "2026-10-17T14:58:59.704Z",
-  "completedAt": null,
+  "completedAt": "2026-10-19T12:44:45.208Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -54,11 +54,15 @@
     },
     {
       "name": "005-transfer-ownership@emitter",
-      "status": "failed",
-      "output": null,
-      "error": "Missing or invalid HYDRATION_EMERGENCY_ADMIN: ",
-      "startedAt": "2026-10-17T14:59:31.364Z",
-      "completedAt": null
+      "status": "completed",
+      "output": {
+        "txHash": "0xae23bc5eb823f1d06e15758120dae458a43b6222dcaba3385aa4b6bf63e6b5e7",
+        "contract": "0xb3e365a6241683d5d4ef2701de6bedc16dcc259e",
+        "newOwner": "0xaa7e0000000000000000000000000000000aa7e1"
+      },
+      "error": null,
+      "startedAt": "2026-10-19T12:44:38.065Z",
+      "completedAt": "2026-10-19T12:44:45.207Z"
     }
   ]
 }
