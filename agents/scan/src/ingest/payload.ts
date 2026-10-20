@@ -32,8 +32,19 @@ export interface NttTransfer {
    * any delivery event arrives, and the legs that carry nothing else can simply find it.
    */
   digest: `0x${string}`;
-  /** The NTT manager's sequence — `NttManager.transfer`'s return value. Not a Wormhole sequence. */
-  sequence: bigint;
+  /** The manager message's id, all 32 bytes: a sequence on EVM and NEAR, an account on Solana. */
+  id: `0x${string}`;
+  /**
+   * The NTT manager's sequence — `NttManager.transfer`'s return value. Not a Wormhole sequence. Null
+   * where the message id is not one: Solana's is its outbox item's key.
+   */
+  sequence: bigint | null;
+  /**
+   * Who called the manager, as the 32 bytes the message carries: an EVM caller left-padded, a NEAR
+   * one as `sha256(account_id)`. A contract riding the rail — an emitter, a connector — is named
+   * here rather than its user.
+   */
+  sender: `0x${string}`;
   sourceManager: `0x${string}`;
   recipientManager: `0x${string}`;
   /** Trimmed to `decimals` places, which is the precision the rail actually carries. */
@@ -64,8 +75,11 @@ export function parseNttTransfer(payload: string, sourceChainId: number): NttTra
   const manager = b.subarray(70, 70 + managerLen);
   if (manager.length < 66) return null;
 
-  // `id` is bytes32(uint256(sequence)), so the uint64 sits in its last eight bytes.
-  const sequence = manager.readBigUInt64BE(24);
+  // `id` is bytes32(uint256(sequence)), so the uint64 sits in its last eight bytes — wherever the
+  // rest is zero. Solana's is a key, all 32 bytes of it.
+  const sequence = manager.subarray(0, 24).every((x) => x === 0)
+    ? manager.readBigUInt64BE(24)
+    : null;
   const innerLen = manager.readUInt16BE(64);
   const inner = manager.subarray(66, 66 + innerLen);
   if (inner.length < 79 || hex(inner, 0, 4) !== NTT_PREFIX) return null;
@@ -78,7 +92,9 @@ export function parseNttTransfer(payload: string, sourceChainId: number): NttTra
 
   return {
     digest,
+    id: hex(manager, 0, 32),
     sequence,
+    sender: hex(manager, 32, 32),
     sourceManager: address(sourceManager),
     recipientManager: address(recipientManager),
     decimals: inner.readUInt8(4),

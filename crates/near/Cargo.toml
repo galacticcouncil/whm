@@ -8,6 +8,7 @@ resolver = "2"
 [workspace.dependencies]
 near-sdk = "5.28.3"
 hex = "0.4"
+bs58 = "0.5"
 
 [profile.release]
 codegen-units = 1

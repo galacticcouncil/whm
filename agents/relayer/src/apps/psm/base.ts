@@ -1,7 +1,7 @@
 import { boot } from "../../boot";
 import { WORMHOLE } from "../../chains";
 import { privateKeyBase } from "../../config";
-import { baseClients } from "../../engine/base";
+import { baseClients } from "../../clients/base";
 
 import { makeApp } from "./app";
 import { APP_NAME_BASE, FROM_SEQUENCE_FROM_HYDRATION, RPC_BASE } from "./config";

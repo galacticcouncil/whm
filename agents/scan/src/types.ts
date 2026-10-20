@@ -1,36 +1,4 @@
-import type { AbiEvent, Chain as ViemChain } from "viem";
-
-// ─── Chains ──────────────────────────────────────────────────────
-
-export type ChainKind = "evm" | "substrate";
-
-interface ChainBase {
-  name: string;
-  kind: ChainKind;
-  /** Wormhole chain id — the first component of a VAA id. */
-  wormholeId: number;
-  /** Blocks behind the head that ingest treats as final. */
-  confirmations: bigint;
-  concurrency: number;
-}
-
-export interface EvmChain extends ChainBase {
-  kind: "evm";
-  chain: ViemChain;
-  /** Websocket — new heads arrive over eth_subscribe, never by polling. */
-  rpcUrl: string;
-  chunkSize: bigint;
-}
-
-export interface SubstrateChain extends ChainBase {
-  kind: "substrate";
-  chainId: number;
-  wssUrl: string;
-  /** Blocks between cursor writes during a backfill. */
-  checkpointEvery: number;
-}
-
-export type ChainCfg = EvmChain | SubstrateChain;
+import type { AbiEvent } from "viem";
 
 // ─── Ingest ──────────────────────────────────────────────────────
 
@@ -42,9 +10,30 @@ export interface Watch {
   chain: string;
   /** Stable name a flow addresses this contract set by; never an address. */
   role: string;
+  /**
+   * The cursor's name, defaulting to `role`. A role that gains contracts later gets a second entry
+   * under its own id, so those backfill from their own `from` while the first stays at the tip.
+   */
+  id?: string;
   from: bigint;
-  at: `0x${string}`[];
-  /** Positional topic filter. An array in a slot is an OR; a null matches anything. */
+  /**
+   * Contracts whose events are kept — addresses; account ids on NEAR; programs on Solana.
+   */
+  at: string[];
+  /**
+   * NEAR and Solana: accounts whose transaction history surfaces `at`'s events, defaulting to `at`. A shared contract — the Wormhole core, a connector — is read through the accounts of ours
+   * that call it, never through its own history.
+   */
+  via?: string[];
+  /**
+   * NEAR only: calls into `at` kept as events carrying their arguments, for what a call says and no
+   * log does.
+   */
+  calls?: string[];
+  /**
+   * Positional topic filter. An array in a slot is an OR; a null matches anything. On Solana it is
+   * applied to the topics its watcher stores — a publish's emitter is its second.
+   */
   topics?: (`0x${string}` | `0x${string}`[] | null)[];
   /**
    * Resolve who sent the transaction, for events that do not say. Costs a receipt lookup per
@@ -64,6 +53,11 @@ export interface EventRef {
   blockTimestamp: number;
   txHash: string;
   logIndex: number;
+  /**
+   * Substrate only: `<block>-<index>` of the extrinsic it ran in. What a Hydration event without an
+   * ethereum transaction is linked by — it came in as a substrate call.
+   */
+  extrinsic?: string;
 }
 
 /** A decoded log, handed to a leg. */
@@ -94,11 +88,29 @@ export interface LogEvent<A = Record<string, unknown>> {
  */
 export interface Leg<A = any> {
   role: string;
-  abi: AbiEvent;
+  /**
+   * The chains this leg reads its role on, where the role spans more than it needs. The Wormhole
+   * core is watched on every chain, but a feature's own emitter publishes on one or two — without
+   * this, its reader would drain every chain's core for events it then drops.
+   */
+  chains?: string[];
+  /** The EVM event. Exactly one of `abi` and `near`. */
+  abi?: AbiEvent;
+  /**
+   * A JSON event: NEP-297, a NEAR call kept as one (`standard: "call"`, `event`: the method), or
+   * what the Solana watcher decodes a transaction into (`chains/events.ts`).
+   */
+  near?: NearEvent;
   state: string;
   keyBy?: string;
   key: (args: A, ev: LogEvent<A>, db: Queryable) => string | null | Promise<string | null>;
   patch: (args: A, ev: LogEvent<A>) => Record<string, unknown>;
+}
+
+/** A NEAR event's identity — NEP-297's `standard` and `event`. */
+export interface NearEvent {
+  standard: string;
+  event: string;
 }
 
 /** The subset of a pg client a leg may use — enough to read, never enough to manage a transaction. */

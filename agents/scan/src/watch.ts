@@ -1,58 +1,90 @@
+import { base58 } from "@scure/base";
 import { pad, toEventSelector } from "viem";
 
-import { LogMessagePublishedEvt } from "./abi";
+import { LogMessagePublishedEvt, nearTopic } from "./abi";
 import { CHAINS } from "./chains";
+import { PUBLISH } from "./chains/events";
+import {
+  BASEJUMP,
+  INTENT,
+  NTT,
+  nttLegs,
+  ORACLE,
+  UTXO,
+  WORMHOLE_CORE,
+  type EvmLeg,
+  type SolanaLeg,
+} from "./deployments";
 import type { Watch } from "./types";
 
 /**
- * What to index, and where each cursor starts.
+ * What to index, and where each cursor starts. Addresses come from deployments.ts.
  *
  * A watch entry is the unit of both ingestion and backfill: adding one indexes only that contract,
  * from only its own `from`, while everything else stays at the tip. Roles are how a flow addresses
  * a contract — never by address, so a redeployment or a second deployment of the same role is a
  * change here and nowhere else.
- *
- * Only the corridors actually running are listed. NTT has eleven tokens deployed; the rest go in
- * when something reads them.
  */
-
-// ─── Hydration ───────────────────────────────────────────────────
-
-/** 2026-08-25 00:00 UTC */
-const FROM_HYDRATION = 13_775_946n;
-
-const WORMHOLE_CORE_HYDRATION = "0x3792a6d63c31941B2805181771795D9176fA82A1";
-
-export const WETH_TRANSCEIVER_HYDRATION = "0x8acce9CA511d5D7213F8C3f813B8916087cd00ae";
-export const WETH_MANAGER_HYDRATION = "0xb5cef790d52a57fa619ed96edd64c5328f3dcfb7";
 
 /**
- * Its Wormhole messages are the forwarding instructions, and its emitter sequence counts intents
- * alone, from zero — unlike the NTT manager's, which every corridor riding that token shares.
+ * 2026-09-01 00:00 UTC on each chain — a block, a slot, a checkpoint — where the public dataset
+ * starts.
+ *
+ * Robinhood's and HyperEVM's NTT came later, so theirs is the deploy: 2026-09-05 and
+ * 2026-09-29.
+ *
+ * Full history starts 2026-07-28: hydration 13_349_127, base 49_203_727; solana from
+ * SOL's first transaction (436_017_983).
  */
-export const INTENT_EMITTER = "0x98f1ebC9dcC8Ab7bA54D83C98500e9e313F793f2";
+const SEPT_1 = {
+  hydration: 14_056_293n,
+  ethereum: 25_878_705n,
+  base: 50_715_727n,
+  robinhood: 54_675_547n,
+  hyperevm: 47_156_536n,
+  solana: 443_282_098n,
+};
 
-const INTENT_QUOTE_EMITTER: `0x${string}`[] = [];
+/** 2026-10-01 00:00 UTC on each chain — the smaller dataset indexing was tested on. */
+const OCT_1 = {
+  hydration: 15_237_663n,
+  ethereum: 26_093_738n,
+  base: 52_011_727n,
+  robinhood: 76_928_654n,
+  hyperevm: 47_332_216n,
+  solana: 452_119_504n,
+};
 
-/** Basejump landing. Several independent deployments merge into one view, so this is a list. */
-const BASEJUMP_LANDING = ["0x70e9b12c3b19cb5f0e59984a5866278ab69df976"];
+const FROM_CHAIN = OCT_1;
+const FROM_CHAIN_ORA = OCT_1;
 
-// ─── Ethereum ────────────────────────────────────────────────────
-
-/** 2026-08-25 00:00 UTC */
-const FROM_ETHEREUM = 25_828_484n;
-
-const WORMHOLE_CORE_ETHEREUM = "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B";
-
-export const WETH_TRANSCEIVER_ETHEREUM = "0xbA0Cd32131b8206AF4feB79A1A3aaF0AEfe18b48";
-export const WETH_MANAGER_ETHEREUM = "0x283B14B5Dd352e32154Df014EA96834F395E04b6";
-
-const INTENT_RECEIVER = "0x2173F6ecE25768e7EFc5199f70f8783d88Ba63c8";
-
-/** BasejumpEmitter on Ethereum — the corridor is moving here, and is not deployed yet. */
-const BASEJUMP_EMITTER: `0x${string}`[] = [];
-
-// ─────────────────────────────────────────────────────────────────
+/** Where each cursor starts, by chain, then by what it indexes. */
+const FROM = {
+  hydration: {
+    ntt: FROM_CHAIN.hydration,
+    intents: FROM_CHAIN.hydration,
+    basejump: FROM_CHAIN.hydration,
+    oracles: FROM_CHAIN_ORA.hydration,
+    /** ZecUtxoEmitter's deploy. */
+    utxoZec: 15_901_846n,
+  },
+  ethereum: {
+    ntt: FROM_CHAIN.ethereum,
+    intents: FROM_CHAIN.ethereum,
+    basejump: FROM_CHAIN.ethereum,
+    oracles: FROM_CHAIN_ORA.ethereum,
+  },
+  base: { ntt: FROM_CHAIN.base },
+  robinhood: { ntt: FROM_CHAIN.robinhood, oracles: FROM_CHAIN_ORA.robinhood },
+  hyperevm: { ntt: FROM_CHAIN.hyperevm },
+  solana: { ntt: FROM_CHAIN.solana, oracles: FROM_CHAIN_ORA.solana },
+  near: {
+    /** ntt-near's deploy, the earlier of the two NEAR managers. */
+    ntt: 219_438_351n,
+    /** withdraw-zec's deploy. */
+    utxoZec: 220_248_232n,
+  },
+};
 
 const LOG_MESSAGE_PUBLISHED = toEventSelector(LogMessagePublishedEvt);
 
@@ -61,75 +93,198 @@ const LOG_MESSAGE_PUBLISHED = toEventSelector(LogMessagePublishedEvt);
  * the chain, which on Ethereum is thousands of messages a day.
  *
  * @param senders Emitter addresses to keep.
+ * @param topic0 The publish's topic: the core's event on an EVM chain, the decoded one elsewhere.
  */
-function published(senders: `0x${string}`[]): Watch["topics"] {
-  return [LOG_MESSAGE_PUBLISHED, senders.map((s) => pad(s, { size: 32 }))];
+function published(senders: string[], topic0 = LOG_MESSAGE_PUBLISHED): Watch["topics"] {
+  return [topic0, senders.map((s) => pad(s as `0x${string}`, { size: 32 }))];
 }
 
-export const WATCH: Watch[] = [
-  {
-    chain: "hydration",
+/** The EVM chains NTT legs are indexed on. */
+const NTT_EVM = ["hydration", "ethereum", "base", "robinhood", "hyperevm"] as const;
+
+/** Every EVM leg's contracts on a chain. */
+const evmLegs = (chain: string) =>
+  nttLegs(chain).filter((l): l is EvmLeg => typeof l !== "string" && "transceiver" in l);
+
+/** Every Solana leg. */
+const solanaLegs = () => nttLegs("solana") as SolanaLeg[];
+
+/** Every NEAR leg's account. */
+const nearLegs = () => nttLegs("near").filter((l): l is string => typeof l === "string");
+
+/**
+ * The Wormhole cores, filtered to the emitters we own: every token's transceiver, plus the intent
+ * emitter on Hydration. NEAR's and Solana's cores are shared, so each is read through the managers'
+ * own histories — and on Solana still filtered by emitter, since anything else a transaction of
+ * ours publishes is not ours.
+ */
+const WORMHOLE: Watch[] = [
+  ...NTT_EVM.map((chain) => ({
+    chain,
     role: "wormhole-core",
-    from: FROM_HYDRATION,
-    at: [WORMHOLE_CORE_HYDRATION],
-    topics: published([WETH_TRANSCEIVER_HYDRATION, INTENT_EMITTER, ...INTENT_QUOTE_EMITTER]),
+    from: FROM[chain].ntt,
+    at: [WORMHOLE_CORE[chain]],
+    topics: published([
+      ...evmLegs(chain).map((l) => l.transceiver),
+      ...(chain === "hydration" ? [INTENT.emitter] : []),
+    ]),
+  })),
+  {
+    chain: "near",
+    role: "wormhole-core",
+    from: FROM.near.ntt,
+    at: [WORMHOLE_CORE.near],
+    via: nearLegs(),
   },
   {
-    // Manager and transceiver share one entry deliberately: a delivery emits `ReceivedMessage` on
-    // the transceiver and `TransferRedeemed` on the manager in the same transaction, and only the
-    // first names the VAA the second's digest belongs to. One entry means one getLogs, so they are
-    // stored — and drained — in log order. Split them and the manager's leg finds no row.
-    chain: "hydration",
-    role: "ntt",
-    from: FROM_HYDRATION,
-    at: [WETH_TRANSCEIVER_HYDRATION, WETH_MANAGER_HYDRATION],
+    chain: "solana",
+    role: "wormhole-core",
+    from: FROM.solana.ntt,
+    at: [WORMHOLE_CORE.solana],
+    via: solanaLegs().map((l) => l.program),
+    topics: published(
+      solanaLegs().map((l) => `0x${Buffer.from(base58.decode(l.emitter)).toString("hex")}`),
+      nearTopic(PUBLISH),
+    ),
   },
+];
+
+/**
+ * Every token's NTT legs, one entry per chain.
+ *
+ * Managers and transceivers share an entry deliberately: a delivery emits `ReceivedMessage` on the
+ * transceiver and `TransferRedeemed` on the manager in the same transaction, and only the first
+ * names the VAA the second's digest belongs to. One entry means one getLogs, so they are stored —
+ * and drained — in log order. Split them and the manager's leg finds no row.
+ */
+const NTT_LEGS: Watch[] = [
+  ...NTT_EVM.map((chain) => ({
+    chain,
+    role: "ntt",
+    from: FROM[chain].ntt,
+    at: evmLegs(chain).flatMap((l) => [l.transceiver, l.manager]),
+  })),
+  {
+    chain: "near",
+    role: "ntt",
+    from: FROM.near.ntt,
+    at: nearLegs(),
+  },
+  {
+    chain: "solana",
+    role: "ntt",
+    from: FROM.solana.ntt,
+    at: solanaLegs().map((l) => l.program),
+  },
+];
+
+/** Intents: placed on Hydration, forwarded on Ethereum. */
+const INTENTS: Watch[] = [
   {
     chain: "hydration",
     role: "intent-emitter",
-    from: FROM_HYDRATION,
-    at: [INTENT_EMITTER],
-  },
-  {
-    chain: "hydration",
-    role: "intent-quote",
-    from: FROM_HYDRATION,
-    at: INTENT_QUOTE_EMITTER,
-  },
-  {
-    chain: "ethereum",
-    role: "wormhole-core",
-    from: FROM_ETHEREUM,
-    at: [WORMHOLE_CORE_ETHEREUM],
-    topics: published([WETH_TRANSCEIVER_ETHEREUM]),
-  },
-  {
-    chain: "ethereum",
-    role: "ntt",
-    from: FROM_ETHEREUM,
-    at: [WETH_TRANSCEIVER_ETHEREUM, WETH_MANAGER_ETHEREUM],
+    from: FROM.hydration.intents,
+    at: [INTENT.emitter],
   },
   {
     chain: "ethereum",
     role: "intent-receiver",
-    from: FROM_ETHEREUM,
-    at: [INTENT_RECEIVER],
+    from: FROM.ethereum.intents,
+    at: [INTENT.receiver],
   },
+];
+
+/** Basejump: the Ethereum source, paid out of the Hydration landing pool. */
+const BASEJUMPS: Watch[] = [
   {
     // BridgeInitiated names no sender, and who bridged is the first thing anyone asks.
     chain: "ethereum",
     role: "basejump-source",
-    from: FROM_ETHEREUM,
-    at: BASEJUMP_EMITTER,
+    from: FROM.ethereum.basejump,
+    at: [...BASEJUMP.emitter],
     sender: true,
   },
   {
     chain: "hydration",
     role: "basejump-landing",
-    from: FROM_HYDRATION,
-    at: BASEJUMP_LANDING,
+    from: FROM.hydration.basejump,
+    at: [...BASEJUMP.landing],
   },
-].filter((w) => w.at.length > 0) as Watch[];
+];
+
+/**
+ * ZEC through Omni: the Hydration emitter a withdrawal leaves by, `withdraw-zec` signing it on NEAR,
+ * and the NEAR connector a deposit is proven on — read through `ntt-zec`, which every deposit pays.
+ */
+const UTXO_ZEC: Watch[] = [
+  {
+    chain: "hydration",
+    role: "utxo-emitter",
+    from: FROM.hydration.utxoZec,
+    at: [UTXO.zec.emitter],
+  },
+  {
+    chain: "near",
+    role: "utxo-withdraw",
+    from: FROM.near.utxoZec,
+    at: [UTXO.zec.withdraw],
+  },
+  {
+    // The proof's arguments name what no log does: the Zcash transaction itself — and so who paid
+    // — and the order, refund address included.
+    chain: "near",
+    role: "utxo-connector",
+    from: FROM.near.ntt,
+    at: [UTXO.zec.connector],
+    via: [NTT.zec.near],
+    calls: ["verify_deposit_v2"],
+  },
+];
+
+/**
+ * Oracle relays: each source's emitter, read off its chain's Wormhole core under a cursor of its
+ * own — so the relays backfill from their own start while the core's NTT cursor stays where it is —
+ * and the receivers on each destination.
+ */
+const ORACLES: Watch[] = [
+  ...(["ethereum", "robinhood", "hydration"] as const).map((chain) => ({
+    chain,
+    role: "wormhole-core",
+    id: "oracle-core",
+    from: FROM[chain].oracles,
+    at: [WORMHOLE_CORE[chain]],
+    topics: published([ORACLE[chain].emitter]),
+  })),
+  {
+    chain: "solana",
+    role: "wormhole-core",
+    id: "oracle-core",
+    from: FROM.solana.oracles,
+    at: [WORMHOLE_CORE.solana],
+    via: [ORACLE.solana.program],
+    topics: published(
+      [`0x${Buffer.from(base58.decode(ORACLE.solana.emitter)).toString("hex")}`],
+      nearTopic(PUBLISH),
+    ),
+  },
+  ...(["hydration", "robinhood"] as const).map((chain) => ({
+    chain,
+    role: "oracle-receiver",
+    from: FROM[chain].oracles,
+    at: Object.values(ORACLE)
+      .filter((r) => r.receiver.chain === chain)
+      .map((r) => r.receiver.address),
+  })),
+];
+
+export const WATCH: Watch[] = [
+  ...WORMHOLE,
+  ...NTT_LEGS,
+  ...INTENTS,
+  ...BASEJUMPS,
+  ...UTXO_ZEC,
+  ...ORACLES,
+].filter((w) => w.at.length > 0);
 
 /** The watch entries on chains this process has an endpoint for. */
 export const enabled: Watch[] = WATCH.filter((w) => CHAINS[w.chain]);

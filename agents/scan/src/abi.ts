@@ -1,4 +1,6 @@
-import { parseAbiItem } from "viem";
+import { keccak256, parseAbiItem, toHex, toEventSelector, type AbiEvent } from "viem";
+
+import type { NearEvent } from "./types";
 
 /**
  * Wormhole and NTT event shapes. Infrastructure, not a feature — every corridor in this repo
@@ -31,3 +33,24 @@ export const TransferRedeemedEvt = parseAbiItem("event TransferRedeemed(bytes32 
 export const InboundTransferQueuedEvt = parseAbiItem(
   "event InboundTransferQueued(bytes32 digest)",
 );
+
+/**
+ * A NEAR event's stand-in for `topic0`, so it is stored, routed and replayed exactly like a log:
+ * `keccak256("<standard>:<event>")`.
+ *
+ * @param e The event's identity.
+ */
+export function nearTopic(e: NearEvent): `0x${string}` {
+  return keccak256(toHex(`${e.standard}:${e.event}`));
+}
+
+/**
+ * The `topic0` a leg's events are stored under, whichever chain they come from.
+ *
+ * @param leg Exactly one of an EVM event or a NEAR event.
+ */
+export function legTopic(leg: { abi?: AbiEvent; near?: NearEvent }): `0x${string}` {
+  if (leg.abi) return toEventSelector(leg.abi);
+  if (leg.near) return nearTopic(leg.near);
+  throw new Error("a leg names neither an abi nor a near event");
+}

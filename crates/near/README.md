@@ -9,7 +9,8 @@ token. Its wire format is byte-for-byte EVM NTT, so the Hydration side is unmodi
 
 Design: [docs/near-ntt/spec.md](../../docs/near-ntt/spec.md) · pre-implementation checks:
 [verify.md](../../docs/near-ntt/verify.md) · build log: [progress.md](../../docs/near-ntt/progress.md) ·
-BTC / ZEC from their own chains: [omft-routing.md](../../docs/near-ntt/omft-routing.md).
+BTC / ZEC from their own chains: [deposit](../../docs/near-utxo/deposit/spec.md), and back:
+[withdraw](../../docs/near-utxo/withdraw/spec.md).
 
 ## Layout
 
@@ -23,10 +24,19 @@ contracts/ntt-manager/     the contract (near-sdk 5)
   src/trimmed.rs           8-decimal trimming, with dust
   src/vaa.rs               VAA body parser
   tests/fixtures/          real mainnet NTT VAAs — golden vectors
+contracts/utxo-withdraw/    a UTXO-chain token on NEAR → its native chain via Omni's connector, from an
+                           MPC-derived account per destination address; one deployment per chain
+  src/chain.rs             the deployment's chain; dispatches to chains/
+  src/chains/zcash.rs      Zcash: t1/t3 address → script, derivation path, ZIP-317 fee
+  src/connector.rs         connector reads, bridge fee, best-fit coin, the Withdraw message
+  src/delegate.rs          NEP-366 delegate actions, borsh by hand
+  src/mpc.rs               v1.signer derived_public_key / sign
 sandbox/                   end-to-end tests on a NEAR sandbox (near-workspaces)
   tests/wasm/              mainnet code of the Wormhole core, wrap.near and zec.omft.near
   forge/                   EVM check: a NEAR-published payload through the real TransceiverStructs
+  tests/delegate.rs        utxo-withdraw's delegate encoding against nearcore's own types
 scripts/ntt-manager/       user scripts + local fork
+scripts/utxo-withdraw/     derive a withdraw account; sign and relay a withdraw or claim (the bot's job)
 ```
 
 Deployment is [`migrations/definitions/near-ntt-{zec,near}`](../../migrations/definitions/) — NEAR

@@ -1,70 +1,105 @@
 /*
- * Shared across every domain's pages.
- *
- * Tokens, spacing and the layout primitives are taken from the Hydration explorer so the two read
- * as one product — the 1280/24 wrap, the 18px panel, the 220px key column, the pill nav. Geist
- * comes from Google Fonts rather than the explorer's own host, so nothing here depends on it
- * staying up. Gazpacho is not publicly distributed, so the wordmark falls back to a serif: still a
- * wordmark, still distinct from the body face.
+ * Shared across every domain's pages — the Hydration explorer's design system, ported to plain CSS:
+ * its tokens, faces, table, address pill, chain badge, asset chip, badges, key/value grid, search
+ * and pager, taken from hydration-neckwork/explorer-ui so the two read as one product. Filters are
+ * the explorer's pill controls and combo popover, holding checkbox rows.
  */
+
+/* Fonts: the explorer's own woff2 halves, served from /fonts — see its global.css for the split. */
+@font-face { font-family: 'Gazpacho'; src: url('/fonts/GazpachoRegular-latin.woff2') format('woff2'); font-weight: 400; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'Gazpacho'; src: url('/fonts/GazpachoRegular-ext.woff2') format('woff2'); font-weight: 400; font-display: swap; unicode-range: U+0100-0107, U+010A-011B, U+011E-0123, U+0126-0127, U+012A-0131, U+0134-0137, U+0139-0148, U+014A-015B, U+015E-0167, U+016A-016B, U+016E-017E, U+018F, U+01FC-01FD, U+0218-021B, U+0237, U+0259, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+1E80-1E85, U+1E9E, U+1EF2-1EF3; }
+@font-face { font-family: 'Gazpacho'; src: url('/fonts/GazpachoMedium-latin.woff2') format('woff2'); font-weight: 500; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'Gazpacho'; src: url('/fonts/GazpachoMedium-ext.woff2') format('woff2'); font-weight: 500; font-display: swap; unicode-range: U+0100-0107, U+010A-011B, U+011E-0123, U+0126-0127, U+012A-0131, U+0134-0137, U+0139-0148, U+014A-015B, U+015E-0167, U+016A-016B, U+016E-017E, U+018F, U+01FC-01FD, U+0218-021B, U+0237, U+0259, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+1E80-1E85, U+1E9E, U+1EF2-1EF3; }
+@font-face { font-family: 'Gazpacho'; src: url('/fonts/GazpachoBold-latin.woff2') format('woff2'); font-weight: 600; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'Gazpacho'; src: url('/fonts/GazpachoBold-ext.woff2') format('woff2'); font-weight: 600; font-display: swap; unicode-range: U+0100-0107, U+010A-011B, U+011E-0123, U+0126-0127, U+012A-0131, U+0134-0137, U+0139-0148, U+014A-015B, U+015E-0167, U+016A-016B, U+016E-017E, U+018F, U+01FC-01FD, U+0218-021B, U+0237, U+0259, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+1E80-1E85, U+1E9E, U+1EF2-1EF3; }
+@font-face { font-family: 'Geist'; src: url('/fonts/GeistRegular-latin.woff2') format('woff2'); font-weight: 400; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'Geist'; src: url('/fonts/GeistRegular-ext.woff2') format('woff2'); font-weight: 400; font-display: swap; unicode-range: U+0100-0113, U+0116-012B, U+012E-0137, U+0139-013E, U+0141-0148, U+014A-014D, U+0150-017E, U+018F, U+0192, U+01CD-01CE, U+01E4-01E9, U+0218-021B, U+0237, U+0259, U+02B9, U+02BC, U+02C6-02C8, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+0335, U+039B, U+03A9, U+03BB, U+03C0, U+0400-040C, U+040E-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-0493, U+0496-0497, U+049A-049B, U+04A2-04A3, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0, U+04CF, U+04D8-04D9, U+04E2-04E3, U+04E8-04E9, U+04EE-04EF, U+0E3F, U+1E20-1E21, U+1E80-1E85, U+1E9E, U+1EBC-1EBD, U+1EF2-1EF3, U+1EF8-1EF9, U+2032-2033, U+240B-240C, U+2460-2468, U+24EA, U+24FF, U+2639-263A, U+3003, U+3008-3011, U+3014-3017, U+301C, U+A78B-A78C, U+F8FF; }
+@font-face { font-family: 'Geist'; src: url('/fonts/GeistMedium-latin.woff2') format('woff2'); font-weight: 500; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'Geist'; src: url('/fonts/GeistMedium-ext.woff2') format('woff2'); font-weight: 500; font-display: swap; unicode-range: U+0100-0113, U+0116-012B, U+012E-0137, U+0139-013E, U+0141-0148, U+014A-014D, U+0150-017E, U+018F, U+0192, U+01CD-01CE, U+01E4-01E9, U+0218-021B, U+0237, U+0259, U+02B9, U+02BC, U+02C6-02C8, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+0335, U+039B, U+03A9, U+03BB, U+03C0, U+0400-040C, U+040E-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-0493, U+0496-0497, U+049A-049B, U+04A2-04A3, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0, U+04CF, U+04D8-04D9, U+04E2-04E3, U+04E8-04E9, U+04EE-04EF, U+0E3F, U+1E20-1E21, U+1E80-1E85, U+1E9E, U+1EBC-1EBD, U+1EF2-1EF3, U+1EF8-1EF9, U+2032-2033, U+240B-240C, U+2460-2468, U+24EA, U+24FF, U+2639-263A, U+3003, U+3008-3011, U+3014-3017, U+301C, U+A78B-A78C, U+F8FF; }
+@font-face { font-family: 'Geist'; src: url('/fonts/GeistSemiBold-latin.woff2') format('woff2'); font-weight: 600; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'Geist'; src: url('/fonts/GeistSemiBold-ext.woff2') format('woff2'); font-weight: 600; font-display: swap; unicode-range: U+0100-0113, U+0116-012B, U+012E-0137, U+0139-013E, U+0141-0148, U+014A-014D, U+0150-017E, U+018F, U+0192, U+01CD-01CE, U+01E4-01E9, U+0218-021B, U+0237, U+0259, U+02B9, U+02BC, U+02C6-02C8, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+0335, U+039B, U+03A9, U+03BB, U+03C0, U+0400-040C, U+040E-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-0493, U+0496-0497, U+049A-049B, U+04A2-04A3, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0, U+04CF, U+04D8-04D9, U+04E2-04E3, U+04E8-04E9, U+04EE-04EF, U+0E3F, U+1E20-1E21, U+1E80-1E85, U+1E9E, U+1EBC-1EBD, U+1EF2-1EF3, U+1EF8-1EF9, U+2032-2033, U+240B-240C, U+2460-2468, U+24EA, U+24FF, U+2639-263A, U+3003, U+3008-3011, U+3014-3017, U+301C, U+A78B-A78C, U+F8FF; }
+@font-face { font-family: 'GeistMono'; src: url('/fonts/GeistMonoRegular-latin.woff2') format('woff2'); font-weight: 400; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'GeistMono'; src: url('/fonts/GeistMonoRegular-ext.woff2') format('woff2'); font-weight: 400; font-display: swap; unicode-range: U+0100-0113, U+0116-012B, U+012E-0131, U+0134-0137, U+0139-013E, U+0141-0148, U+014C-014D, U+0150-0165, U+0168-017E, U+018F, U+0192, U+01CD-01CE, U+0218-021B, U+0237, U+0259, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+03A9, U+03C0, U+0E3F, U+1E20-1E21, U+1E80-1E85, U+1E9E, U+1EBC-1EBD, U+1EF2-1EF3, U+1EF8-1EF9, U+240B-240C, U+2423, U+3002-3003, U+3008-3011, U+3014-3017, U+301C, U+A78B-A78C, U+FF01-FF03, U+FF05-FF0A, U+FF0C-FF0F, U+FF1A-FF1B, U+FF1F-FF20, U+FF3B-FF3D, U+FF3F, U+FF5B, U+FF5D; }
+@font-face { font-family: 'GeistMono'; src: url('/fonts/GeistMonoMedium-latin.woff2') format('woff2'); font-weight: 500; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'GeistMono'; src: url('/fonts/GeistMonoMedium-ext.woff2') format('woff2'); font-weight: 500; font-display: swap; unicode-range: U+0100-0113, U+0116-012B, U+012E-0131, U+0134-0137, U+0139-013E, U+0141-0148, U+014A-014D, U+0150-017E, U+018F, U+0192, U+01CD-01CE, U+01E4-01E9, U+0218-021B, U+0237, U+0259, U+02B9, U+02BC, U+02C6-02C8, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+0335-0338, U+039B, U+03A9, U+03BB, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-0493, U+0496-0497, U+049A-049B, U+04A2-04A3, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0, U+04CF, U+04D8-04D9, U+04E2-04E3, U+04E8-04E9, U+04EE-04EF, U+0E3F, U+1E20-1E21, U+1E80-1E85, U+1E9E, U+1EBC-1EBD, U+1EF2-1EF3, U+1EF8-1EF9, U+2032-2033, U+240B-240C, U+2423, U+2460-2468, U+24EA, U+24FF-2500, U+2502, U+250C, U+2514, U+251C, U+3003, U+3008-3011, U+3014-3017, U+301C, U+A78B-A78C, U+F8FF; }
+@font-face { font-family: 'GeistMono'; src: url('/fonts/GeistMonoSemiBold-latin.woff2') format('woff2'); font-weight: 600; font-display: swap; unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+2070, U+2074-2079, U+2080-2089, U+20AA, U+20AC, U+20B4, U+20B9, U+20BD, U+20BF, U+2107, U+2116-2117, U+2122, U+2153-2155, U+215B-215E, U+2190-2199, U+219D, U+21A9-21AA, U+21B0-21B1, U+21B3-21B5, U+21E4-21E5, U+21E7, U+2202, U+2205-2206, U+220F, U+2211-2212, U+221A, U+221E, U+222B, U+2248, U+2260, U+2264-2265, U+2326-2327, U+232B, U+23CE, U+25B2-25B3, U+25B6-25B7, U+25BC-25BD, U+25C0-25C1, U+25CA-25CC, U+25CF, U+2776-277E, U+FB01-FB02; }
+@font-face { font-family: 'GeistMono'; src: url('/fonts/GeistMonoSemiBold-ext.woff2') format('woff2'); font-weight: 600; font-display: swap; unicode-range: U+0100-0113, U+0116-012B, U+012E-0131, U+0134-0137, U+0139-013E, U+0141-0148, U+014C-014D, U+0150-0165, U+0168-017E, U+018F, U+0192, U+01CD-01CE, U+0218-021B, U+0237, U+0259, U+02C6-02C7, U+02D8-02DD, U+0300-0304, U+0306-0308, U+030A-030C, U+0312, U+0326-0328, U+03A9, U+03C0, U+0E3F, U+1E20-1E21, U+1E80-1E85, U+1E9E, U+1EBC-1EBD, U+1EF2-1EF3, U+1EF8-1EF9, U+240B-240C, U+2423, U+3002-3003, U+3008-3011, U+3014-3017, U+301C, U+A78B-A78C, U+FF01-FF03, U+FF05-FF0A, U+FF0C-FF0F, U+FF1A-FF1B, U+FF1F-FF20, U+FF3B-FF3D, U+FF3F, U+FF5B, U+FF5D; }
+
+/* ─── Tokens ────────────────────────────────────────────────── */
+
+:root {
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
 
 :root[data-theme="dark"] {
   --bg: #030816;
   --bg-elev: #0d1525;
   --bg-elev2: #131d30;
-  --panel: #ffffff08;
-  --panel-hover: #ffffff0f;
-  --border: #ffffff17;
-  --separator: #ffffff0e;
+  --panel: rgba(255, 255, 255, 0.03);
+  --panel-hover: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.09);
+  --separator: rgba(255, 255, 255, 0.055);
   --text-high: #f5f1f8;
   --text-medium: #a4abbd;
   --text-low: #6a7187;
   --text-lowest: #454c5e;
   --accent: #e53e76;
-  --accent-soft: #e53e7624;
+  --accent-soft: rgba(229, 62, 118, 0.14);
+  --accent-on: #fff;
   --lavender: #dfb1f3;
-  --lavender-soft: #cc6ef426;
+  --lavender-soft: rgba(204, 110, 244, 0.15);
   --sky: #95caff;
-  --sky-soft: #53a4f321;
+  --sky-deep: #2c89e9;
+  --sky-soft: rgba(83, 164, 243, 0.13);
   --green: #74c742;
-  --green-soft: #74c74226;
+  --green-soft: rgba(116, 199, 66, 0.15);
   --red: #ff6868;
-  --red-soft: #ff686821;
+  --red-soft: rgba(255, 104, 104, 0.13);
   --amber: #f7bf06;
-  --amber-soft: #f7bf0621;
+  --amber-soft: rgba(247, 191, 6, 0.13);
   --orange: #ff8a45;
-  --orange-soft: #ff8a4524;
+  --orange-soft: rgba(255, 138, 69, 0.14);
   --neutral: #9aa3b5;
+  --neutral-cool: #8399bf;
+  --chart-neutral: #6b7488;
+  color-scheme: dark;
 }
 
 :root[data-theme="light"] {
   --bg: #efedea;
-  --bg-elev: #fff;
+  --bg-elev: #ffffff;
   --bg-elev2: #f6f4f1;
-  --panel: #240e3209;
-  --panel-hover: #240e3212;
-  --border: #240e3221;
-  --separator: #240e3214;
+  --panel: rgba(36, 14, 50, 0.035);
+  --panel-hover: rgba(36, 14, 50, 0.07);
+  --border: rgba(36, 14, 50, 0.13);
+  --separator: rgba(36, 14, 50, 0.08);
   --text-high: #232226;
   --text-medium: #5f5b67;
   --text-low: #8a8693;
   --text-lowest: #bdb8c6;
   --accent: #e53e76;
-  --accent-soft: #e53e761a;
+  --accent-soft: rgba(229, 62, 118, 0.1);
+  --accent-on: #fff;
   --lavender: #b454da;
-  --lavender-soft: #cc6ef429;
+  --lavender-soft: rgba(204, 110, 244, 0.16);
   --sky: #2c89e9;
-  --sky-soft: #53a4f31a;
+  --sky-deep: #1f5cab;
+  --sky-soft: rgba(83, 164, 243, 0.1);
   --green: #45ac1f;
-  --green-soft: #74c74229;
+  --green-soft: rgba(116, 199, 66, 0.16);
   --red: #d83b3b;
-  --red-soft: #d83b3b1a;
+  --red-soft: rgba(216, 59, 59, 0.1);
   --amber: #b58800;
-  --amber-soft: #f7bf0629;
+  --amber-soft: rgba(247, 191, 6, 0.16);
   --orange: #a04508;
-  --orange-soft: #a045081f;
+  --orange-soft: rgba(160, 69, 8, 0.12);
   --neutral: #5f5b67;
+  --neutral-cool: #3f5570;
+  --chart-neutral: #7b8298;
+  color-scheme: light;
 }
+
+/* ─── Base ──────────────────────────────────────────────────── */
 
 * {
   box-sizing: border-box;
@@ -80,12 +115,12 @@ body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--text-high);
-  font-family: Geist, system-ui, sans-serif;
+  font-family: "Geist", system-ui, sans-serif;
   line-height: 1.5;
 }
 
 .mono {
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: "GeistMono", ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }
 
@@ -94,12 +129,46 @@ a {
   text-decoration: none;
 }
 
-a.link {
+a.link,
+a.hash,
+.hash {
   color: var(--sky);
+  font-family: "GeistMono", ui-monospace, monospace;
 }
 
-a.link:hover {
+a.link:hover,
+a.hash:hover {
   text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sky);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-on);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+  border: 2px solid var(--bg);
+}
+
+.muted {
+  color: var(--text-medium);
+}
+
+.dim {
+  color: var(--text-lowest);
 }
 
 /* ─── Frame ─────────────────────────────────────────────────── */
@@ -120,7 +189,6 @@ a.link:hover {
   border-bottom: 1px solid var(--separator);
 }
 
-/* Brand, nav and the right-hand cluster, spaced by the row's own gap. */
 .topbar .wrap {
   display: flex;
   align-items: center;
@@ -144,17 +212,15 @@ a.link:hover {
   flex: none;
 }
 
-/* The wordmark, as the explorer sets it. Gazpacho if the viewer happens to have it, serif if not. */
 .brand .wm {
-  font-family: Gazpacho, serif;
+  font-family: "Gazpacho", serif;
   font-size: 18px;
   font-weight: 500;
-  letter-spacing: 0;
 }
 
 .brand .pr {
   color: var(--accent);
-  font-family: Gazpacho, serif;
+  font-family: "Gazpacho", serif;
   font-size: 18px;
   font-style: italic;
   font-weight: 400;
@@ -201,22 +267,24 @@ a.link:hover {
 }
 
 .conn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--text-lowest);
+  gap: 8px;
+  color: var(--text-low);
   font-size: 12px;
 }
 
 .dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--text-lowest);
+  flex: none;
 }
 
 .dot.live {
   background: var(--green);
+  box-shadow: 0 0 0 3px var(--green-soft);
 }
 
 .theme {
@@ -241,8 +309,36 @@ a.link:hover {
 }
 
 main.wrap {
-  padding-top: 24px;
-  padding-bottom: 64px;
+  padding-top: 32px;
+  padding-bottom: 80px;
+  animation: pageIn 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pageIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.crumbs a:hover {
+  color: var(--accent);
+}
+
+.crumbs .sep {
+  color: var(--text-lowest);
 }
 
 .page-title {
@@ -251,34 +347,50 @@ main.wrap {
   align-items: center;
   gap: 2px 14px;
   margin: 0 0 18px;
-  letter-spacing: 0;
-  font-family: Gazpacho, serif;
+  font-family: "Gazpacho", serif;
   font-size: 34px;
   font-weight: 500;
+  letter-spacing: 0;
 }
 
 .page-title .sub {
-  font-family: "Geist Mono", ui-monospace, monospace;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "GeistMono", ui-monospace, monospace;
   font-size: 13px;
   font-weight: 400;
   color: var(--text-medium);
 }
 
+.sec-title {
+  margin: 24px 0 12px;
+  color: var(--text-medium);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
 /* ─── Panels ────────────────────────────────────────────────── */
 
-.panel {
+.panel,
+.detail-card {
   background: var(--bg-elev);
   border: 1px solid var(--separator);
   border-radius: 18px;
   overflow: hidden;
 }
 
+.panel:has(> .tbl),
 .panel:has(> .scroll) {
   overflow-x: auto;
 }
 
 .panel + .panel,
+.detail-card + .detail-card,
 .legs + .panel,
+.legs + .detail-card,
 .panel + .legs {
   margin-top: 14px;
 }
@@ -293,7 +405,7 @@ main.wrap {
 }
 
 .panel-head .t {
-  font-family: Gazpacho, serif;
+  font-family: "Gazpacho", serif;
   font-size: 17px;
   font-weight: 500;
 }
@@ -315,23 +427,28 @@ main.wrap {
   border-collapse: collapse;
 }
 
-.tbl th {
-  padding: 10px 18px;
+.tbl thead th {
+  padding: 11px 16px;
   text-align: left;
   border-bottom: 1px solid var(--separator);
   color: var(--text-low);
-  font-family: "Geist Mono", ui-monospace, monospace;
+  font-family: "GeistMono", ui-monospace, monospace;
   font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   white-space: nowrap;
 }
 
-.tbl td {
-  padding: 11px 18px;
+.tbl thead th.r {
+  text-align: right;
+}
+
+.tbl tbody td {
+  padding: 12px 16px;
   border-bottom: 1px solid var(--separator);
   font-size: 13px;
+  vertical-align: middle;
   white-space: nowrap;
 }
 
@@ -339,35 +456,285 @@ main.wrap {
   border-bottom: 0;
 }
 
+.tbl tbody tr {
+  transition: background 120ms;
+}
+
 .tbl tbody tr.clickable {
   cursor: pointer;
 }
 
-.tbl tbody tr:hover {
-  background: var(--panel);
+.tbl tbody tr.clickable:hover {
+  background: var(--panel-hover);
 }
 
-.tbl th.r,
 .tbl td.r {
   text-align: right;
 }
 
 .tbl td.mono {
-  font-family: "Geist Mono", ui-monospace, monospace;
+  font-family: "GeistMono", ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
 }
 
-.table-error {
+/* The previous query's rows while the next loads: dimmed rather than swapped, so the height holds. */
+.tbl tbody.rows-pending {
+  opacity: 0.4;
+  transition: opacity 120ms;
+}
+
+.table-error,
+.tbl td.table-error {
   padding: 32px 16px;
   text-align: center;
   color: var(--text-medium);
   font-size: 12px;
 }
 
-/* Token and chain marks. Never load-bearing — a symbol always sits beside them, and a mark whose
-   registry entry is missing removes itself rather than leaving a broken image.
-   Spacing comes from the flex gap of whatever holds them, never a margin here. */
+/* A row that just arrived: a sky wash and a left edge, both fading out. */
+@keyframes rowEnter {
+  0% {
+    background-color: color-mix(in srgb, var(--sky) 14%, transparent);
+  }
+  55% {
+    background-color: color-mix(in srgb, var(--sky) 8%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes edgeFade {
+  0% {
+    box-shadow: inset 2px 0 0 0 var(--sky);
+  }
+  100% {
+    box-shadow: inset 2px 0 0 0 transparent;
+  }
+}
+
+.tbl tbody tr.row-new > td {
+  animation: rowEnter 1.25s ease-out;
+}
+
+.tbl tbody tr.row-new > td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--sky);
+  animation:
+    rowEnter 1.25s ease-out,
+    edgeFade 1.25s ease-out;
+}
+
+/* Skeleton rows: the real grid, each cell a shimmer bar. */
+@keyframes sk {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.tbl tbody tr.sk-tr td::before {
+  content: "";
+  display: block;
+  height: 11px;
+  width: var(--w, 60%);
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--panel) 25%, var(--panel-hover) 37%, var(--panel) 63%);
+  background-size: 400% 100%;
+  animation: sk 1.4s ease infinite;
+}
+
+/* ─── Atoms ─────────────────────────────────────────────────── */
+
+/* Chain: a gradient text badge, colours per chain (chainBadge in app.js). */
+.chain-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: #fff;
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.chain-badge-local {
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #000));
+  color: var(--accent-on);
+}
+
+/* Account: avatar, address with its last three characters raised, copy. */
+.addr-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.addr-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 12.5px;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.addr-pill .emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 13px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.addr-pill .a {
+  color: var(--sky);
+}
+
+a.addr-pill:hover .a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.last3 {
+  color: var(--text-high);
+}
+
+.ext-site {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text-low);
+  font-size: 9px;
+  line-height: 1.25;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+a.addr-pill:hover .ext-site {
+  color: var(--text-medium);
+  border-color: var(--text-low);
+}
+
+.copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-low);
+  cursor: pointer;
+  vertical-align: middle;
+  transition:
+    color 140ms,
+    background 140ms;
+}
+
+.copy:hover {
+  color: var(--text-high);
+  background: var(--panel-hover);
+}
+
+.copy svg {
+  width: 12px;
+  height: 12px;
+}
+
+.copy.done,
+.copy.done:hover {
+  color: var(--green);
+}
+
+.copy.done svg {
+  animation: copy-pop 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes copy-pop {
+  from {
+    transform: scale(0.45);
+  }
+  60% {
+    transform: scale(1.25);
+  }
+}
+
+/* Asset: icon (home chain in the corner), symbol, amount. */
+.asset-chip,
+.trade-leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.trade-leg {
+  gap: 7px;
+}
+
+.sym {
+  color: var(--text-medium);
+}
+
+.ai {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 0;
+  vertical-align: middle;
+}
+
+.ai > img:first-child,
+.asset-logo {
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.asset-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.ai-corner {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  border-radius: 50%;
+  border: 1px solid var(--bg);
+  background: var(--bg);
+  object-fit: cover;
+}
+
+/* Token and chain marks that stand alone (leg cards). Remove themselves on a 404. */
 .icon {
   width: 20px;
   height: 20px;
@@ -377,14 +744,11 @@ main.wrap {
   vertical-align: middle;
 }
 
-/* Wormhole's mark is a solid white glyph with no backdrop of its own, so it needs one to survive a
-   light panel. Same disc in both themes, so it reads the same either way. */
 .icon-wormhole {
   background: #131d30;
   padding: 2px;
 }
 
-/* The trade itself: what went in, what came out. */
 .assets {
   display: inline-flex;
   flex-wrap: wrap;
@@ -392,30 +756,225 @@ main.wrap {
   gap: 8px;
 }
 
-.assets .arrow {
+.assets .arrow,
+.route .arrow {
   color: var(--text-lowest);
 }
 
-/* One asset: its mark, the amount, the symbol — centred on a single row. */
-.asset-chip {
+/* A transfer's end: its chain and its account side by side, wrapping only when it must. */
+.end-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A route cell: chain badge → chain badge. */
+.route {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  vertical-align: middle;
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
 }
 
-.sym {
+/* Stacked cells: the main line, and a quieter one under it. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.stack .under,
+.dd .under {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.tbl td.r .stack {
+  align-items: flex-end;
+}
+
+/* A hash and its copy button, kept together on one line. */
+.txl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.ext-link {
+  margin-left: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--sky-soft);
+  color: var(--sky);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ext-link:hover {
+  color: var(--text-high);
+}
+
+/* ─── Badges ────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  background: var(--panel);
   color: var(--text-medium);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.badge svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Icon-only, round — the list's status column. */
+.badge-icon {
+  padding: 4px;
+  gap: 0;
+}
+
+.badge.ok {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.badge.fail {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.badge.progress {
+  background: var(--sky-soft);
+  color: var(--sky);
+}
+
+.badge.pending {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+/* Lifecycle stages, shared by every flow: in flight is cool, done is green, held is amber. */
+.badge.placed,
+.badge.initiated,
+.badge.published,
+.badge.requested,
+.badge.deposited {
+  background: var(--sky-soft);
+  color: var(--sky);
+}
+
+.badge.processed,
+.badge.received,
+.badge.signed,
+.badge.withdrawn {
+  background: var(--lavender-soft);
+  color: var(--lavender);
+}
+
+.badge.settled,
+.badge.redeemed,
+.badge.fulfilled,
+.badge.confirmed,
+.badge.completed {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.badge.queued,
+.badge.held {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.badge.expired {
+  background: var(--panel-hover);
+  color: var(--text-low);
+}
+
+.badge.refunded {
+  background: var(--orange-soft);
+  color: var(--orange);
+}
+
+.badge.failed {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* A kind of thing, in its own colour — the list's type column. */
+.pill-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 15%, transparent);
 }
 
 /* ─── Key / value ───────────────────────────────────────────── */
 
+.dl {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+}
+
+.dl .dt {
+  display: flex;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--separator);
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dl .dd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--separator);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.dl .dd.mono {
+  font-family: "GeistMono", ui-monospace, monospace;
+}
+
+.dl .dt:nth-last-child(2),
+.dl .dd:last-child {
+  border-bottom: 0;
+}
+
+/* The older key/value rows, still used by intents. */
 .kv-row {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 200px 1fr;
   border-bottom: 1px solid var(--separator);
 }
 
@@ -426,42 +985,104 @@ main.wrap {
 .kv-row .kk {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 11px 16px;
-  color: var(--text-medium);
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-size: 12px;
+  padding: 14px 18px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .kv-row .vv {
-  padding: 11px 16px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px;
   color: var(--text-high);
-  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* ─── Fee tree ──────────────────────────────────────────────── */
+
+/* A total's parts, branching out under it: a trunk down the left, a tick to each part, the last one
+   closing the trunk like └. Sits on its own line inside a key/value cell. */
+.fee-tree {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0 0 9px;
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
-  word-break: break-all;
+}
+
+.fee-tree .br {
+  position: relative;
+  display: grid;
+  grid-template-columns: 150px auto;
+  gap: 12px;
+  padding: 4px 0 4px 20px;
+}
+
+.fee-tree .br::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--border);
+}
+
+.fee-tree .br:last-child::before {
+  bottom: 50%;
+}
+
+.fee-tree .br::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.fee-tree .who {
+  color: var(--text-low);
+}
+
+.fee-tree .amt {
+  color: var(--text-high);
 }
 
 /* ─── Legs ──────────────────────────────────────────────────── */
 
 /*
- * The route, start to end, one card per hop. Cards flow left to right so the shape of the journey
- * is legible before any of the values are — a pending hop is dimmed rather than hidden, because
- * where a transfer stopped is the thing worth seeing.
+ * The route, start to end, one card per hop. A hop not taken yet is dimmed rather than hidden,
+ * because where a transfer stopped is the thing worth seeing.
  */
+/* At most four steps to a row: a route of five or six breaks into rows of three (`--cols`). */
 .legs {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 960px) {
+  .legs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .leg {
   position: relative;
+  min-width: 0;
+  padding: 14px 16px;
   background: var(--bg-elev);
   border: 1px solid var(--separator);
-  border-radius: 18px;
-  padding: 14px 18px;
-  min-width: 0;
-  overflow-wrap: anywhere;
+  border-radius: 16px;
 }
 
 .leg.pending {
@@ -469,7 +1090,7 @@ main.wrap {
 }
 
 .leg.held {
-  border-color: var(--amber-soft);
+  border-color: color-mix(in srgb, var(--amber) 45%, transparent);
 }
 
 .leg-head {
@@ -483,18 +1104,13 @@ main.wrap {
 .leg-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
-}
-
-.leg-title .where {
-  font-size: 13px;
-  font-weight: 500;
 }
 
 .leg-kind {
   color: var(--text-low);
-  font-family: "Geist Mono", ui-monospace, monospace;
+  font-family: "GeistMono", ui-monospace, monospace;
   font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
@@ -507,12 +1123,19 @@ main.wrap {
 
 .leg-body {
   color: var(--text-medium);
-  font-family: "Geist Mono", ui-monospace, monospace;
+  font-family: "GeistMono", ui-monospace, monospace;
   font-size: 12px;
 }
 
 .leg-body > div + div {
-  margin-top: 5px;
+  margin-top: 6px;
+}
+
+/* Every line of a card is one line: a hash never breaks mid-string, a long value ellipsizes. */
+.leg-body > div {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .leg-body .v {
@@ -524,59 +1147,404 @@ main.wrap {
   font-size: 13px;
 }
 
-/* ─── Badges ────────────────────────────────────────────────── */
+/* ─── Search ────────────────────────────────────────────────── */
 
-.badge {
-  display: inline-block;
-  padding: 3px 9px;
+.search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-radius: 9999px;
+  transition: background 160ms;
+}
+
+.search:focus-within {
+  background: var(--panel-hover);
+}
+
+.search svg {
+  width: 15px;
+  height: 15px;
+  color: var(--text-medium);
+  flex-shrink: 0;
+}
+
+.search input {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  font-family: "Geist", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text-high);
+}
+
+.search input::placeholder {
+  color: var(--text-low);
+}
+
+.search .hint {
+  color: var(--text-lowest);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.search.xl {
+  height: 60px;
+  padding: 0 22px;
+  border-radius: 18px;
+}
+
+.search.xl input {
+  font-size: 16px;
+}
+
+.search.xl svg {
+  width: 20px;
+  height: 20px;
+}
+
+.search.xl .hint {
+  font-size: 12px;
+}
+
+/* ─── Filters ───────────────────────────────────────────────── */
+
+/* The list's head: a live title on the left, the filter triggers on the right. */
+.list-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 28px 0 12px;
+}
+
+.list-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "Gazpacho", serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.list-title .count {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.fbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fdrop {
+  position: relative;
+}
+
+/* A filter's trigger: its name quiet, its value loud — "Chains  All ▾". */
+.ftrig,
+.freset {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px 0 14px;
+  border: 1px solid var(--border);
   border-radius: 9999px;
   background: var(--panel);
-  color: var(--text-medium);
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  color: var(--text-high);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 12px;
+  cursor: pointer;
   white-space: nowrap;
+  transition:
+    border-color 120ms,
+    background 120ms;
 }
 
-/* Lifecycle colouring, shared by every flow: in flight is cool, done is green, held is amber. */
-.badge.placed,
-.badge.initiated,
-.badge.published {
-  background: var(--sky-soft);
-  color: var(--sky);
+.ftrig .k {
+  color: var(--text-low);
 }
 
-.badge.processed,
-.badge.received,
-.badge.completed {
-  background: var(--lavender-soft);
-  color: var(--lavender);
+.ftrig .chev {
+  width: 12px;
+  height: 12px;
+  color: var(--text-low);
+  transition: transform 160ms var(--ease-standard);
 }
 
-.badge.settled,
-.badge.redeemed,
-.badge.fulfilled {
-  background: var(--green-soft);
-  color: var(--green);
+.ftrig:hover,
+.ftrig.open,
+.ftrig.has {
+  border-color: var(--sky);
 }
 
-.badge.queued {
-  background: var(--amber-soft);
-  color: var(--amber);
+.ftrig.open .chev {
+  transform: rotate(180deg);
 }
 
-.badge.refunded {
-  background: var(--orange-soft);
-  color: var(--orange);
+.ftrig .fb {
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
 }
 
-.badge.failed {
-  background: var(--red-soft);
-  color: var(--red);
+.freset {
+  padding: 0 14px;
+  color: var(--text-medium);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-/* ─── Controls ──────────────────────────────────────────────── */
+.freset:hover {
+  color: var(--text-high);
+  background: var(--panel-hover);
+}
+
+.freset[hidden] {
+  display: none;
+}
+
+/* The popup: the explorer's combo popover, holding checkbox rows. */
+.fpop {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  z-index: 60;
+  min-width: 260px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+  animation: dropIn 140ms ease-out;
+}
+
+.fpop[hidden] {
+  display: none;
+}
+
+@keyframes dropIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.fpop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 8px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.fpop-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.fpop-head button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-low);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Only the full-screen sheet needs a way out of its own; the popover closes on any click outside. */
+.fpop-close {
+  display: none;
+}
+
+.fpop-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* A filter's options on a phone: a full-screen modal over a scrim, the page behind held still. */
+.fsheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+  animation: ov 0.18s ease;
+}
+
+.fpop.sheet {
+  position: fixed;
+  inset: 0;
+  min-width: 0;
+  max-height: none;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: sheetIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fpop.sheet .fpop-head {
+  padding: 16px 18px 12px;
+  font-size: 11px;
+}
+
+.fpop.sheet .fpop-close {
+  display: inline-flex;
+}
+
+.fpop.sheet .fpop-search {
+  margin: 0 14px 8px;
+  height: 40px;
+  font-size: 14px;
+}
+
+.fpop.sheet .fpop-body {
+  flex: 1;
+  padding: 0 10px 16px;
+}
+
+.fpop.sheet .fopt {
+  padding: 11px 10px;
+  font-size: 14px;
+}
+
+@keyframes sheetIn {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+body.noscroll {
+  overflow: hidden;
+}
+
+.fpop-head button:hover {
+  color: var(--accent);
+}
+
+.fpop-search {
+  all: unset;
+  box-sizing: border-box;
+  margin: 0 8px 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text-high);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.fpop-search:focus {
+  border-color: var(--sky);
+}
+
+.fpop-search::placeholder {
+  color: var(--text-low);
+}
+
+.fpop-body {
+  overflow-y: auto;
+  padding: 0 6px 6px;
+}
+
+.fpop-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.fpop-col-title {
+  padding: 6px 10px 4px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.fopt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--text-high);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.fopt:hover {
+  background: var(--panel-hover);
+}
+
+.fopt input {
+  appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+}
+
+.fopt input::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  background: var(--accent-on);
+  transform: scale(0);
+  transition: transform 100ms;
+}
+
+.fopt input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.fopt input:checked::before {
+  transform: scale(1);
+}
+
+.fempty {
+  padding: 10px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+/* ─── Older list controls, still used by intents ────────────── */
 
 .bar {
   display: flex;
@@ -586,28 +1554,40 @@ main.wrap {
   margin-bottom: 14px;
 }
 
-input[type="search"],
-select {
-  padding: 7px 13px;
-  background: var(--bg-elev);
+.bar input[type="search"],
+.bar select {
+  all: unset;
+  box-sizing: border-box;
+  height: 34px;
+  padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 9999px;
+  background: var(--panel);
   color: var(--text-high);
-  font-family: inherit;
-  font-size: 13px;
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 12px;
+  cursor: pointer;
 }
 
-input[type="search"] {
+.bar input[type="search"] {
   flex: 1 1 22rem;
   min-width: 0;
-  font-family: "Geist Mono", ui-monospace, monospace;
+  cursor: text;
 }
 
-input[type="search"]:focus,
-select:focus {
-  outline: none;
+.bar input[type="search"]:hover,
+.bar select:hover,
+.bar input[type="search"]:focus,
+.bar select:focus {
   border-color: var(--sky);
 }
+
+.bar select option {
+  background: var(--bg-elev);
+  color: var(--text-high);
+}
+
+/* ─── Pager ─────────────────────────────────────────────────── */
 
 .pager {
   display: flex;
@@ -618,52 +1598,241 @@ select:focus {
   border-top: 1px solid var(--separator);
 }
 
+.pager .info,
+.pager .count {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
 .pager .btns {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 4px;
+  min-width: 0;
 }
 
-.pager button {
-  width: 34px;
-  height: 34px;
-  padding: 0;
+.pager .btns button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 7px;
   border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--panel);
   color: var(--text-medium);
-  border-radius: 9px;
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
   cursor: pointer;
-  font-family: inherit;
-  font-size: 13px;
+  white-space: nowrap;
+  transition: transform 90ms ease;
 }
 
-.pager button:hover:not(:disabled) {
+.pager .btns button:hover:not(:disabled) {
   color: var(--text-high);
   background: var(--panel-hover);
 }
 
-.pager button:disabled {
+.pager .btns button:active {
+  transform: scale(0.96);
+}
+
+.pager .btns button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+
+.pager .btns button:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
 
-.pager .count {
+/* ─── Drawer ────────────────────────────────────────────────── */
+
+/* The explorer's mobile menu: a burger in the top bar, a drawer from the right. */
+.nav-burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--panel);
   color: var(--text-medium);
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color 150ms,
+    background 150ms;
 }
 
-.muted {
-  color: var(--text-medium);
+.nav-burger:hover {
+  color: var(--text-high);
+  background: var(--panel-hover);
 }
 
-.dim {
-  color: var(--text-lowest);
+.nav-burger svg,
+.drawer-close svg {
+  width: 17px;
+  height: 17px;
+}
+
+.drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+  animation: ov 0.18s ease;
+}
+
+@keyframes ov {
+  from {
+    opacity: 0;
+  }
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  width: min(320px, 88vw);
+  height: 100%;
+  overflow-y: auto;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+  box-shadow: -16px 0 44px rgba(0, 0, 0, 0.5);
+  animation: drawerIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes drawerIn {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.drawer-head .brand {
+  gap: 5px;
+}
+
+.drawer-sec {
+  padding: 10px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.drawer-sec:last-child {
+  border-bottom: 0;
+}
+
+.drawer-sec .sec-lbl {
+  padding: 6px 12px 8px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.drawer-sec > a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  color: var(--text-medium);
+  font-size: 15px;
+  font-weight: 500;
+  transition:
+    color 130ms,
+    background 130ms;
+}
+
+.drawer-sec > a:hover {
+  color: var(--text-high);
+  background: var(--panel-hover);
+}
+
+.drawer-sec > a.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* The filters' narrow-screen switch; hidden while the pills fit. */
+.ftoggle {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-medium);
+  font-family: "Geist", system-ui, sans-serif;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.ftoggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ftoggle.open,
+.ftoggle:hover {
+  color: var(--text-high);
+}
+
+.ftoggle .fb {
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.ftoggle .fb[hidden] {
+  display: none;
 }
 
 /* ─── Narrow ────────────────────────────────────────────────── */
 
+@media (max-width: 860px) {
+  .topbar .wrap {
+    gap: 10px;
+  }
+
+  .nav {
+    display: none;
+  }
+
+  .nav-burger {
+    display: inline-flex;
+  }
+}
+
+/* Below 720px a table becomes cards: no header row, each cell labelled from its own data-label. */
 @media (max-width: 720px) {
   .wrap {
     padding: 0 16px;
@@ -671,6 +1840,151 @@ select:focus {
 
   main.wrap {
     padding: 16px 16px 48px;
+  }
+
+  /* A list becomes separate cards: the panel steps back, each row is its own card, gap between. */
+  .panel:has(> .tbl),
+  .panel:has(> .scroll) {
+    overflow: visible;
+    background: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .panel:has(> .tbl) > .pager,
+  .panel:has(> .scroll) > .pager {
+    margin-top: 10px;
+    background: var(--bg-elev);
+    border: 1px solid var(--separator);
+    border-radius: 16px;
+  }
+
+  .tbl,
+  .tbl tbody,
+  .tbl tbody tr,
+  .tbl tbody td {
+    display: block;
+  }
+
+  .tbl {
+    min-width: 0;
+  }
+
+  .tbl thead {
+    display: none;
+  }
+
+  .tbl tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .tbl tbody tr,
+  .tbl tbody tr:last-child {
+    padding: 10px 2px;
+    background: var(--bg-elev);
+    border: 1px solid var(--separator);
+    border-radius: 16px;
+  }
+
+  .tbl tbody td {
+    padding: 5px 14px;
+    border: 0;
+    white-space: normal;
+  }
+
+  .tbl tbody td[data-label] {
+    text-align: right;
+    overflow: hidden;
+  }
+
+  .tbl tbody td[data-label]::before {
+    content: attr(data-label);
+    float: left;
+    margin-right: 14px;
+    color: var(--text-low);
+    font-family: "GeistMono", ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    line-height: 1.85;
+  }
+
+  .tbl tbody td .stack {
+    align-items: flex-end;
+  }
+
+  .tbl tbody td .end-row {
+    justify-content: flex-end;
+  }
+
+  .dl,
+  .kv-row {
+    grid-template-columns: 1fr;
+  }
+
+  .dl .dt,
+  .kv-row .kk {
+    border-bottom: 0;
+    padding-bottom: 2px;
+  }
+
+  .legs {
+    grid-template-columns: 1fr;
+  }
+
+  /* Filters fold behind their switch and open as full-width rows: name left, value right. */
+  .list-head {
+    align-items: center;
+  }
+
+  .ftoggle {
+    display: inline-flex;
+  }
+
+  .fbar {
+    display: none;
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .fbar.open {
+    display: flex;
+  }
+
+  .fbar .fdrop {
+    position: static;
+  }
+
+  .fbar .ftrig {
+    width: 100%;
+    height: 46px;
+    padding: 0 4px;
+    border: 0;
+    border-bottom: 1px solid var(--separator);
+    border-radius: 0;
+    background: none;
+    font-size: 14px;
+  }
+
+  .fbar .ftrig .k {
+    margin-right: auto;
+    font-family: "Geist", system-ui, sans-serif;
+    font-size: 14px;
+  }
+
+  .fbar .freset {
+    align-self: flex-end;
+    margin-top: 10px;
+  }
+
+  .fpop-cols {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -680,56 +1994,349 @@ select:focus {
   }
 }
 
-@media (max-width: 860px) {
-  .topbar .wrap {
-    gap: 10px;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
+}
 
-  /* The explorer's pattern: drop the header row and label each cell from its own data-label. */
-  .tbl {
-    min-width: 0;
+/* ─── Oracles ───────────────────────────────────────────────── */
+
+/* The explorer's chart: a neutral line over a fading area, a crosshair and a tooltip on hover. */
+
+.feed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.feed-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--separator);
+  border-radius: 18px;
+  color: inherit;
+  transition:
+    border-color 0.15s,
+    transform 0.15s var(--ease-standard);
+}
+
+.feed-card:hover {
+  border-color: var(--border);
+}
+
+.feed-card:active {
+  transform: scale(0.99);
+}
+
+/* The dead feeds' heading: the live one's, with a skull where its dot is. */
+.list-title .skull {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-low);
+}
+
+.list-title .skull svg {
+  width: 18px;
+  height: 18px;
+}
+
+.list-note {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+/* Nothing delivered this week: still there to open, but out of the way. */
+.feed-card.dead {
+  opacity: 0.6;
+}
+
+.feed-card.dead:hover {
+  opacity: 1;
+}
+
+.feed-card .fc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.feed-card .fc-name {
+  font-family: "Gazpacho", serif;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.feed-card .fc-route {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.feed-card .fc-route .chain-badge {
+  font-size: 9.5px;
+  padding: 2px 6px;
+}
+
+.fc-value {
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.fc-value .unit {
+  margin-left: 6px;
+  color: var(--text-low);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.fc-sub {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 52px;
+  margin-top: 6px;
+  overflow: visible;
+}
+
+.spark-empty {
+  display: grid;
+  place-items: center;
+  height: 52px;
+  margin-top: 6px;
+  color: var(--text-lowest);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+/* Stat cards across the top of a feed. */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+}
+
+.stat-card .k {
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.stat-card .v {
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.stat-card .s {
+  color: var(--text-low);
+  font-size: 11.5px;
+}
+
+.pf-card {
+  margin-top: 14px;
+  padding: 18px 20px;
+  background: var(--bg-elev);
+  border: 1px solid var(--separator);
+  border-radius: 18px;
+}
+
+.pf-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.pf-head .t {
+  margin-right: auto;
+  font-family: "Gazpacho", serif;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+/* The range control: the explorer's segmented pill. */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+}
+
+.seg button {
+  padding: 4px 11px;
+  border: 0;
+  border-radius: 9999px;
+  background: none;
+  color: var(--text-medium);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--bg-elev2);
+  color: var(--text-high);
+}
+
+.apx-wrap {
+  position: relative;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.apx-chart {
+  display: block;
+  width: 100%;
+  height: 220px;
+  overflow: visible;
+}
+
+.apx-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10.5px;
+}
+
+.apx-y {
+  position: absolute;
+  left: 0;
+  color: var(--text-lowest);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.apx-cross {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.apx-vline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text-medium);
+  opacity: 0.55;
+  transform: translateX(-0.5px);
+}
+
+.apx-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--bg-elev);
+  border-radius: 50%;
+  background: var(--text-high);
+  transform: translate(-50%, -50%);
+}
+
+.apx-tip {
+  position: absolute;
+  top: 4px;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+  padding: 5px 9px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: tipIn 120ms ease-out;
+}
+
+.apx-tip .t-d {
+  color: var(--text-low);
+}
+
+@keyframes tipIn {
+  from {
+    opacity: 0;
   }
+}
 
-  .tbl thead {
-    display: none;
-  }
+.apx-empty {
+  display: grid;
+  place-items: center;
+  height: 220px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 12px;
+}
 
-  .tbl tbody td {
-    display: block;
-    text-align: right;
-    white-space: normal;
-    border-bottom: 0;
-    padding: 5px 16px;
-  }
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+  color: var(--text-medium);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+}
 
-  .tbl tbody tr {
-    display: block;
-    border-bottom: 1px solid var(--separator);
-    padding: 8px 0;
-  }
+.chart-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
 
-  .tbl tbody td[data-label]:before {
-    content: attr(data-label);
-    float: left;
-    margin-right: 14px;
-    color: var(--text-low);
-    font-family: "Geist Mono", ui-monospace, monospace;
-    font-size: 10px;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    line-height: 1.85;
-  }
-
-  .kv-row {
+@media (max-width: 720px) {
+  .feed-grid {
     grid-template-columns: 1fr;
   }
 
-  .kv-row .kk {
-    padding-bottom: 0;
+  .apx-chart {
+    height: 180px;
   }
 
-  .legs {
-    grid-template-columns: 1fr;
+  .pf-card {
+    padding: 14px;
   }
 }

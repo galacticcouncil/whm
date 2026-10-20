@@ -1,6 +1,6 @@
 import { pool } from "../../db";
 import { validLegs } from "../../flow";
-import { WETH_MANAGER_HYDRATION } from "../../watch";
+import { NTT } from "../../deployments";
 
 import { orders } from "./flows";
 
@@ -12,7 +12,7 @@ import { orders } from "./flows";
 const RAIL = `
   LEFT JOIN ntt_transfers n
     ON n.source_chain = 'hydration'
-   AND n.source_manager = '${WETH_MANAGER_HYDRATION}'
+   AND n.source_manager = '${NTT.weth.hydration.manager.toLowerCase()}'
    AND n.manager_sequence = o.transfer_sequence
   LEFT JOIN wh_messages m ON m.vaa_id = n.vaa_id
 `;
@@ -21,7 +21,7 @@ const COLUMNS = `
   o.*,
   n.vaa_id, n.digest, n.state AS rail_state, n.published AS rail_published,
   n.received AS rail_received, n.settled AS rail_settled,
-  m.sequence AS wormhole_sequence, m.consistency AS wormhole_consistency
+  m.sequence AS wormhole_sequence
 `;
 
 const VALID = validLegs(orders, "o");
@@ -43,11 +43,12 @@ export interface OrderRow extends Record<string, unknown> {
 /**
  * Recent orders, newest first.
  *
- * @param filter `state` narrows the lifecycle; `address` matches the caller, the Ethereum deposit
- *        address, or the final destination recipient.
+ * @param filter `state` narrows the lifecycle to any of its states; `address` matches the caller,
+ *        the Ethereum deposit address, the final destination recipient, or any of its transactions.
  */
 export async function listOrders(filter: {
-  state?: string;
+  /** Any of these states. */
+  state?: string[];
   address?: string;
   limit: number;
   offset: number;
@@ -55,22 +56,23 @@ export async function listOrders(filter: {
   const conds: string[] = [VALID];
   const params: unknown[] = [];
 
-  if (filter.state) {
+  if (filter.state?.length) {
     params.push(filter.state);
-    conds.push(`o.state = $${params.length}`);
+    conds.push(`o.state = ANY($${params.length})`);
   }
   if (filter.address) {
-    params.push(filter.address.toLowerCase());
+    params.push(filter.address.trim().toLowerCase());
+    const n = params.length;
+    // An address on any end, or any transaction the order touched: placed, forwarded, settled, refunded.
     conds.push(
-      `(lower(o.caller) = $${params.length} OR lower(o.deposit_address) = $${params.length} OR lower(o.dest_address) = $${params.length})`,
+      `(lower(o.caller) = $${n} OR lower(o.deposit_address) = $${n} OR lower(o.dest_address) = $${n}
+        OR lower(o.placed->>'txHash') = $${n} OR lower(o.processed->>'txHash') = $${n}
+        OR lower(o.dest_tx) = $${n} OR lower(o.refund_tx) = $${n})`,
     );
   }
 
   const where = `WHERE ${conds.join(" AND ")}`;
-  const total = await pool.query(
-    `SELECT COUNT(*)::int AS n FROM intent_orders o ${where}`,
-    params,
-  );
+  const total = await pool.query(`SELECT COUNT(*)::int AS n FROM intent_orders o ${where}`, params);
   params.push(filter.limit, filter.offset);
   const items = await pool.query(
     `SELECT ${COLUMNS} FROM intent_orders o ${RAIL} ${where}
@@ -112,20 +114,4 @@ export async function pendingSettlement(): Promise<
       WHERE state IN ('placed', 'processed') AND deposit_address IS NOT NULL`,
   );
   return r.rows;
-}
-
-export async function listQuotes(limit: number, offset: number) {
-  const total = await pool.query(`SELECT COUNT(*)::int AS n FROM intent_quotes`);
-  const items = await pool.query(
-    `SELECT * FROM intent_quotes ORDER BY updated_at DESC LIMIT $1 OFFSET $2`,
-    [limit, offset],
-  );
-  return { items: items.rows, total: total.rows[0].n };
-}
-
-export async function getQuote(authPath: string) {
-  const r = await pool.query(`SELECT * FROM intent_quotes WHERE lower(auth_path) = lower($1)`, [
-    authPath,
-  ]);
-  return r.rows[0] ?? null;
 }

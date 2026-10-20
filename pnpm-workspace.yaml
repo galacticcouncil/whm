@@ -8,6 +8,7 @@ packages:
   - agents/relayer
   - agents/scan
   - agents/intent
+  - agents/utxo
 
 onlyBuiltDependencies:
   - esbuild
