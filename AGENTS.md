@@ -10,9 +10,9 @@ It lists available reference documents and their raw GitHub URLs.
 
 ## Project overview
 
-Cross-chain messaging infrastructure connecting EVM chains, Solana, Sui and Hydration over Wormhole. Three concerns:
+Cross-chain messaging infrastructure connecting EVM chains, Solana, NEAR, Sui and Hydration over Wormhole. Three concerns:
 
-1. **On-chain contracts** — upgradeable Solidity (Foundry) on Base/Hydration/Ethereum + an Anchor program on Solana.
+1. **On-chain contracts** — upgradeable Solidity (Foundry) on Base/Hydration/Ethereum + an Anchor program on Solana + near-sdk contracts on NEAR.
 2. **Off-chain agents** — long-running TS services that publish/index/relay (`broadcaster`, `scan`, `relayer`).
 3. **Shared tooling** — a crash-safe migration runner, shared chain/wallet/args utilities, and the `migrations/` top-level orchestration.
 
@@ -32,6 +32,10 @@ Cross-chain messaging infrastructure connecting EVM chains, Solana, Sui and Hydr
 
 - **Intents v2** (in design, branch `feat/intent-v2`) — replaces 1Click with unattended swaps and DCA. Each action derives one NEAR account `A` (MPC, from `keccak256(terms)`) and one reusable POA deposit address `0xN`. An ICE `OnResolved::Forward` callback calls `IntentDispatcher`, which reads Hydration price feeds, calls `IntentEmitter.placeOrder` on the unchanged rail and `IntentQuoteEmitter.publishOrder(terms, order)` for a per-order price VAA; the NEAR `IntentRouter.finalize(terms, orderVaa)` signs the swap, delivery or post-deadline refund for `A`. See [docs/intents-v2/spec.md](docs/intents-v2/spec.md), [docs/intents-v2/schema.md](docs/intents-v2/schema.md), [docs/intents-v2/plan.md](docs/intents-v2/plan.md).
 
+- **NEAR NTT** — NEAR tokens move NEAR ↔ Hydration in one hop over native NTT. `ntt-manager` on NEAR is manager + transceiver in one, LOCKING, one deployment per token; Hydration runs a stock EVM NttManager. Owner: `hydration.sputnik-dao.near`. See [docs/near-ntt/spec.md](docs/near-ntt/spec.md).
+
+- **NEAR UTXO** — UTXO-chain coins to and from their native chain through Omni, one deployment per chain. Deposits are proven on the chain's Omni connector and carried over NTT to Hydration; withdrawals go the chain's UTXO emitter (Hydration) → NTT to NEAR → `utxo-withdraw` MPC-signs the Omni withdrawal for the account derived from the destination address, and `agents/utxo` relays it. See [docs/near-utxo/deposit/spec.md](docs/near-utxo/deposit/spec.md), [docs/near-utxo/withdraw/spec.md](docs/near-utxo/withdraw/spec.md).
+
 ## Build & test
 
 ```sh
@@ -50,6 +54,11 @@ pnpm --filter @whm/contracts test         # forge test
 pnpm --filter @whm/crates-solana build    # anchor build -p oracle-emitter
 pnpm --filter @whm/crates-solana test     # cargo test -p oracle-emitter
 pnpm --filter @whm/crates-solana logs:local
+
+# NEAR (cargo-near)
+pnpm --filter @whm/crates-near build          # cargo near build
+pnpm --filter @whm/crates-near test           # unit tests: ntt-manager, utxo-withdraw
+pnpm --filter @whm/crates-near test:sandbox   # end-to-end on a NEAR sandbox
 
 # Agents (esbuild)
 cd agents/<broadcaster|scan>
@@ -76,6 +85,10 @@ pnpm migrate:oracle-relay-solana:fork
 pnpm migrate:oracle-relay-solana             # prod
 pnpm migrate:oracle-relay-ethereum:fork
 pnpm migrate:oracle-relay-ethereum           # prod
+pnpm migrate:near-ntt-zec                    # prod (NEAR side; Hydration side is hydration-ntt's)
+pnpm migrate:near-ntt-near                   # prod
+pnpm migrate:utxo-emitter-zec                # prod
+pnpm migrate:utxo-withdraw-zec               # prod
 ```
 
 Full migration model + conventions: [migrations/README.md](migrations/README.md).
@@ -102,6 +115,10 @@ crates/                   # Rust umbrella (each subdir = its own Cargo workspace
   solana/                 # @whm/crates-solana — Anchor workspace
     programs/             # Anchor programs (currently: oracle-emitter)
     scripts/              # Solana ops helpers
+  near/                   # @whm/crates-near — Cargo workspace (near-sdk 5)
+    contracts/            # ntt-manager, utxo-withdraw
+    sandbox/              # end-to-end tests on a NEAR sandbox
+    scripts/              # NEAR ops helpers (e.g. ntt-manager/limits.sh — DAO limit proposals)
 
 migrations/               # Cross-platform deployment runner
   run.ts                  # CLI entry
@@ -124,6 +141,7 @@ common
 chopsticks
 contracts
 crates/solana
+crates/near
 agents/broadcaster
 agents/scan
 agents/relayer
@@ -172,7 +190,9 @@ Cross-platform glue lives at the **migration** layer and the **IDL/ABI sync** la
 
 - **IDL sync.** `broadcaster` consumes the Solana program's IDL — `pnpm run sync-idl` in `agents/broadcaster/` copies `crates/solana/target/idl/oracle_emitter.json` and `crates/solana/target/types/oracle_emitter.ts` into `agents/broadcaster/src/emitter/`. Re-run after Solana program changes.
 
-- **Ops scripts.** `contracts/scripts/<feature>/` (EVM) and `crates/solana/scripts/<program>/` (Solana) hold one-shot `tsx`/`bash` entry points. They use the per-package `package.json` plus root `.env` for PKs.
+- **Ops scripts.** `contracts/scripts/<feature>/` (EVM), `crates/solana/scripts/<program>/` (Solana) and `crates/near/scripts/<contract>/` (NEAR) hold one-shot `tsx`/`bash` entry points. They use the per-package `package.json` plus root `.env` for PKs.
+
+- **NEAR governance.** NEAR contracts are owned by `hydration.sputnik-dao.near`. A proposal executes on the vote that reaches the threshold and expires after 7 days. The Hydration side of the same corridor is a TC motion.
 
 ## Testing guidelines
 
@@ -230,7 +250,7 @@ Common scopes: `oracle`, `basejump`, `intents`, `scan`, `contracts`, `crates`, `
 | Package manager     | pnpm 10 (workspaces)                                                                                   |
 | Language (TS)       | TypeScript 5.7 (strict, ES2022 target)                                                                 |
 | Language (Solidity) | Solidity via Foundry (`forge`, `anvil`)                                                                |
-| Language (Rust)     | Cargo + Anchor 0.32                                                                                    |
+| Language (Rust)     | Cargo + Anchor 0.32 (Solana), near-sdk 5 + cargo-near (NEAR)                                           |
 | TS bundler          | esbuild (CJS, node platform — for agents)                                                              |
 | TS runner           | `tsx` for scripts; runner is `@whm/common/migration`                                                   |
 | EVM deps            | Soldeer (forge-std, OZ upgradeable, wormhole-solidity-sdk)                                             |
