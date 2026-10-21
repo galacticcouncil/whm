@@ -1,6 +1,6 @@
 # WHM (Wormhole Messaging)
 
-Cross-chain infrastructure connecting EVM chains, Solana, Sui and Hydration via Wormhole. Handles oracle price relay, instant token bridging, and intent-driven swaps — through upgradeable contracts, an Anchor program, and off-chain agents.
+Cross-chain infrastructure connecting EVM chains, Solana, NEAR, Sui and Hydration via Wormhole. Handles oracle price relay, instant token bridging, intent-driven swaps, and NEAR / Zcash corridors — through upgradeable contracts, an Anchor program, NEAR contracts, and off-chain agents.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -9,9 +9,9 @@ Cross-chain infrastructure connecting EVM chains, Solana, Sui and Hydration via 
 │  ┌──────────────┐   ┌────────────────────────┐   ┌──────────────────────────┐   │
 │  │   common/    │   │      contracts/        │   │      crates/             │   │
 │  │              │   │                        │   │                          │   │
-│  │  - args      │◄──┤   Solidity (Foundry)   │   │  Anchor / Cargo (Rust)   │──►│
-│  │  - evm       │   └────────────────────────┘   └──────────────────────────┘   |
-│  │  - migration │                                                               │
+│  │  - args      │◄──┤   Solidity (Foundry)   │   │  - solana  (Anchor)      │──►│
+│  │  - evm       │   └────────────────────────┘   │  - near    (near-sdk)    │   │
+│  │  - migration │                                └──────────────────────────┘   │
 │  └──────────────┘                                                               │
 │                                                                                 │
 │  ┌────────────────────────────────────────────────────────────────────────────┐ │
@@ -20,9 +20,10 @@ Cross-chain infrastructure connecting EVM chains, Solana, Sui and Hydration via 
 │                                                                                 │
 │  ┌────────────────────────────────────────────────────────────────────────────┐ │
 │  │                          agents/  (off-chain)                              │ │
-│  │   broadcaster — Price/rate publisher                                       │ │
+│  │   broadcaster — Rate publisher                                             │ │
 │  │   scan        — Data indexer                                               │ │
 │  │   relayer     — VAA relayer (ntt, oracles, intent)                         │ │
+│  │   utxo        — UTXO withdraw relayer (NEAR)                               │ │
 │  └────────────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -52,6 +53,20 @@ Hydration users buy any NEAR-Intents supported asset (BTC, ZEC, NEAR,…) via On
 - [Fee](docs/intents/fee.md)
 - [Refund](docs/intents/refund.md)
 
+### Near NTT
+
+NEAR tokens move NEAR ↔ Hydration in one hop over native NTT. `ntt-manager` on NEAR is manager + transceiver in one, LOCKING, one deployment per token; Hydration runs a stock EVM NttManager.
+
+- [Spec](docs/near-ntt/spec.md)
+- [Crate](crates/near/README.md)
+
+### Near UTXO
+
+UTXO-chain coins to and from their native chain through Omni, one deployment per chain. Deposits are proven on the chain's Omni connector and carried over NTT to Hydration. Withdrawals go the chain's UTXO emitter (Hydration) → NTT to NEAR → `utxo-withdraw` MPC-signs the Omni withdrawal for the account derived from the destination address, and the `utxo` agent relays it.
+
+- [Deposit](docs/near-utxo/deposit/spec.md)
+- [Withdraw](docs/near-utxo/withdraw/spec.md)
+
 ## Setup
 
 ```bash
@@ -59,16 +74,18 @@ pnpm install                              # workspace deps
 pnpm --filter @whm/contracts install      # forge soldeer install
 pnpm --filter @whm/contracts build        # forge build
 pnpm --filter @whm/crates-solana build    # anchor build -p oracle-emitter
+pnpm --filter @whm/crates-near build      # cargo near build (ntt-manager, utxo-withdraw)
+pnpm --filter @whm/crates-near test       # unit tests; test:sandbox for end-to-end
 ```
 
 ## Repo layout
 
 ```
 contracts/      # Foundry (Solidity) — @whm/contracts
-crates/         # Anchor / Cargo workspaces — @whm/crates-solana (extensible)
+crates/         # Cargo workspaces — @whm/crates-solana, @whm/crates-near
 migrations/     # Cross-platform deploy pipelines
 deployments/    # Migration state files (prod/, fork/)
-agents/         # Off-chain services (broadcaster, scan, relayer, intent)
+agents/         # Off-chain services (broadcaster, scan, relayer, intent, utxo)
 common/         # @whm/common — shared TS (evm, args, migration)
 sh/             # Cross-cutting bash wrappers (fork-*, migrate-*, verify-*)
 docs/           # Cross-cutting protocol docs
@@ -103,6 +120,10 @@ pnpm migrate:governance-hyper-evm:fork
 pnpm migrate:governance-hyper-evm           # prod
 pnpm migrate:governance-base:fork
 pnpm migrate:governance-base                # prod
+pnpm migrate:near-ntt-zec                   # prod (NEAR side; Hydration side is hydration-ntt's)
+pnpm migrate:near-ntt-near                  # prod
+pnpm migrate:utxo-emitter-zec               # prod
+pnpm migrate:utxo-withdraw-zec              # prod
 
 # Print MRL oracle state
 pnpm print:oracles
@@ -117,8 +138,9 @@ See [migrations/README.md](migrations/README.md) for the migration model, naming
 | `@whm/common`        | `common/`             | Shared TS (chains, wallet, migration)      |
 | `@whm/contracts`     | `contracts/`          | Foundry project + per-package scripts      |
 | `@whm/crates-solana` | `crates/solana/`      | Anchor workspace + per-package scripts     |
-| `@whm/crates-near`   | `crates/near/`        | Near contracts + per-package scripts       |
+| `@whm/crates-near`   | `crates/near/`        | NEAR contracts + per-package scripts       |
 | `@whm/broadcaster`   | `agents/broadcaster/` | Price/rate publisher                       |
 | `@whm/scan`          | `agents/scan/`        | Data indexer (intent/basejump)             |
 | `@whm/relayer`       | `agents/relayer/`     | VAA relayer (ntt, oracle, intent)          |
 | `@whm/intent`        | `agents/intent/`      | Intents off-chain (quoter, 1Click relayer) |
+| `@whm/utxo`          | `agents/utxo/`        | UTXO withdrawals (account api, relayer)    |

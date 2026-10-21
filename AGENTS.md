@@ -1,0 +1,347 @@
+# AGENTS.md — WHM (Wormhole Messaging) Monorepo
+
+## Protocol context
+
+For Hydration protocol-level context (architecture, products, tokenomics, Omnipool mechanics), fetch the central context index using the available web-fetching tool:
+
+`https://raw.githubusercontent.com/galacticcouncil/hydration/main/CLAUDE.md`
+
+It lists available reference documents and their raw GitHub URLs.
+
+## Project overview
+
+Cross-chain messaging infrastructure connecting EVM chains, Solana, NEAR, Sui and Hydration over Wormhole. Three concerns:
+
+1. **On-chain contracts** — upgradeable Solidity (Foundry) on Base/Hydration/Ethereum + an Anchor program on Solana + near-sdk contracts on NEAR.
+2. **Off-chain agents** — long-running TS services that publish/index/relay (`broadcaster`, `scan`, `relayer`).
+3. **Shared tooling** — a crash-safe migration runner, shared chain/wallet/args utilities, and the `migrations/` top-level orchestration.
+
+**Repo:** `galacticcouncil/whm`
+
+**Toolchain:** TypeScript 5.7 (strict, ES2022), Node 23.x. Solidity via Foundry + Soldeer. Rust via Cargo + Anchor 0.32.
+
+**Package manager:** pnpm 10 (workspaces; see [pnpm-workspace.yaml](pnpm-workspace.yaml)).
+
+### Use cases
+
+- **Oracle Relay** — Solana (Kamino Scope prices + SPL stake-pool rates) and Ethereum (wstETH / apyUSD rates) emitters publish via Wormhole; an `OracleReceiver` on Hydration's EVM verifies the VAA and writes straight to the oracle. See [docs/oracle/spec.md](docs/oracle/spec.md).
+
+- **Basejump** — Instant cross-chain token bridging from EVM chains to Hydration. Two rails leave the same transaction: a fast-path message pays the user in ~2 min out of a pre-funded landing pool, and a slow Wormhole **NTT** settlement replenishes that pool (~13 min). The difference is the fee. See [docs/basejump/spec.md](docs/basejump/spec.md), [docs/basejump/schema.md](docs/basejump/schema.md), [docs/basejump/indexer.md](docs/basejump/indexer.md).
+
+- **Intents** — Hydration users get any NEAR-Intents-supported asset (BTC, ZEC, NEAR, …). `IntentEmitter.placeOrder` (Hydration) sells the user's asset for WETH and settles it to Ethereum over **NTT**, publishing a forwarding instruction beside each settlement; `IntentReceiver.processOrder` (Ethereum) pairs the two, delivers, pays the relayer, and forwards the rest to a 1Click quote's `depositAddress`. Deployed. See [docs/intents/spec.md](docs/intents/spec.md), [docs/intents/schema.md](docs/intents/schema.md), [docs/intents/relay-fee.md](docs/intents/relay-fee.md), [docs/intents/verification.md](docs/intents/verification.md).
+
+- **Intents v2** (in design, branch `feat/intent-v2`) — replaces 1Click with unattended swaps and DCA. Each action derives one NEAR account `A` (MPC, from `keccak256(terms)`) and one reusable POA deposit address `0xN`. An ICE `OnResolved::Forward` callback calls `IntentDispatcher`, which reads Hydration price feeds, calls `IntentEmitter.placeOrder` on the unchanged rail and `IntentQuoteEmitter.publishOrder(terms, order)` for a per-order price VAA; the NEAR `IntentRouter.finalize(terms, orderVaa)` signs the swap, delivery or post-deadline refund for `A`. See [docs/intents-v2/spec.md](docs/intents-v2/spec.md), [docs/intents-v2/schema.md](docs/intents-v2/schema.md), [docs/intents-v2/plan.md](docs/intents-v2/plan.md).
+
+- **NEAR NTT** — NEAR tokens move NEAR ↔ Hydration in one hop over native NTT. `ntt-manager` on NEAR is manager + transceiver in one, LOCKING, one deployment per token; Hydration runs a stock EVM NttManager. Owner: `hydration.sputnik-dao.near`. See [docs/near-ntt/spec.md](docs/near-ntt/spec.md).
+
+- **NEAR UTXO** — UTXO-chain coins to and from their native chain through Omni, one deployment per chain. Deposits are proven on the chain's Omni connector and carried over NTT to Hydration; withdrawals go the chain's UTXO emitter (Hydration) → NTT to NEAR → `utxo-withdraw` MPC-signs the Omni withdrawal for the account derived from the destination address, and `agents/utxo` relays it. See [docs/near-utxo/deposit/spec.md](docs/near-utxo/deposit/spec.md), [docs/near-utxo/withdraw/spec.md](docs/near-utxo/withdraw/spec.md).
+
+## Build & test
+
+```sh
+pnpm install                              # all workspace deps
+```
+
+Per-package scripts (invoked via pnpm filter or `cd <pkg>` + `pnpm <script>`):
+
+```sh
+# Solidity (Foundry)
+pnpm --filter @whm/contracts install      # forge soldeer install
+pnpm --filter @whm/contracts build        # forge build
+pnpm --filter @whm/contracts test         # forge test
+
+# Solana (Anchor + Cargo)
+pnpm --filter @whm/crates-solana build    # anchor build -p oracle-emitter
+pnpm --filter @whm/crates-solana test     # cargo test -p oracle-emitter
+pnpm --filter @whm/crates-solana logs:local
+
+# NEAR (cargo-near)
+pnpm --filter @whm/crates-near build          # cargo near build
+pnpm --filter @whm/crates-near test           # unit tests: ntt-manager, utxo-withdraw
+pnpm --filter @whm/crates-near test:sandbox   # end-to-end on a NEAR sandbox
+
+# Agents (esbuild)
+cd agents/<broadcaster|scan>
+pnpm dev                                  # watch mode
+pnpm build                                # dist/index.js
+pnpm start
+```
+
+### Local forks (anvil)
+
+```sh
+pnpm fork:base          # :8546
+pnpm fork:hydration     # :8547
+pnpm fork:ethereum      # :8550
+pnpm fork:all           # parallel
+```
+
+### Migrations
+
+```sh
+pnpm migrate:basejump-base:fork
+pnpm migrate:basejump-base                   # prod
+pnpm migrate:oracle-relay-solana:fork
+pnpm migrate:oracle-relay-solana             # prod
+pnpm migrate:oracle-relay-ethereum:fork
+pnpm migrate:oracle-relay-ethereum           # prod
+pnpm migrate:near-ntt-zec                    # prod (NEAR side; Hydration side is hydration-ntt's)
+pnpm migrate:near-ntt-near                   # prod
+pnpm migrate:utxo-emitter-zec                # prod
+pnpm migrate:utxo-withdraw-zec               # prod
+```
+
+Full migration model + conventions: [migrations/README.md](migrations/README.md).
+
+## Project structure
+
+```
+agents/
+  broadcaster/            # @whm/broadcaster — Solana → Wormhole price/rate publisher
+  scan/                   # @whm/scan — chain indexer; one ingest writer + a container per domain
+  intent/                 # @whm/intent — intents off-chain: relay-fee quoter + 1Click notifier
+  relayer/                # @whm/relayer — Wormhole VAA relayer (hydration-ntt, intent, ntt-near)
+  utxo/                   # @whm/utxo — UTXO withdrawals: address→account api + withdraw relayer
+
+common/                   # @whm/common — shared TS (evm, args, migration)
+
+contracts/                # @whm/contracts — Foundry / Solidity
+  src/                    # contracts, grouped by feature (basejump/ oracles/ intents/ ntt/ utils/)
+  test/                   # tests, mirroring src/ layout
+  scripts/                # per-feature TS ops scripts
+  sh/                     # source-verification helpers
+
+crates/                   # Rust umbrella (each subdir = its own Cargo workspace)
+  solana/                 # @whm/crates-solana — Anchor workspace
+    programs/             # Anchor programs (currently: oracle-emitter)
+    scripts/              # Solana ops helpers
+  near/                   # @whm/crates-near — Cargo workspace (near-sdk 5)
+    contracts/            # ntt-manager, utxo-withdraw
+    sandbox/              # end-to-end tests on a NEAR sandbox
+    scripts/              # NEAR ops helpers (e.g. ntt-manager/limits.sh — DAO limit proposals)
+
+migrations/               # Cross-platform deployment runner
+  run.ts                  # CLI entry
+  README.md               # detailed model + conventions
+  definitions/            # one merged migration per deployable feature
+  actions/                # shared atomic operations
+  envs/<context>/         # per-context multi-chain env files (prod/fork)
+
+deployments/              # migration state files (write-once audit records)
+docs/                     # protocol docs (basejump, oracle, intents,...)
+sh/                       # cross-cutting bash wrappers (fork-*, migrate-*, verify-*)
+```
+
+### Workspace members
+
+Declared in [pnpm-workspace.yaml](pnpm-workspace.yaml):
+
+```
+common
+chopsticks
+contracts
+crates/solana
+crates/near
+agents/broadcaster
+agents/scan
+agents/relayer
+agents/intent
+agents/utxo
+```
+
+**Agents declare ONLY runtime deps.** The TS toolchain — `typescript`, `tsx`, `esbuild`, `dotenv`, `@types/*` — lives in the **root** `package.json` and resolves from agent packages via upward `node_modules` lookup. Never add these as agent `devDependencies` (a package-specific type like `@types/pg` is the only acceptable exception). New agents follow the `broadcaster`/`scan` pattern: workspace member, runtime-deps-only `package.json`, esbuild bundle to `dist/index.js`, `node:NN-slim` Docker copying just the bundle, and a modular `src/` (`config` / `clients` / `watcher` / `api` / `endpoints` / `index`) — not one fat `index.ts`.
+
+### Dependency graph
+
+```
+Level 0 (no internal deps):  common
+
+Level 1:                      contracts        → @whm/common (workspace:*)
+                              crates/solana    → (Rust only, no TS workspace deps; common is used by migrations/scripts indirectly)
+
+Level 2:                      agents/broadcaster → @whm/common; consumes Solana IDL via sync-idl
+                              agents/scan        → @whm/common; consumes EVM/Hydration ABIs at runtime
+                              migrations/        → @whm/common (top-level orchestration; not a workspace pkg itself)
+```
+
+Cross-platform glue lives at the **migration** layer and the **IDL/ABI sync** layer — agents don't import platform source directly.
+
+## Key patterns
+
+- **Merged migrations.** Each deployable feature lives in a single migration folder under `migrations/definitions/<name>/`. Step files are linear `NNN-<verb>-<subject>[@<contract>].ts`, ordered: deploys → authorize → wire → config → ownership-transfer/renounce. Multi-chain migrations (basejump-base touches Base + Hydration) declare a `WalletContext` map; each step picks its wallet (`ctx.wallet.base`, `ctx.wallet.hydration`, etc.).
+
+- **Env-driven dependencies (no `ctx.ref`).** If migration B needs an address from A's deployment, the operator copies it from `deployments/<env>/A.json` into `envs/<env>/B.env` as a config variable. B's step reads it as `ctx.env.SOME_ADDRESS`. State files are write-once audit records; never queried at runtime by other migrations.
+
+- **PKs from env, not CLI.** Each migration declares `pks: ["PK_X", "PK_Y", …]` in its `index.ts`. Runner validates `process.env` has them before invoking `setup()`. `--pk` is NOT a flag.
+
+- **Env contexts, not chain envs.** Env files are keyed by deployment context (`prod`, `fork`) — not by chain. A single `prod/basejump-base.env` holds all chain configs (RPC_BASE, RPC_HYDRATION). Variables are chain-prefixed where applicable.
+
+- **State paths**: `deployments/<context>/<migration>.json`. One file per (env-context, migration) pair.
+
+- **Renounced ownership is the prod end-state.** Every prod-ready migration ends in `transfer-ownership@*` (to a real custodian) or `renounce@*` (to `0x0`). After the migration completes, the state file is the immutable audit record.
+
+- **Crash-safe.** State is persisted after each step. Resume by re-running the same command; reset a stage with `--from <step-name>`; pause early with `--pause-at <step-name>`.
+
+- **Upgradeable contracts.** Solidity inherits OZ UUPS upgradeable patterns. Initialization is done in migration steps, not constructors.
+
+- **Wormhole SDKs.** EVM uses `wormhole-solidity-sdk` (pinned via Soldeer). Solana uses Wormhole Core Bridge through Anchor. `relayer` agent uses `@wormhole-foundation/relayer-engine`.
+
+- **Agent bundling.** `broadcaster` bundles to a single `dist/index.js` via esbuild (CJS, node platform; see [esbuild.config.mjs](esbuild.config.mjs)); avoid top-level await / ESM-only constructs in its `src/`. `scan`, `relayer` and `intent` are multi-entry — one bundle per container, `dist/<name>/app.js`, declared in their own `esbuild.entries.mjs`. Agents carry only runtime deps — esbuild, tsx, typescript, and dotenv come from the **root** package.json (see Workspace members).
+
+- **IDL sync.** `broadcaster` consumes the Solana program's IDL — `pnpm run sync-idl` in `agents/broadcaster/` copies `crates/solana/target/idl/oracle_emitter.json` and `crates/solana/target/types/oracle_emitter.ts` into `agents/broadcaster/src/emitter/`. Re-run after Solana program changes.
+
+- **Ops scripts.** `contracts/scripts/<feature>/` (EVM), `crates/solana/scripts/<program>/` (Solana) and `crates/near/scripts/<contract>/` (NEAR) hold one-shot `tsx`/`bash` entry points. They use the per-package `package.json` plus root `.env` for PKs.
+
+- **NEAR governance.** NEAR contracts are owned by `hydration.sputnik-dao.near`. A proposal executes on the vote that reaches the threshold and expires after 7 days. The Hydration side of the same corridor is a TC motion.
+
+## Testing guidelines
+
+- **Solidity:** `pnpm --filter @whm/contracts test` (Foundry). Tests live in `contracts/test/` organized by feature subdir (`basejump/`, `oracles/`, `intents/`) + `mocks/`, `helpers/`, `integration/`, `utils/`.
+- **Solana:** `pnpm --filter @whm/crates-solana test` (cargo test, no validator needed). For integration tests via `ts-mocha`, start a local validator first.
+- **Agents:** No formal test suite. Validate via `pnpm dev` against a local fork/validator.
+- **Migrations:** Run against `--env fork` first. The runner is idempotent — re-run picks up where it failed.
+
+## Naming conventions
+
+### Step file naming (inside `migrations/definitions/<migration>/`)
+
+```
+NNN-<verb>-<subject>[@<contract>].ts
+```
+
+Phases group naturally by NNN order:
+
+1. **Deploys** — `001-deploy-<contract>.ts`. No `@` suffix.
+2. **Authorize** — `NNN-authorize-<subject>@<contract>.ts`. Granting permissions.
+3. **Wire** (cross-contract addresses) — `NNN-set-<thing>@<contract>.ts`. Storing one contract's address on another.
+4. **Config** (per-asset / per-feature) — `NNN-set-<asset>-<thing>@<contract>.ts` or `NNN-register-<thing>@<contract>.ts`.
+5. **Ownership** — `NNN-transfer-ownership@<contract>.ts` (to a custodian) or `NNN-renounce@<contract>.ts` (to `0x0`). Always last.
+
+### Env var naming (inside `migrations/envs/<context>/<migration>.env`)
+
+- Chain-prefixed: `RPC_<CHAIN>`, `CHAIN_ID_<CHAIN>`, `WORMHOLE_CORE_<CHAIN>`, `TOKEN_BRIDGE_<CHAIN>`, `WORMHOLE_ID_<CHAIN>`.
+- Single-chain values with no ambiguity: unprefixed (`XCM_FEE`, `FEE_ASSET`, etc.).
+- Asset-prefixed: `<ASSET>_<thing>` (e.g. `EURC_FEE_ASSET`, `PRIME_ASSET_ID_BYTES32`).
+- Ownership: `<contract>_NEW_OWNER`.
+- **PKs**: NOT in env files; live in shell env or root `.env`.
+
+### Wallet keys (inside migration `WalletContext`)
+
+Keys are chain names: `hydration`, `base`, `ethereum`, `solana`. Step files use `ctx.wallet.<chain>`.
+
+## Commit & PR conventions
+
+`scope: description` — lowercase, imperative, no period:
+
+```
+oracle: revoke ownership (immutable)
+basejump: verify scripts
+scan: onIngest hook
+contracts: rename IntentReceiver.redeem to processOrder
+migrations: merge basejump-base
+```
+
+Common scopes: `oracle`, `basejump`, `intents`, `scan`, `contracts`, `crates`, `migrations`, `broadcaster`. Omit scope for repo-wide or generic changes.
+
+## Dependencies
+
+| Concern             | Tool                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------ |
+| Package manager     | pnpm 10 (workspaces)                                                                                   |
+| Language (TS)       | TypeScript 5.7 (strict, ES2022 target)                                                                 |
+| Language (Solidity) | Solidity via Foundry (`forge`, `anvil`)                                                                |
+| Language (Rust)     | Cargo + Anchor 0.32 (Solana), near-sdk 5 + cargo-near (NEAR)                                           |
+| TS bundler          | esbuild (CJS, node platform — for agents)                                                              |
+| TS runner           | `tsx` for scripts; runner is `@whm/common/migration`                                                   |
+| EVM deps            | Soldeer (forge-std, OZ upgradeable, wormhole-solidity-sdk)                                             |
+| Wormhole            | `wormhole-solidity-sdk`, `@coral-xyz/anchor` (Solana), `@wormhole-foundation/relayer-engine` (relayer) |
+| Polkadot interop    | `polkadot-api` (papi), `@galacticcouncil/descriptors`, `@galacticcouncil/common`                       |
+| Web/API             | Fastify + `@fastify/cors` (scan)                                                                       |
+| Database            | Postgres via `pg` (scan)                                                                               |
+| Logging             | winston                                                                                                |
+
+## CI & deployment
+
+- **Docker images** — `broadcaster` and `scan` ship as multi-arch images via `pnpm run docker:deploy` (uses `docker buildx`). Deploy with `docker stack deploy -c docker-compose.yml whm`.
+- **No GitHub Actions workflow** is checked in — releases are manual.
+
+## Key files
+
+| File                                                     | Purpose                                             |
+| -------------------------------------------------------- | --------------------------------------------------- |
+| [pnpm-workspace.yaml](pnpm-workspace.yaml)               | Workspace member list                               |
+| [tsconfig.json](tsconfig.json)                           | Root TS config (strict, ES2022, bundler resolution) |
+| [esbuild.config.mjs](esbuild.config.mjs)                 | Shared agent bundler config                         |
+| [common/migration/runner.ts](common/migration/runner.ts) | Crash-safe migration runner core                    |
+| [common/migration/run.ts](common/migration/run.ts)       | Migration CLI entry                                 |
+| [common/utils/args.ts](common/utils/args.ts)             | Shared CLI args parser                              |
+| [contracts/foundry.toml](contracts/foundry.toml)         | Foundry / Soldeer config                            |
+| [crates/solana/Anchor.toml](crates/solana/Anchor.toml)   | Anchor config (program id, validator settings)      |
+| [crates/solana/Cargo.toml](crates/solana/Cargo.toml)     | Solana workspace                                    |
+| [migrations/README.md](migrations/README.md)             | Migration model + conventions                       |
+
+## AI agent guidance
+
+### Terminal and session privacy
+
+- Do not inspect the user's terminal sessions, scrollback, shell history, or commands entered outside the current agent task.
+- Do not read `~/.zsh_history`, `~/.bash_history`, `~/.codex/sessions`, `~/.claude/projects`, or similar session/history stores.
+- Do not inspect unrelated processes, terminal logs, or another agent's conversation history.
+- Use only output from commands executed for the current task, and project files necessary for the requested work.
+- Do not read secrets or private keys from `.env` files unless explicitly necessary and authorized; never print, commit, or transmit their contents.
+- These are behavioral instructions, not OS-level access controls. Enforce actual isolation through sandbox and filesystem permissions.
+
+### Before editing any file
+
+1. **Identify the package** the file belongs to and read its `package.json` for scripts and deps.
+2. **Check `pnpm-workspace.yaml`** — agents are workspace members; their `package.json` lists runtime deps only, the TS toolchain is in the root.
+3. **For TS:** check the root `tsconfig.json`; per-package `tsconfig.json` extends it.
+4. **For contracts:** check `contracts/foundry.toml` and `contracts/remappings.txt` before adding imports.
+5. **For the Solana program:** check `crates/solana/Anchor.toml`, `crates/solana/Cargo.toml`, and existing accounts under `crates/solana/programs/oracle-emitter/src/`.
+6. **For migrations:** read [migrations/README.md](migrations/README.md) before adding a step or migration.
+
+### Tracing code across the repo
+
+- **Oracle path:** source emitter → Wormhole (VAA) → `OracleReceiver` on Hydration's EVM (extends `MessageReceiver`) → `oracle.setPrice()`, all in one transaction. Solana's emitter is the `oracle-emitter` Anchor program; Ethereum's is `OracleEmitter.sol`. Each source has its OWN receiver deployment, renounced independently — an oracle serving both authorizes both receiver addresses. The relay leg is not implemented; it needs an `oracle` feature in `agents/relayer`.
+
+- **Basejump path:** Source EVM `BasejumpEmitter.sol` fires two rails in one call — an NTT settlement of the gross amount addressed to the landing, then a fast-path Wormhole message of the net amount. `BasejumpReceiver.completeTransfer` (Hydration) verifies that message and calls `BasejumpLanding.sol`, which pays the recipient through the `0x0401` dispatch precompile or queues on a shortfall. Settlement precedes publication, so a payout can never outrun its settlement.
+
+- **Intents path:** `IntentEmitter.placeOrder(assetIn, amountIn, minEthOut, depositAddress, maxRelayFee)` (Hydration) sells the asset for WETH via the router, then in one call settles it over NTT to `IntentReceiver` **and** publishes `abi.encode(sequence, depositAddress, maxRelayFee)` as its own Wormhole message — NTT carries no payload, so the destination travels separately. Both legs key on the NTT **manager's** sequence. On Ethereum, `agents/relayer` (intent feature) reads the settlement, finds the instruction in the source tx's `LogMessagePublished` logs, sizes a fee by estimating the real call, and calls `IntentReceiver.processOrder(nttVaa, instructionVaa, feeRequested)` → deliver → pay caller → forward the rest; emits `OrderProcessed`, which `intent`'s relayer app uses to nudge 1Click. `processOrder` also asserts the settlement actually released — a VAA the inbound rate limiter queued is delivered but credits nothing — via `NttManager.isMessageExecuted` + `getInboundQueuedTransfer`. See [docs/intents/spec.md](docs/intents/spec.md).
+
+- **Intents v2 path (in design):** ICE intent resolves → lazy executor pushes WETH and calls `IntentDispatcher.execute` → price from Hydration feeds (stale reverts, nothing bridged) → `IntentEmitter.placeOrder` (rail above, unchanged) → `IntentQuoteEmitter.publishOrder(terms, Order{seq, amount, outPerIn})` publishes the order VAA from its own emitter address (so `IntentReceiver` rejects it as `UnauthorizedEmitter`) → POA credits `A` → a NEAR-only bot calls the stateless `IntentRouter.finalize(terms, orderVaa)`, which signs via `v1.signer` a swap of `balance(A)` at the floor, a delivery of held destination tokens, or a refund after `terms.deadline`. `docs/intents/` documents only the deployed v1; v2 lives in `docs/intents-v2/` and may link to v1, never the reverse. See [docs/intents-v2/spec.md](docs/intents-v2/spec.md).
+
+- **Off-chain:** `broadcaster` reads Solana oracle state and signs `send_price` / `send_rate` instructions. `scan` splits indexing from serving: one `ingest` container is the sole writer, filling a shared event store plus the two tables no feature owns (`wh_messages`, `ntt_transfers`), and a container per domain reads those and serves its own API and pages. See [agents/scan/README.md](agents/scan/README.md). `relayer` polls Wormhole for VAAs and submits them to receiver contracts.
+
+- **Shared:** `@whm/common` exports `chains`, `ifs`, `wallet`, `args`, `migration`. Any change here affects all consumers.
+
+### Validating changes
+
+1. **Solidity:** `pnpm --filter @whm/contracts build && pnpm --filter @whm/contracts test`. For migration changes, run against `--env fork` end-to-end via `pnpm migrate:<name>:fork`.
+2. **Solana:** `pnpm --filter @whm/crates-solana build && pnpm --filter @whm/crates-solana test`. For TS-mocha integration tests against a local validator, start it first.
+3. **Agents:** `cd agents/<pkg> && pnpm build` then `pnpm dev` against a local fork/validator.
+4. **After Solana program changes that touch IDL:** `cd agents/broadcaster && pnpm sync-idl` to refresh `src/emitter/idl.json` and `src/emitter/types.ts`.
+
+### What NOT to break
+
+- **Do not edit prod state files under `deployments/prod/`** — they're the audit record of renounced/immutable deployments. Reconstruct manually from chain state if absolutely needed.
+- **Do not skip migration step ordering** — `NNN-*.ts` numbering is load-bearing. To insert a step, renumber carefully; `--from` re-runs from a step onward.
+- **Do not bypass the migration runner** with ad-hoc deploy scripts — the runner is the single source of truth for crash safety, resume, and audit.
+- **Keep contracts upgradeable-safe** — they inherit OZ UUPS upgradeable; never add state-init constructors; respect storage layout when adding fields.
+- **Do not commit `.env`** (gitignored). `.env.<context>` templates are checked in (no secrets, just RPCs).
+- **Do not add a TS toolchain dep (`typescript`/`tsx`/`esbuild`/`dotenv`/`@types/*`) to an agent's `package.json`** — those live in the **root** and resolve upward. Agents declare runtime deps only.
+- **`broadcaster` bundles to CJS** via esbuild — avoid top-level await or ESM-only constructs in `src/`.
+- **Sync IDL/types before merging Solana program changes** — `broadcaster` will silently break against outdated types.
+- **Don't add `ctx.ref` cross-migration calls** — that pattern was removed. Cross-deployment dependencies go through env-config copies.
+
+## Terminal, session and conversation privacy
+
+- Never inspect the user's personal terminal sessions, scrollback, or shell history.
+- Never read `~/.zsh_history`, `~/.bash_history`, or equivalent shell history files.
+- Never inspect unrelated live processes, terminal sessions, or their output.
+- Previous AI agent conversations and session histories may be consulted when relevant to the current task.
+- Only access previous conversations to recover useful project context, architectural decisions, debugging findings, or implementation history.
+- Do not indiscriminately scan unrelated conversations or session files.
+- Prefer current repository documentation and source code over potentially outdated conversation context.
+- Never expose credentials, private keys, or secrets discovered in previous sessions.
+- Only use terminal output generated for the current task or explicitly provided by the user.
+- These are behavioral instructions, not OS-level security restrictions.

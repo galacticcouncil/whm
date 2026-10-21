@@ -22,6 +22,27 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: 'true'
 
+  app-ntt-near:
+    image: galacticcouncil/relayer:latest
+    command: [node, ntt-near/app.js]
+    environment:
+      # Signs on NEAR, pays 0.01 NEAR per `complete` (the unused part refunded).
+      NEAR_ACCOUNT_ID: FILL THIS ACCOUNT ALWAYS
+      NEAR_PRIVKEY: FILL THIS KEY ALWAYS
+      RPC_NEAR: https://free.rpc.fastnear.com
+      # Read-only: the source tx receipt the account is found in.
+      RPC_HYDRATION: https://rpc.hydradx.cloud
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
+
   app-oracle:
     image: galacticcouncil/relayer:latest
     command: [node, oracle/app.js]

@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Order · Hydration scan</title>
+    <script>
+      try {
+        var t = localStorage.getItem("explorer-theme");
+        if (t === "light" || t === "dark")
+          document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <link rel="preload" href="/fonts/GazpachoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/GeistMonoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/shared/style.css" />
+  </head>
+  <body>
+    <main class="wrap" id="main">
+      <div class="panel"><div class="table-error">loading…</div></div>
+    </main>
+
+    <script type="module">
+      import {
+        NAV,
+        addrLink,
+        asset,
+        assetIcon,
+        badge,
+        chainIcon,
+        destTxLink,
+        esc,
+        json,
+        kv,
+        legCard,
+        live,
+        nearIntentsUrl,
+        short,
+        topbar,
+        vaaLink,
+      } from "/shared/app.js";
+
+      topbar("scan", NAV);
+
+      /** This section's app, through the UI's proxy. */
+      const API = "/api/orders";
+
+      // Also answers the bare `/orders`, which has nothing to show — the list is the root.
+      const sequence = decodeURIComponent(
+        location.pathname.split("/")[2] ?? "",
+      );
+      if (!sequence) location.replace("/");
+
+      const main = document.getElementById("main");
+      let tokens = { hydration: {}, dest: {} };
+
+      /** Whatever the quote named. No default — an unknown destination links nowhere. */
+      const destChain = (o) => tokens.dest[o.dest_asset]?.chain ?? null;
+      const mono = (v) => (v ? esc(v) : '<span class="dim">—</span>');
+
+      /** The rail's own unit. Not the destination asset — that comes from the quote. */
+      const ETH = { symbol: "ETH", decimals: 18 };
+
+      /**
+       * The route, start to end.
+       *
+       * Five hops, and every one of them is somewhere the transfer can stop: the order is placed on
+       * Hydration, the settlement is published as a VAA, delivered on Ethereum, forwarded to the
+       * deposit address, and only then is the user paid on whichever chain the quote named — NEAR,
+       * Zcash, Bitcoin, anything 1Click supports. Nothing on any chain indexed here reports that
+       * last hop; it comes from 1Click alone.
+       */
+      function route(o) {
+        const placedAt = o.placed?.blockTimestamp;
+        const inMeta = tokens.hydration[o.asset_in];
+        const destMeta = tokens.dest[o.dest_asset];
+        const chain = destChain(o);
+        const where = chain ?? "destination";
+
+        const held = o.rail_state === "queued";
+        const done = o.state === "settled";
+        const refunded = o.state === "refunded";
+        const failed = o.state === "failed";
+
+        const oneClick = o.deposit_address
+          ? [
+              "",
+              `<a class="link" href="${nearIntentsUrl(o.deposit_address)}" target="_blank" rel="noreferrer">1Click execution ↗</a>`,
+            ]
+          : null;
+
+        const destTx = destTxLink(o.dest_tx, o.dest_tx_url, chain);
+        const refundTx = destTxLink(o.refund_tx, o.refund_tx_url, "ethereum");
+
+        // A refund never reaches the destination chain — the ETH goes back to the refund address on
+        // Ethereum. Rendering the quote's output here is what made a refunded order read as
+        // delivered, so the last leg follows where the money actually went.
+        const last = refunded
+          ? {
+              where: "ethereum",
+              kind: "refunded",
+              rows: [
+                o.refund_amount ? ["", asset(o.refund_amount, ETH)] : null,
+                refundTx ? ["tx", refundTx] : null,
+                o.refund_reason
+                  ? ["", `<span class="dim">${esc(o.refund_reason.toLowerCase())}</span>`]
+                  : null,
+                oneClick,
+              ],
+            }
+          : {
+              where,
+              kind: failed ? o.state : done ? "received" : (o.settlement_status ?? "pending"),
+              pending: !done && !failed,
+              rows: [
+                done && o.dest_amount
+                  ? [
+                      "",
+                      asset(
+                        o.dest_amount,
+                        destMeta,
+                        o.dest_asset ?? "",
+                        chainIcon(chain ?? destChain(o)),
+                      ),
+                    ]
+                  : null,
+                // Not delivered yet: what the quote promised, said as an expectation.
+                !done && !failed && o.quoted_amount
+                  ? [
+                      "expecting",
+                      asset(
+                        o.quoted_amount,
+                        destMeta,
+                        o.dest_asset ?? "",
+                        chainIcon(chain ?? destChain(o)),
+                      ),
+                    ]
+                  : null,
+                destTx ? ["tx", destTx] : null,
+                oneClick,
+              ],
+            };
+
+        return [
+          legCard({
+            where: "hydration",
+            kind: "placed",
+            ref: o.placed,
+            rows: [
+              [
+                "",
+                `sold ${asset(o.amount_in, inMeta, `#${o.asset_in ?? "?"}`, assetIcon(tokens.hydration[o.asset_in]?.icon ?? o.asset_in))}`,
+              ],
+            ],
+          }),
+          legCard({
+            where: "wormhole",
+            kind: "published",
+            ref: o.rail_published,
+            rows: o.vaa_id ? [["vaa", vaaLink(o.vaa_id)]] : [],
+            since: placedAt,
+          }),
+          legCard({
+            where: "ethereum",
+            kind: held ? "rate limited" : "delivered",
+            ref: o.rail_settled,
+            held,
+            rows: held
+              ? [
+                  [
+                    "",
+                    '<span class="dim">held by the inbound rate limiter</span>',
+                  ],
+                ]
+              : [],
+            since: placedAt,
+          }),
+          legCard({
+            where: "ethereum",
+            kind: "forwarded",
+            ref: o.processed,
+            rows: o.forwarded_amount
+              ? [["", asset(o.forwarded_amount, ETH)]]
+              : [],
+            since: placedAt,
+          }),
+          legCard({ ...last, rows: last.rows.filter(Boolean), since: placedAt }),
+        ].join("");
+      }
+
+      function render(o) {
+        if (!o) {
+          main.innerHTML = `<div class="panel"><div class="table-error">no order with sequence ${esc(sequence)}</div></div>`;
+          return;
+        }
+
+        const inMeta = tokens.hydration[o.asset_in];
+        const destMeta = tokens.dest[o.dest_asset];
+
+        const order = [
+          kv(
+            "sold",
+            asset(
+              o.amount_in,
+              inMeta,
+              `#${o.asset_in ?? "?"}`,
+              assetIcon(tokens.hydration[o.asset_in]?.icon ?? o.asset_in),
+            ),
+          ),
+          // What the user ended up with, which is not always the asset they ordered: a refund comes
+          // back as ETH on Ethereum, and a quote's output is only ever an expectation.
+          o.state === "refunded"
+            ? kv(
+                "refunded",
+                o.refund_amount
+                  ? asset(o.refund_amount, ETH)
+                  : '<span class="dim">amount unreported</span>',
+              )
+            : kv(
+                o.state === "settled" ? "received" : "expecting",
+                (o.state === "settled" ? o.dest_amount : o.quoted_amount)
+                  ? asset(
+                      o.state === "settled" ? o.dest_amount : o.quoted_amount,
+                      destMeta,
+                      o.dest_asset ?? "",
+                      chainIcon(destChain(o)),
+                    )
+                  : '<span class="dim">pending</span>',
+              ),
+          kv("caller", addrLink(o.caller, "hydration")),
+          kv("recipient", addrLink(o.dest_address, destChain(o))),
+          kv("destination asset", mono(o.dest_asset)),
+          kv("settlement id", mono(o.settlement_sequence)),
+          kv("ntt sequence", mono(o.transfer_sequence)),
+        ].join("");
+
+        // The ceiling is what the emitter committed to; the fee is what the relayer actually took.
+        const relay = [
+          kv("settled to ethereum", asset(o.eth_out, ETH)),
+          kv(
+            "forwarded",
+            o.forwarded_amount
+              ? asset(o.forwarded_amount, ETH)
+              : '<span class="dim">—</span>',
+          ),
+          kv(
+            "relay fee paid",
+            o.relay_fee
+              ? asset(o.relay_fee, ETH)
+              : '<span class="dim">—</span>',
+          ),
+          kv("max relay fee", asset(o.max_relay_fee, ETH)),
+          kv("relayer", addrLink(o.relayer, "ethereum")),
+          kv("deposit address", addrLink(o.deposit_address, "ethereum")),
+        ].join("");
+
+        const rail = [
+          kv(
+            "state",
+            o.rail_state ? badge(o.rail_state) : '<span class="dim">—</span>',
+          ),
+          kv("settlement vaa", vaaLink(o.vaa_id)),
+          kv("instruction vaa", vaaLink(o.instruction_vaa)),
+          kv("ntt digest", mono(short(o.digest, 14, 10))),
+        ].join("");
+
+        main.innerHTML = `
+          <h1 class="page-title">Order ${esc(o.settlement_sequence ?? o.transfer_sequence)} <span class="sub">${badge(o.state)}</span></h1>
+          <div class="legs">${route(o)}</div>
+          <div class="panel">
+            <div class="panel-head"><span class="t">Order</span></div>
+            ${order}
+          </div>
+          <div class="panel">
+            <div class="panel-head"><span class="t">Relay</span><span class="note">ETH is the rail, not the destination</span></div>
+            ${relay}
+          </div>
+          <div class="panel">
+            <div class="panel-head"><span class="t">NTT rail</span></div>
+            ${rail}
+          </div>`;
+      }
+
+      async function load() {
+        render(await json(`${API}/orders/${encodeURIComponent(sequence)}`));
+      }
+
+      live(
+        "orders",
+        (u) => {
+          if (String(u.record?.transfer_sequence) === sequence) load();
+        },
+        load,
+        API,
+      );
+
+      json(`${API}/tokens`).then((t) => {
+        if (t) tokens = t;
+        load();
+      });
+    </script>
+  </body>
+</html>

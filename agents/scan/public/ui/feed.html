@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Feed · Hydration scan</title>
+    <script>
+      try {
+        var t = localStorage.getItem("explorer-theme");
+        if (t !== "light" && t !== "dark") {
+          t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <link rel="preload" href="/fonts/GazpachoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/GeistMonoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/shared/style.css" />
+  </head>
+  <body>
+    <main class="wrap" id="main">
+      <div class="panel"><div class="table-error">loading…</div></div>
+    </main>
+
+    <script type="module">
+      import {
+        NAV,
+        addrLink,
+        agoLong,
+        at,
+        chainBadge,
+        dl,
+        esc,
+        eventLink,
+        json,
+        live,
+        pager,
+        statusBadge,
+        tokenIcon,
+        topbar,
+      } from "/shared/app.js";
+      import { chart, fmt } from "/chart.js";
+
+      topbar("scan", NAV);
+
+      /** This section's app, through the UI's proxy. */
+      const API = "/api/feeds";
+
+      const LIMIT = 25;
+      const RANGES = [
+        ["24h", "24H"],
+        ["7d", "7D"],
+        ["30d", "30D"],
+      ];
+      const id = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop() ?? "");
+      const url = new URLSearchParams(location.search);
+      let range = RANGES.some(([k]) => k === url.get("range")) ? url.get("range") : "7d";
+      let page = Math.max(1, Number(url.get("page") ?? 1));
+      let feed = null;
+      const main = document.getElementById("main");
+      const dim = '<span class="dim">—</span>';
+
+      function sync() {
+        const p = new URLSearchParams();
+        if (range !== "7d") p.set("range", range);
+        if (page > 1) p.set("page", page);
+        history.replaceState(null, "", p.size ? `?${p}` : location.pathname);
+      }
+
+      /** Wormholescan for an update's VAA, named by the emitter's sequence. */
+      const vaa = (u) =>
+        u.vaa_id
+          ? `<a class="hash" href="https://wormholescan.io/#/tx/${esc(u.vaa_id)}" target="_blank" rel="noreferrer" title="${esc(u.vaa_id)}">#${esc(u.sequence)}</a>`
+          : dim;
+
+      /** The page's frame: who the feed is, what it says now, and where it comes from and goes. */
+      function frame(f) {
+        // What the oracle holds: the last value its receiver wrote, and when.
+        const latest = f.delivered;
+        const unit = f.kind === "rate" ? ` <span class="dim">${esc(f.unit)}</span>` : "";
+        document.title = `${f.symbol} · Hydration scan`;
+        main.innerHTML = `
+          <div class="crumbs"><a href="/feeds">Feeds</a><span class="sep">/</span><span>${esc(f.symbol)}</span></div>
+          <h1 class="page-title">${tokenIcon({ symbol: f.symbol, assetId: f.icon, home: f.source }, 30)}${esc(f.symbol)}
+            <span class="sub">${chainBadge(f.source)}<span class="dim">→</span>${chainBadge(f.receiver.chain)} · ${esc(f.kind)}</span>
+          </h1>
+          <div class="stat-cards">
+            <div class="stat-card"><span class="k">Latest value</span><span class="v">${esc(fmt(latest?.value ?? null, f))}${unit}</span>
+              <span class="s">${f.kind === "rate" ? `${esc(f.unit)} per ${esc(f.symbol)}` : "USD"}</span></div>
+            <div class="stat-card"><span class="k">Updated</span><span class="v">${latest ? esc(agoLong(latest.deliveredAt)) : "never"}</span>
+              <span class="s">${latest ? esc(at(latest.deliveredAt)) : "nothing written to the oracle yet"}</span></div>
+            <div class="stat-card"><span class="k">Updates</span><span class="v">${f.updates24h} · 24H</span>
+              <span class="s">written to the oracle · ${f.published24h} published</span></div>
+          </div>
+          <div class="detail-card">
+            <div class="panel-head"><span class="t">Relay</span></div>
+            ${dl([
+              ["Reads", esc(f.reads)],
+              ["Emitter", `${chainBadge(f.source)}${addrLink(f.emitter, f.source)}`],
+              ["Receiver", `${chainBadge(f.receiver.chain)}${addrLink(f.receiver.address, f.receiver.chain)}`],
+              ["Oracle", `${chainBadge(f.receiver.chain)}${addrLink(f.oracle, f.receiver.chain)}`],
+              ["Asset id", `<span class="mono">${esc(f.assetId)}</span>`],
+            ])}
+          </div>
+          <div class="pf-card">
+            <div class="pf-head"><span class="t">History</span>
+              <div class="seg" id="ranges">${RANGES.map(([k, l]) => `<button type="button" data-range="${k}" aria-pressed="${k === range}">${l}</button>`).join("")}</div>
+            </div>
+            <div id="chart"><div class="apx-empty">loading…</div></div>
+            <div class="chart-legend"><span><i style="background:var(--chart-neutral)"></i>${f.kind === "rate" ? `${esc(f.unit)} per ${esc(f.symbol)}` : "Price, USD"}, as written to the oracle</span></div>
+          </div>
+          <div class="sec-title">Updates</div>
+          <div class="panel">
+            <table class="tbl">
+              <thead><tr><th>Time</th><th>Value</th><th>VAA</th><th>Published</th><th>Delivered</th><th class="r">Status</th></tr></thead>
+              <tbody id="rows"></tbody>
+            </table>
+            <div class="pager" id="pager"></div>
+          </div>`;
+
+        main.querySelector("#ranges").addEventListener("click", (e) => {
+          const b = e.target.closest("button[data-range]");
+          if (!b || b.dataset.range === range) return;
+          range = b.dataset.range;
+          for (const x of main.querySelectorAll("#ranges button")) x.setAttribute("aria-pressed", x === b);
+          sync();
+          drawChart();
+        });
+        main.querySelector("#pager").addEventListener("click", (e) => {
+          const b = e.target.closest("button[data-page]");
+          if (!b || b.disabled) return;
+          page = Number(b.dataset.page);
+          sync();
+          drawUpdates();
+        });
+      }
+
+      async function drawChart() {
+        const s = await json(`${API}/feeds/${encodeURIComponent(id)}/series?range=${range}`);
+        chart(main.querySelector("#chart"), s?.points ?? [], feed);
+      }
+
+      async function drawUpdates() {
+        const data = await json(`${API}/feeds/${encodeURIComponent(id)}/updates?limit=${LIMIT}&offset=${(page - 1) * LIMIT}`);
+        const rows = main.querySelector("#rows");
+        if (!data) {
+          rows.innerHTML = '<tr><td class="table-error" colspan="6"><strong>Could not load updates.</strong></td></tr>';
+          return;
+        }
+        rows.innerHTML = data.items.length
+          ? data.items
+              .map(
+                (u) => `<tr>
+                  <td data-label="Time"><span class="mono muted" title="${esc(at(u.time))}">${esc(agoLong(u.time))}</span></td>
+                  <td data-label="Value" class="mono">${esc(fmt(u.value, feed))}</td>
+                  <td data-label="VAA" class="mono">${vaa(u)}</td>
+                  <td data-label="Published">${u.published ? eventLink(u.published) : dim}</td>
+                  <td data-label="Delivered">${u.delivered ? eventLink(u.delivered) : dim}</td>
+                  <td class="r" data-label="Status">${statusBadge(u.status, { compact: true })}</td>
+                </tr>`,
+              )
+              .join("")
+          : '<tr><td class="table-error" colspan="6">No updates yet.</td></tr>';
+        main.querySelector("#pager").innerHTML = pager(page, Math.max(1, Math.ceil(data.total / LIMIT)));
+      }
+
+      async function load() {
+        const f = await json(`${API}/feeds/${encodeURIComponent(id)}`);
+        if (!f) {
+          main.innerHTML = `<div class="crumbs"><a href="/feeds">Feeds</a></div><div class="panel"><div class="table-error">No feed ${esc(id)}.</div></div>`;
+          return;
+        }
+        feed = f;
+        frame(f);
+        await Promise.all([drawChart(), drawUpdates()]);
+      }
+
+      // An update anywhere redraws the page — a notice does not say whose feed it was, and the page
+      // is three requests. A burst coalesces.
+      let pending;
+      live(
+        "oracle",
+        () => {
+          clearTimeout(pending);
+          pending = setTimeout(load, 500);
+        },
+        load,
+        API,
+      );
+    </script>
+  </body>
+</html>

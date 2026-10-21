@@ -1,11 +1,14 @@
 import type { PoolClient } from "pg";
-import { decodeEventLog, toEventSelector } from "viem";
+import { decodeEventLog } from "viem";
 
+import { legTopic } from "../abi";
 import log from "../logger";
 import {
   advanceReader,
+  applyRebuild,
   deadLetter,
   listenEvents,
+  notifyRow,
   pool,
   readerSeq,
   takeEvents,
@@ -51,12 +54,18 @@ export class Drain {
     const chains = new Set<string>();
     for (const flow of flows) {
       for (const leg of flow.legs) {
-        const topic0 = toEventSelector(leg.abi);
-        for (const w of watches.filter((x) => x.role === leg.role)) {
+        const topic0 = legTopic(leg);
+        const on = (x: Watch) =>
+          x.role === leg.role && (!leg.chains || leg.chains.includes(x.chain));
+        for (const w of watches.filter(on)) {
           chains.add(w.chain);
           for (const address of w.at) {
+            // Two entries may share a contract under one role — a second cursor for what was added
+            // later — and the leg must still apply once.
             const key = routeKey(w.chain, address, topic0);
-            this.routes.set(key, [...(this.routes.get(key) ?? []), { flow, leg }]);
+            const routes = this.routes.get(key) ?? [];
+            if (!routes.some((r) => r.leg === leg))
+              this.routes.set(key, [...routes, { flow, leg }]);
           }
         }
       }
@@ -101,6 +110,7 @@ export class Drain {
     try {
       do {
         this.again = false;
+        await this.rebuild();
         for (const chain of this.chains) {
           try {
             await this.drainChain(chain);
@@ -114,6 +124,24 @@ export class Drain {
     }
   }
 
+  /** Honour a rebuild asked for this reader: its tables emptied, the store replayed from the start. */
+  private async rebuild(): Promise<void> {
+    try {
+      if (
+        await applyRebuild(
+          this.name,
+          this.flows.map((f) => f.table),
+        )
+      ) {
+        log.warn(
+          `[${this.name}] rebuilding ${this.flows.map((f) => f.table).join(", ")} from the start`,
+        );
+      }
+    } catch (e) {
+      log.error(`[${this.name}] rebuild: ${(e as Error).message}`);
+    }
+  }
+
   private async drainChain(chain: string): Promise<void> {
     let total = 0;
     for (;;) {
@@ -124,10 +152,14 @@ export class Drain {
       // A batch that failed as a whole is retried row by row, which isolates the one bad event
       // instead of stalling every event behind it.
       for (const u of updates ?? (await this.applyEachRow(chain, rows))) {
-        broadcast({
+        const kind = u.created ? "created" : "updated";
+        broadcast({ flow: u.flow, kind, record: u.row, previousState: u.previousState });
+        const key = this.flows.find((f) => f.name === u.flow)!.key.column;
+        void notifyRow({
           flow: u.flow,
-          kind: u.created ? "created" : "updated",
-          record: u.row,
+          kind,
+          id: String(u.row[key]),
+          state: u.row.state,
           previousState: u.previousState,
         });
       }
@@ -195,11 +227,7 @@ export class Drain {
 
     const out: RecordChange[] = [];
     for (const { flow, leg } of routes) {
-      const { eventName, args } = decodeEventLog({
-        abi: [leg.abi],
-        topics: row.topics as [`0x${string}`, ...`0x${string}`[]],
-        data: row.data as `0x${string}`,
-      });
+      const { eventName, args } = decode(leg, row);
 
       const ev: LogEvent = {
         chain: row.chain,
@@ -212,9 +240,10 @@ export class Drain {
           blockTimestamp: Number(row.block_timestamp),
           txHash: row.tx_hash,
           logIndex: row.log_index,
+          ...(row.extrinsic && { extrinsic: row.extrinsic }),
         },
         eventName,
-        args: args as Record<string, unknown>,
+        args,
       };
 
       const key = await leg.key(ev.args, ev, client);
@@ -234,6 +263,23 @@ export class Drain {
 
 interface RecordChange extends Applied {
   flow: string;
+}
+
+/**
+ * Decode a stored event for a leg: an EVM log by its ABI, a NEAR event from the JSON the watcher
+ * stored.
+ *
+ * @param leg The leg claiming it.
+ * @param row The stored event.
+ */
+function decode(leg: Leg, row: EventRow): { eventName: string; args: Record<string, unknown> } {
+  if (leg.near) return { eventName: leg.near.event, args: JSON.parse(row.data) };
+  const { eventName, args } = decodeEventLog({
+    abi: [leg.abi!],
+    topics: row.topics as [`0x${string}`, ...`0x${string}`[]],
+    data: row.data as `0x${string}`,
+  });
+  return { eventName, args: args as Record<string, unknown> };
 }
 
 /**

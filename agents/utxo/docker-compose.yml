@@ -1,0 +1,57 @@
+# One image, one service per app. The command names the entry point — nothing is selected at
+# runtime, and the banner says which app a container is.
+services:
+  # Which NEAR account a Utxo address withdraws through. Stateless, read-only, no keys.
+  api:
+    image: galacticcouncil/utxo:latest
+    command: [node, api/app.js]
+    environment:
+      - RPC_NEAR=https://free.rpc.fastnear.com
+    ports:
+      - "8090:8080"
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
+  # Withdraws each derived account's balance once ntt-near (agents/relayer) has settled into it.
+  relayer:
+    image: galacticcouncil/utxo:latest
+    command: [node, relayer/app.js]
+    environment:
+      - NEAR_ACCOUNT_ID=
+      - NEAR_PRIVKEY=
+      # Pages the connector's whole coin set (~50 views) per withdrawing tick — a paid RPC avoids 429s.
+      - RPC_NEAR=https://free.rpc.fastnear.com
+      # Websocket — EVM.Log is read out of substrate events, not eth_getLogs.
+      - RPC_HYDRATION_WSS=wss://rpc.hydradx.cloud
+      - REDIS_HOST=redis
+    ports:
+      - "8091:8080"
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
+  redis:
+    image: redis:latest
+    isolation: default
+    volumes:
+     - db:/data
+    networks:
+     - default
+    logging:
+      driver: json-file
+
+volumes:
+  db:
+
+networks:
+  default:
+    driver: overlay

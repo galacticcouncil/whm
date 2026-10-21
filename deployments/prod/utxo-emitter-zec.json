@@ -1,0 +1,68 @@
+{
+  "migration": "utxo-emitter-zec",
+  "environment": "prod",
+  "startedAt": "2026-10-17T14:58:59.704Z",
+  "completedAt": "2026-10-19T12:44:45.208Z",
+  "steps": [
+    {
+      "name": "001-deploy-emitter",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x04cdb7f5ba4e38bd0e8c5ba89a53dd88d4539596",
+        "proxyAddress": "0xb3e365a6241683d5d4ef2701de6bedc16dcc259e",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
+      "error": null,
+      "startedAt": "2026-10-17T14:58:59.706Z",
+      "completedAt": "2026-10-17T14:59:12.903Z"
+    },
+    {
+      "name": "002-set-fee@emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0xa78f666dc5753127a25c302a0f89ac19314662735ee45da558a069e790c599f2",
+        "emitter": "0xb3e365a6241683d5d4ef2701de6bedc16dcc259e",
+        "fee": "10000"
+      },
+      "error": null,
+      "startedAt": "2026-10-17T14:59:12.905Z",
+      "completedAt": "2026-10-17T14:59:19.044Z"
+    },
+    {
+      "name": "003-set-near-ntt-manager@emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0x2bdb16d8fb6556aa8ad64f061a5a04194a6747931ad4dea7c05590f9b59d222e",
+        "emitter": "0xb3e365a6241683d5d4ef2701de6bedc16dcc259e",
+        "manager": "0x374E5239a2342Be6Bf31B410EC03984D03A8b7dE"
+      },
+      "error": null,
+      "startedAt": "2026-10-17T14:59:19.044Z",
+      "completedAt": "2026-10-17T14:59:25.131Z"
+    },
+    {
+      "name": "004-set-zec-ntt-manager@emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0x7e870e2f0f5b60cbe5a501541c734806d07600c7a4c8717f4a487b2a7d9186c3",
+        "emitter": "0xb3e365a6241683d5d4ef2701de6bedc16dcc259e",
+        "manager": "0xe20cED5f5798cD4FeBc7aE182309b9f51345e0cC"
+      },
+      "error": null,
+      "startedAt": "2026-10-17T14:59:25.132Z",
+      "completedAt": "2026-10-17T14:59:31.363Z"
+    },
+    {
+      "name": "005-transfer-ownership@emitter",
+      "status": "completed",
+      "output": {
+        "txHash": "0xae23bc5eb823f1d06e15758120dae458a43b6222dcaba3385aa4b6bf63e6b5e7",
+        "contract": "0xb3e365a6241683d5d4ef2701de6bedc16dcc259e",
+        "newOwner": "0xaa7e0000000000000000000000000000000aa7e1"
+      },
+      "error": null,
+      "startedAt": "2026-10-19T12:44:38.065Z",
+      "completedAt": "2026-10-19T12:44:45.207Z"
+    }
+  ]
+}

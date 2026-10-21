@@ -1,7 +1,7 @@
 import { boot } from "../../boot";
 import { WORMHOLE } from "../../chains";
 import { privateKey } from "../../config";
-import { hydrationClients } from "../../engine/hydration";
+import { hydrationClients } from "../../clients/hydration";
 
 import { makeApp } from "./app";
 import { APP_NAME_HYDRATION, FROM_SEQUENCE_FROM_BASE, RPC_HYDRATION } from "./config";

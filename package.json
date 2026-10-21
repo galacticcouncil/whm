@@ -47,6 +47,10 @@
     "migrate:near-ntt-near:testnet": "bash sh/migrate-near-ntt-near.sh testnet",
     "hyperevm:big-blocks:on": "bash sh/hyperevm-big-blocks.sh on",
     "hyperevm:big-blocks:off": "bash sh/hyperevm-big-blocks.sh off",
+    "migrate:utxo-emitter-zec": "bash sh/migrate-utxo-emitter-zec.sh prod",
+    "migrate:utxo-emitter-zec:fork": "bash sh/migrate-utxo-emitter-zec.sh fork",
+    "migrate:utxo-withdraw-zec": "bash sh/migrate-utxo-withdraw-zec.sh prod",
+    "migrate:utxo-withdraw-zec:testnet": "bash sh/migrate-utxo-withdraw-zec.sh testnet",
     "print:oracles": "bash sh/print-oracles.sh",
     "print:agents": "bash sh/print-agents.sh"
   },

@@ -81,8 +81,17 @@ export function settlementAmount(payload: Buffer, decimals: number): bigint {
  * @param manager Expected destination NttManager address.
  */
 export function isForManager(payload: Buffer, manager: Address): boolean {
-  const recipient = payload
-    .subarray(RECIPIENT_MANAGER_OFFSET, RECIPIENT_MANAGER_OFFSET + 32)
-    .toString("hex");
-  return recipient === pad(manager, { size: 32 }).slice(2).toLowerCase();
+  return recipientManager(payload) === pad(manager, { size: 32 }).slice(2).toLowerCase();
 }
+
+/**
+ * The destination NTT manager as it sits on the wire — a padded EVM address, or `sha256(account_id)`
+ * for a NEAR manager.
+ *
+ * @param payload Raw transceiver payload bytes.
+ * @returns 32 bytes as lowercase hex, no `0x`.
+ */
+export function recipientManager(payload: Buffer): string {
+  return payload.subarray(RECIPIENT_MANAGER_OFFSET, RECIPIENT_MANAGER_OFFSET + 32).toString("hex");
+}
+
