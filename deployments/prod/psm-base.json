@@ -1,0 +1,91 @@
+{
+  "migration": "psm-base",
+  "environment": "prod",
+  "startedAt": "2026-10-21T09:40:37.450Z",
+  "completedAt": null,
+  "steps": [
+    {
+      "name": "001-deploy-vault",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x2052d7944c3b5992423e6b7ee641015701b59a52",
+        "proxyAddress": "0xd5fd74f570343245afce4a4c0b24b59179cfdfa7",
+        "ownerAddress": "0x20b588a194d9a3D788985c0C86A1160836a0Aaaa"
+      },
+      "error": null,
+      "startedAt": "2026-10-21T11:07:10.989Z",
+      "completedAt": "2026-10-21T11:07:16.372Z"
+    },
+    {
+      "name": "002-set-fees@vault",
+      "status": "completed",
+      "output": {
+        "txHash": "0x6163ba2b573df77a97b813bff206ed31c6d7239acb58116c85dcee83db7f411e",
+        "contract": "0xd5fd74f570343245afce4a4c0b24b59179cfdfa7"
+      },
+      "error": null,
+      "startedAt": "2026-10-21T11:07:16.373Z",
+      "completedAt": "2026-10-21T11:07:18.163Z"
+    },
+    {
+      "name": "003-set-limits@vault",
+      "status": "completed",
+      "output": {
+        "contract": "0xd5fd74f570343245afce4a4c0b24b59179cfdfa7",
+        "depositLimitTx": "0x11ca7696593f72e1a8ece03030f40e8fbfd5297d63847bf54f7b5a9e4b522461",
+        "payoutLimitTx": "0xefeab667733754f1edc3e4f8ff7f77d53f6df41e1821dce6774e6d69959e8237"
+      },
+      "error": null,
+      "startedAt": "2026-10-21T11:07:18.165Z",
+      "completedAt": "2026-10-21T11:07:22.288Z"
+    },
+    {
+      "name": "004-deploy-facilitator",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "005-set-base-emitter@facilitator",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "006-set-limits@facilitator",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "007-transfer-ownership@facilitator",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "008-set-hydration-emitter@vault",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "009-transfer-ownership@vault",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    }
+  ]
+}

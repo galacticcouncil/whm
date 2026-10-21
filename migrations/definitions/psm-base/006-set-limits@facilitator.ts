@@ -2,7 +2,7 @@ import type { MigrationStep } from "./types";
 import { setLimits } from "../../actions/psm/setFacilitatorConfig";
 
 const step: MigrationStep = {
-  name: "007-set-limits@facilitator",
+  name: "006-set-limits@facilitator",
   description: "Set inbound (mint) and outbound (redeem) rate limits on the facilitator",
   action: async (ctx) => {
     const required = (k: string) => {

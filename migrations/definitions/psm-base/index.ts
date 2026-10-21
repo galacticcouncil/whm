@@ -9,25 +9,25 @@ import type { MigrationConfig } from "./types";
  * emitters (one-shot, self-freezing), applies the launch parameters, and hands DEFAULT_ADMIN_ROLE
  * to its permanent holder.
  *
- * Step order is Base-first by design, not by accident. Neither proxy needs the other's address at
- * init — the emitters are bound afterwards — so everything that touches only Base is front-loaded
- * (001-003) and Hydration is not touched until 004. That leaves the whole Base leg deployable and
- * configurable in one sitting, and confines the cross-chain dependency to two steps:
+ * Steps are grouped by chain: Base 001-003, Hydration 004-007, Base 008-009. The Base key and the
+ * Hydration key can belong to different people, so the deployment is three runs, one per group.
+ * Neither proxy needs the other's address at init — the emitters are bound afterwards — so the
+ * cross-chain dependency is confined to two steps:
  *
  *   005-set-base-emitter@facilitator   Hydration tx, needs the vault address from 001
- *   006-set-hydration-emitter@vault    Base tx, needs the facilitator address from 004
+ *   008-set-hydration-emitter@vault    Base tx, needs the facilitator address from 004
  *
- * The vault's handover (008) has to follow 006, because binding the emitter needs the admin role,
- * so it cannot be front-loaded with the rest of the Base steps. Do not reorder to group by chain:
- * both binds are one-shot and self-freezing, so a step that runs before the address it needs
- * exists cannot be corrected by re-running it — only by redeploying that side.
+ * Each handover is its chain's last step and follows that contract's bind, because binding needs
+ * the admin role: the facilitator's at 007, the vault's at 009. Both binds are one-shot and
+ * self-freezing, so a step that runs before the address it needs exists cannot be corrected by
+ * re-running it — only by redeploying that side.
  *
  * The PSM compiles under its own compiler profile (see contracts/foundry.toml); the actions read
  * artifacts from contracts/out/. sh/migrate-psm-base.sh builds them first; by hand it is
  *
  *   pnpm --filter @whm/contracts build
  *
- * The emitter binds (005/006) read before they write — an already-bound value is idempotent on
+ * The emitter binds (005/008) read before they write — an already-bound value is idempotent on
  * resume, a different one throws — and the handovers refuse to hand the role to the deployer
  * itself. A `failed` step still re-runs on every invocation; `--from <next>` does not skip it.
  *
@@ -38,12 +38,13 @@ import type { MigrationConfig } from "./types";
  *     the EconomicParameters track, not a technical-committee motion. Until it lands the
  *     facilitator has a zero bucket and mints nothing.
  *   - Unpausing. Both contracts ship paused. Once this migration has bound both emitters
- *     (005/006), the go-live order is redeem unpaused → mint unpaused, once the bucket is granted
+ *     (005/008), the go-live order is redeem unpaused → mint unpaused, once the bucket is granted
  *     and the invariant has been watched → the vault's deposits last, each a guardian action.
  *     Deposits go last because a deposit that lands while mint is paused only queues, and a
  *     queue → cancel → refund loop spends the deposit window for free.
  *
- * Required PK env vars:
+ * Required PK env vars, both on every run (a run that signs on one chain only may pass a throwaway
+ * key for the other):
  *   PK_FACILITATOR — Hydration deployer
  *   PK             — Base deployer
  *

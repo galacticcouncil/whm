@@ -530,11 +530,19 @@ Two things the migration deliberately does **not** do, because neither is ours t
 - `GhoToken.addFacilitator(facilitator, label, capacity)` — Hydration governance: the GHO roles sit
   on the dispatcher's AaveManager account, so it is `dispatch_as_aave_manager` from Root or the
   EconomicParameters track. Until it lands the facilitator has a zero bucket and mints nothing.
-- **Unpausing.** Both contracts ship paused. Once the migration has bound both emitters (005/006),
+- **Unpausing.** Both contracts ship paused. Once the migration has bound both emitters (005/008),
   the go-live order is redeem unpaused → mint unpaused, once the bucket is granted and the
   invariant has been watched → the vault's deposits last, each a guardian action. Deposits go last
   because a deposit that lands while mint is paused only queues, and a queue → cancel → refund loop
   spends the deposit window for free.
+
+`chopsticks/probes/_probePsmGoLive.ts` prints both as calldata for the facilitator in
+`deployments/prod/psm-base.json`: the EconomicParameters referendum (`dispatch_as_aave_manager` →
+`addFacilitator`) and the two TC-majority motions (`dispatch_as_emergency_admin` → `setPaused`).
+It enacts each on a fork of live Hydration under its own origin, then mints and redeems through
+the real core. Before 004 has run it deploys a stand-in, and its calldata is not submittable. Both
+dispatcher accounts pay EVM gas in WETH from their `ETH\0`-derived accounts, which must hold the
+call's gas limit times its max fee.
 
 The runner resumes a `failed` step on every invocation and `--from <next>` does not skip it. The
 emitter binds read before they write — an already-bound value is idempotent, a different one throws
@@ -550,6 +558,7 @@ already deployed changes bytecode. `sh/migrate-psm-base.sh` builds before runnin
 ```sh
 forge test --match-path "test/psm/**"                        # fork suites skip without RPC_BASE / RPC_HYDRATION
 npx tsx chopsticks/probes/_probePsmRedeem.ts                 # the redeem leg, real runtime
+npx tsx chopsticks/probes/_probePsmGoLive.ts                 # bucket referendum + TC motions, on a fork
 ```
 
 Fork suites run against live chain state and skip cleanly without an RPC:

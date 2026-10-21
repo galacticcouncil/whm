@@ -2,7 +2,7 @@ import type { MigrationStep } from "./types";
 import { transferAdmin } from "../../actions/psm/transferAdmin";
 
 const step: MigrationStep = {
-  name: "009-transfer-ownership@facilitator",
+  name: "007-transfer-ownership@facilitator",
   description: "Hand facilitator DEFAULT_ADMIN_ROLE to its permanent holder, drop the deployer's",
   action: async (ctx) => {
     const facilitator = ctx.outputs["004-deploy-facilitator"].proxyAddress;

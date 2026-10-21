@@ -2,7 +2,7 @@ import type { MigrationStep } from "./types";
 import { transferAdmin } from "../../actions/psm/transferAdmin";
 
 const step: MigrationStep = {
-  name: "008-transfer-ownership@vault",
+  name: "009-transfer-ownership@vault",
   description: "Hand vault DEFAULT_ADMIN_ROLE to the Base technical committee, drop the deployer's",
   action: async (ctx) => {
     const vault = ctx.outputs["001-deploy-vault"].proxyAddress;

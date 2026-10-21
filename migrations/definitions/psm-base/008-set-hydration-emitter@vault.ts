@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { setEmitter } from "../../actions/psm/setEmitter";
 
 const step: MigrationStep = {
-  name: "006-set-hydration-emitter@vault",
+  name: "008-set-hydration-emitter@vault",
   description: "Bind the Hydration facilitator as the vault's only authorized emitter (one-shot)",
   action: async (ctx) => {
     const vault = ctx.outputs["001-deploy-vault"].proxyAddress;

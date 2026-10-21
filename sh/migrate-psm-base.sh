@@ -13,11 +13,13 @@ set -euo pipefail
 #   <env>   Environment context: prod | fork
 #   ...     Any further flags go straight to the runner (--from, --pause-at).
 #
-#           --pause-at runs that step and stops after it, so to keep the deployer's
-#           admin role for post-checks, pause at 007-set-limits@facilitator — the last
-#           step before either handover.
+#           --pause-at runs that step and stops after it. A deployment split between a
+#           Base key and a Hydration key is three runs: --pause-at 003-set-limits@vault
+#           (Base key), --pause-at 007-transfer-ownership@facilitator (Hydration key),
+#           then to the end (Base key).
 #
-# Required env vars (set in shell or root .env):
+# Required env vars (set in shell or root .env), both on every run; a run that signs on one
+# chain only may pass a throwaway key for the other:
 #   PK_FACILITATOR  Hydration deployer (0x...)
 #   PK              Base deployer (0x...)
 #
