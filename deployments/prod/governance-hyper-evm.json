@@ -1,0 +1,43 @@
+{
+  "migration": "governance-hyper-evm",
+  "environment": "prod",
+  "startedAt": "2026-10-21T09:11:21.276Z",
+  "completedAt": "2026-10-21T09:13:02.668Z",
+  "steps": [
+    {
+      "name": "001-deploy-executor-implementation",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xf1a5fe4252d9a1c39b0fb9de1f19049ee57ed188",
+        "deployTxHash": "0x887564e628ff42c93e333cf5321e2b6065685ac2e12d156939ee179e2433ab16",
+        "runtimeCodeHash": "0xcf23d8bc91362103304709c71fba2863710d70aae7f5a49faaa7b4f2e30b9e61",
+        "proxiableUUID": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+      },
+      "error": null,
+      "startedAt": "2026-10-21T09:11:21.278Z",
+      "completedAt": "2026-10-21T09:12:02.045Z"
+    },
+    {
+      "name": "002-deploy-executor-proxy",
+      "status": "completed",
+      "output": {
+        "proxyAddress": "0x102225852eca1937ae57d2fb23409877aee50699",
+        "deployTxHash": "0xab331b6f7d2a6f16fd6965d32cc5f80625db3a8a979248c7ff54741eefc5b71d",
+        "runtimeCodeHash": "0xce38e3061ecb0c2a71d7e8d1587624a16fd04dfd2350bd77fa078a994e30f141",
+        "implAddress": "0xf1a5fE4252D9a1C39b0Fb9DE1F19049ee57ED188",
+        "wormholeCore": "0x7C0faFc4384551f063e05aee704ab943b8B53aB3",
+        "wormholeId": "47",
+        "sourceDispatcher": "0x00302167F9597b9d90Bd342311c5c4be39BF0Fa0",
+        "sourceDispatcherBytes32": "0x00000000000000000000000000302167F9597b9d90Bd342311c5c4be39BF0Fa0",
+        "vetoer": "0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7",
+        "vetoerThreshold": "4",
+        "vetoerOwners": "0x990Df21C11f82127b371102F44970E2fc6c5520A,0x8F6b274E80D0DC7A5274Ea9696dAdceF73b4515D,0x6466b77eeE8687639ABDbBB51eea453Bf5e7Cf30,0xF34e845538Cc8A498eDD97d7cde16FdfEf3d4d99,0x538a22F1e7AF49Bb040f30F95c17d928cd178A3a,0x2b6F2D5bC8EEfCC82Fef4546Fe7ff2143A238497,0x16b25bbAbd8aA87c29989820E721AaE739075AC4",
+        "vetoPeriod": "86400",
+        "executionGracePeriod": "604800"
+      },
+      "error": null,
+      "startedAt": "2026-10-21T09:12:02.047Z",
+      "completedAt": "2026-10-21T09:13:02.667Z"
+    }
+  ]
+}

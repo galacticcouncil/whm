@@ -22,6 +22,24 @@ State files live outside this dir, in `deployments/<context>/<migration>.json` â
 
 ## Running
 
+The production `pnpm migrate:governance-hydration` wrapper also verifies the dispatcher
+implementation and ERC-1967 proxy sources on Neckwork using its Sourcify V2 API.
+Fork runs skip explorer verification. Direct invocation of `migrations/run.ts` requires
+running `pnpm verify:governance-hydration` separately afterward.
+
+Verification reads addresses and transaction hashes from the completed production record
+and compiler version/contract paths from the Foundry artifacts. Keep the exact deployment
+checkout and artifacts for verification. Both `match` and `exact_match` runtime results are
+accepted; the API lookup must confirm the Hydration chain and requested address.
+Evidence is saved under `deployments/prod/verification/governance-hydration-*.json`.
+Neckwork source verification does not prove constructor arguments or proxy configuration;
+the migration's on-chain checks remain required.
+
+If verification fails, the wrapper exits unsuccessfully but the completed deployment
+record is retained. Retry `pnpm verify:governance-hydration` without keys or transaction
+broadcasts. This verifies only the Hydration contracts; destination-chain explorer
+verification is separate.
+
 From the repo root:
 
 ```bash

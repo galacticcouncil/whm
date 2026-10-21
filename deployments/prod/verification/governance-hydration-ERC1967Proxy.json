@@ -1,0 +1,11 @@
+{
+  "contract": "ERC1967Proxy",
+  "address": "0x00302167f9597b9d90bd342311c5c4be39bf0fa0",
+  "deploymentTransaction": "0x6eb921b32a7c4a58f047baf723ceb791055af67ca3b31d2d46e6e81bacd98e38",
+  "url": "https://hydration-explorer.neckwork.net/api/v2/contract/222222/0x00302167f9597b9d90bd342311c5c4be39bf0fa0",
+  "match": "exact_match",
+  "creationMatch": "exact_match",
+  "runtimeMatch": "exact_match",
+  "chainId": "222222",
+  "checkedAt": "2026-10-15T13:29:08.368Z"
+}

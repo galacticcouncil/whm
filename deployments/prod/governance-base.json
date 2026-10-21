@@ -1,0 +1,43 @@
+{
+  "migration": "governance-base",
+  "environment": "prod",
+  "startedAt": "2026-10-21T09:26:21.958Z",
+  "completedAt": "2026-10-21T09:43:34.069Z",
+  "steps": [
+    {
+      "name": "001-deploy-executor-implementation",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xf1a5fe4252d9a1c39b0fb9de1f19049ee57ed188",
+        "deployTxHash": "0xc074f8c4fa4ef4e043d807e1723df41ba5f3fa7ba4bff58cf16de0a4c3afe6af",
+        "runtimeCodeHash": "0xcf23d8bc91362103304709c71fba2863710d70aae7f5a49faaa7b4f2e30b9e61",
+        "proxiableUUID": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+      },
+      "error": null,
+      "startedAt": "2026-10-21T09:30:09.379Z",
+      "completedAt": "2026-10-21T09:30:09.379Z"
+    },
+    {
+      "name": "002-deploy-executor-proxy",
+      "status": "completed",
+      "output": {
+        "proxyAddress": "0x8830b6eb2e015184b86cfa3a0a759cd55ff47a4b",
+        "deployTxHash": "0x2abc678d99250ea801c482194d3322ccd2cfce5c0d665857856e04094a25002d",
+        "runtimeCodeHash": "0xce38e3061ecb0c2a71d7e8d1587624a16fd04dfd2350bd77fa078a994e30f141",
+        "implAddress": "0xf1a5fE4252D9a1C39b0Fb9DE1F19049ee57ED188",
+        "wormholeCore": "0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6",
+        "wormholeId": "30",
+        "sourceDispatcher": "0x00302167F9597b9d90Bd342311c5c4be39BF0Fa0",
+        "sourceDispatcherBytes32": "0x00000000000000000000000000302167F9597b9d90Bd342311c5c4be39BF0Fa0",
+        "vetoer": "0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7",
+        "vetoerThreshold": "4",
+        "vetoerOwners": "0x990Df21C11f82127b371102F44970E2fc6c5520A,0x8F6b274E80D0DC7A5274Ea9696dAdceF73b4515D,0x6466b77eeE8687639ABDbBB51eea453Bf5e7Cf30,0xF34e845538Cc8A498eDD97d7cde16FdfEf3d4d99,0x538a22F1e7AF49Bb040f30F95c17d928cd178A3a,0x2b6F2D5bC8EEfCC82Fef4546Fe7ff2143A238497,0x16b25bbAbd8aA87c29989820E721AaE739075AC4",
+        "vetoPeriod": "86400",
+        "executionGracePeriod": "604800"
+      },
+      "error": null,
+      "startedAt": "2026-10-21T09:43:28.777Z",
+      "completedAt": "2026-10-21T09:43:34.067Z"
+    }
+  ]
+}
