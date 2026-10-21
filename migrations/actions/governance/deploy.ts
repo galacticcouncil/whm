@@ -109,13 +109,35 @@ export type DeployExecutorProxyResult = {
   executionGracePeriod: string;
 };
 
+// Base serves receipts from preconfirmed flashblocks before `latest` includes the tx,
+// so a post-deploy read can briefly see empty state. Retry before failing.
+const READ_ATTEMPTS = 5;
+const READ_DELAY_MS = 2_000;
+
+/**
+ * Retry a read until it yields a value, tolerating RPC state behind the receipt.
+ *
+ * @param read - returns the value, or undefined while state isn't visible yet
+ * @returns the first defined value, or undefined after all attempts
+ */
+async function readWithRetry<T>(read: () => Promise<T | undefined>): Promise<T | undefined> {
+  for (let attempt = 1; ; attempt++) {
+    const value = await read();
+    if (value !== undefined || attempt === READ_ATTEMPTS) return value;
+    await new Promise((resolve) => setTimeout(resolve, READ_DELAY_MS));
+  }
+}
+
 async function requireCode(
   publicClient: WalletContext["publicClient"],
   address: Address,
   label: string,
 ): Promise<Hex> {
-  const code = await publicClient.getCode({ address });
-  if (!code || code === "0x") throw new Error(`${label} has no code: ${address}`);
+  const code = await readWithRetry(async () => {
+    const code = await publicClient.getCode({ address });
+    return code && code !== "0x" ? code : undefined;
+  });
+  if (!code) throw new Error(`${label} has no code: ${address}`);
   return code;
 }
 
@@ -123,8 +145,11 @@ async function implementationOf(
   publicClient: WalletContext["publicClient"],
   proxy: Address,
 ): Promise<Address> {
-  const value = await publicClient.getStorageAt({ address: proxy, slot: IMPLEMENTATION_SLOT });
-  if (!value || value === "0x") throw new Error(`Missing ERC-1967 implementation slot on ${proxy}`);
+  const value = await readWithRetry(async () => {
+    const value = await publicClient.getStorageAt({ address: proxy, slot: IMPLEMENTATION_SLOT });
+    return value && BigInt(value) !== 0n ? value : undefined;
+  });
+  if (!value) throw new Error(`Missing ERC-1967 implementation slot on ${proxy}`);
   return getAddress(`0x${value.slice(-40)}`);
 }
 
