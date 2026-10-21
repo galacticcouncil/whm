@@ -45,6 +45,8 @@
     "migrate:near-ntt-near": "bash sh/migrate-near-ntt-near.sh prod",
     "migrate:near-ntt-near:fork": "bash sh/migrate-near-ntt-near.sh fork",
     "migrate:near-ntt-near:testnet": "bash sh/migrate-near-ntt-near.sh testnet",
+    "hyperevm:big-blocks:on": "bash sh/hyperevm-big-blocks.sh on",
+    "hyperevm:big-blocks:off": "bash sh/hyperevm-big-blocks.sh off",
     "print:oracles": "bash sh/print-oracles.sh",
     "print:agents": "bash sh/print-agents.sh"
   },
