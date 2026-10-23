@@ -53,7 +53,7 @@ export class SolanaRpc {
   async transaction(signature: string): Promise<Tx> {
     const tx = await this.call<Tx | null>("getTransaction", [
       signature,
-      { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 },
+      { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 1 },
     ]);
     if (!tx) throw new Error(`getTransaction: ${signature} not found`);
     return tx;
