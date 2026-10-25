@@ -15,7 +15,7 @@ settlement and forwarding instruction — are unchanged: [../intents/schema.md](
     ├─ IntentEmitter.placeOrder ─► [B] settlement + [C] instruction ─► IntentReceiver ─► ETH → 0xN
     │                                                                                    POA credits A
     └─ IntentQuoteEmitter.publishOrder ─► [O] order VAA ──────────────────────────────► IntentRouter
-                                              emitter: IntentQuoteEmitter                 .finalize(terms, O)
+                                              emitter: IntentQuoteEmitter                 .swap(terms, O, quote)
                                               payload: (authPath, seq, amount, outPerIn)
 ```
 
@@ -152,28 +152,22 @@ is a different account.
 
 ### The message (`nep413`)
 
-`nonce` and `recipient` are siblings of `message`, not inside it.
+`nonce` and `recipient` are siblings of `message`, not inside it. Every message carries one intent.
 
 ```json
-{
-  "signer_id": "<A>",
-  "deadline": "<order expiry>",
-  "intents": [
-    { "intent": "token_diff",
-      "diff": { "nep141:eth.omft.near": "-<amount_in>", "<destinationAsset>": "<amount_out>" } },
-    { "intent": "ft_withdraw", "token": "<route token contract>", "receiver_id": "<route token contract>",
-      "amount": "<amount_out>", "memo": "WITHDRAW_TO:<recipient>" }
-  ]
-}
+{ "signer_id": "<A>", "deadline": "<RFC 3339, ms>", "intents": [ <one of the three below> ] }
 ```
 
-- Negative = given up, positive = received; deltas are **i128**.
-- `recipientKind: 1` replaces `ft_withdraw` with `transfer` to the intents account `recipient`.
-- `ft_withdraw.token` is a contract account id (`zec.omft.near`), not the ledger id; POA routes take
-  the token contract as receiver and the external address in the memo. Exact rules per route live in
-  the router's route registry.
-- **Refund:** a single `ft_withdraw` of `eth.omft.near` to `refundTo` (`WITHDRAW_TO:` memo).
-  **Delivery:** a single withdrawal of the destination token to `recipient`.
+| Action | Intent |
+| --- | --- |
+| **swap** | `{ "intent": "transfer", "receiver_id": "<quote.depositAddress>", "tokens": { "nep141:eth.omft.near": "<quote.amountIn>" } }` |
+| **deliver**, `recipientKind 0` | `{ "intent": "ft_withdraw", "token": "<contract>", "receiver_id": "<contract>", "amount": "<balance>", "memo": "WITHDRAW_TO:<recipient>" }` |
+| **deliver**, `recipientKind 1` | `{ "intent": "transfer", "receiver_id": "<recipient>", "tokens": { "<destinationAsset>": "<balance>" } }` |
+| **refund** | `{ "intent": "ft_withdraw", "token": "eth.omft.near", "receiver_id": "eth.omft.near", "amount": "<balance>", "memo": "WITHDRAW_TO:<refundTo, EIP-55>" }` |
+
+- The swap is a transfer into 1Click's deposit account, not a `token_diff`: 1Click has the solvers
+  trade and pays the output back to `A` in the same transaction ([poc.md](poc.md#g1--a-counterparty)).
+- `<contract>` is the ledger id without `nep141:`. Deliveries and refunds move `A`'s whole balance.
 
 ### What is signed
 
@@ -184,22 +178,46 @@ NEP-413: the Ed25519 signature is over `sha256( LE_u32(2^31 + 413) ‖ borsh({me
 v1.signer.sign({ request: { payload_v2: { Eddsa: "<hex of the 32-byte digest>" }, path, domain_id: 1 } })
 ```
 
-Deposit, gas and response shape are pinned against the deployed signer before release.
+1 yocto, 30 TGas attached; the router checks the returned signature against `A` before emitting it.
 
-### Nonces
+### Nonces and deadlines
 
-The verifier's versioned nonce: `magic 4 ‖ version 1 ‖ salt 4 ‖ expiry_ns 8 (i64) ‖ entropy 15`.
+The verifier's versioned nonce: `magic 4 ‖ version 1 ‖ salt 4 ‖ expiry_ns 8 (i64) ‖ entropy 15`;
+salt from `intents.near.current_salt()`; a payload's deadline must be ≤ its nonce's expiry.
 
 ```
-order expiry = min(terms.deadline, vaa.timestamp + price_validity)      payload deadline AND nonce expiry
-swap         entropy = H(domain ‖ "swap"   ‖ path ‖ seq)[..15]
-refund       entropy = H(domain ‖ "refund" ‖ path ‖ block_height ‖ amount)[..15]
-delivery     entropy = H(domain ‖ "deliver"‖ path ‖ block_height ‖ amount)[..15]
+order expiry      = min(terms.deadline, vaa.timestamp + price_validity)
+swap      nonce   = (salt, order expiry, H(domain ‖ "swap" ‖ path ‖ seq)[..15])
+          deadline= min(now + transfer_validity, order expiry)
+deliver / refund  = (salt, now + transfer_validity, H(domain ‖ action ‖ path ‖ block_height ‖ amount)[..15])
+domain            = "whm-intent-router/v1",  H = sha256
 ```
 
-A fixed expiry means re-signing an order reproduces its whole nonce, so one order fills at most once.
+The swap nonce depends on the order alone: every quote for one order re-signs the same nonce, so at
+most one transfer per order executes. The short deadline keeps a signed transfer from landing after
+its quote.
 
-### `MultiPayload` — what the bot publishes
+### The quote — what 1Click signs
+
+Ed25519 under 1Click's manager key, over the UTF-8 of `base58(sha256(stable JSON))` — keys sorted, no
+whitespace — of a fixed field set: the request's `dry`, `swapType`, `slippageTolerance`, assets,
+`depositType`, `amount`, `refundTo`/`refundType`, `recipient`/`recipientType`, `deadline` and its
+optional fields when set; the quote's amounts; non-dry, its `depositAddress`, `deadline`,
+`timeWhenInactive`, `timeEstimate`, fees; and `timestamp`. The bot passes exactly that set
+(`signedFields` in `crates/near/scripts/intent-router/oneclick.ts`); the router reads every value it
+checks from it.
+
+| Check | Rule |
+| --- | --- |
+| signature | by a key in the router's set (DAO-managed) |
+| shape | `dry` false, `swapType` `EXACT_INPUT`, `depositType` `INTENTS`, `amount` = `amountIn` > 0 |
+| assets | `originAsset` = ETH, `destinationAsset` = the terms' |
+| payee | `recipient` = `refundTo` = `A`, both `INTENTS`; no `virtualChain*`, `customRecipientMsg`, `depositMemo` |
+| age | `now ≤ timestamp + max_quote_age`; the quote's `deadline` ≥ the transfer's |
+| size | `amountIn ≤ max_fill_multiple × order.amount` |
+| floor | `minAmountOut × 1e18 × 10⁴ ≥ amountIn × outPerIn × (10⁴ − maxSlippageBps)`, and ≥ `amountIn × minOutPerIn / 1e18` |
+
+### `MultiPayload` — what the bot submits
 
 ```json
 {
@@ -216,36 +234,49 @@ A fixed expiry means re-signing an order reproduces its whole nonce, so one orde
 
 ## 7. `IntentRouter` interface
 
+`crates/near/contracts/intent-router`.
+
 ```rust
 #[near(contract_state)]
 pub struct IntentRouter {
-    wormhole_core:    AccountId,      // contract.wormhole_crypto.near
-    mpc_signer:       AccountId,      // v1.signer
-    intents_contract: AccountId,      // intents.near
-    emitter_chain:    u16,            // 73
-    emitter_address:  [u8; 32],       // IntentQuoteEmitter
-    price_validity:   u64,            // seconds
-    eth_token:        String,         // nep141:eth.omft.near
-    routes:           LookupMap<String, Route>,   // ledger id → token contract, decimals, memo rule, minimum
-    owner:            AccountId,
-    pending_owner:    Option<AccountId>,
+    owner:          AccountId,
+    pending_owner:  Option<AccountId>,
+    mpc_signer:     AccountId,          // v1.signer
+    intents:        AccountId,          // intents.near
+    core:           AccountId,          // contract.wormhole_crypto.near
+    emitter_chain:  u16,                // 73
+    emitter:        [u8; 32],           // IntentQuoteEmitter
+    eth_token:      String,             // nep141:eth.omft.near
+    quote_keys:     Vec<[u8; 32]>,      // 1Click's quote-signing keys
+    params:         Params,             // price_validity, max_quote_age, transfer_validity (s),
+                                        // max_fill_multiple, min_refund (wei)
+    routes:         BTreeMap<String, Route>,   // ledger id → { min_withdraw, min_delivery }
 }
 
 #[near]
 impl IntentRouter {
-    /// Swap, deliver or refund for the account the terms derive. Permissionless.
-    pub fn finalize(&mut self, terms: Base64VecU8, order_vaa: Base64VecU8) -> Promise;
-    // private callbacks only; owner: routes, price_validity, upgrade, two-step ownership
+    /// The swap: a transfer of the quote's amountIn ETH from A to 1Click's deposit account.
+    pub fn swap(&mut self, terms: Base64VecU8, order_vaa: Base64VecU8, quote: Quote) -> Promise;
+    /// A's whole destination balance to the recipient — from min_delivery before the deadline,
+    /// from min_withdraw after it.
+    pub fn deliver(&mut self, terms: Base64VecU8) -> Promise;
+    /// After the deadline, A's whole ETH balance to refundTo. Reads no route.
+    pub fn refund(&mut self, terms: Base64VecU8) -> Promise;
+    // all three: anyone, 1 yocto (the signer's deposit), 300 TGas
+    // owner: set_params, set_quote_keys, set_route, remove_route, upgrade, two-step ownership
+    // views: get_config, get_routes, path_of(terms)
 }
+
+pub struct Quote { signed: Map<String, Value>, signature: String }   // "ed25519:<bs58>"
 ```
 
 Event, so the bot needs no view on the happy path:
 
 ```json
-{ "standard": "intent_router", "version": "1.0.0", "event": "intent_signed",
-  "data": [{ "auth_path": "0x…", "action": "swap | refund | deliver", "seq": 7,
-             "account": "<A>", "amount_in": "…", "amount_out": "…",
-             "recipient": "…", "signed_data": { "...MultiPayload..." } }] }
+{ "standard": "whm-intent-router", "version": "1.0.0", "event": "intent_signed",
+  "data": [{ "action": "swap | deliver | refund", "account": "<A>", "auth_path": "0x…", "seq": 7,
+             "token": "…", "amount": "…", "min_amount_out": "…", "receiver": "…",
+             "signed_data": { "...MultiPayload..." } }] }
 ```
 
 ---
@@ -260,15 +291,29 @@ GET https://api.wormholescan.io/api/v1/vaas/73/<IntentQuoteEmitter emitter hex>/
 
 **Balances** — `intents.near.mt_batch_balance_of({ account_id: A, token_ids: [eth, destination] })`.
 
-**Publish** — `publish_intent({ quote_hashes: [], signed_data })` → `{ status: "OK", intent_hash }`.
+**Swap** — per order, once `A` holds ETH (`crates/near/scripts/intent-router/swap.ts`):
 
-**Status** — `get_status({ intent_hash })`:
+```
+amount = min(A's ETH, max_fill_multiple × order.amount)
+POST 1click /v0/quote   { dry: false, swapType: EXACT_INPUT, depositType / recipientType / refundType: INTENTS,
+                          originAsset: eth, destinationAsset, amount, recipient = refundTo = A, deadline }
+router.swap(terms, orderVaa, { signed: signedFields(quote), signature })   1 yocto, 300 TGas
+POST 1click /v0/submit-intent { type: "swap_transfer", signedData }
+GET  1click /v0/status?depositAddress=…   until SUCCESS | REFUNDED | FAILED
+```
+
+`REFUNDED` returns the ETH to `A`; the next order buys it. A transfer that never executes expires
+with its deadline; a new quote for the same order re-signs the same nonce.
+
+**Deliver, refund** — `router.deliver(terms)` / `router.refund(terms)`, then on the relay
+(`payout.ts`): `publish_intent({ quote_hashes: [], signed_data })` → `{ status: "OK", intent_hash }`,
+and `get_status({ intent_hash })`:
 
 | Status | Bot action |
 | --- | --- |
 | `PENDING`, `TX_BROADCASTED` | keep polling |
 | `SETTLED` | record; reconcile balances |
-| `NOT_FOUND_OR_NOT_VALID` | nonce unused and VAA valid → re-sign; else wait for the next order or the deadline |
+| `NOT_FOUND_OR_NOT_VALID` | call again — a new block height gives a new nonce |
 
 The bot keeps nothing whose loss strands funds: everything rebuilds from balances, router events and
 verifier nonces.
