@@ -1,0 +1,17 @@
+[package]
+name = "intent-router"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+hex = { workspace = true }
+bs58 = { workspace = true }
+# U512 for the floor comparison: amount × price × bps overflows 256 bits.
+uint = { version = "0.9", default-features = false }
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }
