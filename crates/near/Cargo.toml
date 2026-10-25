@@ -2,6 +2,7 @@
 members = [
     "contracts/*",
     "sandbox",
+    "sandbox/mock-mpc",
 ]
 resolver = "2"
 

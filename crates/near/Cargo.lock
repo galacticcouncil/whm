@@ -926,6 +926,7 @@ version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
+ "pkcs8",
  "signature",
 ]
 
@@ -938,8 +939,10 @@ dependencies = [
  "curve25519-dalek",
  "ed25519",
  "rand_core 0.6.4",
+ "serde",
  "sha2 0.10.9",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -1598,6 +1601,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "intent-router"
+version = "0.1.0"
+dependencies = [
+ "bs58 0.5.1",
+ "hex",
+ "near-sdk",
+ "uint",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1921,6 +1934,16 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mock-mpc"
+version = "0.1.0"
+dependencies = [
+ "bs58 0.5.1",
+ "ed25519-dalek",
+ "hex",
+ "near-sdk",
 ]
 
 [[package]]
@@ -2676,7 +2699,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "borsh",
+ "bs58 0.5.1",
+ "ed25519-dalek",
  "hex",
+ "intent-router",
  "k256",
  "near-crypto 0.36.0",
  "near-primitives 0.36.0",

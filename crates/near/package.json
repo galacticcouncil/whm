@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "cargo near build non-reproducible-wasm",
-    "test": "cargo test -p ntt-manager -p utxo-withdraw",
-    "test:sandbox": "cargo build -p ntt-manager --target wasm32-unknown-unknown --release && NTT_WASM=$PWD/target/wasm32-unknown-unknown/release/ntt_manager.wasm cargo test -p ntt-sandbox -- --test-threads=1"
+    "test": "cargo test -p ntt-manager -p utxo-withdraw -p intent-router",
+    "test:sandbox": "cargo build -p ntt-manager --target wasm32-unknown-unknown --release && (cd contracts/intent-router && cargo near build non-reproducible-wasm) && (cd sandbox/mock-mpc && cargo near build non-reproducible-wasm --no-abi) && NTT_WASM=$PWD/target/wasm32-unknown-unknown/release/ntt_manager.wasm ROUTER_WASM=$PWD/target/near/intent_router/intent_router.wasm MPC_WASM=$PWD/target/near/mock_mpc/mock_mpc.wasm cargo test -p ntt-sandbox -- --test-threads=1"
   }
 }
