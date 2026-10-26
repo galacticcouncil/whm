@@ -8,7 +8,7 @@
 use near_sdk::serde_json::{self, Map, Value};
 use near_sdk::{env, near, AccountId};
 
-use crate::time;
+use near_common::time;
 
 /// Fields that would deliver anywhere but the intents account the quote names. Never signed for a
 /// plain swap; refused if present.

@@ -5,7 +5,7 @@
 //! msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        73 bytes
 //! ```
 
-use crate::codec::Reader;
+use near_common::codec::Reader;
 
 pub const ORDER: u8 = 1;
 

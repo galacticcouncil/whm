@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 near-sdk = { workspace = true }
 hex = { workspace = true }
 bs58 = { workspace = true }
+near-common = { path = "../../common" }
 # U512 for the floor comparison: amount × price × bps overflows 256 bits.
 uint = { version = "0.9", default-features = false }
 

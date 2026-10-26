@@ -1606,6 +1606,7 @@ version = "0.1.0"
 dependencies = [
  "bs58 0.5.1",
  "hex",
+ "near-common",
  "near-sdk",
  "uint",
 ]
@@ -1943,6 +1944,7 @@ dependencies = [
  "bs58 0.5.1",
  "ed25519-dalek",
  "hex",
+ "near-common",
  "near-sdk",
 ]
 
@@ -2048,6 +2050,15 @@ dependencies = [
  "smart-default",
  "time",
  "tracing",
+]
+
+[[package]]
+name = "near-common"
+version = "0.1.0"
+dependencies = [
+ "bs58 0.5.1",
+ "hex",
+ "near-sdk",
 ]
 
 [[package]]
@@ -2690,6 +2701,7 @@ name = "ntt-manager"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "near-common",
  "near-sdk",
 ]
 
@@ -4474,6 +4486,7 @@ version = "0.1.0"
 dependencies = [
  "bs58 0.5.1",
  "hex",
+ "near-common",
  "near-sdk",
 ]
 

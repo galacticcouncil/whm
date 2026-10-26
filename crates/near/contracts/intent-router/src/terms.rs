@@ -11,7 +11,7 @@
 
 use near_sdk::{env, AccountId};
 
-use crate::codec::Reader;
+use near_common::codec::Reader;
 
 /// The terms version of the limit swap — the only strategy.
 pub const LIMIT_SWAP: u8 = 2;

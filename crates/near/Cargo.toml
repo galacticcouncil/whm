@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "common",
     "contracts/*",
     "sandbox",
     "sandbox/mock-mpc",

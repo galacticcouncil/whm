@@ -13,7 +13,7 @@ use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::serde_json::{json, Value};
 use near_sdk::{env, AccountId};
 
-use crate::time;
+use near_common::time;
 
 /// NEP-413's prefix tag, 2^31 + 413.
 pub const NEP413_TAG: u32 = (1 << 31) + 413;

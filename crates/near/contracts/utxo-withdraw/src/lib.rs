@@ -40,7 +40,9 @@ pub mod chains {
 }
 pub mod connector;
 pub mod delegate;
-pub mod mpc;
+
+/// `v1.signer`, shared with the other WHM contracts.
+pub use near_common::mpc;
 
 use std::collections::BTreeMap;
 
@@ -502,10 +504,7 @@ pub(crate) fn emit(event: &str, data: serde_json::Value) {
     env::log_str(&format!("EVENT_JSON:{log}"));
 }
 
-fn parse_hex32(value: &str) -> [u8; 32] {
-    let bytes = hex::decode(value).unwrap_or_else(|_| env::panic_str("InvalidHex"));
-    bytes.try_into().unwrap_or_else(|_| env::panic_str("InvalidBytes32"))
-}
+use near_common::parse_bytes32 as parse_hex32;
 
 #[cfg(test)]
 mod tests {

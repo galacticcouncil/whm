@@ -57,7 +57,7 @@ pnpm --filter @whm/crates-solana logs:local
 
 # NEAR (cargo-near)
 pnpm --filter @whm/crates-near build          # cargo near build
-pnpm --filter @whm/crates-near test           # unit tests: ntt-manager, utxo-withdraw
+pnpm --filter @whm/crates-near test           # unit tests: ntt-manager, utxo-withdraw, intent-router
 pnpm --filter @whm/crates-near test:sandbox   # end-to-end on a NEAR sandbox
 
 # Agents (esbuild)
@@ -116,7 +116,8 @@ crates/                   # Rust umbrella (each subdir = its own Cargo workspace
     programs/             # Anchor programs (currently: oracle-emitter)
     scripts/              # Solana ops helpers
   near/                   # @whm/crates-near — Cargo workspace (near-sdk 5)
-    contracts/            # ntt-manager, utxo-withdraw
+    common/               # code the contracts share (wire reader, VAA, v1.signer, time)
+    contracts/            # ntt-manager, utxo-withdraw, intent-router
     sandbox/              # end-to-end tests on a NEAR sandbox
     scripts/              # NEAR ops helpers (e.g. ntt-manager/limits.sh — DAO limit proposals)
 

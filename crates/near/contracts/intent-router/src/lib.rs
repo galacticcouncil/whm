@@ -27,14 +27,14 @@
 //! above the order's floor; `A`'s destination asset to the terms' recipient; after the deadline,
 //! `A`'s ETH to the terms' `refundTo`. No admin sign, no generic `sign(payload)`, no public callback.
 
-pub mod codec;
 pub mod floor;
 pub mod intent;
-pub mod mpc;
 pub mod order;
 pub mod quote;
 pub mod terms;
-pub mod time;
+
+/// Shared with the other WHM contracts.
+pub use near_common::{mpc, time, vaa};
 
 use std::collections::BTreeMap;
 
@@ -42,12 +42,12 @@ use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::serde_json::{json, Value};
 use near_sdk::{env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError};
 
-use codec::Vaa;
 use intent::{eip55, entropy, ft_withdraw, multi_payload, nep413_digest, transfer, versioned_nonce};
 use mpc::{ext_mpc, implicit_account, parse_ed25519, Payload, SignRequest, SignatureResponse, DOMAIN_ED25519};
 use order::Order;
 use quote::{Expect, Quote};
 use terms::{auth_path, path_string, RecipientKind, Terms};
+use vaa::{ext_wormhole, Vaa};
 
 pub const GAS_FOR_DERIVE: Gas = Gas::from_tgas(10);
 pub const GAS_FOR_SALT: Gas = Gas::from_tgas(5);
@@ -81,12 +81,6 @@ const NEP141: &str = "nep141:";
 
 /// The memo POA's bridge tokens read the destination address from.
 const WITHDRAW_TO: &str = "WITHDRAW_TO:";
-
-#[ext_contract(ext_wormhole)]
-pub trait WormholeCore {
-    /// Verifies signatures and the guardian set; returns the set index. Does not parse the body.
-    fn verify_vaa(&self, vaa: String) -> u32;
-}
 
 #[ext_contract(ext_intents)]
 pub trait Verifier {
@@ -502,7 +496,7 @@ impl IntentRouter {
     /// The order the VAA carries, for these terms, still priced at `now_ms` — and when its price
     /// expires: `min(deadline, Hydration block time + price_validity)`.
     fn order(&self, t: &Terms, path: &[u8; 32], vaa: &[u8], now_ms: u64) -> (Order, u64) {
-        let vaa = Vaa::parse(vaa).unwrap_or_else(|e| env::panic_str(e));
+        let vaa = Vaa::parse(vaa).unwrap_or_else(|_| env::panic_str("InvalidVaa"));
         require!(vaa.emitter_chain == self.emitter_chain && vaa.emitter_address == self.emitter, "UnknownEmitter");
         let order = Order::parse(&vaa.payload).unwrap_or_else(|e| env::panic_str(e));
         require!(order.auth_path == *path, "OrderForOtherTerms");
@@ -686,10 +680,7 @@ fn parse_salt(value: &str) -> [u8; 4] {
     bytes.try_into().unwrap_or_else(|_| env::panic_str("InvalidSalt"))
 }
 
-fn parse_hex32(value: &str) -> [u8; 32] {
-    let bytes = hex::decode(value.trim_start_matches("0x")).unwrap_or_else(|_| env::panic_str("InvalidHex"));
-    bytes.try_into().unwrap_or_else(|_| env::panic_str("InvalidBytes32"))
-}
+use near_common::parse_bytes32 as parse_hex32;
 
 #[cfg(test)]
 mod tests;

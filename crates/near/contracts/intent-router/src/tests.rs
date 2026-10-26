@@ -2,7 +2,6 @@
 //! `intents.near` are not called here — the builders take what they return.
 
 use super::*;
-use codec::tests::vaa_bytes;
 use near_sdk::serde_json;
 use near_sdk::test_utils::{accounts, VMContextBuilder};
 use near_sdk::testing_env;
@@ -10,6 +9,21 @@ use quote::tests::{fixture, ACCOUNT, ETH, MANAGER, ZEC};
 use terms::tests::{sample, T_ADDR};
 
 const CONTRACT: &str = "intents-router.hydration-whm.near";
+
+/// A VAA envelope with no signatures — enough for parsing; only the core verifies.
+fn vaa_bytes(timestamp: u32, chain: u16, emitter: [u8; 32], sequence: u64, payload: &[u8]) -> Vec<u8> {
+    let mut out = vec![1];
+    out.extend_from_slice(&5u32.to_be_bytes());
+    out.push(0);
+    out.extend_from_slice(&timestamp.to_be_bytes());
+    out.extend_from_slice(&0u32.to_be_bytes());
+    out.extend_from_slice(&chain.to_be_bytes());
+    out.extend_from_slice(&emitter);
+    out.extend_from_slice(&sequence.to_be_bytes());
+    out.push(202);
+    out.extend_from_slice(payload);
+    out
+}
 const EMITTER: [u8; 32] = [0xe1; 32];
 const SALT: [u8; 4] = [0xa1, 0xb2, 0xc3, 0xd4];
 

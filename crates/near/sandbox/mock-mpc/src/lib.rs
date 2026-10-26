@@ -4,25 +4,8 @@
 //! argument. It signs at once instead of yielding, and the keys are not secret.
 
 use ed25519_dalek::{Signer, SigningKey};
+use near_common::mpc::{Payload, SignRequest, SignatureResponse};
 use near_sdk::{env, near, require, AccountId, NearToken, PanicOnDefault};
-
-#[near(serializers = [json])]
-pub enum Payload {
-    Eddsa(String),
-}
-
-#[near(serializers = [json])]
-pub struct SignRequest {
-    pub path: String,
-    pub payload_v2: Payload,
-    pub domain_id: u64,
-}
-
-#[near(serializers = [json])]
-pub struct SignatureResponse {
-    pub scheme: String,
-    pub signature: Vec<u8>,
-}
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
