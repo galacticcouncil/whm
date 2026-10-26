@@ -41,35 +41,52 @@
     },
     {
       "name": "004-deploy-facilitator",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "implAddress": "0x8e12d5a1b220a19f24423b6dd85acaa001a18e3b",
+        "proxyAddress": "0xda30cfdf3647c291cb3b0eed6ac5f0fea7f393c4",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-10-26T16:08:22.518Z",
+      "completedAt": "2026-10-26T16:08:36.183Z"
     },
     {
       "name": "005-set-base-emitter@facilitator",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "txHash": "0x353d5dbfe3cd6fa9e7aa8753dbe8ccc3bc8cc986304eaad542abaef28de38b8e",
+        "contract": "0xda30cfdf3647c291cb3b0eed6ac5f0fea7f393c4",
+        "emitter": "0x000000000000000000000000d5fd74f570343245afce4a4c0b24b59179cfdfa7"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-10-26T16:08:36.184Z",
+      "completedAt": "2026-10-26T16:08:42.478Z"
     },
     {
       "name": "006-set-limits@facilitator",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "txHash": "0xb344a95c024c2707e9cbb75bb0df4b64a8dda5667191c0a06813d1e0624314e2",
+        "contract": "0xda30cfdf3647c291cb3b0eed6ac5f0fea7f393c4"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-10-26T16:08:42.478Z",
+      "completedAt": "2026-10-26T16:08:48.440Z"
     },
     {
       "name": "007-transfer-ownership@facilitator",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "grantTxHash": "0xdc885493f5ee623639cd48ba7c39ad5bbb74ff1d74f544c3e53f8d3af8487b38",
+        "renounceTxHash": "0x27d212caf679b591b9ef7dc88773bc7e3a63052477959903931d61b10433504e",
+        "contract": "0xda30cfdf3647c291cb3b0eed6ac5f0fea7f393c4",
+        "newAdmin": "0xaa7e0000000000000000000000000000000aa7e1",
+        "renouncedBy": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-10-26T16:08:48.440Z",
+      "completedAt": "2026-10-26T16:09:00.566Z"
     },
     {
       "name": "008-set-hydration-emitter@vault",
