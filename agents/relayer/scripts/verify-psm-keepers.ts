@@ -291,12 +291,16 @@ function answer(req: { id: number; method: string; params?: unknown[] }) {
   }
 }
 
+/** The webhook the tests alert to: a placeholder the mock answers with `webhookStatus`, never a URL. */
+const WEBHOOK = "test-webhook";
+let webhookStatus = 204;
+
 const posts: { url: string; body: string }[] = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
-  if (String(url).startsWith("https://discord.invalid")) {
-    posts.push({ url: String(url), body: String(init?.body) });
-    return new Response(null, { status: String(url).endsWith("/429") ? 429 : 204 });
+  if (url === WEBHOOK) {
+    posts.push({ url, body: String(init?.body) });
+    return new Response(null, { status: webhookStatus });
   }
   const body = JSON.parse((init?.body as string) ?? "{}");
   const payload = Array.isArray(body) ? body.map(answer) : answer(body);
@@ -1482,7 +1486,7 @@ async function plumbingChecks() {
         return (e as Error).message.includes("must be https") ? "http" : "throws";
       }
     };
-    const got = [undefined, "FILL THIS URL ALWAYS", "http://discord.invalid/x", "https://discord.com/api/webhooks/1/a"].map(webhook);
+    const got = [undefined, "FILL THIS URL ALWAYS", "http://example.com/webhook", "https://example.com/webhook"].map(webhook);
     delete process.env.RPC_BASE;
     let rpcUnset = "ok";
     try {
@@ -1524,8 +1528,11 @@ async function plumbingChecks() {
   }
   {
     posts.length = 0;
-    const ok = await notifyDiscord("https://discord.invalid/ok", "x".repeat(3000));
-    const refused = await notifyDiscord("https://discord.invalid/429", "y");
+    webhookStatus = 204;
+    const ok = await notifyDiscord(WEBHOOK, "x".repeat(3000));
+    webhookStatus = 429;
+    const refused = await notifyDiscord(WEBHOOK, "y");
+    webhookStatus = 204;
     const none = await notifyDiscord(undefined, "z");
     const content = JSON.parse(posts[0]?.body ?? "{}").content as string;
     record(
@@ -1535,19 +1542,21 @@ async function plumbingChecks() {
     );
   }
   {
-    const warnings = async (webhook: string): Promise<number> => {
+    const warnings = async (status: number): Promise<number> => {
       posts.length = 0;
+      webhookStatus = status;
       mock = newMock(base.id);
       const clients = clientsFor(base);
       // 1000 submissions' worth to warn below: the mock's 1 ETH is under it.
-      const queue = createQueue({ publicClient: clients.publicClient, account: clients.account, discordWebhook: webhook, warnMultiplier: 1_000n });
+      const queue = createQueue({ publicClient: clients.publicClient, account: clients.account, discordWebhook: WEBHOOK, warnMultiplier: 1_000n });
       await queue.init();
       await within(5_000, queue.add({ label: "t", logger, submit: async () => `0x${"03".repeat(32)}` }));
       await settle(50);
       return posts.length;
     };
-    const delivered = await warnings("https://discord.invalid/ok");
-    const refused = await warnings("https://discord.invalid/429");
+    const delivered = await warnings(204);
+    const refused = await warnings(429);
+    webhookStatus = 204;
     record(
       delivered === 1 && refused === 2,
       "queue: the low-gas warning posts once when Discord takes it, and again at the next check when Discord refused it",
