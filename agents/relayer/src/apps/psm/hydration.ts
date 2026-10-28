@@ -4,7 +4,7 @@ import { privateKey } from "../../config";
 import { hydrationClients } from "../../engine/hydration";
 
 import { makeApp } from "./app";
-import { APP_NAME_HYDRATION, FROM_SEQUENCE_FROM_BASE, RPC_HYDRATION } from "./config";
+import { APP_NAME_HYDRATION, FROM_SEQUENCE_FROM_BASE, psmWebhook, RPC_HYDRATION } from "./config";
 import { servedRoutes } from "./routes";
 
 /**
@@ -17,5 +17,6 @@ import { servedRoutes } from "./routes";
 boot("psm-hydration", async () => {
   servedRoutes(WORMHOLE.hydration);
   const key = privateKey();
+  psmWebhook();
   return makeApp(APP_NAME_HYDRATION, WORMHOLE.hydration, hydrationClients, RPC_HYDRATION, key, FROM_SEQUENCE_FROM_BASE);
 });

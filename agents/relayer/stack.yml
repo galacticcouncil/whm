@@ -119,9 +119,12 @@ services:
       # the same nonce lane.
       PRIVKEY: FILL THIS KEY ALWAYS
       RPC_HYDRATION: https://rpc.hydradx.cloud
-      # Optional: alert sink and the multiple of one submission's cost to warn below.
-      DISCORD_WEBHOOK_URL: MAYBE FILL THIS URL OR REMOVE IT
+      # Alert sink: gas, parked deliveries, and the keepers' and watchers' alerts.
+      DISCORD_WEBHOOK_URL: FILL THIS URL ALWAYS
       GAS_WARN_MULTIPLIER: '50'
+      # 'off' stops this wallet's flushPendingMint; the watchers keep alerting.
+      PSM_KEEPER: 'on'
+      PSM_FLUSH_FROM_ID: '0'
       REDIS_HOST: redis
       SPY_ENDPOINT: spy:7073
       WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
@@ -143,10 +146,16 @@ services:
       # app-oracle, app-basejump and app-psm-hydration, so the Base wallet's funds and key are not
       # a Hydration wallet's.
       PRIVKEY_BASE: FILL THIS KEY ALWAYS
-      RPC_BASE: https://mainnet.base.org
-      # Optional: alert sink and the multiple of one submission's cost to warn below.
-      DISCORD_WEBHOOK_URL: MAYBE FILL THIS URL OR REMOVE IT
+      # A provider that serves eth_getLogs: mainnet.base.org refuses it ('request limit reached'),
+      # which leaves the vault's Disputed and retirement alerts blind.
+      RPC_BASE: FILL THIS URL ALWAYS
+      # Read only, for the books check against the facilitator.
+      RPC_HYDRATION: https://rpc.hydradx.cloud
+      # Alert sink: gas, parked deliveries, and the keepers' and watchers' alerts.
+      DISCORD_WEBHOOK_URL: FILL THIS URL ALWAYS
       GAS_WARN_MULTIPLIER: '50'
+      # 'off' stops this wallet's drain; the watchers keep alerting.
+      PSM_KEEPER: 'on'
       REDIS_HOST: redis
       SPY_ENDPOINT: spy:7073
       WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT

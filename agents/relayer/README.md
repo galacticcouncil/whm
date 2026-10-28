@@ -71,8 +71,8 @@ wallet:
 Both read one route table ([routes.ts](src/apps/psm/routes.ts)), keyed by destination chain. A route
 names a source emitter and chain and a destination contract and chain; nothing about direction is
 built in, so a corridor whose destinations are already served is more rows, not more code. The table
-ships blank — the addresses come from the `psm-base` migration — and both processes refuse to start
-while any address is blank, malformed or zero, a chain id is unknown, a route runs from a chain to
+holds the mainnet proxies from `deployments/prod/psm-base.json` (steps 001 and 004), and both
+processes refuse to start while any address is blank, malformed or zero, a chain id is unknown, a route runs from a chain to
 itself, a served route has no return route, the two routes' contracts do not pair up, or two routes
 share a source. Once the clients exist they refuse again if either client is on another chain than
 the destination's, or if a served route's destination contract has no code. The pairing check is
@@ -123,14 +123,64 @@ signs with `PRIVKEY_BASE`, which never falls back to `PRIVKEY`. Nothing compares
 services, so each is deployed with its own. Namespaces are `psm-hydration-relayer` and
 `psm-base-relayer`, overridden by `APP_NAME_PSM_HYDRATION` and `APP_NAME_PSM_BASE`.
 
-Both processes must be running and subscribed before the facilitator's redeem and the vault's
-deposits are unpaused. A floor of `0` does not reach an emitter's sequence `0`: the missed-VAA
+Both processes must be running and subscribed before the vault's deposits open: every message either
+emitter sends follows a deposit. The vault's first is a deposit; the facilitator's first is a
+redemption or a refund, which needs a mint or a queued deposit. A floor of `0` does not reach an
+emitter's sequence `0`: the missed-VAA
 worker's look-ahead considers only sequences above the floor, and a later scan only the gaps between
 sequences it has seen. The first message each emitter publishes is therefore delivered only if the
 process was already listening.
 
-The two keeper calls the spec assigns to the relayer (`drain` on Base, `flushPendingMint` on
-Hydration) are not part of this app yet.
+#### Keepers and watchers
+
+Each process also runs the spec's keeper for its chain and watches its contract, in loops started
+before the engine listens, on the process's one wallet and queue (`src/apps/psm/keepers/`). Every
+PSM transaction, deliveries included, carries a 20% gas margin: both contracts write
+`block.timestamp` into storage, and an estimate taken in the block that last wrote it comes in short.
+
+- **`drain` (psm-base).** Each minute: if the head is payable, `drain(10)`, falling back to
+  `drain(1)`. Whether it is payable is asked of the vault: `claim()` simulated from the head's own
+  address reverts with the reason, which decides the alert. A blacklisted head is drained like any
+  other, and `drain` retires it into `unpayable`; the retirement is alerted. Not sent: a closed
+  payout limit, a head above the payout capacity (never payable: the Safe's
+  `cancelQueuedRedemptionFor` or a capacity raise), a head waiting on liquidity or the allowance.
+- **`flushPendingMint` (psm-hydration).** Reads `pendingMints`, not logs (logs miss deliveries made
+  through `EVM.call`): new ids a hundred per tick from a frontier, the ids last seen live, and a slow
+  sweep of twenty older ids per tick for one a reorg revived. Flushes, oldest first, what fits the
+  bucket's headroom and the inbound allowance read once per tick, up to five per tick, each waiting
+  for its receipt.
+- **One keeper transaction in flight.** The next is sent only once it has mined; one unmined for
+  10 minutes is alerted, since an unmined transaction holds back the wallet's whole nonce lane. Once
+  its nonce is spent with no receipt for its hash, it was replaced (the usual fix for a stuck
+  transaction), and the keeper goes on.
+- **Watchers.** psm-base: the vault's pause flags, the Base Wormhole message fee (non-zero breaks
+  every fee-cap return), the reserve against principal + owed + unpayable (read at one block, alerted
+  on the second short tick in a row), the books (principal
+  against the facilitator's minted + queued, read keylessly over `RPC_HYDRATION`) both ways, and
+  `Disputed` and `CreditUnpayable` logs, which need an `RPC_BASE` that serves `eth_getLogs`. The
+  books alert when Hydration holds more than Base, and when principal has sat above it for an hour
+  without falling: USDC in flight with no delivery landing, a relayer, its Redis or the spy down in
+  either direction, or a `Disputed` message. psm-hydration: the facilitator's pause flags, and mints
+  queued for over an hour.
+- **Failing loops.** A keeper or watcher whose tick has failed five times in a row is alerted; a good
+  tick clears that, so its next run of failures alerts again.
+- **Parked deliveries.** A delivery still failing at attempt 5 (about half an hour in) and one parked
+  after its last attempt are alerted. A job the store fails for stalling (its process died twice
+  while running it) skips the handler and is not.
+
+Alerts go to `DISCORD_WEBHOOK_URL`, which both psm services require (https), deduplicated per key and
+repeated at most hourly; each start posts one message, so a dead channel shows on the day of a
+deploy. An alert counts as sent once Discord takes it: a refused or timed-out post is retried,
+backing off to every 10 minutes, until it goes through, a newer state of its key replaces it, or
+the condition clears. At most 500 wait at once; past that the oldest is dropped with a log line.
+The state is in memory: after a restart, a condition the watchers re-check each tick (reserve,
+books, message fee, an unpayable head) is raised again, while a pause flag alerts only when it
+changes under a running process, and the hours before queued mints and the books' in-flight USDC
+are alerted start over. The log watcher reads back `PSM_LOG_LOOKBACK_BLOCKS` (about 4 hours) at
+start and posts what it finds there again; after a longer psm-base outage, restart it with that
+raised to cover the gap. `PSM_KEEPER=off` stops this wallet's sends
+only: both calls are permissionless, and the watchers keep running. The incident lever for payouts
+and mints is the on-chain pause.
 
 ## Configuration
 
@@ -140,16 +190,20 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | Variable              | Description                                       | Default                               |
 | --------------------- | ------------------------------------------------- | ------------------------------------- |
 | `PRIVKEY`             | Signing key. Same name everywhere — **see below** | Required                              |
-| `RPC_HYDRATION`       | Hydration EVM RPC (chain `222222`)                | `https://hydration-rpc.n.dwellir.com` |
+| `RPC_HYDRATION`       | Hydration EVM RPC (chain `222222`); `psm-base` reads the books over it | `https://hydration-rpc.n.dwellir.com` |
 | `RPC_ETHEREUM`        | Ethereum RPC (`intent` only)                      | `https://eth.llamarpc.com`            |
 | `RPC_ROBINHOOD`       | Robinhood Chain RPC (`oracle-robinhood` only)     | `https://rpc.mainnet.chain.robinhood.com` |
-| `RPC_BASE`            | Base RPC (`psm-base` only)                        | `https://mainnet.base.org`            |
+| `RPC_BASE`            | Base RPC (`psm-base` only); must serve `eth_getLogs`, which `mainnet.base.org` refuses | Required (`psm-base`) |
 | `PRIVKEY_BASE`        | Base signing key (`psm-base` only)                | Required                              |
+| `PSM_KEEPER`          | `on`/`off`: the psm keepers send                  | `on`                                  |
+| `PSM_FLUSH_FROM_ID`   | First pending-mint id the flush keeper reads      | `0`                                   |
+| `PSM_LOG_CHUNK_BLOCKS` | Blocks per vault `eth_getLogs` query (`psm-base`); lower it for a provider that caps the range | `1000` |
+| `PSM_LOG_LOOKBACK_BLOCKS` | Blocks the vault log watcher reads back at start (`psm-base`) | `7200` |
 | `SPY_ENDPOINT`        | Wormhole Spy endpoint                             | `localhost:7073`                      |
 | `REDIS_HOST`          | Redis host                                        | `localhost`                           |
 | `REDIS_PORT`          | Redis port                                        | `6379`                                |
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
-| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts                       | optional                              |
+| `DISCORD_WEBHOOK_URL` | Gas alerts; for psm also keeper, watcher and parked-delivery alerts | Required (https) for psm, optional elsewhere |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |
@@ -169,15 +223,20 @@ pnpm --filter @whm/relayer mainnet-spy
 
 ## Verification
 
-There is no test suite. Four scripts run offline against a mocked JSON-RPC transport, need no secrets,
+There is no test suite. Five scripts run offline against a mocked JSON-RPC transport, need no secrets,
 and exit non-zero on a failed check:
 
 ```bash
 pnpm --filter @whm/relayer verify:hydration-fees  # fee pricing through submit(), per chain
 pnpm --filter @whm/relayer verify:base-clients    # Base client: chain id, key isolation, fees
 pnpm --filter @whm/relayer verify:psm-app         # psm routes: refuse-to-start, destination keying
+pnpm --filter @whm/relayer verify:psm-keepers     # psm keepers, watchers, alerts, queue crash paths
 pnpm --filter @whm/relayer verify:psm-reverts <path to contracts>
 ```
+
+`verify:psm-drain-fork` runs the drain keeper and the vault watcher against the deployed vault on an
+anvil fork of Base (`pnpm fork:base`; `RPC=` to point elsewhere): real USDC with its blacklist, real
+Aave, the real Wormhole core with a guardian key swapped in.
 
 `verify:psm-reverts` checks the psm app's revert handling against the PSM contracts as compiled. It
 builds them with forge into a temporary directory (a few seconds), walks the call graph from
@@ -194,6 +253,10 @@ pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,oracle-robinhood,
 pnpm --filter @whm/relayer start:oracle
 pnpm --filter @whm/relayer docker:up
 ```
+
+`docker:up` deploys `stack.yml` as it stands, and the checked-in file holds placeholders for every
+service's keys: run it only from a copy with every service's env filled, or add a service to the
+running stack with its own env and leave the others as deployed.
 
 One image; the swarm service names the entry point:
 

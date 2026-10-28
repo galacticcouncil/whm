@@ -4,7 +4,7 @@ import { privateKeyBase } from "../../config";
 import { baseClients } from "../../engine/base";
 
 import { makeApp } from "./app";
-import { APP_NAME_BASE, FROM_SEQUENCE_FROM_HYDRATION, RPC_BASE } from "./config";
+import { APP_NAME_BASE, FROM_SEQUENCE_FROM_HYDRATION, psmWebhook, rpcBase } from "./config";
 import { servedRoutes } from "./routes";
 
 /**
@@ -16,5 +16,6 @@ import { servedRoutes } from "./routes";
 boot("psm-base", async () => {
   servedRoutes(WORMHOLE.base);
   const key = privateKeyBase();
-  return makeApp(APP_NAME_BASE, WORMHOLE.base, baseClients, RPC_BASE, key, FROM_SEQUENCE_FROM_HYDRATION);
+  psmWebhook();
+  return makeApp(APP_NAME_BASE, WORMHOLE.base, baseClients, rpcBase(), key, FROM_SEQUENCE_FROM_HYDRATION);
 });

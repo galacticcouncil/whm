@@ -46,3 +46,64 @@ export const receiverAbi = parseAbi([
   "error ClaimsPaused()",
   "error InsufficientMessageFee(uint256 provided, uint256 required)",
 ]);
+
+/**
+ * What the vault keeper and watcher read and send on Base. Kept apart from `receiverAbi`, which
+ * lists exactly what a delivery can raise. The errors are what `claim` and `drain` can raise, so the
+ * keeper can name why a head is not payable.
+ */
+export const vaultKeeperAbi = parseAbi([
+  "function drain(uint256 maxEntries) returns (uint256 paid)",
+  "function claim()",
+  "function queueHead() view returns (uint256)",
+  "function queueHeadEntry() view returns (address recipient, uint256 amount)",
+  "function headSince() view returns (uint64)",
+  "function claimsPaused() view returns (bool)",
+  "function depositsPaused() view returns (bool)",
+  "function investPaused() view returns (bool)",
+  "function limits() view returns (uint256 depositCapacity, uint256 depositWindow, uint256 depositAvailable, uint256 payoutCapacity, uint256 payoutWindow, uint256 payoutAvailable)",
+  "function principal() view returns (uint256)",
+  "function totalOwed() view returns (uint256)",
+  "function totalUnpayable() view returns (uint256)",
+  "function usdc() view returns (address)",
+  "function aUsdc() view returns (address)",
+  "function wormhole() view returns (address)",
+
+  "event Claimed(address indexed recipient, uint256 amount)",
+  "event CreditUnpayable(uint256 indexed index, address indexed recipient, uint256 amount)",
+  "event Disputed(address indexed recipient, uint256 amount, uint256 principal)",
+
+  "error ClaimsPaused()",
+  "error NotAtQueueHead(address caller, address head)",
+  "error InsufficientLiquidity(uint256 requested, uint256 available)",
+  "error InsufficientPayoutAllowance(uint256 requested, uint256 available)",
+  "error RecipientUnpayable(address recipient)",
+  "error PayoutFailed(address recipient)",
+  "error Disabled()",
+]);
+
+/** What the facilitator keeper and watcher read and send on Hydration. */
+export const facilitatorKeeperAbi = parseAbi([
+  "function flushPendingMint(uint256 id)",
+  "function pendingTail() view returns (uint256)",
+  "function pendingMints(uint256 id) view returns (address recipient, address origin, bool remint, uint256 amount)",
+  "function mintPaused() view returns (bool)",
+  "function redeemPaused() view returns (bool)",
+  "function outstanding() view returns (uint256)",
+  "function scale() view returns (uint256)",
+  "function totalPendingMint() view returns (uint256)",
+  "function limits() view returns (uint256 inboundCapacity, uint256 inboundAvailable, uint256 outboundCapacity, uint256 outboundAvailable)",
+  "function hollar() view returns (address)",
+
+  "error MintPausedError()",
+  "error NotQueued(uint256 id)",
+  "error ExceedsBucketLevel(uint256 requested, uint256 level)",
+  "error RateLimitExceeded(uint256 requested, uint256 available)",
+]);
+
+/** HOLLAR's facilitator bucket: capacity and level, in HOLLAR units. */
+export const ghoAbi = parseAbi(["function getFacilitatorBucket(address facilitator) view returns (uint256, uint256)"]);
+
+export const erc20Abi = parseAbi(["function balanceOf(address account) view returns (uint256)"]);
+
+export const wormholeCoreAbi = parseAbi(["function messageFee() view returns (uint256)"]);

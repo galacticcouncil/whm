@@ -1,17 +1,29 @@
 import type { Hash } from "viem";
 
-import { EVM_CHAIN_ID } from "../../chains";
+import { EVM_CHAIN_ID, WORMHOLE } from "../../chains";
 import { alerts, engineConfig } from "../../config";
 import { createApp } from "../../engine/app";
 import { onEmitter } from "../../engine/emitter";
+import { createAlerter } from "../../engine/notify";
+import { parkedAlert } from "../../engine/parked";
 import { createQueue, type Queue } from "../../engine/queue";
 import type { ChainClients } from "../../engine/hydration";
-import { receiveMessage } from "../../engine/hydration";
+import { hydrationReader, receiveMessage } from "../../engine/hydration";
 import logger from "../../logger";
 import type { ChainId, Next, RelayerApp, RelayerCtx } from "../../types";
 
 import { receiverAbi } from "./abi";
-import { RETRIES, RETRY_BASE_MS, RETRY_MAX_MS } from "./config";
+import {
+  ALERT_REPEAT_MS,
+  EARLY_WARNING_ATTEMPT,
+  GAS_MARGIN_BPS,
+  KEEPER_ENABLED,
+  RETRIES,
+  RETRY_BASE_MS,
+  RETRY_MAX_MS,
+  RPC_HYDRATION,
+} from "./config";
+import { startKeepers } from "./keepers";
 import { servedRoutes, type PsmRoute } from "./routes";
 
 /**
@@ -103,7 +115,9 @@ export function wireRoutes(app: RelayerApp, routes: PsmRoute[], clients: ChainCl
         label: route.name,
         logger: log,
         submit: async (n) =>
-          (sent.hash = await receiveMessage(clients, receiverAbi, route.destinationContract, vaa.bytes, n)),
+          (sent.hash = await receiveMessage(clients, receiverAbi, route.destinationContract, vaa.bytes, n, {
+            gasMarginBps: GAS_MARGIN_BPS,
+          })),
       });
       if (sent.hash) {
         const receipt = await clients.publicClient.waitForTransactionReceipt({ hash: sent.hash });
@@ -167,6 +181,9 @@ export async function makeApp(
   const clients = await clientFactory(rpcUrl, key);
   await assertDestination(destinationChain, routes, clients);
   const { account, publicClient } = clients;
+  // psm-base reads the facilitator's side of the books over RPC_HYDRATION: a wrong one stops the
+  // start, like the process's own RPC, rather than blinding that check later.
+  const books = destinationChain === WORMHOLE.base ? await hydrationReader(RPC_HYDRATION) : undefined;
 
   const queue = createQueue({ publicClient, account, ...alerts() });
   const nonce = await queue.init();
@@ -184,6 +201,19 @@ export async function makeApp(
   });
 
   wireRoutes(app, routes, clients, queue);
+
+  const alerter = createAlerter({ webhook: alerts().discordWebhook, repeatMs: ALERT_REPEAT_MS });
+  app.use(parkedAlert(alerter, { app: name, earlyAttempt: EARLY_WARNING_ATTEMPT }) as never);
+  // One post per start, so a dead alert channel shows on the day it is deployed.
+  alerter.alert(
+    `psm:started:${name}`,
+    "started",
+    `${name} started: ${account.address}, ${routes.map((r) => r.name).join(" + ")}, ` +
+      `keepers ${KEEPER_ENABLED ? "sending" : "off"}`,
+  );
+
+  // Before listen(): it serves the spy stream for the life of the process and never returns.
+  startKeepers(destinationChain, { app: name, clients, queue, alerter, routes, books });
 
   await app.listen();
 }

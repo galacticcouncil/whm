@@ -1238,7 +1238,7 @@ async function main() {
     // check; only the entry's own text can show it.
     record(
       squash(baseSrc).includes(
-        "makeApp(APP_NAME_BASE, WORMHOLE.base, baseClients, RPC_BASE, key, FROM_SEQUENCE_FROM_HYDRATION)",
+        "makeApp(APP_NAME_BASE, WORMHOLE.base, baseClients, rpcBase(), key, FROM_SEQUENCE_FROM_HYDRATION)",
       ),
       "composition: base.ts hands makeApp Base's own namespace, destination, client factory, RPC and floors",
     );
