@@ -203,7 +203,7 @@ market by up to `maxFeedAge` before that check trips. Alert on missed heartbeats
 ## 5. NEAR — the limit-swap strategy, `finalize(terms, orderVaa)`
 
 Two arguments. Every number comes from the order message, the terms or a balance read. `finalize`
-dispatches on the terms' version byte; terms version 2 is the limit swap below, the only strategy
+dispatches on the terms' version byte; terms version 1 is the limit swap below, the only strategy
 the MVP ships. An unknown version reverts.
 
 ```

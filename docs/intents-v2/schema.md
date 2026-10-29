@@ -72,10 +72,10 @@ Packed big-endian:
 ```
 version 1 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8 | recipientKind 1
 | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
-fixed prefix 96, total 98 + D + R; wire value of version = 2
+fixed prefix 96, total 98 + D + R; wire value of version = 1
 ```
 
-The version byte selects the strategy: 2 = limit swap, the only one the router accepts in the MVP. A
+The version byte selects the strategy: 1 = limit swap, the only one the router accepts in the MVP. A
 new strategy takes the next version, with its own layout; it hashes to a different path, so its
 accounts never overlap this one's.
 

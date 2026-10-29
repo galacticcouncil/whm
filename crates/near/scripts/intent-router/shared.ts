@@ -56,7 +56,7 @@ export interface Terms {
 }
 
 /**
- * Packs terms big-endian, version 2 (limit swap) — byte for byte what the router parses.
+ * Packs terms big-endian, version 1 (limit swap) — byte for byte what the router parses.
  *
  * @param t The terms
  * @returns The encoded terms
@@ -70,7 +70,7 @@ export function encodeTerms(t: Terms): Buffer {
   };
   if (t.quoteId.length !== 32) throw new Error("quoteId must be 32 bytes");
   return Buffer.concat([
-    Buffer.from([2]),
+    Buffer.from([1]),
     t.quoteId,
     u(BigInt(t.maxSlippageBps), 2),
     u(t.minOutPerIn, 16),
