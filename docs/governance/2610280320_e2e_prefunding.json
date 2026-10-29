@@ -1,0 +1,78 @@
+{
+  "purpose": "Production cross-chain governance canary: per chain fast-track one native transfer and veto a second equal transfer",
+  "deployer": "0x75aE7FDE85b447Aa02E36332F681903f3EE48630",
+  "prefundPerExecutorWei": "2000000000000",
+  "plannedTransferPerActionWei": "1000000000000",
+  "expectedRetainedWei": "1000000000000",
+  "note": "Only prefunding has occurred. No referendum, governance action, fast-track, or veto has been submitted. All executor balances were zero before funding. Transaction gas is paid separately by the deployer.",
+  "baseBridgeTopUp": {
+    "route": "Ethereum to Base via Base L1StandardBridge.bridgeETH",
+    "bridge": "0x3154Cf16ccdb4C6d922629664174b904d80F2C35",
+    "recipient": "0x75aE7FDE85b447Aa02E36332F681903f3EE48630",
+    "amountWei": "100000000000000",
+    "ethereumTransactionHash": "0x9c47c50f9fd387e17744f254991ca55a07a2239655fcc3138d13377006c2a5cf",
+    "ethereumBlockNumber": "26288512",
+    "ethereumGasUsed": "620515",
+    "ethereumEffectiveGasPriceWei": "39744980",
+    "baseTransactionHash": "0x28299c06d5ac16cb9d3b179a173dc7c8e0db731315c81ded62e0d0522e162453",
+    "baseBlockNumber": "53184341",
+    "status": "confirmed",
+    "creditedAt": "2026-10-28T03:27:10.273Z"
+  },
+  "funding": [
+    {
+      "chain": "ethereum",
+      "chainId": 1,
+      "symbol": "ETH",
+      "executor": "0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83",
+      "status": "confirmed",
+      "transactionHash": "0x5a906c83f9c83a7ef09fb9c2e23c3c6a50885c6471ac74d2209c2074fcdb73d7",
+      "blockNumber": "26288481",
+      "gasUsed": "26020",
+      "effectiveGasPriceWei": "41739236",
+      "executorBalanceAfterWei": "2000000000000",
+      "checkedAt": "2026-10-28T03:18:03.663Z"
+    },
+    {
+      "chain": "robinhood",
+      "chainId": 4663,
+      "symbol": "ETH",
+      "executor": "0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83",
+      "status": "confirmed",
+      "transactionHash": "0x90f72b7353f87f283ac91f8452cd170214d7dbda193ff02c7ff58fc6e3a55460",
+      "blockNumber": "99757843",
+      "gasUsed": "26020",
+      "effectiveGasPriceWei": "20028000",
+      "executorBalanceAfterWei": "2000000000000",
+      "checkedAt": "2026-10-28T03:19:04.830Z"
+    },
+    {
+      "chain": "hyper-evm",
+      "chainId": 999,
+      "symbol": "HYPE",
+      "executor": "0x102225852eCa1937AE57d2fb23409877AEe50699",
+      "status": "confirmed",
+      "transactionHash": "0x6a104eef3dd38d44bd096426fc0dade86aa4b4a36255e07a0bc6e4887908b302",
+      "blockNumber": "49715922",
+      "gasUsed": "26020",
+      "effectiveGasPriceWei": "100000000",
+      "executorBalanceAfterWei": "2000000000000",
+      "checkedAt": "2026-10-28T03:20:35.382Z"
+    },
+    {
+      "chain": "base",
+      "chainId": 8453,
+      "symbol": "ETH",
+      "executor": "0x8830B6eB2e015184B86Cfa3a0A759CD55FF47A4B",
+      "status": "confirmed",
+      "transactionHash": "0xcad3510ad9b1b4534dc1eab0f87cdfa25bb7b6291b81be4f127d411213c668a6",
+      "blockNumber": "53184355",
+      "gasUsed": "26020",
+      "effectiveGasPriceWei": "6000000",
+      "executorBalanceAfterWei": "2000000000000",
+      "deployerBalanceAfterETH": "0.000097843485715244",
+      "checkedAt": "2026-10-28T03:27:48.452Z",
+      "note": "Initial balance read lagged the successful receipt; a follow-up read confirmed the expected executor balance. No duplicate transfer was sent."
+    }
+  ]
+}
