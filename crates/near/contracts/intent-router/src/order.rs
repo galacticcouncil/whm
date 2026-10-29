@@ -57,6 +57,16 @@ mod tests {
         Order { auth_path: [7; 32], seq: 9, amount: 10u128.pow(15), out_per_in: 180_000_000 }
     }
 
+    /// The bytes `IntentCodec.encodeOrder` must produce for the same order (contracts/test/intents).
+    #[test]
+    fn golden_vector() {
+        assert_eq!(
+            hex::encode(sample().encode()),
+            "0107070707070707070707070707070707070707070707070707070707070707070000000000000009\
+             000000000000000000038d7ea4c680000000000000000000000000000aba9500"
+        );
+    }
+
     #[test]
     fn round_trips_in_73_bytes() {
         let bytes = sample().encode();

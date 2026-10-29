@@ -678,10 +678,14 @@ fn parse_terms(bytes: &[u8]) -> Terms {
     Terms::parse(bytes).unwrap_or_else(|e| env::panic_str(e))
 }
 
-/// A withdrawal needs a NEP-141 contract — `ft_withdraw` takes nothing else. Checked at swap and
-/// delivery, never at parse: terms that fail it must still refund.
+/// What delivery needs: a withdrawal, a NEP-141 contract — `ft_withdraw` takes nothing else; a
+/// transfer, a valid intents account id. Checked at swap and delivery, never at parse: terms that
+/// fail it must still refund.
 fn deliverable(t: &Terms) {
-    require!(t.recipient_kind == RecipientKind::Intents || t.token_contract().is_some(), "NotWithdrawable");
+    match t.recipient_kind {
+        RecipientKind::Withdraw => require!(t.token_contract().is_some(), "NotWithdrawable"),
+        RecipientKind::Intents => require!(t.recipient_account().is_some(), "InvalidRecipient"),
+    }
 }
 
 /// `nep141:<contract>` → the contract.

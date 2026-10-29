@@ -504,3 +504,17 @@ fn only_the_owner_upgrades() {
     set_ctx(accounts(1).as_str(), 1, ISSUED_0);
     let _ = c.upgrade();
 }
+
+/// An intents recipient that is not an account id parses — the terms still refund — but is never
+/// swapped into or delivered to.
+#[test]
+fn a_bad_intents_recipient_still_refunds() {
+    let c = contract();
+    let mut t = sample();
+    t.recipient_kind = RecipientKind::Intents;
+    t.recipient = "Not_An.Account".into();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.swap_terms(&terms_bytes(&t))));
+    let text = result.err().map(|e| e.downcast_ref::<String>().cloned().unwrap_or_default()).unwrap_or_default();
+    assert!(text.contains("InvalidRecipient"), "{text}");
+    payout(&c, &t, Payout::Refund, 10u128.pow(15), DEADLINE_MS + 1);
+}

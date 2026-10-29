@@ -2,7 +2,7 @@
 //! them derives another account, so nothing here can be altered once funds sit in `A`.
 //!
 //! ```text
-//! field byte widths; the version byte's value is 2 (`LIMIT_SWAP`)
+//! field byte widths; the version byte's value is 1 (`LIMIT_SWAP`)
 //! version 1 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8
 //! | recipientKind 1 | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
 //! ```
@@ -15,7 +15,7 @@ use near_sdk::{env, AccountId};
 use near_common::codec::Reader;
 
 /// The terms version of the limit swap — the only strategy.
-pub const LIMIT_SWAP: u8 = 2;
+pub const LIMIT_SWAP: u8 = 1;
 
 /// Basis points in 1.
 pub const BPS: u16 = 10_000;
@@ -110,6 +110,11 @@ impl Terms {
         Ok(out)
     }
 
+    /// The recipient as an intents account, for `recipientKind 1`.
+    pub fn recipient_account(&self) -> Option<AccountId> {
+        self.recipient.parse().ok()
+    }
+
     /// The destination's NEP-141 contract — `nep141:<contract>` without the prefix.
     pub fn token_contract(&self) -> Option<AccountId> {
         self.destination_asset.strip_prefix("nep141:").and_then(|c| c.parse().ok())
@@ -137,10 +142,10 @@ impl Terms {
             return Err("InvalidDestinationAsset");
         }
         // It ends up in a withdrawal memo or as an account id: no spaces, no control characters.
+        // Only structure is checked here, all of which the Solidity encoder mirrors: terms the
+        // encoder accepts must parse, or their ETH could not even refund. Whether the recipient is
+        // deliverable — an account id, a NEP-141 to withdraw — is checked at swap and delivery.
         if !printable(&self.recipient) {
-            return Err("InvalidRecipient");
-        }
-        if self.recipient_kind == RecipientKind::Intents && self.recipient.parse::<AccountId>().is_err() {
             return Err("InvalidRecipient");
         }
         Ok(())
@@ -215,14 +220,14 @@ pub(crate) mod tests {
         let bytes = sample().encode().unwrap();
         assert_eq!(
             hex::encode(&bytes),
-            "021111111111111111111111111111111111111111111111111111111111111111006400000000000000000000000008f0d1\
+            "011111111111111111111111111111111111111111111111111111111111111111006400000000000000000000000008f0d1\
              80000000000000000000000000000f4240000000006b49d200002222222222222222222222222222222222222222146e6570\
              3134313a7a65632e6f6d66742e6e6561722374314b50565352676e46485042574d4a4c433774614a696f4e366d3551366a56\
              426d61"
         );
         assert_eq!(
             path_string(&auth_path(&bytes)),
-            "0x351bd01e03085b01eb462b8ad448f5afa84434e9d7acd59164f446669b0ab506"
+            "0xa2159833cf7701b9e372725c6e640f1e922752118b6e5087dedbbb89b7a6d193"
         );
     }
 
@@ -239,7 +244,7 @@ pub(crate) mod tests {
         let bytes = sample().encode().unwrap();
 
         let mut other = bytes.clone();
-        other[0] = 1;
+        other[0] = 2;
         assert_eq!(Terms::parse(&other), Err("UnknownStrategy"));
 
         let mut long = bytes.clone();
@@ -267,13 +272,7 @@ pub(crate) mod tests {
         check(|t| t.destination_asset = String::new(), "InvalidDestinationAsset");
         check(|t| t.recipient = "t1 x".into(), "InvalidRecipient");
         check(|t| t.recipient = "a".repeat(256), "InvalidRecipient");
-        check(
-            |t| {
-                t.recipient_kind = RecipientKind::Intents;
-                t.recipient = "Not_An.Account".into();
-            },
-            "InvalidRecipient",
-        );
+
     }
 
     #[test]
