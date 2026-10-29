@@ -177,16 +177,10 @@ async fn setup() -> anyhow::Result<Env> {
                 "max_quote_age": 120,
                 "transfer_validity": 180,
                 "max_fill_multiple": 2,
+                "max_order_shortfall_bps": 2000,
                 "min_refund": "1000",
             },
         }))
-        .transact()
-        .await?
-        .into_result()?;
-    router
-        .call("set_route")
-        .args_json(json!({ "asset": ledger(&zec), "route": { "min_withdraw": "1000", "min_delivery": "1000000" } }))
-        .deposit(ONE_YOCTO)
         .transact()
         .await?
         .into_result()?;
@@ -209,6 +203,8 @@ impl Env {
             quote_id: [0x5a; 32],
             max_slippage_bps: 100,
             min_out_per_in: 0,
+            // The batch threshold the deliver tests run against.
+            min_delivery: 1_000_000,
             deadline,
             recipient_kind: kind,
             refund_to: [0x22; 20],
@@ -349,9 +345,10 @@ async fn swap_executes_once_per_order() -> anyhow::Result<()> {
     let a = env.account_of(&terms).await?;
     env.fund(&env.eth, &a, 3 * ORDER_AMOUNT).await?;
 
-    // 2 zec per eth less 1% = 1.98 per eth; the quote guarantees 1.99.
+    // A holds 3 eth, the cap is 2 × the order's 1: the fill is 2. 2 zec per eth less 1% = 1.98 per
+    // eth; the quote guarantees 1.99.
     let vaa = env.order(&terms, 7).await?;
-    let quote = env.quote(&a, "oneclick-1.near", ORDER_AMOUNT, 199 * ORDER_AMOUNT / 100).await?;
+    let quote = env.quote(&a, "oneclick-1.near", 2 * ORDER_AMOUNT, 199 * 2 * ORDER_AMOUNT / 100).await?;
     let outcome = env
         .call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&vaa), "quote": quote }))
         .await?;
@@ -363,10 +360,11 @@ async fn swap_executes_once_per_order() -> anyhow::Result<()> {
 
     let executed = env.execute(&event["signed_data"]).await?;
     assert!(executed.is_success(), "{:?}", failures(&executed));
-    assert_eq!(env.held(&a, &env.eth).await?, 2 * ORDER_AMOUNT);
-    assert_eq!(env.held("oneclick-1.near", &env.eth).await?, ORDER_AMOUNT);
+    assert_eq!(env.held(&a, &env.eth).await?, ORDER_AMOUNT);
+    assert_eq!(env.held("oneclick-1.near", &env.eth).await?, 2 * ORDER_AMOUNT);
 
-    // A second quote for the same order signs the same nonce: the verifier refuses it.
+    // A second quote for the same order — the 1 eth left — signs the same nonce: the verifier
+    // refuses it.
     let again = env.quote(&a, "oneclick-2.near", ORDER_AMOUNT, 199 * ORDER_AMOUNT / 100).await?;
     let outcome = env
         .call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&vaa), "quote": again }))
@@ -375,11 +373,11 @@ async fn swap_executes_once_per_order() -> anyhow::Result<()> {
     assert_ne!(second["receiver"], event["receiver"]);
     let replay = env.execute(&second["signed_data"]).await?;
     assert!(replay.is_failure(), "a second fill of one order executed");
-    assert_eq!(env.held(&a, &env.eth).await?, 2 * ORDER_AMOUNT);
+    assert_eq!(env.held(&a, &env.eth).await?, ORDER_AMOUNT);
 
     // The next order fills again — the catch-up.
     let next = env.order(&terms, 8).await?;
-    let quote = env.quote(&a, "oneclick-3.near", 2 * ORDER_AMOUNT, 199 * 2 * ORDER_AMOUNT / 100).await?;
+    let quote = env.quote(&a, "oneclick-3.near", ORDER_AMOUNT, 199 * ORDER_AMOUNT / 100).await?;
     let outcome = env
         .call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&next), "quote": quote }))
         .await?;
@@ -403,21 +401,45 @@ async fn swap_refuses_what_the_router_must_not_sign() -> anyhow::Result<()> {
         assert!(all.contains(why), "expected {why}, got {all}");
     };
 
+    // The 2026-10-26 audit's order squat: a stranger credits A with dust before POA credits the
+    // order's ETH, and asks for a swap of that dust. The order's own ETH has not arrived: refused,
+    // and the order's nonce stays free.
+    env.fund(&env.eth, &a, 1_000).await?;
+    let quote = env.quote(&a, "oneclick-1.near", 1_000, 2_000).await?;
+    let outcome = env.call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&vaa), "quote": quote })).await?;
+    refused(outcome, "OrderNotCredited");
+
+    // The order's ETH arrives: A holds 1 eth + the dust. The fill is all of it.
+    env.fund(&env.eth, &a, ORDER_AMOUNT).await?;
+    let fill = ORDER_AMOUNT + 1_000;
+
+    // Less than A's whole balance.
+    let quote = env.quote(&a, "oneclick-1.near", ORDER_AMOUNT / 2, ORDER_AMOUNT).await?;
+    let outcome = env.call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&vaa), "quote": quote })).await?;
+    refused(outcome, "WrongFillAmount");
+
     // Paying anyone but A.
-    let quote = env.quote("attacker.near", "oneclick-1.near", ORDER_AMOUNT, 2 * ORDER_AMOUNT).await?;
+    let quote = env.quote("attacker.near", "oneclick-1.near", fill, 2 * fill).await?;
     let outcome = env.call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&vaa), "quote": quote })).await?;
     refused(outcome, "WrongRecipient");
 
     // Below the order's floor (1.98 per eth).
-    let quote = env.quote(&a, "oneclick-1.near", ORDER_AMOUNT, 197 * ORDER_AMOUNT / 100).await?;
+    let quote = env.quote(&a, "oneclick-1.near", fill, 197 * fill / 100).await?;
     let outcome = env.call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&vaa), "quote": quote })).await?;
     refused(outcome, "BelowFloor");
 
     // An order no guardian signed: the real core refuses it.
     let forged = Guardian::new(0x99).sign((now_s) as u32, HYDRATION, EMITTER, 7, &vaa[vaa.len() - 73..]);
-    let quote = env.quote(&a, "oneclick-1.near", ORDER_AMOUNT, 2 * ORDER_AMOUNT).await?;
+    let quote = env.quote(&a, "oneclick-1.near", fill, 2 * fill).await?;
     let outcome = env.call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&forged), "quote": quote })).await?;
     refused(outcome, "VaaVerifyFailed");
+
+    // None of that spent the order: the bot's full fill still goes through.
+    let quote = env.quote(&a, "oneclick-1.near", fill, 2 * fill).await?;
+    let outcome = env.call_router("swap", json!({ "terms": b64(&terms), "order_vaa": b64(&vaa), "quote": quote })).await?;
+    let executed = env.execute(&signed_event(&outcome)?["signed_data"]).await?;
+    assert!(executed.is_success(), "{:?}", failures(&executed));
+    assert_eq!(env.held(&a, &env.eth).await?, 0);
     Ok(())
 }
 
@@ -493,8 +515,8 @@ async fn only_the_owner_configures() -> anyhow::Result<()> {
     let env = setup().await?;
     let outcome = env
         .bot
-        .call(env.router.id(), "set_route")
-        .args_json(json!({ "asset": ledger(&env.zec), "route": { "min_withdraw": "1", "min_delivery": "1" } }))
+        .call(env.router.id(), "set_quote_keys")
+        .args_json(json!({ "keys": [format!("ed25519:{}", bs58::encode([7u8; 32]).into_string())] }))
         .deposit(ONE_YOCTO)
         .transact()
         .await?;
