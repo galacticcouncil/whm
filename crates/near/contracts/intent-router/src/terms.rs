@@ -2,8 +2,9 @@
 //! them derives another account, so nothing here can be altered once funds sit in `A`.
 //!
 //! ```text
-//! version 1 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | deadline 8 | recipientKind 1
-//! | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
+//! field byte widths; the version byte's value is 2 (`LIMIT_SWAP`)
+//! version 1 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8
+//! | recipientKind 1 | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
 //! ```
 //!
 //! Checked on the raw bytes, never trusting an encoder: exact length, every field in range. The
@@ -21,7 +22,9 @@ pub const BPS: u16 = 10_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecipientKind {
-    /// Withdrawn off NEAR through the asset's bridge, to an address on its chain.
+    /// Withdrawn off NEAR through POA: `ft_withdraw` to the token contract with a
+    /// `WITHDRAW_TO:<recipient>` memo. Needs a `nep141:` asset that POA withdraws this way — the
+    /// SDK's to choose; the router checks only that the asset is a NEP-141.
     Withdraw,
     /// Transferred to an account inside `intents.near`.
     Intents,
@@ -35,6 +38,10 @@ pub struct Terms {
     pub max_slippage_bps: u16,
     /// The user's hard floor, destination units per 1e18 wei. 0 = none.
     pub min_out_per_in: u128,
+    /// Before the deadline, deliveries wait until `A` holds this much of the destination asset —
+    /// one bridge fee per batch, and never below the bridge's minimum withdrawal. The SDK sets it
+    /// from POA's `supported_tokens`. After the deadline any balance is delivered.
+    pub min_delivery: u128,
     /// Unix seconds. Swaps end by it; refunds start after it.
     pub deadline: u64,
     pub recipient_kind: RecipientKind,
@@ -55,6 +62,7 @@ impl Terms {
         let quote_id = r.bytes32()?;
         let max_slippage_bps = r.u16()?;
         let min_out_per_in = r.u128()?;
+        let min_delivery = r.u128()?;
         let deadline = r.u64()?;
         let recipient_kind = match r.u8()? {
             0 => RecipientKind::Withdraw,
@@ -70,6 +78,7 @@ impl Terms {
             quote_id,
             max_slippage_bps,
             min_out_per_in,
+            min_delivery,
             deadline,
             recipient_kind,
             refund_to,
@@ -82,11 +91,12 @@ impl Terms {
 
     pub fn encode(&self) -> Result<Vec<u8>, &'static str> {
         self.validate()?;
-        let mut out = Vec::with_capacity(82 + self.destination_asset.len() + self.recipient.len());
+        let mut out = Vec::with_capacity(98 + self.destination_asset.len() + self.recipient.len());
         out.push(LIMIT_SWAP);
         out.extend_from_slice(&self.quote_id);
         out.extend_from_slice(&self.max_slippage_bps.to_be_bytes());
         out.extend_from_slice(&self.min_out_per_in.to_be_bytes());
+        out.extend_from_slice(&self.min_delivery.to_be_bytes());
         out.extend_from_slice(&self.deadline.to_be_bytes());
         out.push(match self.recipient_kind {
             RecipientKind::Withdraw => 0,
@@ -98,6 +108,11 @@ impl Terms {
         out.push(self.recipient.len() as u8);
         out.extend_from_slice(self.recipient.as_bytes());
         Ok(out)
+    }
+
+    /// The destination's NEP-141 contract — `nep141:<contract>` without the prefix.
+    pub fn token_contract(&self) -> Option<AccountId> {
+        self.destination_asset.strip_prefix("nep141:").and_then(|c| c.parse().ok())
     }
 
     /// Unix ms.
@@ -160,6 +175,7 @@ pub(crate) mod tests {
             quote_id: [0x11; 32],
             max_slippage_bps: 100,
             min_out_per_in: 150_000_000,
+            min_delivery: 1_000_000,
             deadline: 1_800_000_000,
             recipient_kind: RecipientKind::Withdraw,
             refund_to: [0x22; 20],
@@ -172,7 +188,7 @@ pub(crate) mod tests {
     fn round_trips() {
         let t = sample();
         let bytes = t.encode().unwrap();
-        assert_eq!(bytes.len(), 82 + ZEC.len() + T_ADDR.len());
+        assert_eq!(bytes.len(), 98 + ZEC.len() + T_ADDR.len());
         assert_eq!(Terms::parse(&bytes).unwrap(), t);
     }
 
@@ -184,12 +200,13 @@ pub(crate) mod tests {
         assert_eq!(&bytes[1..33], &[0x11; 32]);
         assert_eq!(&bytes[33..35], &100u16.to_be_bytes());
         assert_eq!(&bytes[35..51], &150_000_000u128.to_be_bytes());
-        assert_eq!(&bytes[51..59], &1_800_000_000u64.to_be_bytes());
-        assert_eq!(bytes[59], 0);
-        assert_eq!(&bytes[60..80], &[0x22; 20]);
-        assert_eq!(bytes[80] as usize, ZEC.len());
-        assert_eq!(&bytes[81..81 + ZEC.len()], ZEC.as_bytes());
-        assert_eq!(bytes[81 + ZEC.len()] as usize, T_ADDR.len());
+        assert_eq!(&bytes[51..67], &1_000_000u128.to_be_bytes());
+        assert_eq!(&bytes[67..75], &1_800_000_000u64.to_be_bytes());
+        assert_eq!(bytes[75], 0);
+        assert_eq!(&bytes[76..96], &[0x22; 20]);
+        assert_eq!(bytes[96] as usize, ZEC.len());
+        assert_eq!(&bytes[97..97 + ZEC.len()], ZEC.as_bytes());
+        assert_eq!(bytes[97 + ZEC.len()] as usize, T_ADDR.len());
     }
 
     /// The same terms from `scripts/intent-router/shared.ts`'s `encodeTerms`, and their keccak.
@@ -198,13 +215,14 @@ pub(crate) mod tests {
         let bytes = sample().encode().unwrap();
         assert_eq!(
             hex::encode(&bytes),
-            "021111111111111111111111111111111111111111111111111111111111111111006400000000000000000000000008f0d180\
-             000000006b49d200002222222222222222222222222222222222222222146e65703134313a7a65632e6f6d66742e6e6561\
-             722374314b50565352676e46485042574d4a4c433774614a696f4e366d3551366a56426d61"
+            "021111111111111111111111111111111111111111111111111111111111111111006400000000000000000000000008f0d1\
+             80000000000000000000000000000f4240000000006b49d200002222222222222222222222222222222222222222146e6570\
+             3134313a7a65632e6f6d66742e6e6561722374314b50565352676e46485042574d4a4c433774614a696f4e366d3551366a56\
+             426d61"
         );
         assert_eq!(
             path_string(&auth_path(&bytes)),
-            "0x1f126d96fab0acbc97bc19c71c6ada1c0b8d0bb5a72af82d7049963229882a58"
+            "0x351bd01e03085b01eb462b8ad448f5afa84434e9d7acd59164f446669b0ab506"
         );
     }
 
@@ -231,7 +249,7 @@ pub(crate) mod tests {
         assert_eq!(Terms::parse(&bytes[..bytes.len() - 1]), Err("Truncated"));
 
         let mut kind = bytes.clone();
-        kind[59] = 2;
+        kind[75] = 2;
         assert_eq!(Terms::parse(&kind), Err("InvalidRecipientKind"));
     }
 

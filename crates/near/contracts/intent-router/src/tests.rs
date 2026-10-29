@@ -31,6 +31,9 @@ const SALT: [u8; 4] = [0xa1, 0xb2, 0xc3, 0xd4];
 const ISSUED_0: u64 = 1_792_585_081_239;
 const ISSUED_1: u64 = 1_792_585_269_872;
 
+/// Both fixtures sell 0.001 ETH; `A` holds exactly that unless a test says otherwise.
+const BALANCE: u128 = 1_000_000_000_000_000;
+
 fn set_ctx(predecessor: &str, deposit: u128, now_ms: u64) {
     let mut ctx = VMContextBuilder::new();
     ctx.current_account_id(CONTRACT.parse().unwrap())
@@ -48,18 +51,15 @@ fn params() -> Params {
         max_quote_age: 120,
         transfer_validity: 180,
         max_fill_multiple: 2,
+        max_order_shortfall_bps: 2_000,
         min_refund: U128(100_000_000_000_000),
     }
 }
 
-fn zec_route() -> Route {
-    Route { min_withdraw: U128(100_000), min_delivery: U128(1_000_000) }
-}
-
-/// Owned by `accounts(0)`, which stays the caller, with ZEC routed.
+/// Owned by `accounts(0)`, which stays the caller.
 fn contract() -> IntentRouter {
     set_ctx(accounts(0).as_str(), 1, ISSUED_0);
-    let mut c = IntentRouter::new(
+    IntentRouter::new(
         accounts(0),
         "v1.signer".parse().unwrap(),
         "intents.near".parse().unwrap(),
@@ -69,9 +69,7 @@ fn contract() -> IntentRouter {
         ETH.into(),
         vec![MANAGER.into()],
         params(),
-    );
-    c.set_route(ZEC.into(), zec_route());
-    c
+    )
 }
 
 /// `A` of the fixtures: the PoC account is the hex of its key.
@@ -94,7 +92,7 @@ fn poc_swap(c: &IntentRouter, t: &Terms) -> Plan {
     let terms = terms_bytes(t);
     let now = ISSUED_0 + 30_000;
     set_ctx(accounts(1).as_str(), 1, now);
-    c.build_swap(&terms, &order_vaa(&terms, now, 60, 10u128.pow(15), 180_000_000), &fixture(0), key(), SALT, now)
+    c.build_swap(&terms, &order_vaa(&terms, now, 60, 10u128.pow(15), 180_000_000), &fixture(0), key(), SALT, BALANCE, now)
 }
 
 fn message(plan: &Plan) -> Value {
@@ -124,8 +122,9 @@ fn swap_signs_the_transfer_to_the_deposit_account() {
     );
 
     let path = auth_path(&terms_bytes(&t));
-    let order_expiry = (now / 1_000 - 60 + 900) * 1_000;
-    assert_eq!(plan.nonce, versioned_nonce(SALT, order_expiry, entropy(&[b"swap", &path, &7u64.to_be_bytes()])));
+    // The nonce's expiry is the order's time plus MAX_PRICE_VALIDITY, not the current param.
+    let nonce_expiry = (now / 1_000 - 60 + MAX_PRICE_VALIDITY) * 1_000;
+    assert_eq!(plan.nonce, versioned_nonce(SALT, nonce_expiry, entropy(&[b"swap", &path, &7u64.to_be_bytes()])));
     assert_eq!(plan.path, path);
     assert_eq!(plan.info.seq, Some(7));
     assert_eq!(plan.info.amount, U128(10u128.pow(15)));
@@ -141,9 +140,9 @@ fn one_fill_per_order() {
     let vaa = order_vaa(&terms, ISSUED_0, 30, 10u128.pow(15), 180_000_000);
 
     set_ctx(accounts(1).as_str(), 1, ISSUED_0 + 10_000);
-    let first = c.build_swap(&terms, &vaa, &fixture(0), key(), SALT, ISSUED_0 + 10_000);
+    let first = c.build_swap(&terms, &vaa, &fixture(0), key(), SALT, BALANCE, ISSUED_0 + 10_000);
     set_ctx(accounts(1).as_str(), 1, ISSUED_1 + 10_000);
-    let second = c.build_swap(&terms, &vaa, &fixture(1), key(), SALT, ISSUED_1 + 10_000);
+    let second = c.build_swap(&terms, &vaa, &fixture(1), key(), SALT, BALANCE, ISSUED_1 + 10_000);
 
     assert_ne!(message(&first)["intents"][0]["receiver_id"], message(&second)["intents"][0]["receiver_id"]);
     assert_eq!(first.nonce, second.nonce);
@@ -155,7 +154,7 @@ fn the_transfer_never_outlives_the_order() {
     let terms = terms_bytes(&sample());
     let now = ISSUED_0 + 30_000;
     // Published 850 s ago: 50 s of price left, less than the 180 s transfer validity.
-    let plan = c.build_swap(&terms, &order_vaa(&terms, now, 850, 10u128.pow(15), 180_000_000), &fixture(0), key(), SALT, now);
+    let plan = c.build_swap(&terms, &order_vaa(&terms, now, 850, 10u128.pow(15), 180_000_000), &fixture(0), key(), SALT, BALANCE, now);
     let order_expiry = (now / 1_000 - 850 + 900) * 1_000;
     assert_eq!(message(&plan)["deadline"], time::format(order_expiry));
 }
@@ -171,7 +170,7 @@ fn refused(err: &str, change: impl FnOnce(&mut IntentRouter, &mut Terms, &mut Ve
     change(&mut c, &mut t, &mut vaa, &mut key, &mut now);
     set_ctx(accounts(1).as_str(), 1, now);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        c.build_swap(&terms_bytes(&t), &vaa, &fixture(0), key, SALT, now);
+        c.build_swap(&terms_bytes(&t), &vaa, &fixture(0), key, SALT, BALANCE, now);
     }));
     let message = result.err().map(|e| e.downcast_ref::<String>().cloned().unwrap_or_default()).unwrap_or_default();
     assert!(message.contains(err), "expected {err}, got {message:?}");
@@ -205,10 +204,9 @@ fn swap_refusals() {
         t.min_out_per_in = 190_000_000;
         *vaa = order_vaa(&terms_bytes(t), *now, 60, 10u128.pow(15), 180_000_000);
     });
-    refused("AboveFillCap", |_, _, vaa, _, now| *vaa = order_vaa(&terms_bytes(&sample()), *now, 60, 4 * 10u128.pow(14), 180_000_000));
+    // Cap 2 × 0.0004 ETH = 0.0008 ETH, below the quote's 0.001.
+    refused("WrongFillAmount", |_, _, vaa, _, now| *vaa = order_vaa(&terms_bytes(&sample()), *now, 60, 4 * 10u128.pow(14), 180_000_000));
 
-    // The terms.
-    refused("UnsupportedRoute", |c, _, _, _, _| c.routes.clear());
 }
 
 #[test]
@@ -223,7 +221,7 @@ fn slippage_lowers_the_floor() {
         let terms = terms_bytes(&t);
         set_ctx(accounts(1).as_str(), 1, now);
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            c.build_swap(&terms, &order_vaa(&terms, now, 60, 10u128.pow(15), 190_000_000), &fixture(0), key(), SALT, now);
+            c.build_swap(&terms, &order_vaa(&terms, now, 60, 10u128.pow(15), 190_000_000), &fixture(0), key(), SALT, BALANCE, now);
         }))
     };
     assert!(build(0).is_err());
@@ -259,6 +257,79 @@ fn eth_to_eth_is_refused() {
     let mut t = sample();
     t.destination_asset = ETH.into();
     c.swap_terms(&terms_bytes(&t));
+}
+
+/// The PoC swap with `A` holding `balance` and the order sending `order_amount`.
+fn swap_with(balance: u128, order_amount: u128) -> std::thread::Result<Plan> {
+    let c = contract();
+    let terms = terms_bytes(&sample());
+    let now = ISSUED_0 + 30_000;
+    set_ctx(accounts(1).as_str(), 1, now);
+    let vaa = order_vaa(&terms, now, 60, order_amount, 180_000_000);
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.build_swap(&terms, &vaa, &fixture(0), key(), SALT, balance, now)))
+}
+
+fn panic_text(result: std::thread::Result<Plan>) -> String {
+    result.err().map(|e| e.downcast_ref::<String>().cloned().unwrap_or_default()).unwrap_or_default()
+}
+
+/// Finding 1 of the 2026-10-26 audit: a dust quote cannot spend the order's nonce.
+#[test]
+fn the_fill_is_a_s_whole_balance_up_to_the_cap() {
+    // A holds 0.002 ETH, the cap is 2 × 0.001: the fill must be 0.002, the quote sells 0.001.
+    assert!(panic_text(swap_with(2 * BALANCE, BALANCE)).contains("WrongFillAmount"));
+    // A few wei more than the quote, within 1%: still the bot's fill.
+    assert!(swap_with(BALANCE + BALANCE / 200, BALANCE).is_ok());
+    // 2% more: a different fill, refused.
+    assert!(panic_text(swap_with(BALANCE + BALANCE / 50, BALANCE)).contains("WrongFillAmount"));
+}
+
+#[test]
+fn the_orders_own_eth_must_have_arrived() {
+    // The order sent 0.002 ETH; A holds 0.001 (below 80%) — e.g. dust someone credited before POA.
+    assert!(panic_text(swap_with(BALANCE, 2 * BALANCE)).contains("OrderNotCredited"));
+    // 0.00125 sent, 0.001 held: exactly the 20% shortfall allowed.
+    assert!(swap_with(BALANCE, BALANCE * 5 / 4).is_ok());
+}
+
+/// Finding 2 of the 2026-10-26 audit: a param change does not re-sign an order.
+#[test]
+fn a_price_validity_change_keeps_the_nonce() {
+    let mut c = contract();
+    let terms = terms_bytes(&sample());
+    let now = ISSUED_0 + 30_000;
+    let vaa = order_vaa(&terms, now, 60, BALANCE, 180_000_000);
+    set_ctx(accounts(1).as_str(), 1, now);
+    let before = c.build_swap(&terms, &vaa, &fixture(0), key(), SALT, BALANCE, now).nonce;
+    set_ctx(accounts(0).as_str(), 1, now);
+    c.set_params(Params { price_validity: 1_800, ..params() });
+    set_ctx(accounts(1).as_str(), 1, now);
+    assert_eq!(c.build_swap(&terms, &vaa, &fixture(0), key(), SALT, BALANCE, now).nonce, before);
+}
+
+/// A withdrawal needs a NEP-141; the swap refuses to buy what delivery could not move.
+#[test]
+fn only_a_nep141_can_be_withdrawn() {
+    let c = contract();
+    let mut t = sample();
+    t.destination_asset = "nep245:v2_1.omni.hot.tg:56_11111111111111111111".into();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.swap_terms(&terms_bytes(&t))));
+    let text = result.err().map(|e| e.downcast_ref::<String>().cloned().unwrap_or_default()).unwrap_or_default();
+    assert!(text.contains("NotWithdrawable"), "{text}");
+
+    // Into an intents account it is just a transfer.
+    t.recipient_kind = RecipientKind::Intents;
+    t.recipient = "alice.near".into();
+    c.swap_terms(&terms_bytes(&t));
+    payout(&c, &t, Payout::Deliver, 2_000_000, ISSUED_0);
+}
+
+/// Terms that cannot be delivered still parse, so their ETH refunds.
+#[test]
+fn undeliverable_terms_still_refund() {
+    let mut t = sample();
+    t.destination_asset = "nep245:v2_1.omni.hot.tg:56_11111111111111111111".into();
+    payout(&contract(), &t, Payout::Refund, 10u128.pow(15), DEADLINE_MS + 1);
 }
 
 // =============== deliver and refund ======================================================
@@ -297,6 +368,7 @@ fn deliver_to_an_intents_account() {
     );
 }
 
+/// Before the deadline the batch threshold is the terms' `minDelivery` (1_000_000 in `sample`).
 #[test]
 #[should_panic(expected = "NothingToDeliver")]
 fn deliveries_batch_before_the_deadline() {
@@ -304,15 +376,15 @@ fn deliveries_batch_before_the_deadline() {
 }
 
 #[test]
-fn after_the_deadline_any_withdrawable_amount_delivers() {
-    let plan = payout(&contract(), &sample(), Payout::Deliver, 100_000, DEADLINE_MS + 1);
-    assert_eq!(plan.info.amount, U128(100_000));
+fn after_the_deadline_any_balance_delivers() {
+    let plan = payout(&contract(), &sample(), Payout::Deliver, 1, DEADLINE_MS + 1);
+    assert_eq!(plan.info.amount, U128(1));
 }
 
 #[test]
 #[should_panic(expected = "NothingToDeliver")]
-fn never_below_the_bridge_minimum() {
-    payout(&contract(), &sample(), Payout::Deliver, 99_999, DEADLINE_MS + 1);
+fn nothing_to_deliver_from_an_empty_account() {
+    payout(&contract(), &sample(), Payout::Deliver, 0, DEADLINE_MS + 1);
 }
 
 #[test]
@@ -337,13 +409,6 @@ fn no_refund_before_the_deadline() {
 #[should_panic(expected = "NothingToRefund")]
 fn no_dust_refund() {
     payout(&contract(), &sample(), Payout::Refund, 10u128.pow(14) - 1, DEADLINE_MS + 1);
-}
-
-#[test]
-fn refunds_need_no_route() {
-    let mut c = contract();
-    c.remove_route(ZEC.into());
-    payout(&c, &sample(), Payout::Refund, 10u128.pow(15), DEADLINE_MS + 1);
 }
 
 #[test]
@@ -394,23 +459,10 @@ fn path_of_is_the_terms_hash() {
 
 #[test]
 #[should_panic(expected = "Unauthorized")]
-fn only_the_owner_sets_routes() {
+fn only_the_owner_sets_params() {
     let mut c = contract();
     set_ctx(accounts(1).as_str(), 1, ISSUED_0);
-    c.set_route(ZEC.into(), zec_route());
-}
-
-#[test]
-fn route_rules() {
-    let bad = |asset: &str, route: Route, err: &str| {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| contract().set_route(asset.into(), route)));
-        let message = result.err().map(|e| e.downcast_ref::<String>().cloned().unwrap_or_default()).unwrap_or_default();
-        assert!(message.contains(err), "{asset}: expected {err}, got {message:?}");
-    };
-    bad("zec.omft.near", zec_route(), "UnsupportedToken");
-    bad(ETH, zec_route(), "SameAsset");
-    bad(ZEC, Route { min_withdraw: U128(0), min_delivery: U128(1) }, "InvalidRoute");
-    bad(ZEC, Route { min_withdraw: U128(2), min_delivery: U128(1) }, "InvalidRoute");
+    c.set_params(params());
 }
 
 #[test]
@@ -425,6 +477,8 @@ fn param_bounds() {
     bad(Params { transfer_validity: 0, ..params() }, "InvalidTransferValidity");
     bad(Params { max_fill_multiple: 0, ..params() }, "InvalidFillMultiple");
     bad(Params { min_refund: U128(0), ..params() }, "InvalidMinRefund");
+    bad(Params { min_refund: U128(MAX_MIN_REFUND + 1), ..params() }, "InvalidMinRefund");
+    bad(Params { max_order_shortfall_bps: 10_000, ..params() }, "InvalidOrderShortfall");
 }
 
 #[test]

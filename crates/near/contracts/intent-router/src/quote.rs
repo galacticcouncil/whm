@@ -10,9 +10,39 @@ use near_sdk::{env, near, AccountId};
 
 use near_common::time;
 
-/// Fields that would deliver anywhere but the intents account the quote names. Never signed for a
-/// plain swap; refused if present.
-const FORBIDDEN: [&str; 4] = ["virtualChainRecipient", "virtualChainRefundRecipient", "customRecipientMsg", "depositMemo"];
+/// Every field a plain intents-to-intents swap quote may carry — what 1Click's SDK signs, less the
+/// four that would deliver anywhere but the intents account the quote names
+/// (`virtualChainRecipient`, `virtualChainRefundRecipient`, `customRecipientMsg`, `depositMemo`).
+/// Anything else is refused: a field 1Click starts to sign later is unknown until reviewed.
+const ALLOWED: [&str; 27] = [
+    "dry",
+    "swapType",
+    "slippageTolerance",
+    "originAsset",
+    "depositType",
+    "destinationAsset",
+    "amount",
+    "refundTo",
+    "refundType",
+    "recipient",
+    "recipientType",
+    "deadline",
+    "quoteWaitingTimeMs",
+    "referral",
+    "amountIn",
+    "amountInFormatted",
+    "amountInUsd",
+    "minAmountIn",
+    "amountOut",
+    "amountOutFormatted",
+    "amountOutUsd",
+    "minAmountOut",
+    "depositAddress",
+    "timeWhenInactive",
+    "timeEstimate",
+    "refundFee",
+    "withdrawFee",
+];
 
 #[near(serializers = [json])]
 #[derive(Clone, Debug)]
@@ -115,7 +145,7 @@ pub fn accept(signed: &Map<String, Value>, expect: &Expect) -> Result<Accepted, 
     if !is("refundTo", expect.account) || !is("refundType", "INTENTS") {
         return Err("WrongRefundTo");
     }
-    if FORBIDDEN.iter().any(|key| signed.contains_key(*key)) {
+    if signed.keys().any(|key| key != "timestamp" && !ALLOWED.contains(&key.as_str())) {
         return Err("UnsupportedQuoteField");
     }
 
@@ -293,6 +323,8 @@ pub(crate) mod tests {
         refuse("virtualChainRecipient", Some(Value::from("0xabc")), "UnsupportedQuoteField");
         refuse("customRecipientMsg", Some(Value::from("x")), "UnsupportedQuoteField");
         refuse("depositMemo", Some(Value::from("x")), "UnsupportedQuoteField");
+        refuse("virtualChainRefundRecipient", Some(Value::from("0xabc")), "UnsupportedQuoteField");
+        refuse("someFutureField", Some(Value::from("x")), "UnsupportedQuoteField");
         refuse("amount", Some(Value::from("1")), "InvalidQuoteAmount");
         refuse("amountIn", Some(Value::from("0")), "InvalidQuoteAmount");
         refuse("minAmountOut", Some(Value::from("-1")), "InvalidQuoteAmount");

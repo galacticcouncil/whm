@@ -9,9 +9,10 @@
 //!   ├─ v1.signer.derived_public_key(path)   ┐
 //!   ├─ intents.current_salt()               │ joint
 //!   └─ core.verify_vaa(order_vaa)           ┘
-//!        → on_swap_reads: order, 1Click quote and floor checked
-//!             → v1.signer.sign(a transfer of amountIn ETH from A to the quote's deposit account)
-//!                  → on_signed: emit the MultiPayload
+//!        → on_swap_reads: A known → intents.mt_balance_of(A, eth)
+//!             → on_swap_balance: order, 1Click quote, fill size and floor checked
+//!                  → v1.signer.sign(a transfer of amountIn ETH from A to the quote's deposit account)
+//!                       → on_signed: emit the MultiPayload
 //! deliver(terms) | refund(terms)
 //!   ├─ derived_public_key(path) ┐ joint
 //!   └─ current_salt()           ┘
@@ -36,8 +37,6 @@ pub mod terms;
 /// Shared with the other WHM contracts.
 pub use near_common::{mpc, time, vaa};
 
-use std::collections::BTreeMap;
-
 use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::serde_json::{json, Value};
 use near_sdk::{env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError};
@@ -57,8 +56,10 @@ pub const GAS_FOR_BALANCE: Gas = Gas::from_tgas(5);
 /// `v1.signer` requires 15 TGas attached; the rest covers its yield callback.
 pub const GAS_FOR_SIGN: Gas = Gas::from_tgas(30);
 pub const GAS_FOR_ON_SIGNED: Gas = Gas::from_tgas(10);
-/// `on_swap_reads`' own work — the quote's JSON, hash and signature — then the sign it schedules.
-pub const GAS_FOR_ON_SWAP_READS: Gas = Gas::from_tgas(20 + 30 + 10);
+/// `on_swap_balance`'s own work — the quote's JSON, hash and signature — then the sign it schedules.
+pub const GAS_FOR_ON_SWAP_BALANCE: Gas = Gas::from_tgas(20 + 30 + 10);
+/// `on_swap_reads`' own work, the balance read and `on_swap_balance`.
+pub const GAS_FOR_ON_SWAP_READS: Gas = Gas::from_tgas(10 + 5 + 60);
 /// `on_payout_balance`'s own work, then the sign it schedules.
 pub const GAS_FOR_ON_PAYOUT_BALANCE: Gas = Gas::from_tgas(15 + 30 + 10);
 /// `on_payout_key`'s own work, the balance read and `on_payout_balance`.
@@ -72,6 +73,13 @@ pub const MAX_PRICE_VALIDITY: u64 = 86_400;
 pub const MAX_QUOTE_AGE: u64 = 600;
 pub const MAX_TRANSFER_VALIDITY: u64 = 600;
 pub const MAX_FILL_MULTIPLE: u32 = 100;
+/// Upper bound on `min_refund`, wei — 0.01 ETH, well above POA's withdrawal fee; a refund
+/// threshold above it would let config hold users' ETH.
+pub const MAX_MIN_REFUND: u128 = 10_000_000_000_000_000;
+
+/// A fill may be this far below `min(A's ETH, cap)`: the quote is fetched a moment before the
+/// router reads the balance, and a stranger crediting `A` a few wei in between must not void it.
+pub const FILL_TOLERANCE_BPS: u128 = 100;
 
 /// The `v1.signer` deposit.
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
@@ -101,19 +109,11 @@ pub struct Params {
     /// One fill per order, of at most this many times the order's own amount — the catch-up rate,
     /// and what a bad quote can move at once.
     pub max_fill_multiple: u32,
-    /// The smallest ETH refund, wei — above POA's withdrawal fee.
+    /// How far below the order's own amount `A`'s ETH may be and still count as credited, bps: the
+    /// relay fee and trimming between Hydration's WETH and the ETH POA credits.
+    pub max_order_shortfall_bps: u16,
+    /// The smallest ETH refund, wei — above POA's withdrawal fee. At most `MAX_MIN_REFUND`.
     pub min_refund: U128,
-}
-
-/// A destination asset the router swaps into and delivers.
-#[near(serializers = [borsh, json])]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Route {
-    /// The bridge's smallest withdrawal — every delivery is at least this.
-    pub min_withdraw: U128,
-    /// Before the deadline, deliveries wait until `A` holds this much: one bridge fee per batch,
-    /// not per tranche. At least `min_withdraw`.
-    pub min_delivery: U128,
 }
 
 #[near(serializers = [json])]
@@ -172,8 +172,6 @@ pub struct IntentRouter {
     /// in advance has no gap.
     quote_keys: Vec<[u8; 32]>,
     params: Params,
-    /// Destination ledger id → route. A handful; read whole.
-    routes: BTreeMap<String, Route>,
 }
 
 #[near]
@@ -206,7 +204,6 @@ impl IntentRouter {
             eth_token,
             quote_keys: parse_quote_keys(&quote_keys),
             params,
-            routes: BTreeMap::new(),
         };
         this.assert_params();
         this
@@ -216,14 +213,15 @@ impl IntentRouter {
 
     /// Signs `A`'s transfer of the quote's `amountIn` ETH to 1Click's deposit account — the swap.
     /// The order message prices it; the quote, signed by 1Click, must pay and refund `A` at or above
-    /// that price. One fill per order. Anyone may call, with 1 yocto — the signer's deposit.
+    /// that price, for `A`'s whole ETH up to the fill cap — never a size the caller picks. One fill
+    /// per order. Anyone may call, with 1 yocto — the signer's deposit.
     #[payable]
     pub fn swap(&mut self, terms: Base64VecU8, order_vaa: Base64VecU8, quote: Quote) -> Promise {
         near_sdk::assert_one_yocto();
         self.require_gas(
             GAS_FOR_DERIVE.saturating_add(GAS_FOR_SALT).saturating_add(GAS_FOR_VERIFY).saturating_add(GAS_FOR_ON_SWAP_READS),
         );
-        // Fail fast on everything checkable before the reads; on_swap_reads checks it all again.
+        // Fail fast on everything checkable before the reads; on_swap_balance checks it all again.
         let (t, path) = self.swap_terms(&terms.0);
         self.order(&t, &path, &order_vaa.0, now_ms());
         quote::verify(&quote, &self.quote_keys).unwrap_or_else(|e| env::panic_str(e));
@@ -238,14 +236,14 @@ impl IntentRouter {
     }
 
     /// Signs the transfer of `A`'s whole destination balance to the terms' recipient. Before the
-    /// deadline only once it reaches the route's `min_delivery`; after it, from `min_withdraw`.
+    /// deadline only once it reaches the terms' `minDelivery`; after it, any balance.
     #[payable]
     pub fn deliver(&mut self, terms: Base64VecU8) -> Promise {
         self.payout(terms, Payout::Deliver)
     }
 
     /// After the deadline, signs the withdrawal of `A`'s whole ETH balance to the terms' `refundTo`
-    /// on Ethereum. Reads no route: a refund never depends on config the owner can change.
+    /// on Ethereum. Its one setting, `min_refund`, is capped at `MAX_MIN_REFUND`.
     #[payable]
     pub fn refund(&mut self, terms: Base64VecU8) -> Promise {
         self.payout(terms, Payout::Refund)
@@ -264,7 +262,28 @@ impl IntentRouter {
         let key = parse_ed25519(&key.unwrap_or_else(|_| env::panic_str("DeriveFailed")));
         let salt = parse_salt(&salt.unwrap_or_else(|_| env::panic_str("SaltReadFailed")));
         require!(verified.is_ok(), "VaaVerifyFailed");
-        let plan = self.build_swap(&terms.0, &order_vaa.0, &quote, key, salt, now_ms());
+        ext_intents::ext(self.intents.clone())
+            .with_static_gas(GAS_FOR_BALANCE)
+            .mt_balance_of(implicit_account(&key), self.eth_token.clone())
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_ON_SWAP_BALANCE)
+                    .on_swap_balance(terms, order_vaa, quote, hex::encode(key), hex::encode(salt)),
+            )
+    }
+
+    #[private]
+    pub fn on_swap_balance(
+        &mut self,
+        terms: Base64VecU8,
+        order_vaa: Base64VecU8,
+        quote: Quote,
+        key: String,
+        salt: String,
+        #[callback_result] balance: Result<U128, PromiseError>,
+    ) -> Promise {
+        let balance = balance.unwrap_or_else(|_| env::panic_str("BalanceReadFailed")).0;
+        let plan = self.build_swap(&terms.0, &order_vaa.0, &quote, parse_hex32(&key), parse_salt(&salt), balance, now_ms());
         self.sign(plan)
     }
 
@@ -359,26 +378,6 @@ impl IntentRouter {
         emit("quote_keys_set", json!({ "keys": keys }));
     }
 
-    /// Adds or replaces a destination. `asset` is a `nep141:` ledger id; its contract is what
-    /// deliveries withdraw.
-    #[payable]
-    pub fn set_route(&mut self, asset: String, route: Route) {
-        self.assert_owner();
-        token_contract(&asset);
-        require!(asset != self.eth_token, "SameAsset");
-        require!(route.min_withdraw.0 > 0 && route.min_delivery.0 >= route.min_withdraw.0, "InvalidRoute");
-        emit("route_set", json!({ "asset": asset, "route": route }));
-        self.routes.insert(asset, route);
-    }
-
-    /// Stops swaps into `asset` and its deliveries. Refunds are unaffected.
-    #[payable]
-    pub fn remove_route(&mut self, asset: String) {
-        self.assert_owner();
-        require!(self.routes.remove(&asset).is_some(), "UnsupportedRoute");
-        emit("route_removed", json!({ "asset": asset }));
-    }
-
     /// Proposes `new_owner`, who takes over on `accept_ownership`. Proposing again replaces it.
     #[payable]
     pub fn transfer_ownership(&mut self, new_owner: AccountId) {
@@ -447,10 +446,6 @@ impl IntentRouter {
         })
     }
 
-    pub fn get_routes(&self) -> &BTreeMap<String, Route> {
-        &self.routes
-    }
-
     /// The derivation path of `terms` — what `v1.signer.derived_public_key` takes, with this
     /// account as `predecessor` and `domain_id` 1. Panics on invalid terms.
     pub fn path_of(&self, terms: Base64VecU8) -> String {
@@ -473,9 +468,7 @@ impl IntentRouter {
         self.require_gas(GAS_FOR_DERIVE.saturating_add(GAS_FOR_SALT).saturating_add(GAS_FOR_ON_PAYOUT_KEY));
         let t = parse_terms(&terms.0);
         match payout {
-            Payout::Deliver => {
-                self.route(&t.destination_asset);
-            }
+            Payout::Deliver => deliverable(&t),
             Payout::Refund => require!(now_ms() > t.deadline_ms(), "BeforeDeadline"),
         }
         self.reads(&auth_path(&terms.0)).then(
@@ -485,17 +478,19 @@ impl IntentRouter {
         )
     }
 
-    /// Terms a swap may run under: a supported route, not ETH → ETH.
+    /// Terms a swap may run under: not ETH → ETH, and a destination their delivery can move. Whether
+    /// the asset can be bought at all is 1Click's: no quote, no swap — the ETH waits for a refund.
     fn swap_terms(&self, bytes: &[u8]) -> (Terms, [u8; 32]) {
         let t = parse_terms(bytes);
         require!(t.destination_asset != self.eth_token, "SameAsset");
-        self.route(&t.destination_asset);
+        deliverable(&t);
         (t, auth_path(bytes))
     }
 
-    /// The order the VAA carries, for these terms, still priced at `now_ms` — and when its price
-    /// expires: `min(deadline, Hydration block time + price_validity)`.
-    fn order(&self, t: &Terms, path: &[u8; 32], vaa: &[u8], now_ms: u64) -> (Order, u64) {
+    /// The order the VAA carries, for these terms, still priced at `now_ms` — when its price expires,
+    /// `min(deadline, Hydration block time + price_validity)` — and its nonce's expiry, the same
+    /// from `MAX_PRICE_VALIDITY` instead: fixed by the order alone, so no param change re-signs it.
+    fn order(&self, t: &Terms, path: &[u8; 32], vaa: &[u8], now_ms: u64) -> (Order, u64, u64) {
         let vaa = Vaa::parse(vaa).unwrap_or_else(|_| env::panic_str("InvalidVaa"));
         require!(vaa.emitter_chain == self.emitter_chain && vaa.emitter_address == self.emitter, "UnknownEmitter");
         let order = Order::parse(&vaa.payload).unwrap_or_else(|e| env::panic_str(e));
@@ -503,13 +498,24 @@ impl IntentRouter {
         let priced_until = (u64::from(vaa.timestamp) + self.params.price_validity) * 1_000;
         let expiry = t.deadline_ms().min(priced_until);
         require!(now_ms < expiry, "OrderExpired");
-        (order, expiry)
+        let nonce_expiry = t.deadline_ms().min((u64::from(vaa.timestamp) + MAX_PRICE_VALIDITY) * 1_000);
+        (order, expiry, nonce_expiry)
     }
 
     /// The swap: every check, then a transfer of exactly `amountIn` ETH to the deposit account.
-    pub(crate) fn build_swap(&self, terms: &[u8], vaa: &[u8], quote: &Quote, key: [u8; 32], salt: [u8; 4], now_ms: u64) -> Plan {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_swap(
+        &self,
+        terms: &[u8],
+        vaa: &[u8],
+        quote: &Quote,
+        key: [u8; 32],
+        salt: [u8; 4],
+        balance: u128,
+        now_ms: u64,
+    ) -> Plan {
         let (t, path) = self.swap_terms(terms);
-        let (order, order_expiry) = self.order(&t, &path, vaa, now_ms);
+        let (order, order_expiry, nonce_expiry) = self.order(&t, &path, vaa, now_ms);
         quote::verify(quote, &self.quote_keys).unwrap_or_else(|e| env::panic_str(e));
         let account = implicit_account(&key);
         let q = quote::accept(
@@ -520,7 +526,18 @@ impl IntentRouter {
 
         let p = &self.params;
         require!(now_ms <= q.issued_ms.saturating_add(p.max_quote_age * 1_000), "QuoteTooOld");
-        require!(q.amount_in <= order.amount.saturating_mul(u128::from(p.max_fill_multiple)), "AboveFillCap");
+        // The fill is A's whole ETH up to the cap, not the caller's choice: a dust quote cannot
+        // spend the order's one nonce. And the order's own ETH must have arrived, so dust a stranger
+        // credits to A before POA does cannot qualify either.
+        let fill = balance.min(order.amount.saturating_mul(u128::from(p.max_fill_multiple)));
+        require!(
+            q.amount_in <= fill && q.amount_in * 10_000 >= fill * (10_000 - FILL_TOLERANCE_BPS),
+            "WrongFillAmount"
+        );
+        require!(
+            balance * 10_000 >= order.amount * u128::from(10_000 - p.max_order_shortfall_bps),
+            "OrderNotCredited"
+        );
         require!(floor::meets_rate(q.amount_in, q.min_amount_out, order.out_per_in, t.max_slippage_bps), "BelowFloor");
         require!(floor::meets_hard_floor(q.amount_in, q.min_amount_out, t.min_out_per_in), "BelowHardFloor");
 
@@ -528,9 +545,11 @@ impl IntentRouter {
         let deadline = now_ms.saturating_add(p.transfer_validity * 1_000).min(order_expiry);
         require!(q.deadline_ms >= deadline, "QuoteDeadlineTooSoon");
 
-        // From the order alone: any quote for the same order re-signs the same nonce, so at most
-        // one transfer per order ever executes.
-        let nonce = versioned_nonce(salt, order_expiry, entropy(&[b"swap", &path, &order.seq.to_be_bytes()]));
+        // From the order alone: any quote for the same order re-signs the same nonce, so at most one
+        // transfer per order executes. The salt is the verifier's live one: after a salt rotation,
+        // while the old salt is still accepted, an order can be signed once more — a fill of what A
+        // still holds, sized and floored as above: the catch-up, earlier.
+        let nonce = versioned_nonce(salt, nonce_expiry, entropy(&[b"swap", &path, &order.seq.to_be_bytes()]));
         let message = intent::message(&account, deadline, vec![transfer(q.deposit.as_str(), &self.eth_token, q.amount_in)]);
         let info = Signed {
             action: "swap".into(),
@@ -572,12 +591,12 @@ impl IntentRouter {
                 ("refund", self.eth_token.clone(), to, intent)
             }
             Payout::Deliver => {
-                let route = self.route(&t.destination_asset);
-                let min = if past { route.min_withdraw.0 } else { route.min_delivery.0 };
-                require!(balance > 0 && balance >= min, "NothingToDeliver");
+                deliverable(&t);
+                let min = if past { 1 } else { t.min_delivery.max(1) };
+                require!(balance >= min, "NothingToDeliver");
                 let intent = match t.recipient_kind {
                     RecipientKind::Withdraw => {
-                        let contract = token_contract(&t.destination_asset);
+                        let contract = t.token_contract().unwrap();
                         ft_withdraw(contract.as_str(), contract.as_str(), balance, Some(format!("{WITHDRAW_TO}{}", t.recipient)))
                     }
                     RecipientKind::Intents => transfer(&t.recipient, &t.destination_asset, balance),
@@ -624,10 +643,6 @@ impl IntentRouter {
             )
     }
 
-    fn route(&self, asset: &str) -> &Route {
-        self.routes.get(asset).unwrap_or_else(|| env::panic_str("UnsupportedRoute"))
-    }
-
     fn require_gas(&self, needed: Gas) {
         require!(env::prepaid_gas().saturating_sub(env::used_gas()) >= needed, "NotEnoughGas");
     }
@@ -643,7 +658,8 @@ impl IntentRouter {
         require!(p.max_quote_age > 0 && p.max_quote_age <= MAX_QUOTE_AGE, "InvalidQuoteAge");
         require!(p.transfer_validity > 0 && p.transfer_validity <= MAX_TRANSFER_VALIDITY, "InvalidTransferValidity");
         require!(p.max_fill_multiple > 0 && p.max_fill_multiple <= MAX_FILL_MULTIPLE, "InvalidFillMultiple");
-        require!(p.min_refund.0 > 0, "InvalidMinRefund");
+        require!(p.max_order_shortfall_bps < 10_000, "InvalidOrderShortfall");
+        require!(p.min_refund.0 > 0 && p.min_refund.0 <= MAX_MIN_REFUND, "InvalidMinRefund");
     }
 }
 
@@ -660,6 +676,12 @@ fn now_ms() -> u64 {
 
 fn parse_terms(bytes: &[u8]) -> Terms {
     Terms::parse(bytes).unwrap_or_else(|e| env::panic_str(e))
+}
+
+/// A withdrawal needs a NEP-141 contract — `ft_withdraw` takes nothing else. Checked at swap and
+/// delivery, never at parse: terms that fail it must still refund.
+fn deliverable(t: &Terms) {
+    require!(t.recipient_kind == RecipientKind::Intents || t.token_contract().is_some(), "NotWithdrawable");
 }
 
 /// `nep141:<contract>` → the contract.
