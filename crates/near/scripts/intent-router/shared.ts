@@ -29,6 +29,7 @@ export interface Config {
     max_quote_age: number;
     transfer_validity: number;
     max_fill_multiple: number;
+    max_order_shortfall_bps: number;
     min_refund: string;
   };
 }
@@ -39,6 +40,11 @@ export interface Terms {
   maxSlippageBps: number;
   /** Destination units per 1e18 wei; 0 = no hard floor. */
   minOutPerIn: bigint;
+  /**
+   * Before the deadline, deliver only once `A` holds this much of the destination — at least POA's
+   * `min_withdrawal_amount` for the token (`supported_tokens`); above it, a batch size.
+   */
+  minDelivery: bigint;
   /** Unix seconds. */
   deadline: bigint;
   /** 0 = withdraw off NEAR, 1 = intents account. */
@@ -68,6 +74,7 @@ export function encodeTerms(t: Terms): Buffer {
     t.quoteId,
     u(BigInt(t.maxSlippageBps), 2),
     u(t.minOutPerIn, 16),
+    u(t.minDelivery, 16),
     u(t.deadline, 8),
     Buffer.from([t.recipientKind]),
     Buffer.from(t.refundTo.replace(/^0x/, ""), "hex"),

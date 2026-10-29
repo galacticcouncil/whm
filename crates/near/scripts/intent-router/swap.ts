@@ -13,8 +13,8 @@ import { run, signer } from "../ntt-manager/shared";
 const { optionalArg, requiredArg } = args;
 
 /**
- * One swap round, as the bot runs it: size the fill (`A`'s ETH, capped at `max_fill_multiple` × the
- * order's amount), get a 1Click quote paying and refunding `A`, have the router check and sign the
+ * One swap round, as the bot runs it: size the fill (`A`'s whole ETH, capped at `max_fill_multiple` ×
+ * the order's amount — the router accepts no other size, within 1%), get a 1Click quote paying and refunding `A`, have the router check and sign the
  * transfer to its deposit account, submit through 1Click, follow the status. Needs ONECLICK_KEY.
  *
  * Usage: ONECLICK_KEY=… tsx swap.ts --contract <router> --terms <hex|base64> --vaa <hex|base64>
@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   const d = await derive(provider, contract, terms);
   const order = parseOrderVaa(vaa);
   if (order.authPath !== d.path) throw new Error(`the order is for ${order.authPath}, the terms for ${d.path}`);
-  const destination = terms.subarray(81, 81 + terms[80]).toString("utf8");
+  const destination = terms.subarray(97, 97 + terms[96]).toString("utf8");
 
   const held = (await balances(provider, config.intents, d.account, [config.eth_token]))[config.eth_token];
   const cap = order.amount * BigInt(config.params.max_fill_multiple);

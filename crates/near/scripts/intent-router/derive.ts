@@ -16,7 +16,8 @@ const { optionalArg, requiredArg, requiredEnv } = args;
  *
  * Usage: tsx derive.ts --contract <router> --terms <hex|base64>
  *        tsx derive.ts --contract <router> --asset <ledger id> --recipient <address> --refund-to <0x…>
- *          --deadline <unix s> [--slippage <bps>] [--min-rate <units per 1e18 wei>] [--intents]
+ *          --deadline <unix s> --min-delivery <destination units> [--slippage <bps>]
+ *          [--min-rate <units per 1e18 wei>] [--intents]
  */
 async function main(): Promise<void> {
   const provider = new JsonRpcProvider({ url: requiredEnv("RPC_NEAR") });
@@ -28,6 +29,7 @@ async function main(): Promise<void> {
         quoteId: newQuoteId(),
         maxSlippageBps: Number(optionalArg("--slippage") ?? "100"),
         minOutPerIn: BigInt(optionalArg("--min-rate") ?? "0"),
+        minDelivery: BigInt(requiredArg("--min-delivery")),
         deadline: BigInt(requiredArg("--deadline")),
         recipientKind: process.argv.includes("--intents") ? 1 : 0,
         refundTo: requiredArg("--refund-to"),
@@ -43,7 +45,7 @@ async function main(): Promise<void> {
   console.log("account A  ", d.account);
   console.log("deposit 0xN", d.depositAddress);
 
-  const destination = terms.subarray(81, 81 + terms[80]).toString("utf8");
+  const destination = terms.subarray(97, 97 + terms[96]).toString("utf8");
   const held = await balances(provider, config.intents, d.account, [config.eth_token, destination]);
   console.log("balances   ", Object.entries(held).map(([t, v]) => `${v} ${t}`).join(", "));
 }
