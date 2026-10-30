@@ -2,11 +2,13 @@
 pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 /// @title IGhoToken — the facilitator surface of the HOLLAR token
 /// @dev Only what a facilitator calls. Registration (`addFacilitator`,
-///      `setFacilitatorBucketCapacity`) is governance's, on the token, not ours.
-interface IGhoToken is IERC20 {
+///      `setFacilitatorBucketCapacity`) is governance's, on the token, not ours. EIP-2612 is the
+///      token's own (galacticcouncil/hollar `ERC20.permit`); `redeemWithPermit` calls it.
+interface IGhoToken is IERC20, IERC20Permit {
     /// @notice Mint against this facilitator's bucket. Reverts if it would exceed capacity.
     function mint(address account, uint256 amount) external;
 

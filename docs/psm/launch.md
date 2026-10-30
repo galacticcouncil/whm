@@ -53,15 +53,16 @@ ADMIN=0x0000000000000000000000000000000000000000000000000000000000000000
 ## 1. Pre-flight
 
 ```sh
-(cd contracts && forge test --match-path "test/psm/**") # set RPC_BASE + RPC_HYDRATION so the 14 fork tests run
+(cd contracts && forge test --match-path "test/psm/**") # set RPC_BASE + RPC_HYDRATION so the 16 fork tests run
 npx tsx chopsticks/probes/_probePsmRedeem.ts
 pnpm fork:base                                           # terminal 1
 pnpm fork:hydration                                      # terminal 2
 pnpm migrate:psm-base:fork                               # terminal 3, right after the forks start
 ```
 
-Everything passes, the rehearsal ends `Migration complete`, and a second `migrate:psm-base:fork`
-skips all nine steps. Delete `deployments/fork/psm-base.json` before rehearsing again.
+Everything passes, and the rehearsal stops at `011-upgrade@facilitator`, which waits for the
+admin's upgrade (3c). A second `migrate:psm-base:fork` skips the ten steps before it. Delete
+`deployments/fork/psm-base.json` before rehearsing again.
 
 ## 2. Base half
 
@@ -82,9 +83,9 @@ cast call $VAULT "limits()(uint256,uint256,uint256,uint256,uint256,uint256)" --r
 Commit `deployments/prod/psm-base.json`. Verify the implementation and proxy on Basescan — the PSM
 compiles with the optimizer at 200 runs.
 
-## 3. Hydration, then Base to finish
+## 3. Hydration, then Base, then the facilitator upgrade
 
-Two runs, each resuming where the last stopped.
+Runs that each resume where the last stopped.
 
 **a. Hydration key, 004–007:** deploy the facilitator, bind the vault as its emitter, set its
 limits, hand it to the TC.
@@ -97,7 +98,24 @@ PK=0x$(openssl rand -hex 32) PK_FACILITATOR=<hydration key> \
 **b. Base key, 008–009:** bind the facilitator on the vault, hand the vault to the Safe.
 
 ```sh
-PK="$(key whm-eth-deployer)" PK_FACILITATOR=0x$(openssl rand -hex 32) pnpm migrate:psm-base
+PK="$(key whm-eth-deployer)" PK_FACILITATOR=0x$(openssl rand -hex 32) \
+  pnpm migrate:psm-base --pause-at 009-transfer-ownership@vault
+```
+
+**c. Hydration key, 010, then the TC, 011:** upgrade the facilitator to the implementation with
+`redeemWithPermit`. 010 deploys it; 011 sends nothing and fails, printing the `upgradeToAndCall`
+calldata, until the proxy points at it.
+
+```sh
+PK=0x$(openssl rand -hex 32) PK_FACILITATOR=<hydration key> pnpm migrate:psm-base
+```
+
+A TC member proposes that calldata to `$FACILITATOR` through `dispatch_as_emergency_admin`, the
+shape of Motion 1 in step 7. Once it enacts, the same command again completes 011:
+
+```sh
+PK=0x$(openssl rand -hex 32) PK_FACILITATOR=<hydration key> pnpm migrate:psm-base
+cast storage $FACILITATOR 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url $RPC_HYD   # 010's implAddress
 ```
 
 A run that reaches the other key's step fails it before anything is sent; the right key's next run

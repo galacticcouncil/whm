@@ -56,6 +56,8 @@ interface IHollarBaseFacilitator {
     error MintPausedError();
     error RedeemPaused();
     error RedeemExpired(uint64 deadline);
+    /// @dev The permit did not apply and the allowance it would have set is not in place either.
+    error PermitFailed(uint256 allowance, uint256 required);
     error EmitterAlreadySet();
     error EmitterNotSet();
     error ZeroAddress();

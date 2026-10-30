@@ -170,6 +170,46 @@ contract MockGho is MockToken {
         _move(msg.sender, address(0), amount);
         totalSupply -= amount;
     }
+
+    // ─── EIP-2612, as galacticcouncil/hollar@7bbf3e1 src/contracts/gho/ERC20.sol ─
+
+    bytes32 public constant PERMIT_TYPEHASH =
+        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+
+    mapping(address => uint256) public nonces;
+
+    /// @dev The live token's name is "Hydrated Dollar"; `name` above is only this mock's label.
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes("Hydrated Dollar")),
+                keccak256("1"),
+                block.chainid,
+                address(this)
+            )
+        );
+    }
+
+    /// @dev The real `permit`'s logic, without its `Approval` event (this mock emits none): the
+    ///      nonce is spent on success only, and the allowance is set, not added to.
+    function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
+        external
+    {
+        require(deadline >= block.timestamp, "PERMIT_DEADLINE_EXPIRED");
+        address recovered = ecrecover(_spendPermitDigest(owner, spender, value, deadline), v, r, s);
+        require(recovered != address(0) && recovered == owner, "INVALID_SIGNER");
+        allowance[recovered][spender] = value;
+    }
+
+    /// @dev Split out of `permit` only to fit the unoptimised test profile's stack.
+    function _spendPermitDigest(address owner, address spender, uint256 value, uint256 deadline)
+        private
+        returns (bytes32)
+    {
+        bytes32 structHash = keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonces[owner]++, deadline));
+        return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), structHash));
+    }
 }
 
 /// @notice aToken that actually custodies the underlying, so `usdc.balanceOf(aUsdc)` is the
@@ -363,6 +403,39 @@ contract MockWormholeCore is MockWormhole {
 
     function lastPublished() external view returns (Published memory) {
         return published[published.length - 1];
+    }
+}
+
+/// @notice The digest a HOLLAR permit signs, built from the token's EIP-712 parameters (name
+///         "Hydrated Dollar", version "1", the chain id, the token) rather than asked of the token
+///         under test, so a mock with the wrong domain fails instead of agreeing with itself. The
+///         fork suite checks this domain against the live token's `DOMAIN_SEPARATOR`.
+library HollarPermit {
+    bytes32 internal constant TYPEHASH =
+        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+
+    function domain(address token) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes("Hydrated Dollar")),
+                keccak256("1"),
+                block.chainid,
+                token
+            )
+        );
+    }
+
+    function structHash(address owner, address spender, uint256 value, uint256 nonce, uint256 deadline)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(TYPEHASH, owner, spender, value, nonce, deadline));
+    }
+
+    function digest(address token, bytes32 permitHash) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19\x01", domain(token), permitHash));
     }
 }
 

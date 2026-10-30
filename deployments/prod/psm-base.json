@@ -107,6 +107,22 @@
       "error": null,
       "startedAt": null,
       "completedAt": null
+    },
+    {
+      "name": "010-deploy-facilitator-implementation",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "011-upgrade@facilitator",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
     }
   ]
 }
