@@ -16,7 +16,8 @@ set -euo pipefail
 #           --pause-at runs that step and stops after it. A deployment split between a
 #           Base key and a Hydration key is three runs: --pause-at 003-set-limits@vault
 #           (Base key), --pause-at 007-transfer-ownership@facilitator (Hydration key),
-#           then to the end (Base key).
+#           --pause-at 009-transfer-ownership@vault (Base key). The facilitator upgrade is a
+#           fourth, to the end (Hydration key); its last step waits for the TC's motion.
 #
 # Required env vars (set in shell or root .env), both on every run; a run that signs on one
 # chain only may pass a throwaway key for the other:

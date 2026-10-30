@@ -101,6 +101,18 @@ by its own bucket.
   `block.timestamp` is past `deadline`; zero is refused the same way and `type(uint64).max` sets no
   limit. `ref` is the caller's own and is emitted, indexed, in `RedeemInitiated`; it is not on the
   wire. The deadline bounds the burn only: a credit queued on Base pays whenever the queue reaches it.
+- **`redeemWithPermit(usdcAmount, baseRecipient, maxFeeBps, deadline, ref, v, r, s)`** — `redeem`
+  with HOLLAR's EIP-2612 permit in place of a prior `approve`: one signature and one transaction.
+  The permit is the caller's, for this contract, for exactly `usdcAmount * scale`, under the same
+  `deadline`, so one deadline bounds both. The deadline is checked first, as in `redeem`. A permit
+  that reverts (someone submitted the same signature first) falls through to the caller's
+  allowance; with enough of it the redeem goes ahead, without it the call reverts `PermitFailed`.
+  Everything after the permit is `redeem`'s own body: the same checks, burn, message and
+  `RedeemInitiated`. HOLLAR's `transferFrom` consults a delegated allowance, the HDX precompile's,
+  before its own: unlimited for a contract on `approved_contracts`, otherwise what the owner approved
+  the facilitator there. An owner with such an approval burns without spending the permit, which
+  then stays behind as the owner's allowance to the facilitator, usable only in the owner's own
+  redeem; in that state a permit that fails reverts `PermitFailed` where `redeem` would pass.
 
 The solvency model is not in this contract. `GhoToken.burn` computes `bucketLevel - amount` with no
 floor, so 0.8 underflow means this facilitator can never redeem past what it minted — including
@@ -523,7 +535,11 @@ pnpm migrate:psm-base
 ```
 
 Nine steps: deploy both proxies, bind emitters (one-shot), set limits / fees, hand
-`DEFAULT_ADMIN_ROLE` to its permanent holder and renounce the deployer's.
+`DEFAULT_ADMIN_ROLE` to its permanent holder and renounce the deployer's. Two more upgrade the
+facilitator to the implementation with `redeemWithPermit`: 010 deploys it with the Hydration key,
+and 011 records the upgrade once the admin has made it. 011 sends nothing: until the proxy points
+at the new implementation it fails with the `upgradeToAndCall` calldata, which the TC submits
+through `dispatch_as_emergency_admin`.
 
 Two things the migration deliberately does **not** do, because neither is ours to run:
 
@@ -566,11 +582,15 @@ Fork suites run against live chain state and skip cleanly without an RPC:
 - `fork/BaseAaveFork` — real Aave v3.3 and Circle USDC; the virtual balance is mocked under the
   squeeze cases and the Chainlink feed is exercised only through `deposit`'s oracle gate. The
   blacklist is emulated in `unit/QueueHeadBlockTest`.
-- `fork/HydrationFacilitatorFork` — the real GHO contract's bucket arithmetic, mint and burn.
+- `fork/HydrationFacilitatorFork` — the real GHO contract's bucket arithmetic, mint and burn, and
+  `redeemWithPermit` against the real `permit`.
 
-`transferFrom` on HOLLAR resolves its allowance through a Substrate runtime precompile that anvil
-does not have, so the full redeem leg cannot run under Foundry — it is mocked in the fork suite and
-exercised for real by the chopsticks probe.
+`transferFrom` on HOLLAR first asks a delegated token (a Substrate runtime precompile) for an
+allowance, and anvil has only a stub there. The redeem tests mock `transferFrom` whole, and the leg
+is exercised for real by the chopsticks probe. The `redeemWithPermit` tests mock only the delegated
+read: at 0, its live value for an owner who approved nothing on the precompile, so HOLLAR's own
+`permit`, allowance, `transferFrom` and `burn` run; and once above the amount, for the owner who
+did.
 
 ## Contract reference
 

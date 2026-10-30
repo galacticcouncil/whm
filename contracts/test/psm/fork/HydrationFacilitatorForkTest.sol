@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IWormhole} from "wormhole-solidity-sdk/interfaces/IWormhole.sol";
 
 import {HollarBaseFacilitator} from "../../../src/psm/HollarBaseFacilitator.sol";
@@ -11,6 +12,7 @@ import {IGhoToken} from "../../../src/psm/interfaces/IGhoToken.sol";
 import {IHollarBaseFacilitator} from "../../../src/psm/interfaces/IHollarBaseFacilitator.sol";
 import {PsmPayload} from "../../../src/psm/lib/PsmPayload.sol";
 import {RateLimiter} from "../../../src/psm/lib/RateLimiter.sol";
+import {HollarPermit} from "../mocks/PsmMocks.sol";
 
 /// @title The facilitator against real HOLLAR on Hydration
 /// @notice The unit suite runs against `MockGho`. This one runs against the GHO contract the
@@ -23,8 +25,9 @@ import {RateLimiter} from "../../../src/psm/lib/RateLimiter.sol";
 ///      - `prevrandao` is unset in Hydration's EVM headers, so every call after the fork fails
 ///        header validation until it is stamped.
 ///      - `transferFrom` resolves its allowance through a Substrate runtime precompile that anvil
-///        does not have, so it is the one call mocked here. Everything it would have moved is
-///        placed on the facilitator with `deal` instead, leaving the burn and the bucket real.
+///        does not have. The redeem tests mock `transferFrom` whole and place what it would have
+///        moved on the facilitator with `deal`, leaving the burn and the bucket real; the
+///        `redeemWithPermit` tests mock only the precompile's allowance read.
 contract HydrationFacilitatorForkTest is Test {
     /// @dev The GHO ERC20, not the asset-222 precompile — that one answers symbol()/decimals()
     ///      and then reverts on everything a facilitator needs.
@@ -215,5 +218,92 @@ contract HydrationFacilitatorForkTest is Test {
         _redeem(alice, r, makeAddr("baseRecipient"));
         assertEq(_level(), (m - r) * SCALE, "and comes back down exactly");
         assertEq(_level() % SCALE, 0, "no dust can strand");
+    }
+
+    // ─── redeemWithPermit against the real permit ───────────────
+
+    /// @dev HOLLAR's `transferFrom` asks this delegated token, the HDX precompile, for an allowance
+    ///      first and falls back to its own when that does not cover the amount. The precompile
+    ///      answers per (owner, spender): unlimited for an approved contract, otherwise what the owner
+    ///      approved there (hydration-node a35840f0, multicurrency.rs:257-264); live it read 0 for
+    ///      the deployed facilitator (eth_call, 2026-10-30). Here it is a stub anvil cannot call, so
+    ///      that one read is pinned. HOLLAR's own `permit`, allowance, `transferFrom` and `burn` run.
+    address internal constant DELEGATED_TOKEN = 0x0000000000000000000000000000000100000000;
+
+    function _signPermit(uint256 key, address owner, uint256 value, uint64 deadline)
+        internal
+        view
+        returns (uint8 v, bytes32 r, bytes32 s)
+    {
+        uint256 nonce = IGhoToken(HOLLAR).nonces(owner);
+        bytes32 permitHash = HollarPermit.structHash(owner, address(facilitator), value, nonce, deadline);
+        return vm.sign(key, HollarPermit.digest(HOLLAR, permitHash));
+    }
+
+    function _redeemWithPermit(address from, uint256 usdcAmount, uint64 deadline, uint8 v, bytes32 r, bytes32 s)
+        internal
+    {
+        vm.mockCall(DELEGATED_TOKEN, abi.encodeWithSelector(IERC20.allowance.selector), abi.encode(uint256(0)));
+        vm.prank(from);
+        facilitator.redeemWithPermit(usdcAmount, makeAddr("baseRecipient"), type(uint16).max, deadline, bytes32(0), v, r, s);
+        vm.clearMockedCalls();
+    }
+
+    /// @dev One signature, one call, against the live token: the permit's domain is the token's,
+    ///      its allowance is the one `transferFrom` spends, and the burn moves the real bucket.
+    function test_redeemWithPermit_realHollarPermit() public onFork {
+        (address holder, uint256 key) = makeAddrAndKey("holder");
+        _deliverMint(holder, 1_000e6, 1);
+        assertEq(IGhoToken(HOLLAR).DOMAIN_SEPARATOR(), HollarPermit.domain(HOLLAR), "we sign the live domain");
+
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(key, holder, 400e18, deadline);
+        _redeemWithPermit(holder, 400e6, deadline, v, r, s);
+
+        assertEq(IGhoToken(HOLLAR).balanceOf(holder), 600e18, "real HOLLAR pulled and burned");
+        assertEq(_level(), 600e18, "real bucket decremented");
+        assertEq(IGhoToken(HOLLAR).allowance(holder, address(facilitator)), 0, "the permit's allowance is spent");
+        assertEq(IGhoToken(HOLLAR).nonces(holder), 1, "the real nonce moved");
+
+        // The same signed call again: the nonce is used and the allowance is gone.
+        vm.mockCall(DELEGATED_TOKEN, abi.encodeWithSelector(IERC20.allowance.selector), abi.encode(uint256(0)));
+        vm.expectRevert(abi.encodeWithSelector(IHollarBaseFacilitator.PermitFailed.selector, 0, 400e18));
+        vm.prank(holder);
+        facilitator.redeemWithPermit(400e6, makeAddr("baseRecipient"), type(uint16).max, deadline, bytes32(0), v, r, s);
+        vm.clearMockedCalls();
+        assertEq(_level(), 600e18, "nothing burned twice");
+    }
+
+    /// @dev The bound on the delegated path. An owner who approved the facilitator on the HDX
+    ///      precompile burns on that approval, so the permit's allowance is left unspent. It is the
+    ///      owner's, to the facilitator only: nobody else can draw on it, and the facilitator pulls
+    ///      only from its caller.
+    function test_redeemWithPermit_ownersPrecompileApprovalLeavesThePermitUnspent() public onFork {
+        (address holder, uint256 key) = makeAddrAndKey("holder");
+        _deliverMint(holder, 1_000e6, 1);
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(key, holder, 400e18, deadline);
+
+        vm.mockCall(
+            DELEGATED_TOKEN,
+            abi.encodeWithSelector(IERC20.allowance.selector, holder, address(facilitator)),
+            abi.encode(uint256(type(uint128).max))
+        );
+        vm.prank(holder);
+        facilitator.redeemWithPermit(400e6, makeAddr("baseRecipient"), type(uint16).max, deadline, bytes32(0), v, r, s);
+        vm.clearMockedCalls();
+
+        assertEq(_level(), 600e18, "the burn happened");
+        assertEq(IGhoToken(HOLLAR).nonces(holder), 1, "the permit applied");
+        assertEq(IGhoToken(HOLLAR).allowance(holder, address(facilitator)), 400e18, "and stayed unspent");
+
+        // Another caller cannot reach it: the facilitator pulls from msg.sender, who has nothing.
+        address eve = makeAddr("eve");
+        vm.mockCall(DELEGATED_TOKEN, abi.encodeWithSelector(IERC20.allowance.selector), abi.encode(uint256(0)));
+        vm.expectRevert();
+        vm.prank(eve);
+        facilitator.redeem(400e6, makeAddr("baseRecipient"), type(uint16).max, NO_DEADLINE, bytes32(0));
+        vm.clearMockedCalls();
+        assertEq(IGhoToken(HOLLAR).allowance(holder, address(facilitator)), 400e18, "still the holder's");
     }
 }

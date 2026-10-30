@@ -263,6 +263,56 @@ contract HollarBaseFacilitator is MessageReceiver, AccessControlUpgradeable, IHo
     {
         // First, so an expired call costs as little as it can and touches nothing.
         if (block.timestamp > deadline) revert RedeemExpired(deadline);
+        return _redeem(usdcAmount, baseRecipient, maxFeeBps, ref);
+    }
+
+    /// @notice `redeem` with an EIP-2612 permit in place of a prior `approve`: one signature and
+    ///         one transaction.
+    /// @dev The permit is for exactly this burn: owner the caller, spender this contract, value
+    ///      `usdcAmount * scale`, and this call's `deadline`, so one deadline bounds both.
+    ///
+    ///      The permit is tried, not required. Anyone who sees the signature can submit it to the
+    ///      token first. That spends the nonce and makes our call to `permit` revert, but leaves
+    ///      the allowance it granted in place, so a failed permit falls through to the allowance:
+    ///      enough of it and the redeem goes ahead, too little and it stops here. The same
+    ///      fall-through accepts an allowance the caller set some other way; it is theirs to spend.
+    ///
+    ///      HOLLAR's `transferFrom` asks a delegated token first, the HDX precompile: unlimited for a
+    ///      contract on `approved_contracts`, otherwise what the owner approved this contract there.
+    ///      Its own allowance, the one a permit sets and the fall-through reads, is spent only when
+    ///      that does not cover the amount. An owner who approved this contract on the precompile
+    ///      therefore burns without spending the permit, and its allowance stays behind: the
+    ///      owner's, usable only by this contract pulling from the owner, in the owner's own redeem.
+    ///      In that state a permit that fails also fails closed here, where `redeem` would pass.
+    /// @param v With `r` and `s`, the caller's signature over the permit.
+    function redeemWithPermit(
+        uint256 usdcAmount,
+        address baseRecipient,
+        uint16 maxFeeBps,
+        uint64 deadline,
+        bytes32 ref,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external payable returns (uint64 sequence) {
+        if (block.timestamp > deadline) revert RedeemExpired(deadline);
+
+        uint256 hollarAmount = usdcAmount * scale;
+        try hollar.permit(msg.sender, address(this), hollarAmount, deadline, v, r, s) {}
+        catch {
+            uint256 allowed = hollar.allowance(msg.sender, address(this));
+            if (allowed < hollarAmount) revert PermitFailed(allowed, hollarAmount);
+        }
+
+        return _redeem(usdcAmount, baseRecipient, maxFeeBps, ref);
+    }
+
+    /// @dev Everything after the deadline, shared by `redeem` and `redeemWithPermit`: one body, one
+    ///      event. The caller's deadline check stays in each entry point, ahead of anything else.
+    function _redeem(uint256 usdcAmount, address baseRecipient, uint16 maxFeeBps, bytes32 ref)
+        private
+        returns (uint64 sequence)
+    {
         if (redeemPaused) revert RedeemPaused();
         if (baseRecipient == address(0)) revert ZeroAddress();
 

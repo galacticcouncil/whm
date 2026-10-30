@@ -31,6 +31,11 @@ import type { MigrationConfig } from "./types";
  * resume, a different one throws — and the handovers refuse to hand the role to the deployer
  * itself. A `failed` step still re-runs on every invocation; `--from <next>` does not skip it.
  *
+ * 010-011 upgrade the facilitator to the implementation with redeemWithPermit. 010 deploys it with
+ * the Hydration key; 011 sends nothing and completes once the proxy delegates to it. The upgrade is
+ * DEFAULT_ADMIN_ROLE's, the TC emergency admin since 007, so until its motion enacts 011 fails with
+ * the upgradeToAndCall calldata, and the run after the motion records it.
+ *
  * Two things this migration deliberately does NOT do, because neither is ours to run:
  *
  *   - GhoToken.addFacilitator(facilitator, label, capacity). Hydration governance — the GHO roles
