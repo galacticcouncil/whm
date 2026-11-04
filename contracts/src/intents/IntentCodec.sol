@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import {IIntentQuoteEmitter} from "./interfaces/IIntentQuoteEmitter.sol";
+import {IIntentDispatcher} from "./interfaces/IIntentDispatcher.sol";
 
-/// @title IntentCodec — the terms and order wire formats
+/// @title IntentCodec — the terms, order and forward wire formats
 /// @notice Packed big-endian, because the decoder is Rust (crates/near/contracts/intent-router,
 ///         `terms.rs` and `order.rs`). Checks mirror the router's parser exactly: terms this encoder
 ///         accepts must parse there, or their account could not even refund. Layouts and rationale:
@@ -19,6 +19,9 @@ import {IIntentQuoteEmitter} from "./interfaces/IIntentQuoteEmitter.sol";
 ///               67     8  deadline             98+D     R  recipient       total 98 + D + R
 ///
 ///         Order message: msgType 1 | authPath 32 | seq 8 | amount 16 | outPerIn 16 — 73 bytes.
+///
+///         Forward payload, in the NTT transfer's `additionalPayload`:
+///           version 1 | depositAddress 20 | maxRelayFee 16 — 37 bytes.
 library IntentCodec {
     /// @notice The limit swap — the only strategy. Inside the hash, so a future layout derives
     ///         disjoint accounts.
@@ -41,6 +44,11 @@ library IntentCodec {
 
     uint256 internal constant ORDER_SIZE = 73;
 
+    /// @notice The forward payload's version.
+    uint8 internal constant FORWARD_VERSION = 1;
+
+    uint256 internal constant FORWARD_SIZE = 37;
+
     error InvalidQuoteId();
     error InvalidSlippage(uint16 bps);
     error InvalidDeadline();
@@ -51,11 +59,15 @@ library IntentCodec {
     error InvalidVersion(uint8 version);
     /// @dev Declared lengths do not account for the buffer exactly.
     error MalformedTerms(uint256 length);
+    /// @dev Not a 37-byte payload of the forward version.
+    error MalformedForward(uint256 length);
+    /// @dev A relay ceiling wider than the payload's 16 bytes.
+    error InvalidRelayFee(uint256 maxRelayFee);
 
     // ─── Terms ───────────────────────────────────────────────────
 
     /// @notice The MPC derivation path a set of terms hashes to.
-    function authPath(IIntentQuoteEmitter.Quote calldata t) internal pure returns (bytes32) {
+    function authPath(IIntentDispatcher.Quote memory t) internal pure returns (bytes32) {
         return keccak256(encodeQuote(t));
     }
 
@@ -63,7 +75,7 @@ library IntentCodec {
     /// @dev Every check the router's parser makes, made here first. Length bounds belong to the
     ///      encoder, so no caller can obtain an ambiguous hash: over 255 wraps to zero through the
     ///      `uint8` cast.
-    function encodeQuote(IIntentQuoteEmitter.Quote calldata t) internal pure returns (bytes memory) {
+    function encodeQuote(IIntentDispatcher.Quote memory t) internal pure returns (bytes memory) {
         bytes memory asset = bytes(t.destinationAsset);
         bytes memory recipient = bytes(t.recipient);
 
@@ -94,7 +106,7 @@ library IntentCodec {
     /// @notice Parse encoded terms back — the mirror of the router's decoder, for tests and tools.
     /// @dev Rejects rather than truncates: a buffer two different sets of terms could hash from is
     ///      not one to read the first of.
-    function decodeQuote(bytes memory terms) internal pure returns (IIntentQuoteEmitter.Quote memory t) {
+    function decodeQuote(bytes memory terms) internal pure returns (IIntentDispatcher.Quote memory t) {
         if (terms.length < TERMS_HEADER_SIZE) revert MalformedTerms(terms.length);
         if (uint8(terms[0]) != VERSION) revert InvalidVersion(uint8(terms[0]));
 
@@ -106,7 +118,7 @@ library IntentCodec {
         // Read the second length only after the first string, and hold the total to both.
         if (terms.length != recipientLenOffset + 1 + recipientLen) revert MalformedTerms(terms.length);
 
-        t = IIntentQuoteEmitter.Quote({
+        t = IIntentDispatcher.Quote({
             quoteId: bytes32(_uint(terms, 1, 32)),
             maxSlippageBps: uint16(_uint(terms, 33, 2)),
             minOutPerIn: uint128(_uint(terms, 35, 16)),
@@ -130,8 +142,25 @@ library IntentCodec {
     // ─── Order ───────────────────────────────────────────────────
 
     /// @notice The order message: what the router reads to price one fill of the path's account.
-    function encodeOrder(bytes32 path, IIntentQuoteEmitter.Order calldata o) internal pure returns (bytes memory) {
+    function encodeOrder(bytes32 path, IIntentDispatcher.Order memory o) internal pure returns (bytes memory) {
         return abi.encodePacked(MSG_ORDER, path, o.seq, o.amount, o.outPerIn);
+    }
+
+    // ─── Forward ─────────────────────────────────────────────────
+
+    /// @notice The forwarding instruction the Ethereum forwarder reads from the NTT transfer.
+    function encodeForward(address depositAddress, uint256 maxRelayFee) internal pure returns (bytes memory) {
+        if (maxRelayFee > type(uint128).max) revert InvalidRelayFee(maxRelayFee);
+        return abi.encodePacked(FORWARD_VERSION, depositAddress, uint128(maxRelayFee));
+    }
+
+    /// @notice Parse a forward payload — exactly 37 bytes of the forward version, or nothing.
+    function decodeForward(bytes memory payload) internal pure returns (address depositAddress, uint256 maxRelayFee) {
+        if (payload.length != FORWARD_SIZE || uint8(payload[0]) != FORWARD_VERSION) {
+            revert MalformedForward(payload.length);
+        }
+        depositAddress = address(uint160(_uint(payload, 1, 20)));
+        maxRelayFee = _uint(payload, 21, 16);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────

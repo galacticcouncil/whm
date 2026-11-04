@@ -2,71 +2,44 @@
 pragma solidity ^0.8.22;
 
 import {Test} from "forge-std/Test.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {IntentQuoteEmitter} from "../../src/intents/IntentQuoteEmitter.sol";
 import {IntentCodec} from "../../src/intents/IntentCodec.sol";
-import {IIntentQuoteEmitter} from "../../src/intents/interfaces/IIntentQuoteEmitter.sol";
-
-contract MockCoreBridge {
-    uint256 public fee;
-    uint64 public nextSequence = 42;
-
-    bytes public lastPayload;
-    uint32 public lastNonce;
-    uint8 public lastConsistency;
-    uint256 public lastValue;
-
-    function setFee(uint256 _fee) external {
-        fee = _fee;
-    }
-
-    function messageFee() external view returns (uint256) {
-        return fee;
-    }
-
-    function publishMessage(uint32 nonce, bytes memory payload, uint8 consistencyLevel)
-        external
-        payable
-        returns (uint64 sequence)
-    {
-        lastNonce = nonce;
-        lastPayload = payload;
-        lastConsistency = consistencyLevel;
-        lastValue = msg.value;
-
-        sequence = nextSequence;
-        nextSequence++;
-    }
-}
+import {IIntentDispatcher} from "../../src/intents/interfaces/IIntentDispatcher.sol";
 
 /// @dev The codec is a library, so its reverts are inlined into the caller rather than raised in a
 ///      subcall — `expectRevert` needs a real call frame to catch. This is that frame.
 contract CodecHarness {
-    function encode(IIntentQuoteEmitter.Quote calldata terms) external pure returns (bytes memory) {
+    function encode(IIntentDispatcher.Quote calldata terms) external pure returns (bytes memory) {
         return IntentCodec.encodeQuote(terms);
     }
 
-    function decode(bytes memory terms) external pure returns (IIntentQuoteEmitter.Quote memory) {
+    function decode(bytes memory terms) external pure returns (IIntentDispatcher.Quote memory) {
         return IntentCodec.decodeQuote(terms);
     }
 
-    function encodeOrder(bytes32 path, IIntentQuoteEmitter.Order calldata o) external pure returns (bytes memory) {
+    function encodeOrder(bytes32 path, IIntentDispatcher.Order calldata o) external pure returns (bytes memory) {
         return IntentCodec.encodeOrder(path, o);
+    }
+
+    function authPath(IIntentDispatcher.Quote calldata terms) external pure returns (bytes32) {
+        return IntentCodec.authPath(terms);
+    }
+
+    function encodeForward(address depositAddress, uint256 maxRelayFee) external pure returns (bytes memory) {
+        return IntentCodec.encodeForward(depositAddress, maxRelayFee);
+    }
+
+    function decodeForward(bytes memory payload) external pure returns (address, uint256) {
+        return IntentCodec.decodeForward(payload);
     }
 }
 
-/// @title IntentQuoteEmitterTest
-/// @notice Pins the two wire formats NEAR's IntentRouter reads — the terms, hashed into the account
-///         `A`, and the order message — to the router's own golden vectors, and the emitter's one
-///         rule: only an authorized dispatcher publishes a price.
-contract IntentQuoteEmitterTest is Test {
-    IntentQuoteEmitter public emitter;
-    MockCoreBridge public coreBridge;
+/// @title IntentCodecTest
+/// @notice Pins the wire formats intents v2 crosses chains with — the terms, hashed into the account
+///         `A`, and the order message, both read by NEAR's router, to the router's own golden
+///         vectors; and the forward payload the Ethereum forwarder reads from the NTT transfer.
+contract IntentCodecTest is Test {
     CodecHarness public codec;
-
-    address constant DISPATCHER = address(0xD15);
-    address constant STRANGER = address(0xBAD);
 
     string constant ZEC = "nep141:zec.omft.near";
     string constant T_ADDR = "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma";
@@ -82,23 +55,13 @@ contract IntentQuoteEmitterTest is Test {
         hex"0107070707070707070707070707070707070707070707070707070707070707070000000000000009000000000000000000038d7ea4c680000000000000000000000000000aba9500";
 
     function setUp() public {
-        coreBridge = new MockCoreBridge();
         codec = new CodecHarness();
-        emitter = IntentQuoteEmitter(
-            address(
-                new ERC1967Proxy(
-                    address(new IntentQuoteEmitter()),
-                    abi.encodeCall(IntentQuoteEmitter.initialize, (address(coreBridge)))
-                )
-            )
-        );
-        emitter.setDispatcher(DISPATCHER, true);
     }
 
     // ─── Helpers ────────────────────────────────────────────────────
 
-    function _terms() internal pure returns (IIntentQuoteEmitter.Quote memory) {
-        return IIntentQuoteEmitter.Quote({
+    function _terms() internal pure returns (IIntentDispatcher.Quote memory) {
+        return IIntentDispatcher.Quote({
             quoteId: bytes32(uint256(0x1111111111111111111111111111111111111111111111111111111111111111)),
             maxSlippageBps: 100,
             minOutPerIn: 150_000_000,
@@ -111,13 +74,8 @@ contract IntentQuoteEmitterTest is Test {
         });
     }
 
-    function _order() internal pure returns (IIntentQuoteEmitter.Order memory) {
-        return IIntentQuoteEmitter.Order({seq: 9, amount: 1e15, outPerIn: 180_000_000});
-    }
-
-    function _publish() internal returns (bytes32 path, uint64 sequence) {
-        vm.prank(DISPATCHER);
-        return emitter.publishOrder(_terms(), _order());
+    function _order() internal pure returns (IIntentDispatcher.Order memory) {
+        return IIntentDispatcher.Order({seq: 9, amount: 1e15, outPerIn: 180_000_000});
     }
 
     // ─── Wire-format readers (independent of the encoder) ───────────
@@ -141,15 +99,15 @@ contract IntentQuoteEmitterTest is Test {
     /// @notice The bytes the router hashes into `A`, equal to its own Rust and TypeScript encoders'.
     ///         A mismatch here is a different account on NEAR.
     function testTermsMatchTheRoutersGoldenVector() public view {
-        assertEq(emitter.computeTerms(_terms()), GOLDEN_TERMS, "terms");
-        assertEq(emitter.computeAuthPath(_terms()), GOLDEN_PATH, "path");
+        assertEq(codec.encode(_terms()), GOLDEN_TERMS, "terms");
+        assertEq(codec.authPath(_terms()), GOLDEN_PATH, "path");
         assertEq(keccak256(GOLDEN_TERMS), GOLDEN_PATH, "path is keccak of the terms");
     }
 
     /// @notice The router decodes by offset, so the layout is read back field by field rather than
     ///         by re-encoding.
     function testTermsWireFormat() public view {
-        bytes memory p = emitter.computeTerms(_terms());
+        bytes memory p = codec.encode(_terms());
         assertEq(_uint(p, 0, 1), 1, "version");
         assertEq(bytes32(_uint(p, 1, 32)), _terms().quoteId, "quoteId");
         assertEq(_uint(p, 33, 2), 100, "maxSlippageBps");
@@ -169,14 +127,14 @@ contract IntentQuoteEmitterTest is Test {
     }
 
     function testTermsRoundTripThroughTheDecoder() public view {
-        IIntentQuoteEmitter.Quote memory t = codec.decode(GOLDEN_TERMS);
+        IIntentDispatcher.Quote memory t = codec.decode(GOLDEN_TERMS);
         assertEq(abi.encode(t), abi.encode(_terms()), "round trip");
     }
 
     /// @notice Each check the router's parser makes, made by the encoder first — terms it accepts
     ///         but the router rejects would leave their account unable even to refund.
     function testEncoderRejectsWhatTheRouterRejects() public {
-        IIntentQuoteEmitter.Quote memory t = _terms();
+        IIntentDispatcher.Quote memory t = _terms();
 
         t.quoteId = bytes32(0);
         vm.expectRevert(IntentCodec.InvalidQuoteId.selector);
@@ -221,7 +179,7 @@ contract IntentQuoteEmitterTest is Test {
     /// @notice An intents recipient is only structurally checked here, as in the router's parser —
     ///         whether it is an account id is checked at swap and delivery, so such terms still refund.
     function testIntentsRecipientIsStructuralOnly() public view {
-        IIntentQuoteEmitter.Quote memory t = _terms();
+        IIntentDispatcher.Quote memory t = _terms();
         t.recipientKind = IntentCodec.KIND_INTENTS_ACCOUNT;
         t.recipient = "Not_An.Account";
         codec.encode(t);
@@ -253,33 +211,33 @@ contract IntentQuoteEmitterTest is Test {
 
     /// @notice Every field moves the path — a change to any term is a different account.
     function testEveryTermMovesThePath() public view {
-        bytes32 base = emitter.computeAuthPath(_terms());
-        IIntentQuoteEmitter.Quote memory t;
+        bytes32 base = codec.authPath(_terms());
+        IIntentDispatcher.Quote memory t;
 
         t = _terms(); t.maxSlippageBps = 99;
-        assertTrue(emitter.computeAuthPath(t) != base, "slippage");
+        assertTrue(codec.authPath(t) != base, "slippage");
         t = _terms(); t.minOutPerIn = 1;
-        assertTrue(emitter.computeAuthPath(t) != base, "hard floor");
+        assertTrue(codec.authPath(t) != base, "hard floor");
         t = _terms(); t.minDelivery = 1;
-        assertTrue(emitter.computeAuthPath(t) != base, "minDelivery");
+        assertTrue(codec.authPath(t) != base, "minDelivery");
         t = _terms(); t.deadline = 1;
-        assertTrue(emitter.computeAuthPath(t) != base, "deadline");
+        assertTrue(codec.authPath(t) != base, "deadline");
         t = _terms(); t.refundTo = address(0x3333);
-        assertTrue(emitter.computeAuthPath(t) != base, "refundTo");
+        assertTrue(codec.authPath(t) != base, "refundTo");
         t = _terms(); t.recipient = "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBmb";
-        assertTrue(emitter.computeAuthPath(t) != base, "recipient");
+        assertTrue(codec.authPath(t) != base, "recipient");
     }
 
     /// @notice The length bytes keep field boundaries unambiguous: moving a byte between the two
     ///         strings changes the path.
     function testPathIsUnambiguousAcrossFieldBoundaries() public view {
-        IIntentQuoteEmitter.Quote memory a = _terms();
+        IIntentDispatcher.Quote memory a = _terms();
         a.destinationAsset = "nep141:a";
         a.recipient = "bc";
-        IIntentQuoteEmitter.Quote memory b = _terms();
+        IIntentDispatcher.Quote memory b = _terms();
         b.destinationAsset = "nep141:ab";
         b.recipient = "c";
-        assertTrue(emitter.computeAuthPath(a) != emitter.computeAuthPath(b));
+        assertTrue(codec.authPath(a) != codec.authPath(b));
     }
 
     // ─── Orders ─────────────────────────────────────────────────────
@@ -289,73 +247,49 @@ contract IntentQuoteEmitterTest is Test {
         assertEq(codec.encodeOrder(path, _order()), GOLDEN_ORDER);
     }
 
-    function testPublishOrder() public {
-        vm.expectEmit(true, true, false, true, address(emitter));
-        emit IIntentQuoteEmitter.OrderPublished(GOLDEN_PATH, 9, DISPATCHER, 1e15, 180_000_000, 42, GOLDEN_TERMS);
-        (bytes32 path, uint64 sequence) = _publish();
+    // ─── Forward ────────────────────────────────────────────────────
 
-        assertEq(path, GOLDEN_PATH, "path");
-        assertEq(sequence, 42, "sequence");
-        assertEq(coreBridge.lastPayload(), abi.encodePacked(uint8(1), GOLDEN_PATH, uint64(9), uint128(1e15), uint128(180_000_000)));
-        assertEq(coreBridge.lastPayload().length, 73, "order size");
-        assertEq(coreBridge.lastConsistency(), 202, "finalized");
-        assertEq(emitter.nonce(), 1, "nonce");
+    function testForwardPayload() public view {
+        address deposit = address(0x04624e5890ed9c703D94652E19E4e327E2F4002a);
+        bytes memory p = codec.encodeForward(deposit, 5e10);
+        assertEq(p, abi.encodePacked(uint8(1), deposit, uint128(5e10)), "version | depositAddress | maxRelayFee");
+        assertEq(p.length, 37, "37 bytes, well under the manager's payload cap");
+        (address d, uint256 fee) = codec.decodeForward(p);
+        assertEq(d, deposit);
+        assertEq(fee, 5e10);
     }
 
-    /// @notice A price is an authority over every path: only an authorized dispatcher sets one.
-    function testOnlyADispatcherPublishes() public {
-        vm.prank(STRANGER);
-        vm.expectRevert(IIntentQuoteEmitter.NotDispatcher.selector);
-        emitter.publishOrder(_terms(), _order());
+    function testForwardRejectsAnythingElse() public {
+        bytes memory p = codec.encodeForward(address(0xBEEF), 1);
 
-        emitter.setDispatcher(DISPATCHER, false);
-        vm.prank(DISPATCHER);
-        vm.expectRevert(IIntentQuoteEmitter.NotDispatcher.selector);
-        emitter.publishOrder(_terms(), _order());
+        vm.expectRevert(abi.encodeWithSelector(IntentCodec.MalformedForward.selector, 36));
+        codec.decodeForward(_head(p, 36));
+
+        vm.expectRevert(abi.encodeWithSelector(IntentCodec.MalformedForward.selector, 38));
+        codec.decodeForward(bytes.concat(p, hex"00"));
+
+        p[0] = 0x02;
+        vm.expectRevert(abi.encodeWithSelector(IntentCodec.MalformedForward.selector, 37));
+        codec.decodeForward(p);
+
+        vm.expectRevert(abi.encodeWithSelector(IntentCodec.InvalidRelayFee.selector, uint256(type(uint128).max) + 1));
+        codec.encodeForward(address(0xBEEF), uint256(type(uint128).max) + 1);
     }
 
-    function testRejectsAZeroRate() public {
-        IIntentQuoteEmitter.Order memory o = _order();
-        o.outPerIn = 0;
-        vm.prank(DISPATCHER);
-        vm.expectRevert(IIntentQuoteEmitter.ZeroRate.selector);
-        emitter.publishOrder(_terms(), o);
+    /// @notice An order message is not a forward payload, and a forward payload is not an order —
+    ///         they travel in different VAAs, and neither parses as the other.
+    function testOrderAndForwardDoNotParseAsEachOther() public {
+        bytes32 path = bytes32(uint256(0x0707070707070707070707070707070707070707070707070707070707070707));
+        bytes memory order = codec.encodeOrder(path, _order());
+        vm.expectRevert(abi.encodeWithSelector(IntentCodec.MalformedForward.selector, 73));
+        codec.decodeForward(order);
+        assertTrue(codec.encodeForward(address(0xBEEF), 1).length != 73, "the router requires exactly 73 bytes");
     }
 
-    function testInvalidTermsAreNeverPublished() public {
-        IIntentQuoteEmitter.Quote memory t = _terms();
-        t.refundTo = address(0);
-        vm.prank(DISPATCHER);
-        vm.expectRevert(IntentCodec.InvalidRefundTo.selector);
-        emitter.publishOrder(t, _order());
-    }
-
-    /// @notice Native is WETH on Hydration: an approximate fee would be paid out of someone's funds.
-    function testRequiresTheExactMessageFee() public {
-        coreBridge.setFee(7);
-        vm.deal(DISPATCHER, 10);
-
-        vm.prank(DISPATCHER);
-        vm.expectRevert(abi.encodeWithSelector(IIntentQuoteEmitter.InvalidMessageFee.selector, 7, 8));
-        emitter.publishOrder{value: 8}(_terms(), _order());
-
-        vm.prank(DISPATCHER);
-        emitter.publishOrder{value: 7}(_terms(), _order());
-        assertEq(coreBridge.lastValue(), 7);
-    }
-
-    // ─── Admin ──────────────────────────────────────────────────────
-
-    function testOnlyTheOwnerAuthorizes() public {
-        vm.prank(STRANGER);
-        vm.expectRevert(IIntentQuoteEmitter.NotOwner.selector);
-        emitter.setDispatcher(STRANGER, true);
-    }
-
-    function testOnlyTheOwnerUpgrades() public {
-        address impl = address(new IntentQuoteEmitter());
-        vm.prank(STRANGER);
-        vm.expectRevert(IIntentQuoteEmitter.NotOwner.selector);
-        emitter.upgradeToAndCall(impl, "");
+    function _head(bytes memory b, uint256 n) internal pure returns (bytes memory out) {
+        out = new bytes(n);
+        for (uint256 i = 0; i < n; i++) {
+            out[i] = b[i];
+        }
     }
 }
