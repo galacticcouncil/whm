@@ -179,7 +179,7 @@ from balances continuously (late credits, restored withdrawals, post-deadline re
 
 ### Scan / SDK (minimal for MVP)
 
-Scan: index `OrderPublished`, `Dispatched`, ICE forward failures, router `intent_signed`, settlement.
+Scan: index `OrderPublished`, ICE forward failures, router `intent_signed`, settlement.
 SDK: terms builder (random `quoteId`; tight DCA slippage, wider swap slippage; ICE schedule ends a
 grace period before `terms.deadline`) → derivation → confirmation check → ICE submit or `dispatch`.
 
