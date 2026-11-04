@@ -2,7 +2,7 @@
   "migration": "psm-base",
   "environment": "prod",
   "startedAt": "2026-10-21T09:40:37.450Z",
-  "completedAt": null,
+  "completedAt": "2026-11-04T11:47:53.842Z",
   "steps": [
     {
       "name": "001-deploy-vault",
@@ -102,11 +102,17 @@
     },
     {
       "name": "009-transfer-ownership@vault",
-      "status": "pending",
-      "output": null,
+      "status": "completed",
+      "output": {
+        "grantTxHash": "0xb49084cd9ab1ef550f791ed8cd2b7f83d0865df967868237ed09a97bd844fba1",
+        "renounceTxHash": "0xebcdd3bd4d45ca93dd12414ac7a654515ff27b158e57f6c30c22457f5299e3b5",
+        "contract": "0xd5fd74f570343245afce4a4c0b24b59179cfdfa7",
+        "newAdmin": "0xD557AeAf1e0cB3D226BfF3B7a10C2cdA9dA081E7",
+        "renouncedBy": "0x20b588a194d9a3D788985c0C86A1160836a0Aaaa"
+      },
       "error": null,
-      "startedAt": null,
-      "completedAt": null
+      "startedAt": "2026-11-04T11:45:41.435Z",
+      "completedAt": "2026-11-04T11:45:43.841Z"
     }
   ]
 }
