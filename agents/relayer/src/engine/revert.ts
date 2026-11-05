@@ -33,8 +33,17 @@ const DONE_REASONS = [
  * window only gets further past it, and a payload that scales to zero is fixed bytes.
  * `StalePriceUpdate` is deliberately NOT here — it means a newer price won the race, which is a
  * genuine completion and belongs in DONE_ERRORS.
+ *
+ * `OracleNotSet` is a VAA delivered to a receiver that does not carry its asset (two receivers
+ * share the Ethereum emitter). `PriceDeviationTooLarge` is a CheckedOracle band rejection: the
+ * VAA ages out of `maxPriceAge` long before the pool EMA moves enough for a retry to pass.
  */
-const DEAD_REASONS = ["Price too stale", "Price too low to scale"];
+const DEAD_REASONS = [
+  "Price too stale",
+  "Price too low to scale",
+  "OracleNotSet",
+  "PriceDeviationTooLarge",
+];
 
 /**
  * The revert's own name: a custom error's name, or the string behind a require.
