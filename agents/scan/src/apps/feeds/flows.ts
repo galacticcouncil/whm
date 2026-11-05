@@ -4,7 +4,7 @@ import { pad } from "viem";
 import { LogMessagePublishedEvt } from "../../abi";
 import { wormholeId } from "../../chains";
 import { PUBLISH, type Publish } from "../../chains/events";
-import { ORACLE } from "../../deployments";
+import { ORACLE, ORACLE_ROUTES } from "../../deployments";
 import { vaaId } from "../../ingest/vaa";
 import type { Flow, LogEvent } from "../../types";
 
@@ -24,9 +24,23 @@ const EMITTERS = new Map<string, string>(
 const EVM_SOURCES = Object.keys(ORACLE).filter((c) => c !== "solana");
 
 /** Each receiver's source chain, by its address. */
-const SOURCE_OF = new Map<string, string>(
-  Object.entries(ORACLE).map(([chain, r]) => [r.receiver.address.toLowerCase(), chain]),
-);
+const SOURCE_OF = new Map<string, string>([
+  ...Object.entries(ORACLE).map(([chain, r]) => [r.receiver.address.toLowerCase(), chain] as const),
+  ...Object.entries(ORACLE_ROUTES).map(
+    ([route, r]) => [r.receiver.address.toLowerCase(), route] as const,
+  ),
+]);
+
+/**
+ * The route a source's asset also rides, or null.
+ *
+ * @param source Source chain.
+ * @param assetId As the payload carries it, lowercase.
+ */
+const routeOf = (source: string, assetId: string) =>
+  Object.entries(ORACLE_ROUTES).find(
+    ([, r]) => r.source === source && (r.assets as readonly string[]).includes(assetId),
+  )?.[0] ?? null;
 
 /** An update as the payload carries it: `abi.encode(uint8 action, bytes32 assetId, uint256 value, uint64 timestamp)`. */
 interface Update {
@@ -100,6 +114,24 @@ function published(
   };
 }
 
+/**
+ * The same publish's row under the route its asset also rides — or null when it rides none.
+ *
+ * @param emitter The emitter, 32 bytes.
+ * @param sequence The emitter's sequence.
+ * @param payload The payload.
+ * @param ev The publishing event.
+ */
+function routed(emitter: string, sequence: bigint, payload: string, ev: LogEvent) {
+  const p = published(emitter, sequence, payload, ev);
+  const route = p && routeOf(ev.chain, p.patch.asset_id);
+  if (!route) return null;
+  return {
+    key: key(route, p.patch.asset_id, p.patch.vaa_time),
+    patch: { ...p.patch, source_chain: route },
+  };
+}
+
 interface Logged {
   sender: `0x${string}`;
   sequence: bigint;
@@ -157,6 +189,15 @@ export const updates: Flow = {
       state: "published",
       key: (a: Logged, ev: LogEvent) => published(a.sender, a.sequence, a.payload, ev)?.key ?? null,
       patch: (a: Logged, ev: LogEvent) => published(a.sender, a.sequence, a.payload, ev)!.patch,
+    },
+    {
+      // The same publish again, under the route of a second receiver on that emitter.
+      role: "wormhole-core",
+      chains: EVM_SOURCES,
+      abi: LogMessagePublishedEvt,
+      state: "published",
+      key: (a: Logged, ev: LogEvent) => routed(a.sender, a.sequence, a.payload, ev)?.key ?? null,
+      patch: (a: Logged, ev: LogEvent) => routed(a.sender, a.sequence, a.payload, ev)!.patch,
     },
     {
       // Solana, as its watcher decodes the post.

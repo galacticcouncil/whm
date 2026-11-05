@@ -1,4 +1,4 @@
-import { ORACLE } from "../../deployments";
+import { ORACLE, ORACLE_ROUTES } from "../../deployments";
 
 /** One relayed oracle: what it is, where it comes from, and what it writes on arrival. */
 export interface Feed {
@@ -9,6 +9,8 @@ export interface Feed {
   assetId: `0x${string}`;
   /** The chain its emitter runs on — a key of `ORACLE`. */
   source: keyof typeof ORACLE;
+  /** A second receiver's route on that emitter — a key of `ORACLE_ROUTES` — when not the relay's own. */
+  route?: keyof typeof ORACLE_ROUTES;
   /** A price is in USD; a rate is in the underlying it converts to. */
   kind: "price" | "rate";
   unit: string;
@@ -45,6 +47,18 @@ export const FEEDS: Feed[] = [
     unit: "apxUSD",
     reads: "convertToAssets(1e18) on apyUSD",
     oracle: "0x80FaaC4Da72FCcABDa5B276D9A931252D6242Caf",
+    icon: null,
+  },
+  {
+    id: "apyusd-discount",
+    symbol: "apyUSD (discount)",
+    assetId: "0xde11c6e5fbb09ebf287fceb58deeb4a0e34ccb69e2deeb25dfe46ad04e35a5a8",
+    source: "ethereum",
+    route: "ethereum-apyusd",
+    kind: "rate",
+    unit: "apxUSD",
+    reads: "convertToAssets(1e18) on apyUSD",
+    oracle: "0x69E3409b0A1EEe647971650f594Bce5e8529a0BD",
     icon: null,
   },
   {

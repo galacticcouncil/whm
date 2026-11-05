@@ -10,6 +10,7 @@ import {
   NTT,
   nttLegs,
   ORACLE,
+  ORACLE_ROUTES,
   UTXO,
   WORMHOLE_CORE,
   type EvmLeg,
@@ -271,9 +272,12 @@ const ORACLES: Watch[] = [
     chain,
     role: "oracle-receiver",
     from: FROM[chain].oracles,
-    at: Object.values(ORACLE)
-      .filter((r) => r.receiver.chain === chain)
-      .map((r) => r.receiver.address),
+    at: [
+      ...Object.values(ORACLE).map((r) => r.receiver),
+      ...Object.values(ORACLE_ROUTES).map((r) => r.receiver),
+    ]
+      .filter((r) => r.chain === chain)
+      .map((r) => r.address),
   })),
 ];
 
