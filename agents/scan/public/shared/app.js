@@ -166,7 +166,44 @@ export function live(flows, onUpdate, onOpen, api = "/api") {
 // ─── Chains ───────────────────────────────────────────────────
 
 const HYDRATION_EXPLORER = "https://hydration-explorer.neckwork.net";
+const HYDRATION_RPC = "https://hydration-rpc.n.dwellir.com";
 const METADATA = "https://cdn.jsdelivr.net/gh/galacticcouncil/intergalactic-asset-metadata@latest/v2";
+
+/** `coefficient()` reads by oracle, one per page load — it moves only by governance. */
+const coefficients = new Map();
+
+/**
+ * A DiscountedCheckedOracle's coefficient, read straight from Hydration: 8 decimals, 1e8 neutral.
+ *
+ * @param {string} oracle The oracle's address.
+ * @returns {Promise<bigint|null>} Null when the read fails.
+ */
+export function coefficientOf(oracle) {
+  if (!coefficients.has(oracle)) {
+    const call = { to: oracle, data: "0x1b9c515b" }; // coefficient()
+    coefficients.set(
+      oracle,
+      fetch(HYDRATION_RPC, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [call, "latest"] }),
+      })
+        .then((r) => r.json())
+        .then((j) => (j.result && j.result !== "0x" ? BigInt(j.result) : null))
+        .catch(() => null),
+    );
+  }
+  return coefficients.get(oracle);
+}
+
+/**
+ * A raw value as a discounted oracle holds it: × coefficient / 1e8.
+ *
+ * @param {string} raw 18 decimals.
+ * @param {bigint} coefficient 8 decimals.
+ * @returns {string} 18 decimals.
+ */
+export const discounted = (raw, coefficient) => ((BigInt(raw) * coefficient) / 10n ** 8n).toString();
 
 /** Whether a reference has a real transaction behind it, rather than a block-and-event identity. */
 const hasTx = (r) => !!r.txHash && !r.txHash.includes("-");

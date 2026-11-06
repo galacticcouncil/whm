@@ -18,6 +18,8 @@ export interface Feed {
   reads: string;
   /** The oracle its receiver writes. */
   oracle: string;
+  /** The oracle stores the value × its `coefficient()`, which the pages read live. */
+  discounted?: boolean;
   /** Hydration asset id, which the registry keys icons by; null where it has none. */
   icon: number | null;
 }
@@ -47,11 +49,11 @@ export const FEEDS: Feed[] = [
     unit: "apxUSD",
     reads: "convertToAssets(1e18) on apyUSD",
     oracle: "0x80FaaC4Da72FCcABDa5B276D9A931252D6242Caf",
-    icon: null,
+    icon: 46,
   },
   {
     id: "apyusd-discount",
-    symbol: "apyUSD (discount)",
+    symbol: "apyUSD",
     assetId: "0xde11c6e5fbb09ebf287fceb58deeb4a0e34ccb69e2deeb25dfe46ad04e35a5a8",
     source: "ethereum",
     route: "ethereum-apyusd",
@@ -59,7 +61,8 @@ export const FEEDS: Feed[] = [
     unit: "apxUSD",
     reads: "convertToAssets(1e18) on apyUSD",
     oracle: "0x69E3409b0A1EEe647971650f594Bce5e8529a0BD",
-    icon: null,
+    discounted: true,
+    icon: 46,
   },
   {
     id: "sol",
