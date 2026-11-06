@@ -118,3 +118,33 @@ export const ROUTES: NttRoute[] = [
     transceiver: "0x0dd43A80C6F96019B8f5699Df1890DFa33BdDE85",
   },
 ];
+
+/**
+ * A transfer leaving Hydration, delivered on another chain by the `ntt-base` process. Kept apart
+ * from `NttRoute`, whose destination is always Hydration and which the `ntt` process serves.
+ */
+export interface OutboundNttRoute {
+  token: string;
+  /** Hydration transceiver, as the Wormhole emitter the transfer VAA comes from. */
+  sourceEmitter: Address;
+  /** Wormhole chain id the transfer must be addressed to (the payload's `toChain`). */
+  destinationChain: ChainId;
+  /** Destination NttManager — what the settlement must be addressed to, and whose digest we read. */
+  manager: Address;
+  /** Destination transceiver — what we submit the VAA to, and whose consumed-VAA set we read. */
+  transceiver: Address;
+}
+
+/**
+ * Hydration -> Base. EURC only: the Hydration manager burns, the Base manager unlocks from its
+ * lockbox. The pair is the reverse of the `EURC` entry in `ROUTES`.
+ */
+export const BASE_ROUTES: OutboundNttRoute[] = [
+  {
+    token: "EURC",
+    sourceEmitter: "0x2e84fac378D67Dc2e11026fB4919E80263a87375",
+    destinationChain: WORMHOLE.base,
+    manager: "0xD1dc3517732c98502b5c1ba2389AcA9E9016d89a",
+    transceiver: "0xa84b362290b0CFdB55e877dfc633284091e0B3F7",
+  },
+];

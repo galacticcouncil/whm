@@ -16,6 +16,31 @@ Redeems NTT transfers **into Hydration** from Ethereum, Base, Solana, and Sui. W
 deployed origin transceivers ([routes.ts](src/apps/ntt/routes.ts)) and submits each transfer VAA to
 that route's Hydration transceiver.
 
+### `ntt-base`
+
+A backstop that delivers NTT transfers **from Hydration to Base** — EURC only today
+([routes.ts](src/apps/ntt/routes.ts), `BASE_ROUTES`). The user's own claim or the Wormhole Executor
+normally delivers within minutes; this covers the transfers nobody delivers, such as one to an
+address that cannot send a transaction itself.
+
+- It acts on a VAA only once it is `NTT_BASE_GRACE_SECONDS` old (default 900), measured from the VAA
+  timestamp (the Hydration block time). A younger one is handed back to the engine, whose backoff
+  (2, 4, 8, 16, 30 min) makes the first real attempt about 30 min after the transfer at the default.
+- Then it reads the Base transceiver's `isVAAConsumed` and the manager's `isMessageExecuted`, skips a
+  transfer either marks done, simulates, and sends `receiveMessage`. A send it did not see land is
+  retried only through those reads.
+- A transfer the Base manager holds under its inbound rate limit is reported `queued` at warn, with a
+  Discord alert: someone must call `completeInboundQueuedTransfer` after the delay. The app does not.
+- Every other refusal is retried (simulate only, so no gas), `InvalidVaa` included: a valid VAA reads
+  as invalid while Base waits for a guardian-set upgrade. A transfer still undelivered after the last
+  of 50 attempts (about 23 h) raises an alert.
+
+Its own process and Base wallet (`PRIVKEY_BASE`, a value different from `psm-base`'s). Same queue as
+every app: it warns, and alerts `DISCORD_WEBHOOK_URL` when set, below `GAS_WARN_MULTIPLIER` times the
+cost of 1,000,000 gas, and exits — this container only — below that cost once. A delivery uses about
+340,000 gas. `FROM_SEQ_HYDRATION` is required. Check on a Base fork:
+[scripts/verify-ntt-base.ts](scripts/verify-ntt-base.ts).
+
 ### `ntt-near`
 
 Completes UTXO withdrawals **from Hydration on NEAR** ([withdraw](../../docs/near-utxo/withdraw/spec.md)).
@@ -104,8 +129,8 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `RPC_HYDRATION`       | Hydration EVM RPC (chain `222222`)                | `https://hydration-rpc.n.dwellir.com` |
 | `RPC_ETHEREUM`        | Ethereum RPC (`intent` only)                      | `https://eth.llamarpc.com`            |
 | `RPC_ROBINHOOD`       | Robinhood Chain RPC (`oracle-robinhood` only)     | `https://rpc.mainnet.chain.robinhood.com` |
-| `RPC_BASE`            | Base RPC (`psm-base` only)                        | `https://mainnet.base.org`            |
-| `PRIVKEY_BASE`        | Base signing key (`psm-base` only)                | Required                              |
+| `RPC_BASE`            | Base RPC (`psm-base`, `ntt-base`)                 | `https://mainnet.base.org`            |
+| `PRIVKEY_BASE`        | Base signing key (`psm-base`, `ntt-base`; differ) | Required                              |
 | `RPC_NEAR`            | NEAR RPC (`ntt-near` only)                        | `https://free.rpc.fastnear.com`       |
 | `NEAR_ACCOUNT_ID`     | NEAR signing account (`ntt-near` only)            | Required                              |
 | `NEAR_PRIVKEY`        | Its `ed25519:` secret key (`ntt-near` only)       | Required                              |
@@ -115,6 +140,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
 | `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts                       | optional                              |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
+| `NTT_BASE_GRACE_SECONDS` | Backstop delay before `ntt-base` acts on a VAA | `900`                                 |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |
 | `APP_NAME`            | Engine namespace override — **see below**         | per-app                               |
@@ -138,7 +164,7 @@ There is no test suite. The type check is `tsc -p agents/relayer --noEmit` from 
 ## Production
 
 ```bash
-pnpm --filter @whm/relayer build        # → dist/{ntt,ntt-near,oracle,oracle-robinhood,intent,basejump,psm-hydration,psm-base}/app.js
+pnpm --filter @whm/relayer build        # → dist/{ntt,ntt-base,ntt-near,oracle,oracle-robinhood,intent,basejump,psm-hydration,psm-base}/app.js
 pnpm --filter @whm/relayer start:oracle
 pnpm --filter @whm/relayer docker:up
 ```
@@ -166,7 +192,7 @@ safe sequence  {name}:missedVaasV3:safeSequence:{chain}:{emitter}
 
 Renaming orphans that state. The missed-VAA worker then falls back to the `FROM_SEQUENCE` floors and
 rescans — replaying a backlog, or silently skipping everything before the floor. Each app's
-`config.ts` carries the name already in Redis (`hydration-ntt-relayer`, `oracle-relayer`,
+`config.ts` carries the name already in Redis (`hydration-ntt-relayer`, `ntt-base-relayer`, `oracle-relayer`,
 `intent-relayer`, `basejump-relayer`, `psm-hydration-relayer`, `psm-base-relayer`); `APP_NAME`
 overrides it, which is only for running a second deployment beside the live one. Do not rename to
 tidy up.

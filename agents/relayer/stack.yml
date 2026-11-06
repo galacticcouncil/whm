@@ -179,6 +179,35 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: 'true'
 
+  app-ntt-base:
+    image: galacticcouncil/relayer:latest
+    command: [node, ntt-base/app.js]
+    environment:
+      # A fresh Base gas wallet, funded at deploy. PRIVKEY_BASE, not PRIVKEY, and a value DIFFERENT
+      # from app-psm-base's: reusing it puts two processes on one Base nonce lane. About 340,000 gas
+      # per delivery.
+      PRIVKEY_BASE: FILL THIS KEY ALWAYS
+      RPC_BASE: https://mainnet.base.org
+      # The Hydration EURC transceiver's last sequence already delivered on Base. Required (the app
+      # refuses to start without it); read only on this namespace's first run, since an unfloored
+      # missed-VAA walk on chain 73 never ends.
+      FROM_SEQ_HYDRATION: FILL THIS SEQUENCE ALWAYS
+      # Backstop delay: act only on transfers nobody delivered this many seconds after signing.
+      NTT_BASE_GRACE_SECONDS: '900'
+      # Optional: alert sink and the multiple of one submission's cost to warn below.
+      DISCORD_WEBHOOK_URL: MAYBE FILL THIS URL OR REMOVE IT
+      GAS_WARN_MULTIPLIER: '50'
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
+
   redis:
     image: redis:latest
     volumes:
