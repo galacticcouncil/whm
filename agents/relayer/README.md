@@ -71,6 +71,19 @@ A landing revert unwinds the VAA, so a retry is always safe; a pool shortfall qu
 reverting, so the only failures are transient and the retry budget is sized in hours. Latency is the
 point, so it does not wait on Wormholescan for the source tx hash.
 
+**Queued payouts.** When the landing's float is short, the payout queues instead of paying. The app
+then pays it from the same wallet ([payouts.ts](src/apps/basejump/payouts.ts)): after each delivery
+and every `QUEUED_PAYOUT_POLL_SECONDS`, it reads the queue head, the head's amount and the pool's
+balance of that asset, and calls `fulfillPending()` only when the pool covers it and a simulation
+passes. That call takes no arguments and pays the head to the recipient stored on chain; it is the
+only call this adds. The landing is read from each route's receiver, not configured.
+
+A head that stays unpaid for `QUEUED_PAYOUT_ALERT_MINUTES` (the pool is not refilled, or the call
+reverts, e.g. a dispatch that always fails) gets one Discord alert, and a follow-up once it is paid.
+Nothing is sent for it in the meantime. Such a head holds every later payout behind it until the
+Technical Committee acts (`withdraw` or an upgrade). The clock starts when this process first sees
+the head, so a restart restarts it.
+
 ### `psm-hydration` and `psm-base`
 
 Relays the HOLLAR peg stability module's two legs ([docs/psm/spec.md](../../docs/psm/spec.md)) — one
@@ -113,7 +126,9 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `REDIS_HOST`          | Redis host                                        | `localhost`                           |
 | `REDIS_PORT`          | Redis port                                        | `6379`                                |
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
-| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts                       | optional                              |
+| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts; `basejump` also queued payouts | optional                    |
+| `QUEUED_PAYOUT_POLL_SECONDS` | How often `basejump` checks the landing's queue | `60`                           |
+| `QUEUED_PAYOUT_ALERT_MINUTES` | Alert once when a queued payout waits longer (`basejump`) | `30`               |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |

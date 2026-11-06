@@ -114,12 +114,17 @@ services:
     image: galacticcouncil/relayer:latest
     command: [node, basejump/app.js]
     environment:
-      # Pays out of the landing via the receiver; its own key, off the other wallets' nonces.
+      # Pays out of the landing via the receiver, and pays queued payouts with fulfillPending();
+      # its own key, off the other wallets' nonces.
       PRIVKEY: FILL THIS KEY ALWAYS
       RPC_HYDRATION: https://rpc.hydradx.cloud
-      # Optional: alert sink and the multiple of one submission's cost to warn below.
+      # Optional: alert sink (low gas, and a queued payout waiting too long) and the multiple of
+      # one submission's cost to warn below.
       DISCORD_WEBHOOK_URL: MAYBE FILL THIS URL OR REMOVE IT
       GAS_WARN_MULTIPLIER: '50'
+      # Optional: how often to check the landing's queue, and when to alert on a waiting payout.
+      QUEUED_PAYOUT_POLL_SECONDS: '60'
+      QUEUED_PAYOUT_ALERT_MINUTES: '30'
       REDIS_HOST: redis
       SPY_ENDPOINT: spy:7073
       WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
