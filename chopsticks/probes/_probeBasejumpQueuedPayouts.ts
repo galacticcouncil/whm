@@ -160,6 +160,11 @@ function startShim(net: Network, forkHttp: string) {
   const nonces = new Map<string, number>();
   const dropped: { hash: Hex; gasPrice: bigint; priceAtSeal: bigint }[] = [];
   let sealing: Promise<void> = Promise.resolve();
+  /** Run around sealing one accepted tx: lets the probe change state between simulation and block. */
+  const hooks: {
+    beforeSeal?: (from: string) => Promise<unknown>;
+    afterSeal?: (from: string) => Promise<unknown>;
+  } = {};
 
   async function forward(method: string, params: unknown[]): Promise<unknown> {
     const r = await fetch(forkHttp, {
@@ -189,7 +194,8 @@ function startShim(net: Network, forkHttp: string) {
         const hash = keccak256(raw);
         accepted.push({ hash, from: from as Hex, to: tx.to ?? undefined, data: (tx.data ?? "0x") as Hex });
         sealing = sealing.then(async () => {
-          const res = await sendRawEthTx(net, raw);
+          await hooks.beforeSeal?.(from);
+          const res = await sendRawEthTx(net, raw).finally(() => hooks.afterSeal?.(from));
           const events = (await retry("events", () =>
             api.query.System.Events.getValue({ at: res.blockHash }),
           )) as EventRecord[];
@@ -305,6 +311,7 @@ function startShim(net: Network, forkHttp: string) {
     accepted: typeof accepted;
     sent: Sent[];
     dropped: typeof dropped;
+    hooks: typeof hooks;
     sealed: () => Promise<void>;
     close: () => Promise<void>;
   }>((resolve) => {
@@ -314,6 +321,7 @@ function startShim(net: Network, forkHttp: string) {
         accepted,
         sent,
         dropped,
+        hooks,
         sealed: () => sealing,
         close: () => new Promise((r) => server.close(() => r())),
       }),
@@ -483,6 +491,59 @@ async function main(): Promise<void> {
     record("recipient +5 USDC", recipAfter - recipBefore === PAYOUT, `${recipBefore} → ${recipAfter}`);
     record("pool −5 USDC", poolAfter === FLOAT - PAYOUT, `${poolAfter}`);
     record("one all-clear after the alert", hook.posts.length === 2 && hook.posts[1].startsWith(`OK queued Basejump payout #${head0} paid`), hook.posts[1] ?? "none");
+
+    // ── D. A call that simulates clean and reverts on chain, three times ──
+    // Constructs the race where a delivery this app sent just before spends the float: the shim
+    // empties the pool after the keeper's simulation and before its call is sealed, then refills
+    // it. The keeper must stop after 3 reverts, alert at once, and try again one alert interval
+    // later, when it pays.
+    console.log(`\n── D. Three calls lose the float race; the cap pauses, then resets ──`);
+    const D_PAYOUT = 2_000_000n;
+    await setPool(0n);
+    record(`a ${D_PAYOUT} USDC-unit payout queues`, await queuePayout(D_PAYOUT, RECIPIENT));
+    await setPool(FLOAT);
+    const headD = await read("pendingHead");
+    const recipD = await usdc(recipSub);
+    const sentBeforeD = sentToLanding().length;
+    const sealedBeforeD = sealedFromKeeper().length;
+    const postsBeforeD = hook.posts.length;
+    const poolTo = (free: bigint) =>
+      hydration.setStorage({ Tokens: { Accounts: [[[landingSub, USDC_ASSET_ID], { free }]] } });
+    shim.hooks.beforeSeal = async (from) => from === keeperAddr && poolTo(0n);
+    shim.hooks.afterSeal = async (from) => from === keeperAddr && poolTo(FLOAT);
+    clock = 0;
+    const revertedD = () => sealedFromKeeper().slice(sealedBeforeD).filter((x) => !x.ok).length;
+    for (let i = 0; i < 30 && revertedD() < 3; i++) {
+      await keeper.poke();
+      await shim.sealed();
+    }
+    await keeper.poke(); // observes the third revert and hits the cap
+    shim.hooks.beforeSeal = undefined;
+    shim.hooks.afterSeal = undefined;
+    const capSends = sentToLanding().length - sentBeforeD;
+    record("three calls sent, all reverted on chain", capSends === 3 && revertedD() === 3, `${capSends} sent, ${revertedD()} reverted`);
+    const capPosts = hook.posts.slice(postsBeforeD);
+    record(
+      "one alert at once, before 30 min",
+      capPosts.length === 1 && capPosts[0].includes("simulated clean, then reverted"),
+      capPosts[0] ?? "none",
+    );
+    clock = ALERT_AFTER_MS - 60_000;
+    for (let i = 0; i < 3; i++) await keeper.poke();
+    await shim.sealed();
+    record("within the interval: nothing more sent", sentToLanding().length - sentBeforeD === 3);
+    clock = ALERT_AFTER_MS + 60_000;
+    await keeper.poke();
+    await shim.sealed();
+    await keeper.poke();
+    await shim.sealed();
+    record("after one interval the cap resets and pays it", (await read("pendingHead")) === headD + 1n, `head ${await read("pendingHead")}`);
+    record("recipient +2 USDC", (await usdc(recipSub)) - recipD === D_PAYOUT);
+    record("four calls in total for this payout", sentToLanding().length - sentBeforeD === 4);
+    record(
+      "all-clear after the paid payout",
+      hook.posts.slice(postsBeforeD).some((m) => m.startsWith(`OK queued Basejump payout #${headD} paid`)),
+    );
 
     // ── C. A head that can never be paid ──
     console.log(`\n── C. A head that can never be paid ──`);

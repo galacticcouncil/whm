@@ -79,10 +79,12 @@ passes. That call takes no arguments and pays the head to the recipient stored o
 only call this adds. The landing is read from each route's receiver, not configured.
 
 A head that stays unpaid for `QUEUED_PAYOUT_ALERT_MINUTES` (the pool is not refilled, or the call
-reverts, e.g. a dispatch that always fails) gets one Discord alert, and a follow-up once it is paid.
-Nothing is sent for it in the meantime. Such a head holds every later payout behind it until the
-Technical Committee acts (`withdraw` or an upgrade). The clock starts when this process first sees
-the head, so a restart restarts it.
+reverts, e.g. a dispatch that always fails) gets one Discord alert. Nothing is sent for it in the
+meantime, and every later payout waits behind it. If the same process later sees it paid, it posts
+an all-clear. Alert state lives in memory: a restart restarts the clock and forgets the alert, so a
+head paid across a restart gets no all-clear, and one still waiting is alerted again after a new
+interval. A call that simulates clean but reverts on chain (a delivery spent the float first) is
+retried up to 3 times, then paused for one alert interval.
 
 ### `psm-hydration` and `psm-base`
 
