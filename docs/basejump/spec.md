@@ -145,8 +145,8 @@ per-token.
    failure mode where the VAA is consumed but the funds did not move — and so no owner power to
    replay a VAA is needed.
 5. **A shortfall does not revert.** Invariant 4 covers misconfiguration, not an empty pool: the
-   landing queues and consumes the VAA. Nothing calls `fulfillPending()` automatically. Alarm on
-   `pendingTail - pendingHead > 0`.
+   landing queues and consumes the VAA. The `basejump` relayer app calls `fulfillPending()` once
+   the pool covers the head, and alerts when the same head waits longer than 30 min.
 6. **Corridor isolation.** The receiver authorizes exactly one emitter per source chain.
 
 ## Configuration
@@ -235,8 +235,8 @@ Two legs, two different needs:
   ([routes.ts](../../agents/relayer/src/apps/basejump/routes.ts)). It does not wait on the source
   tx hash, and retries for days because every failure short of a bad VAA is transient (invariants
   4 and 5), a receiver the TC has not upgraded or armed yet included. A VAA that exhausts the budget
-  parks in the engine's failed queue and needs a manual replay. `fulfillPending()` still needs a
-  keeper.
+  parks in the engine's failed queue and needs a manual replay. The same app pays queued payouts
+  with `fulfillPending()` (see the relayer README).
 
 ## Test coverage
 
