@@ -64,8 +64,8 @@ async function start(): Promise<void> {
     logger.info(`  ${route.source} ${route.sourceEmitter} -> ${route.receiver}`);
   }
 
-  // Queued payouts go through the same queue, so they share this wallet's one nonce lane with the
-  // deliveries and never race them.
+  // Queued payouts go through the app's send queue, so they never use a delivery's nonce. They do
+  // compete with deliveries for the float; payouts.ts retries a call that loses that race.
   const keepers = (await landingsOf(clients, ROUTES.map((r) => r.receiver))).map((landing) => {
     logger.info(`  queued payouts: landing ${landing}, every ${QUEUED_PAYOUT_POLL_MS / 1000}s`);
     return createPayoutKeeper({

@@ -53,14 +53,18 @@ interface Head {
   alerted: boolean;
   /** A `fulfillPending` this process sent while this entry was the head, not yet seen mined. */
   sent?: Hash;
-  /** Calls for this head that simulated clean and then reverted on chain. */
+  /** Calls for this head that simulated clean and then reverted on chain, in this window. */
   reverts: number;
+  /** When `reverts` reached the cap. The count resets `alertAfterMs` later. */
+  cappedAt?: number;
 }
 
 /**
- * A call that simulates clean can still revert on chain (a direct payout spends the float in the
- * same block, say). That is worth a retry, but not an unbounded one: after this many, the keeper
- * stops sending for this head and alerts at once.
+ * A call that simulates clean can still revert on chain: the simulation runs on the latest block,
+ * and a delivery this app sent just before can spend the float in the next one. That is worth a
+ * retry, but not an unbounded one: after this many, the keeper stops sending for this head and
+ * alerts at once, then tries again `alertAfterMs` later. So at most this many sends per head per
+ * alert interval.
  */
 export const MAX_REVERTS_PER_HEAD = 3;
 
@@ -73,15 +77,16 @@ export const MAX_REVERTS_PER_HEAD = 3;
  * only when the pool covers the head and a simulation of the call passes.
  *
  * A head that does not become payable (the pool stays short, or the call reverts, e.g. a dispatch
- * that always fails) blocks everything behind it until the Technical Committee acts. The keeper
+ * that always fails) blocks everything behind it until it is paid or the Technical Committee acts
+ * (`withdraw` or an upgrade). The keeper
  * never retries such a head into a revert: it sends nothing and alerts once when the same head
  * has waited longer than `alertAfterMs`.
  *
  * An unobserved send is never repeated blindly. After a send for head `i`, nothing is sent again
  * until either the head moves past `i` or the call's receipt shows it reverted, and after
- * `MAX_REVERTS_PER_HEAD` such reverts nothing is sent for `i` at all. A call that is never mined
- * (dropped, or stuck behind a nonce gap) leaves the keeper checking its receipt and, after
- * `alertAfterMs`, alerting; it does not send a second one.
+ * `MAX_REVERTS_PER_HEAD` such reverts nothing is sent for `i` for `alertAfterMs`. A call that is
+ * never mined (dropped, or stuck behind a nonce gap) leaves the keeper checking its receipt and,
+ * after `alertAfterMs`, alerting; it does not send a second one.
  *
  * @param deps Clients, the shared queue, the landing and the alert policy.
  * @returns `poke` to run one pass now, `start` to run passes on a timer.
@@ -178,7 +183,12 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
         .catch(() => undefined);
       if (!receipt) {
         log.info(`#${h}: fulfillPending ${current.sent} not mined yet, checking`);
-        await alertIfOverdue(current, what, `fulfillPending ${current.sent} sent, not seen mined`);
+        await alertIfOverdue(
+          current,
+          what,
+          `fulfillPending ${current.sent} sent, not seen mined. If it was dropped, every later ` +
+            `send of this app, deliveries included, waits behind its nonce`,
+        );
         return;
       }
       if (receipt.status === "success") return; // the head read raced the block; next pass sees it
@@ -188,10 +198,16 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     }
 
     if (current.reverts >= MAX_REVERTS_PER_HEAD) {
-      log.warn(`#${h}: ${current.reverts} calls reverted on chain; not sending again for it`);
-      const reason = `${current.reverts} fulfillPending calls simulated clean, then reverted`;
-      await alertIfOverdue(current, what, reason, true);
-      return;
+      current.cappedAt ??= now();
+      if (now() - current.cappedAt < alertAfterMs) {
+        log.warn(`#${h}: ${current.reverts} calls reverted on chain; not sending for it for now`);
+        const reason = `${current.reverts} fulfillPending calls simulated clean, then reverted`;
+        await alertIfOverdue(current, what, reason, true);
+        return;
+      }
+      log.info(`#${h}: revert cap expired; trying again`);
+      current.reverts = 0;
+      current.cappedAt = undefined;
     }
 
     const balance =

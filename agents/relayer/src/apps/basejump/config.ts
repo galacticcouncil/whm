@@ -26,14 +26,20 @@ export const RETRIES = 250;
 export const RETRY_BASE_MS = 60_000;
 export const RETRY_MAX_MS = 30 * 60_000;
 
+/** Node's timer limit: a longer delay is silently clamped to 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
 /**
- * A positive number of `unit`s from env, as milliseconds. Fails at startup on anything else, so a
- * typo cannot turn into a timer that fires constantly or an alert that never does.
+ * A positive number of `unit`s from env, as milliseconds, at most `MAX_TIMER_MS` (about 24.8
+ * days). Fails at startup on anything else, so a typo cannot turn into a timer that fires
+ * constantly or an alert that never does.
  */
 function positiveMs(name: string, fallback: number, unitMs: number): number {
   const v = optNum(name, fallback);
-  if (!Number.isFinite(v) || v <= 0) {
-    throw new Error(`${name} must be a positive number, got ${process.env[name]}`);
+  if (!Number.isFinite(v) || v <= 0 || v * unitMs > MAX_TIMER_MS) {
+    throw new Error(
+      `${name} must be a positive number up to ${MAX_TIMER_MS} ms, got ${process.env[name]}`,
+    );
   }
   return v * unitMs;
 }
