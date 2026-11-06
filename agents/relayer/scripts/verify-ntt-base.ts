@@ -2,7 +2,16 @@
 import { restoreNativeFetch } from "../src/fetch";
 
 import { readFileSync } from "node:fs";
-import { encodeFunctionData, formatUnits, parseAbi, type Address, type Hex } from "viem";
+import {
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  encodeErrorResult,
+  encodeFunctionData,
+  formatUnits,
+  parseAbi,
+  type Address,
+  type Hex,
+} from "viem";
 
 import { registerHydration } from "../src/chains";
 import { baseClients } from "../src/clients/base";
@@ -28,6 +37,8 @@ import { BASE_ROUTES } from "../src/apps/ntt/routes";
  *                   and is reported as lost, not delivered; recipient paid once
  *   queued          the manager's inbound limit is lowered (owner impersonated) so the transfer is
  *                   queued: reported `queued` with an alert, recipient not paid, never "delivered"
+ *   lagging-node    the simulate answers "already delivered" while the reads say open (a lagging
+ *                   RPC node): the pass throws for a retry and sends nothing; the retry delivers once
  *   precheck-queued the limit is lowered and someone else's delivery, queued, lands between our
  *                   reads and our simulate: `queued` with an alert, nothing sent
  *   forged          the right emitter, one amount byte flipped: every run throws for a retry and
@@ -276,6 +287,33 @@ async function main(): Promise<void> {
     const second = await pass(real);
     check(second === "queued", `queued: pass 2 "queued", never "already-delivered" (got "${second}")`);
     check((await nonce()) === n0 + 1, "queued: pass 2 sent nothing");
+  });
+
+  await scenario("lagging-node", async () => {
+    const b0 = await balance();
+    const n0 = await nonce();
+    const data = encodeErrorResult({
+      abi: outboundAbi,
+      errorName: "TransferAlreadyCompleted",
+      args: [`0x${"11".repeat(32)}`],
+    });
+    pc.simulateContract = async () => {
+      throw new ContractFunctionExecutionError(
+        new ContractFunctionRevertedError({ abi: outboundAbi, data, functionName: "receiveMessage" }),
+        { abi: outboundAbi, functionName: "receiveMessage", args: [] },
+      );
+    };
+    const first = await pass(real);
+    check(
+      first === "THROW ntt-base EURC: not sent and not delivered",
+      `lagging-node: pass 1 throws "not sent and not delivered" (got "${first}")`,
+    );
+    check((await nonce()) === n0, "lagging-node: pass 1 sent nothing");
+    pc.simulateContract = original.simulate;
+    const second = await pass(real);
+    check(second === "delivered", `lagging-node: the retry "delivered" (got "${second}")`);
+    check((await nonce()) === n0 + 1, "lagging-node: one transaction in all");
+    check((await balance()) - b0 === amount, "lagging-node: recipient paid once");
   });
 
   await scenario("precheck-queued", async () => {

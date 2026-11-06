@@ -306,7 +306,7 @@ export async function runOutbound(
     if (job !== undefined && job.attempts >= job.maxAttempts) {
       const line =
         `ntt-base ${route.token} sequence ${vaa.sequence}: gave up after ${job.maxAttempts} attempts; not ` +
-        `delivered on Base by us (${(e as Error).message.split("\n")[0]}). Deliver it by hand with ` +
+        `confirmed delivered on Base (${(e as Error).message.split("\n")[0]}). Deliver it by hand with ` +
         `receiveMessage on ${route.transceiver}`;
       log.error(line);
       await opts.alert?.(line);
