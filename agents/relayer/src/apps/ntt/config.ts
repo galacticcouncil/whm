@@ -21,3 +21,28 @@ export const FROM_SEQUENCE = {
   [WORMHOLE.sui]: fromSeq("sui"),
   [WORMHOLE.near]: fromSeq("near"),
 };
+
+/**
+ * The `ntt-base` process's namespace. LOAD-BEARING like `APP_NAME`, and distinct from it: a shared
+ * name would put both processes on one queue and one set of missed-VAA cursors.
+ */
+export const APP_NAME_BASE = opt("APP_NAME_NTT_BASE", "ntt-base-relayer");
+
+export const RPC_BASE = rpc("base", "https://mainnet.base.org");
+
+/**
+ * Cold-start floor for the Hydration emitters `ntt-base` subscribes to. Set `FROM_SEQ_HYDRATION`
+ * before the namespace's first run: the EURC transceiver was busy long before this process, and on
+ * chain 73 an unfloored missed-VAA walk never terminates (see the README).
+ */
+export const FROM_SEQUENCE_FROM_HYDRATION = { [WORMHOLE.hydration]: fromSeq("hydration") };
+
+/**
+ * `ntt-base`'s retry policy. Unlike `RETRIES` above it carries a backoff: without one the engine
+ * retries at once and 8 attempts are spent in seconds (see `apps/psm/config.ts`), so a Base RPC
+ * outage would park a transfer in the failed set. min(2^attempt * 1 min, 30 min): 50 attempts is
+ * about 23.5 hours. A job past that stays deliverable by hand — `receiveMessage` is permissionless.
+ */
+export const RETRIES_BASE = 50;
+export const RETRY_BASE_MS = 60_000;
+export const RETRY_MAX_MS = 30 * 60_000;

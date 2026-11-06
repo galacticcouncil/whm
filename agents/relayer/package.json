@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "start:ntt": "node dist/ntt/app.js",
+    "start:ntt-base": "node dist/ntt-base/app.js",
     "start:ntt-near": "node dist/ntt-near/app.js",
     "start:oracle": "node dist/oracle/app.js",
     "start:oracle-robinhood": "node dist/oracle-robinhood/app.js",
