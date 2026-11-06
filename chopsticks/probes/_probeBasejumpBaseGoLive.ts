@@ -607,13 +607,18 @@ async function main(): Promise<void> {
     const treasuryUsdtAfter = await tokenBalance(treasurySub, USDT_ASSET_ID);
     const treasuryEurcAfter = await tokenBalance(treasurySub, EURC_ASSET_ID);
     const usdtSpent = before.treasuryUsdt - treasuryUsdtAfter;
-    const eurcBought = treasuryEurcAfter + POOL_SEED - before.treasuryEurc;
-    console.log(`   treasury USDT spent  ${amt(usdtSpent, "USDT")} for ${amt(eurcBought, "EURC")}  (${(Number(usdtSpent) / Number(eurcBought)).toFixed(4)} USDT per EURC)`);
+    // From observed balances only: what the landing actually received, not the float we asked for,
+    // so a failed transfer leg (or a failed purchase) prints what happened.
+    const poolAfterSeed = await poolEurc();
+    const eurcSent = poolAfterSeed - before.poolEurc;
+    const eurcBought = treasuryEurcAfter + eurcSent - before.treasuryEurc;
+    const rate = eurcBought > 0n ? `${(Number(usdtSpent) / Number(eurcBought)).toFixed(4)} USDT per EURC` : "no EURC bought";
+    console.log(`   treasury USDT spent  ${amt(usdtSpent, "USDT")} for ${amt(eurcBought, "EURC")}  (${rate})`);
+    console.log(`   sent to the landing  ${amt(eurcSent, "EURC")} (float asked: ${amt(POOL_SEED, "EURC")})`);
     console.log(`   treasury EURC left   ${amt(treasuryEurcAfter, "EURC")}`);
     console.log(`   money market EURC    ${amt(mmBefore, "EURC")} → ${amt(await mmWithdrawable(), "EURC")} withdrawable`);
     record("treasury sold exactly the USDT in", usdtSpent === USDT_IN, amt(usdtSpent, "USDT"));
     record("treasury bought at least the EURC needed", eurcBought >= EURC_MIN_OUT, amt(eurcBought, "EURC"));
-    const poolAfterSeed = await poolEurc();
     record("landing holds the float", poolAfterSeed === before.poolEurc + POOL_SEED, amt(poolAfterSeed, "EURC"));
 
     // ── 4. motion ──
