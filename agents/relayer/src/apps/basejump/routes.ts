@@ -12,6 +12,9 @@ export interface BasejumpRoute {
   receiver: Address;
 }
 
+/** Placeholder for a corridor whose migration has not run yet. A route holding it is not relayed. */
+export const NOT_DEPLOYED = "0x0000000000000000000000000000000000000000";
+
 /**
  * Mainnet routes, from deployments/prod/basejump-&#42;.json.
  */
@@ -22,4 +25,18 @@ export const ROUTES: BasejumpRoute[] = [
     sourceEmitter: "0xa72e2bf29c840eb93adbb9ee1aa41580f01c9944",
     receiver: "0x35bf3a1b9ac564c8f66c97cea1ee410cd3f97c8a",
   },
+  {
+    // EURC. Fill both from deployments/prod/basejump-base.json once `pnpm migrate:basejump-base`
+    // has run: sourceEmitter = 001-deploy-emitter.proxyAddress, receiver = 005-deploy-receiver
+    // .proxyAddress. Until then the app skips this route (see app.ts). Checklist:
+    // docs/basejump/base-eurc.md.
+    source: "base",
+    sourceChain: WORMHOLE.base,
+    sourceEmitter: NOT_DEPLOYED,
+    receiver: NOT_DEPLOYED,
+  },
 ];
+
+/** A route both of whose addresses are filled in. */
+export const isDeployed = (route: BasejumpRoute): boolean =>
+  route.sourceEmitter.toLowerCase() !== NOT_DEPLOYED && route.receiver.toLowerCase() !== NOT_DEPLOYED;

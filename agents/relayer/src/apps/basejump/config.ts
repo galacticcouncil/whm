@@ -14,7 +14,10 @@ export const RPC_HYDRATION = rpc("hydration", "https://hydration-rpc.n.dwellir.c
  * Cold-start floor; ignored once a safeSequence exists in Redis. The emitter counts fast-path
  * messages alone, from zero, so nothing below the floor is ever a payout to skip.
  */
-export const FROM_SEQUENCE = { [WORMHOLE.ethereum]: fromSeq("ethereum") };
+export const FROM_SEQUENCE = {
+  [WORMHOLE.ethereum]: fromSeq("ethereum"),
+  [WORMHOLE.base]: fromSeq("base"),
+};
 
 /**
  * Failures are transient by construction — a shortfall queues, a receiver the TC has not upgraded

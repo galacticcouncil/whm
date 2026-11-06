@@ -24,11 +24,19 @@ import type { MigrationConfig } from "./types";
  * Hydration steps (005-008) deploy the receiver and wire it to the emitter deployed in 001,
  * read straight from ctx.outputs — no env-copied address, so the two ends cannot diverge.
  *
- * REUSES the existing landing 0x70e9b12c…df976 — it already holds the EURC pool, is already
- * mapped EURC -> asset 44, and is already TC-owned. Nothing here deploys or configures it.
- * Because it is TC-owned, authorizing the receiver on it is a TC action, NOT a step here —
- * see docs/basejump/spec.md. That call is the go-live switch; until it lands the
- * corridor stays dark and this migration is safe to run in full.
+ * REUSES the existing landing 0x70e9b12c…df976, shared with basejump-ethereum and TC-owned.
+ * Nothing here deploys or configures it. It does NOT serve Base EURC today: referendum #404
+ * unmapped EURC, withdrew the EURC float and seeded USDC. Opening the corridor therefore takes two
+ * governance actions after this migration, neither of them a step here:
+ *
+ *   - TC motion on the landing: setDestAsset(EURC, asset 44), then
+ *     setAuthorizedBridge(<005-deploy-receiver.proxyAddress>, true)   <- go-live switch
+ *   - Treasury referendum: buy EURC and send a 10,000 EURC float to the landing
+ *
+ * Step 010 sends nothing: it checks the landing is in the state the motion expects and records the
+ * two landing calls, built from this run's receiver. Until the motion lands a fast-path VAA
+ * reverts at the landing and the relay retries, so this migration is safe to run in full.
+ * Checklist: docs/basejump/base-eurc.md.
  *
  * Inbound only, by code rather than by configuration: the emitter declares no receive path
  * and the receiver no send path. Hydration -> Base is out of scope.

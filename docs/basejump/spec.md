@@ -297,6 +297,16 @@ Exercised end to end on an Ethereum fork: 10 USDC in settles 10 gross to the lan
 9.9 net, with `assetFee` 100,000 (0.1 USDC) retained. The settlement logs precede the fast-path
 `LogMessagePublished` in the receipt, which is invariant 2 holding against the real manager.
 
+### Base → Hydration (EURC) — ready, not live
+
+Migration [`basejump-base`](../../migrations/definitions/basejump-base/) deploys both ends (never
+run). The settlement leg exists: Base EURC manager `0xD1dc…d89a` (LOCKING) peers with Hydration's
+`0x8dd1…bc4C` (BURNING, `token()` = asset 44), and the relayer's `ntt` routes carry it. The pool
+does not: referendum #404 unmapped Base EURC and moved the EURC float to USDC, so step 2 is a TC
+motion and step 4 a Treasury referendum. Step 010 of the migration records the motion's landing
+calls; [`_probeBasejumpBaseGoLive`](../../chopsticks/probes/_probeBasejumpBaseGoLive.ts) builds
+both proposals and enacts them on a fork. Checklist and referendum draft: [base-eurc.md](base-eurc.md).
+
 ### Arbitrum → Hydration (USDC) — blocked
 
 No NTT leg exists. `getPeer(23)` on the Hydration USDC manager is zero; its only peer is Ethereum.
