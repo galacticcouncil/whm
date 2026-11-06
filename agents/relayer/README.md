@@ -18,17 +18,25 @@ that route's Hydration transceiver.
 
 ### `ntt-base`
 
-Delivers NTT transfers **from Hydration to Base** — EURC only today ([routes.ts](src/apps/ntt/routes.ts),
-`BASE_ROUTES`). Each transfer VAA from the Hydration EURC transceiver goes to the Base EURC
-transceiver's `receiveMessage`, which pays the recipient the signed message names. Before each
-delivery it reads the transceiver's `isVAAConsumed` and the manager's `isMessageExecuted` and skips a
-transfer either marks done; the submission then simulates before spending a nonce. A send it did not
-see land is retried only through those reads again, so a late landing reads as delivered.
+A backstop that delivers NTT transfers **from Hydration to Base** — EURC only today
+([routes.ts](src/apps/ntt/routes.ts), `BASE_ROUTES`). The user's own claim or the Wormhole Executor
+normally delivers within minutes; this covers the transfers nobody delivers, such as one to an
+address that cannot send a transaction itself.
+
+- It acts on a VAA only once it is `NTT_BASE_GRACE_SECONDS` old (default 900), measured from the VAA
+  timestamp (the Hydration block time). A younger one is handed back to the engine for a later retry.
+- Then it reads the Base transceiver's `isVAAConsumed` and the manager's `isMessageExecuted`, skips a
+  transfer either marks done, simulates, and sends `receiveMessage`. A send it did not see land is
+  retried only through those reads.
+- A transfer the Base manager holds under its inbound rate limit is reported `queued` at warn, with a
+  Discord alert: someone must call `completeInboundQueuedTransfer` after the delay. The app does not.
+- A VAA Base refuses for good (`InvalidVaa`) is dropped. A transfer still undelivered after the last
+  of 50 attempts (about 23 h) raises an alert.
 
 Its own process and Base wallet (`PRIVKEY_BASE`, a value different from `psm-base`'s). Same queue as
 every app: it warns, and alerts `DISCORD_WEBHOOK_URL` when set, below `GAS_WARN_MULTIPLIER` times the
 cost of 1,000,000 gas, and exits — this container only — below that cost once. A delivery uses about
-340,000 gas. Set `FROM_SEQ_HYDRATION` before its first run. Check on a Base fork:
+340,000 gas. `FROM_SEQ_HYDRATION` is required. Check on a Base fork:
 [scripts/verify-ntt-base.ts](scripts/verify-ntt-base.ts).
 
 ### `ntt-near`
@@ -130,6 +138,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
 | `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts                       | optional                              |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
+| `NTT_BASE_GRACE_SECONDS` | Backstop delay before `ntt-base` acts on a VAA | `900`                                 |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |
 | `APP_NAME`            | Engine namespace override — **see below**         | per-app                               |

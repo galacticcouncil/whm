@@ -39,6 +39,9 @@ const DONE_REASONS = [
  * VAA ages out of `maxPriceAge` long before the pool EMA moves enough for a retry to pass.
  */
 const DEAD_REASONS = [
+  // The core bridge's custom error for a VAA whose signatures or guardian set do not verify; the
+  // bytes are fixed, so no retry can pass. Declared only in the ntt-base ABI.
+  "InvalidVaa",
   "Price too stale",
   "Price too low to scale",
   "OracleNotSet",

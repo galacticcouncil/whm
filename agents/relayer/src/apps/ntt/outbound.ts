@@ -13,7 +13,11 @@ export const outboundAbi = parseAbi([
   "function receiveMessage(bytes encodedMessage) external",
   "function isVAAConsumed(bytes32 hash) external view returns (bool)",
   "function isMessageExecuted(bytes32 digest) external view returns (bool)",
+  "function getInboundQueuedTransfer(bytes32 digest) external view returns ((uint72 amount, uint64 txTimestamp, address recipient))",
+  "function rateLimitDuration() external view returns (uint64)",
   "error TransferAlreadyCompleted(bytes32 vaaHash)",
+  // The core bridge's refusal of a VAA whose signatures do not verify: permanent (engine/revert.ts).
+  "error InvalidVaa(string reason)",
 ]);
 
 /**
@@ -64,31 +68,78 @@ export function targetChain(payload: Buffer): number {
 }
 
 /**
- * What one pass over a VAA did. `delivered` and `already-delivered` are the two outcomes that end
- * the job; `completed-elsewhere` means the pre-check read "not delivered" and the submission then
- * found it delivered (someone else's transaction landed in between).
+ * What one pass over a VAA did.
+ *
+ * - `ignored`: not a transfer for this route.
+ * - `not-yet-due`: younger than the grace period; nothing read or sent. The caller throws so the
+ *   engine comes back later.
+ * - `delivered`: our transaction paid the recipient.
+ * - `already-delivered`: Base had it before we sent anything.
+ * - `completed-elsewhere`: the checks read open, then someone else's delivery landed first (our
+ *   simulate refused, or our transaction reverted on the consumed VAA).
+ * - `queued`: the Base manager accepted the transfer but holds it under its inbound rate limit; the
+ *   recipient is not paid until someone calls `completeInboundQueuedTransfer` after the delay.
+ * - `dropped`: Base refuses the VAA for good (`InvalidVaa`); nothing was sent.
  */
-export type Outcome = "ignored" | "already-delivered" | "delivered" | "completed-elsewhere";
+export type Outcome =
+  | "ignored"
+  | "not-yet-due"
+  | "already-delivered"
+  | "delivered"
+  | "completed-elsewhere"
+  | "queued"
+  | "dropped";
+
+export interface DeliverOptions {
+  /** Act only on a VAA at least this old, measured from the VAA's own timestamp. */
+  graceSeconds: number;
+  /** Current time in unix seconds; injectable for the fork check. */
+  now?: () => number;
+  /** Alert sink for a queued transfer (Discord); optional. */
+  alert?: (message: string) => Promise<void>;
+}
+
+/** Post one line to a Discord webhook; failures are logged, never thrown. */
+export function discordAlert(webhook: string | undefined, log: typeof logger) {
+  return async (message: string): Promise<void> => {
+    if (!webhook) return;
+    try {
+      await fetch(webhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: message }),
+      });
+    } catch (e) {
+      log.error(`Failed to send Discord notification: ${(e as Error).message}`);
+    }
+  };
+}
 
 /**
- * Deliver one Hydration -> Base NTT transfer, once.
+ * Deliver one Hydration -> Base NTT transfer, as a backstop.
  *
- * Reads both replay guards first — the transceiver's `isVAAConsumed(vaa hash)` and the manager's
- * `isMessageExecuted(digest)`; the second also covers a second signed copy of the same transfer,
- * which carries another VAA hash and which the manager would accept and silently skip, spending
- * gas. Then the queue submits, and `submit` simulates before it spends a nonce.
+ * The user's own claim or the Wormhole Executor normally delivers within minutes, so nothing is read
+ * or sent until the VAA is `graceSeconds` old (from the VAA timestamp, which the guardians sign: the
+ * Hydration block time of the transfer). Then it reads both replay guards — the transceiver's
+ * `isVAAConsumed(vaa hash)` and the manager's `isMessageExecuted(digest)`; the second also covers a
+ * second signed copy of the same transfer, which carries another VAA hash — and, when either is set,
+ * whether the manager holds the transfer in its inbound queue. Only when both read open does the
+ * queue submit, and `submit` simulates before it spends a nonce.
  *
- * Never a blind retry: a throw here hands the job back to the engine, and the retry starts again
- * from the two reads, so a transaction that landed after all reads as delivered. The receipt is
- * read for this delivery's own hash; a replacement or an on-chain revert throws for the same
- * reason. The worst case is a second transaction after an unobserved first one that lands late:
- * the transceiver then reverts it on the consumed VAA, so it costs gas and never pays twice.
+ * Never a blind retry: a throw hands the job back to the engine, and the retry starts again from
+ * the reads, so a transaction that landed after all reads as done. A send whose receipt is not
+ * this delivery's own (a replacement) throws. A send that reverted is re-read: a consumed VAA means
+ * someone else's delivery landed first in the same block (gas spent, nothing lost); anything else
+ * throws. The worst case is a second transaction while an unobserved first one is still pending:
+ * the transceiver reverts whichever lands second on the consumed VAA, so it costs gas and never
+ * pays twice.
  *
  * @param route The outbound route the VAA arrived on.
  * @param vaa The parsed VAA.
  * @param clients Base account and clients.
  * @param queue This process's submission queue.
  * @param log Logger for this VAA.
+ * @param opts Grace period, clock, alert sink.
  * @returns What the pass did.
  * @throws On anything unproven, for the engine to retry.
  */
@@ -98,6 +149,7 @@ export async function deliverOutbound(
   clients: ChainClients,
   queue: Queue,
   log: typeof logger,
+  opts: DeliverOptions,
 ): Promise<Outcome> {
   if (!isNttTransfer(vaa.payload)) {
     log.info("Ignoring non-transfer NTT transceiver message");
@@ -108,23 +160,69 @@ export async function deliverOutbound(
     return "ignored";
   }
 
+  const now = (opts.now ?? (() => Math.floor(Date.now() / 1000)))();
+  const age = now - vaa.timestamp;
+  if (age < opts.graceSeconds) {
+    log.debug(`${route.token} transfer is ${age} s old, under the ${opts.graceSeconds} s grace period`);
+    return "not-yet-due";
+  }
+
   const { publicClient } = clients;
-  const [consumed, executed] = await Promise.all([
-    publicClient.readContract({
-      address: route.transceiver,
-      abi: outboundAbi,
-      functionName: "isVAAConsumed",
-      args: [vaaHash(vaa.bytes)],
-    }),
-    publicClient.readContract({
+  const hash = vaaHash(vaa.bytes);
+  const digest = managerDigest(vaa.emitterChain, vaa.payload);
+
+  /** Done (and whether queued under the inbound limit), or still open. */
+  async function state(): Promise<"open" | "done" | "queued"> {
+    const [consumed, executed] = await Promise.all([
+      publicClient.readContract({
+        address: route.transceiver,
+        abi: outboundAbi,
+        functionName: "isVAAConsumed",
+        args: [hash],
+      }),
+      publicClient.readContract({
+        address: route.manager,
+        abi: outboundAbi,
+        functionName: "isMessageExecuted",
+        args: [digest],
+      }),
+    ]);
+    if (!consumed && !executed) return "open";
+    return (await queuedReport()) ? "queued" : "done";
+  }
+
+  /** The manager's inbound-queue entry for this transfer, as an alert line; undefined when none. */
+  async function queuedReport(): Promise<string | undefined> {
+    const queued = await publicClient.readContract({
       address: route.manager,
       abi: outboundAbi,
-      functionName: "isMessageExecuted",
-      args: [managerDigest(vaa.emitterChain, vaa.payload)],
-    }),
-  ]);
-  if (consumed || executed) {
-    log.info(`${route.token} transfer already delivered on Base (vaa consumed ${consumed}, message executed ${executed})`);
+      functionName: "getInboundQueuedTransfer",
+      args: [digest],
+    });
+    if (queued.txTimestamp === 0n) return undefined;
+    const delay = await publicClient.readContract({
+      address: route.manager,
+      abi: outboundAbi,
+      functionName: "rateLimitDuration",
+    });
+    return (
+      `ntt-base ${route.token} sequence ${vaa.sequence}: queued on Base under the inbound limit; someone must call ` +
+      `completeInboundQueuedTransfer(${digest}) on ${route.manager} after the delay ` +
+      `(completable from unix ${queued.txTimestamp + delay}; amount ${queued.amount} base units, recipient ${queued.recipient})`
+    );
+  }
+
+  async function reportQueued(): Promise<"queued"> {
+    const line = (await queuedReport())!;
+    log.warn(line);
+    await opts.alert?.(line);
+    return "queued";
+  }
+
+  const before = await state();
+  if (before === "queued") return reportQueued();
+  if (before === "done") {
+    log.info(`${route.token} transfer already delivered on Base`);
     return "already-delivered";
   }
 
@@ -135,14 +233,30 @@ export async function deliverOutbound(
     submit: async (n) =>
       (sent.hash = await receiveMessage(clients, outboundAbi, route.transceiver, vaa.bytes, n)),
   });
-  if (!sent.hash) return "completed-elsewhere";
+
+  if (!sent.hash) {
+    // The queue resolved without sending: the simulate refused as done, or as dead. Read which.
+    const after = await state();
+    if (after === "queued") return reportQueued();
+    if (after === "done") {
+      log.info(`${route.token} transfer delivered by someone else first; nothing sent`);
+      return "completed-elsewhere";
+    }
+    log.warn(`${route.token} transfer refused by Base for good; nothing sent`);
+    return "dropped";
+  }
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: sent.hash });
   if (receipt.transactionHash.toLowerCase() !== sent.hash.toLowerCase()) {
     throw new Error(`ntt-base ${route.token}: delivery ${sent.hash} was replaced by ${receipt.transactionHash}`);
   }
   if (receipt.status !== "success") {
-    throw new Error(`ntt-base ${route.token}: delivery ${sent.hash} reverted on chain`);
+    const after = await state();
+    if (after === "open") {
+      throw new Error(`ntt-base ${route.token}: delivery ${sent.hash} reverted on chain`);
+    }
+    log.info(`${route.token} transfer: lost the race, someone else's delivery landed first; ${sent.hash} reverted (gas spent)`);
+    return after === "queued" ? reportQueued() : "completed-elsewhere";
   }
-  return "delivered";
+  return (await queuedReport()) ? reportQueued() : "delivered";
 }
