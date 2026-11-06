@@ -1,4 +1,4 @@
-import { concat, keccak256, parseAbi, toHex, type Hash, type Hex } from "viem";
+import { concat, formatUnits, keccak256, parseAbi, toHex, type Hash, type Hex } from "viem";
 
 import type { ChainClients } from "../../clients/hydration";
 import { receiveMessage } from "../../clients/hydration";
@@ -16,7 +16,9 @@ export const outboundAbi = parseAbi([
   "function getInboundQueuedTransfer(bytes32 digest) external view returns ((uint72 amount, uint64 txTimestamp, address recipient))",
   "function rateLimitDuration() external view returns (uint64)",
   "error TransferAlreadyCompleted(bytes32 vaaHash)",
-  // The core bridge's refusal of a VAA whose signatures do not verify: permanent (engine/revert.ts).
+  // The transceiver's refusal of a VAA that does not verify. Named here for the log only, and
+  // retried like any other revert: it also covers a valid VAA signed by a guardian set Base has
+  // not been given yet, so it is not proof the VAA is bad. Retries only simulate, so they cost no gas.
   "error InvalidVaa(string reason)",
 ]);
 
@@ -68,6 +70,18 @@ export function targetChain(payload: Buffer): number {
 }
 
 /**
+ * An NTT `TrimmedAmount` in human units. It is a uint72 packing the amount (uint64) above its
+ * decimals (uint8): `amount = raw >> 8`, `decimals = raw & 0xFF` (`TrimmedAmount.sol` getAmount /
+ * getDecimals in native-token-transfers). The decimals are the trimmed precision — the token's own,
+ * capped at 8 — so EURC (6) reads 908196247 at 6 as "908.196247".
+ *
+ * @param raw The packed value, as `getInboundQueuedTransfer` returns it.
+ */
+export function trimmedAmount(raw: bigint): string {
+  return formatUnits(raw >> 8n, Number(raw & 0xffn));
+}
+
+/**
  * What one pass over a VAA did.
  *
  * - `ignored`: not a transfer for this route.
@@ -79,7 +93,6 @@ export function targetChain(payload: Buffer): number {
  *   simulate refused, or our transaction reverted on the consumed VAA).
  * - `queued`: the Base manager accepted the transfer but holds it under its inbound rate limit; the
  *   recipient is not paid until someone calls `completeInboundQueuedTransfer` after the delay.
- * - `dropped`: Base refuses the VAA for good (`InvalidVaa`); nothing was sent.
  */
 export type Outcome =
   | "ignored"
@@ -87,8 +100,7 @@ export type Outcome =
   | "already-delivered"
   | "delivered"
   | "completed-elsewhere"
-  | "queued"
-  | "dropped";
+  | "queued";
 
 export interface DeliverOptions {
   /** Act only on a VAA at least this old, measured from the VAA's own timestamp. */
@@ -208,7 +220,8 @@ export async function deliverOutbound(
     return (
       `ntt-base ${route.token} sequence ${vaa.sequence}: queued on Base under the inbound limit; someone must call ` +
       `completeInboundQueuedTransfer(${digest}) on ${route.manager} after the delay ` +
-      `(completable from unix ${queued.txTimestamp + delay}; amount ${queued.amount} base units, recipient ${queued.recipient})`
+      `(completable from unix ${queued.txTimestamp + delay}; ${trimmedAmount(queued.amount)} ${route.token}, ` +
+      `recipient ${queued.recipient})`
     );
   }
 
@@ -235,15 +248,15 @@ export async function deliverOutbound(
   });
 
   if (!sent.hash) {
-    // The queue resolved without sending: the simulate refused as done, or as dead. Read which.
+    // The queue resolved without sending: the simulate refused as done. Read what is now on Base.
     const after = await state();
     if (after === "queued") return reportQueued();
     if (after === "done") {
       log.info(`${route.token} transfer delivered by someone else first; nothing sent`);
       return "completed-elsewhere";
     }
-    log.warn(`${route.token} transfer refused by Base for good; nothing sent`);
-    return "dropped";
+    // Not proven either way (nothing in this app's ABI is classified dead): retry.
+    throw new Error(`ntt-base ${route.token}: not sent and not delivered`);
   }
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: sent.hash });
@@ -259,4 +272,45 @@ export async function deliverOutbound(
     return after === "queued" ? reportQueued() : "completed-elsewhere";
   }
   return (await queuedReport()) ? reportQueued() : "delivered";
+}
+
+/**
+ * One engine run over a VAA: `deliverOutbound`, with the two things only the job knows.
+ *
+ * - `not-yet-due` becomes a throw, so the engine comes back after its backoff (2, 4, 8, 16, 30 min).
+ * - A throw on the last run is logged at error and alerted before it is rethrown: the engine gives
+ *   up after it, and the VAA stays deliverable by hand. bullmq 3.16 counts `attemptsMade` from 1
+ *   (it increments as the job becomes active), so the last run is the one where
+ *   `attempts >= maxAttempts`.
+ *
+ * @param job The engine's attempt count for this run and the budget; absent when not run by the engine.
+ * @returns The outcome of a run that ends the job.
+ * @throws For the engine to retry, or after the last run to fail the job.
+ */
+export async function runOutbound(
+  route: OutboundNttRoute,
+  vaa: ParsedVaa,
+  clients: ChainClients,
+  queue: Queue,
+  log: typeof logger,
+  opts: DeliverOptions,
+  job?: { attempts: number; maxAttempts: number },
+): Promise<Outcome> {
+  try {
+    const outcome = await deliverOutbound(route, vaa, clients, queue, log, opts);
+    if (outcome === "not-yet-due") {
+      throw new Error(`ntt-base ${route.token} sequence ${vaa.sequence}: not yet due (grace ${opts.graceSeconds} s)`);
+    }
+    return outcome;
+  } catch (e) {
+    if (job !== undefined && job.attempts >= job.maxAttempts) {
+      const line =
+        `ntt-base ${route.token} sequence ${vaa.sequence}: gave up after ${job.maxAttempts} attempts; not ` +
+        `delivered on Base by us (${(e as Error).message.split("\n")[0]}). Deliver it by hand with ` +
+        `receiveMessage on ${route.transceiver}`;
+      log.error(line);
+      await opts.alert?.(line);
+    }
+    throw e;
+  }
 }

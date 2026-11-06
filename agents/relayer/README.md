@@ -24,13 +24,15 @@ normally delivers within minutes; this covers the transfers nobody delivers, suc
 address that cannot send a transaction itself.
 
 - It acts on a VAA only once it is `NTT_BASE_GRACE_SECONDS` old (default 900), measured from the VAA
-  timestamp (the Hydration block time). A younger one is handed back to the engine for a later retry.
+  timestamp (the Hydration block time). A younger one is handed back to the engine, whose backoff
+  (2, 4, 8, 16, 30 min) makes the first real attempt about 30 min after the transfer at the default.
 - Then it reads the Base transceiver's `isVAAConsumed` and the manager's `isMessageExecuted`, skips a
   transfer either marks done, simulates, and sends `receiveMessage`. A send it did not see land is
   retried only through those reads.
 - A transfer the Base manager holds under its inbound rate limit is reported `queued` at warn, with a
   Discord alert: someone must call `completeInboundQueuedTransfer` after the delay. The app does not.
-- A VAA Base refuses for good (`InvalidVaa`) is dropped. A transfer still undelivered after the last
+- Every other refusal is retried (simulate only, so no gas), `InvalidVaa` included: a valid VAA reads
+  as invalid while Base waits for a guardian-set upgrade. A transfer still undelivered after the last
   of 50 attempts (about 23 h) raises an alert.
 
 Its own process and Base wallet (`PRIVKEY_BASE`, a value different from `psm-base`'s). Same queue as

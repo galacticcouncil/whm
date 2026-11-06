@@ -17,7 +17,7 @@ import {
   RETRY_MAX_MS,
   RPC_BASE,
 } from "./config";
-import { deliverOutbound, discordAlert } from "./outbound";
+import { discordAlert, runOutbound } from "./outbound";
 import { BASE_ROUTES } from "./routes";
 
 /**
@@ -75,27 +75,9 @@ async function start(): Promise<void> {
         sequence: vaa.sequence.toString(),
       });
       const alert = discordAlert(alerts().discordWebhook, log);
+      // relayer-engine passes the bullmq attempt count (from 1) and the budget on ctx.storage.job.
       const job = (ctx as { storage?: { job?: { attempts: number; maxAttempts: number } } }).storage?.job;
-      // bullmq's attemptsMade: 0 on the first run, so the last run sees maxAttempts - 1.
-      const last = job !== undefined && job.attempts >= job.maxAttempts - 1;
-      let outcome;
-      try {
-        outcome = await deliverOutbound(route, vaa, clients, queue, log, { graceSeconds: GRACE_SECONDS, alert });
-        if (outcome === "not-yet-due") {
-          // Thrown so the engine comes back after its backoff; not an error.
-          throw new Error(`ntt-base ${route.token} sequence ${vaa.sequence}: not yet due (grace ${GRACE_SECONDS} s)`);
-        }
-      } catch (e) {
-        if (last) {
-          const line =
-            `ntt-base ${route.token} sequence ${vaa.sequence}: giving up after ${job.maxAttempts} attempts, ` +
-            `not delivered on Base (${(e as Error).message.split("\n")[0]}); the VAA stays deliverable by hand ` +
-            `with receiveMessage on ${route.transceiver}`;
-          log.error(line);
-          await alert(line);
-        }
-        throw e;
-      }
+      const outcome = await runOutbound(route, vaa, clients, queue, log, { graceSeconds: GRACE_SECONDS, alert }, job);
       log.info(`${route.token} to Base: ${outcome}`);
       return next();
     };

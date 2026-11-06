@@ -51,7 +51,9 @@ export function fromSequenceFromHydration() {
  * make their transaction revert. Measured on the 30 transfers up to sequence 324: automated
  * deliveries at 57-101 s, self-claims at 107-141 s, one at 615 s (Wormholescan, 2026-11-07). 15 min
  * clears all of them.
- * `NTT_BASE_GRACE_SECONDS` overrides it.
+ * `NTT_BASE_GRACE_SECONDS` overrides it. A VAA under the grace period is thrown back to the engine,
+ * whose backoff runs at about +2, +6, +14 and +30 min, so at 900 s the first real attempt comes about
+ * 30 min after the transfer (4 of the 50 runs spent waiting).
  */
 export const GRACE_SECONDS = optNum("NTT_BASE_GRACE_SECONDS", 15 * 60);
 

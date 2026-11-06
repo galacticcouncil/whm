@@ -2,7 +2,7 @@
 import { restoreNativeFetch } from "../src/fetch";
 
 import { readFileSync } from "node:fs";
-import { encodeFunctionData, parseAbi, type Address, type Hex } from "viem";
+import { encodeFunctionData, formatUnits, parseAbi, type Address, type Hex } from "viem";
 
 import { registerHydration } from "../src/chains";
 import { baseClients } from "../src/clients/base";
@@ -13,7 +13,7 @@ import { createQueue } from "../src/engine/queue";
 import logger from "../src/logger";
 import type { ParsedVaa } from "../src/types";
 
-import { deliverOutbound, managerDigest, outboundAbi, vaaHash, type Outcome } from "../src/apps/ntt/outbound";
+import { deliverOutbound, managerDigest, outboundAbi, runOutbound, vaaHash, type Outcome } from "../src/apps/ntt/outbound";
 import { BASE_ROUTES } from "../src/apps/ntt/routes";
 
 /**
@@ -28,7 +28,10 @@ import { BASE_ROUTES } from "../src/apps/ntt/routes";
  *                   and is reported as lost, not delivered; recipient paid once
  *   queued          the manager's inbound limit is lowered (owner impersonated) so the transfer is
  *                   queued: reported `queued` with an alert, recipient not paid, never "delivered"
- *   forged          the right emitter, one amount byte flipped: refused for good, nothing sent
+ *   precheck-queued the limit is lowered and someone else's delivery, queued, lands between our
+ *                   reads and our simulate: `queued` with an alert, nothing sent
+ *   forged          the right emitter, one amount byte flipped: every run throws for a retry and
+ *                   sends nothing; only the last run of a 3-run budget alerts
  *
  *   anvil --fork-url <base rpc> --fork-block-number <block before the delivery> --chain-id 8453 --port <port>
  *   RPC_BASE=http://127.0.0.1:<port> PRIVKEY_BASE=<an anvil account key> \
@@ -148,13 +151,14 @@ async function main(): Promise<void> {
   const nonce = () => publicClient.getTransactionCount({ address: account.address });
 
   const alerts: string[] = [];
+  const deliverOpts = (now?: number) => ({
+    graceSeconds: GRACE,
+    now: now === undefined ? undefined : () => now,
+    alert: async (m: string) => void alerts.push(m),
+  });
   const pass = async (vaa: ParsedVaa, now?: number): Promise<Outcome | string> => {
     try {
-      return await deliverOutbound(route, vaa, clients, queue, logger, {
-        graceSeconds: GRACE,
-        now: now === undefined ? undefined : () => now,
-        alert: async (m: string) => void alerts.push(m),
-      });
+      return await deliverOutbound(route, vaa, clients, queue, logger, deliverOpts(now));
     } catch (e) {
       return `THROW ${(e as Error).message.split("\n")[0]}`;
     }
@@ -188,6 +192,14 @@ async function main(): Promise<void> {
       snapshot = await rpc("evm_snapshot");
     }
   }
+
+  // Owner impersonated on the fork only: the inbound limit from Hydration drops to 1 token.
+  const setOneTokenLimit = async () => {
+    const owner = await publicClient.readContract({ address: route.manager, abi: managerAbi, functionName: "owner" });
+    const oneToken = 10n ** BigInt(decimals);
+    const setLimit = encodeFunctionData({ abi: managerAbi, functionName: "setInboundLimit", args: [oneToken, 73] });
+    await sendAs(owner, route.manager, setLimit);
+  };
 
   await scenario("young", async () => {
     const n0 = await nonce();
@@ -249,32 +261,60 @@ async function main(): Promise<void> {
   });
 
   await scenario("queued", async () => {
-    const owner = await publicClient.readContract({ address: route.manager, abi: managerAbi, functionName: "owner" });
-    const oneToken = 10n ** BigInt(decimals);
-    const setLimit = encodeFunctionData({ abi: managerAbi, functionName: "setInboundLimit", args: [oneToken, 73] });
-    await sendAs(owner, route.manager, setLimit);
+    await setOneTokenLimit();
     const b0 = await balance();
     const n0 = await nonce();
     const first = await pass(real);
     check(first === "queued", `queued: pass 1 "queued" (got "${first}")`);
     check((await balance()) === b0, "queued: recipient not paid yet");
     check(
-      alerts.length === 1 && alerts[0].includes("completeInboundQueuedTransfer"),
-      "queued: one alert naming completeInboundQueuedTransfer",
+      alerts.length === 1 &&
+        alerts[0].includes("completeInboundQueuedTransfer") &&
+        alerts[0].includes(`${formatUnits(amount, decimals)} EURC`),
+      `queued: one alert naming completeInboundQueuedTransfer and ${formatUnits(amount, decimals)} EURC`,
     );
     const second = await pass(real);
     check(second === "queued", `queued: pass 2 "queued", never "already-delivered" (got "${second}")`);
     check((await nonce()) === n0 + 1, "queued: pass 2 sent nothing");
   });
 
+  await scenario("precheck-queued", async () => {
+    await setOneTokenLimit();
+    const b0 = await balance();
+    const n0 = await nonce();
+    pc.simulateContract = async (args: unknown) => {
+      await sendAs(OTHER, route.transceiver, deliverData);
+      return original.simulate(args);
+    };
+    const outcome = await pass(real);
+    check(outcome === "queued", `precheck-queued: "queued" (got "${outcome}")`);
+    check((await nonce()) === n0, "precheck-queued: nothing sent");
+    check((await balance()) === b0, "precheck-queued: recipient not paid yet");
+    check(alerts.length === 1 && alerts[0].includes("completeInboundQueuedTransfer"), "precheck-queued: one alert");
+  });
+
   await scenario("forged", async () => {
     const forged = Buffer.from(real.bytes);
     const body = 6 + forged.readUInt8(5) * 66;
     forged[body + 51 + 141 + 7] ^= 0x01; // last byte of the transfer amount
+    const vaa = parseVaa(forged);
     const n0 = await nonce();
-    const outcome = await pass(parseVaa(forged));
-    check(outcome === "dropped", `forged: "dropped" (got "${outcome}")`);
-    check((await nonce()) === n0, "forged: nothing sent");
+    const runs: string[] = [];
+    const alertsAfter: number[] = [];
+    for (let attempts = 1; attempts <= 3; attempts++) {
+      try {
+        runs.push(await runOutbound(route, vaa, clients, queue, logger, deliverOpts(), { attempts, maxAttempts: 3 }));
+      } catch (e) {
+        runs.push("THROW");
+      }
+      alertsAfter.push(alerts.length);
+    }
+    check(runs.every((r) => r === "THROW"), `forged: every run throws for a retry (got ${runs.join(", ")})`);
+    check((await nonce()) === n0, "forged: nothing sent in 3 runs");
+    check(
+      alertsAfter.join(",") === "0,0,1" && alerts[0].includes("gave up after 3 attempts"),
+      `forged: alert only on the last run (alerts after each run: ${alertsAfter.join(",")})`,
+    );
   });
 
   logger.info(failures === 0 ? "PASS" : `FAIL (${failures})`);
