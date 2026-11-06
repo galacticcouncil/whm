@@ -8,17 +8,22 @@
  * The `basejump-base` migration deploys both ends and stops there; the pool is owned by the
  * emergency admin `0xAA7e…AA7E1`, so two calls remain, and this probe builds and enacts both:
  *
- *   1. Treasury referendum (Treasurer track, `dispatchAsTreasury`): buy EURC with USDT through the
+ *   1. Treasury referendum (Treasurer track, `dispatchAsTreasury`): sell USDT for EURC through the
  *      router (USDT into the Hydration money market as aUSDT, aUSDT → HOLLAR → aEURC over two
- *      stableswaps, aEURC out of the money market as EURC), and send the 10,000 EURC float to the
- *      landing. Same shape as #319, which seeded the first float.
+ *      stableswaps, aEURC out of the money market as EURC), and send the EURC float (`--float`,
+ *      default 10,000) to the landing. Same shape as #319, which seeded the first float.
  *   2. TC motion (`dispatchAsEmergencyAdmin(evm.call)`, `EmergencyAdminOrigin` = Root or TC
  *      majority): `landing.setDestAsset(Base EURC, asset 44)`, then
- *      `landing.setAuthorizedBridge(<Base receiver>, true)`. Map before arming: an armed receiver
- *      over an unmapped route reverts every payout until the map lands.
+ *      `landing.setAuthorizedBridge(<Base receiver>, true)`. Map before authorizing: an authorized
+ *      receiver over an unmapped route reverts every payout until the map lands.
  *
- * Order is load-bearing only for user experience, not for funds: the float lands before the
- * receiver is armed, so the first payout never queues for want of a pool.
+ * Neither call lets a user in: the Base emitter is deployed disarmed (`landing` unset, so
+ * `bridgeViaWormhole` reverts before pulling a token) and the Base TC Safe arms it only after
+ * both have passed (migration step 011 records that call; the Base side is not forked here). Order
+ * among the two is for user experience, not funds: funded before authorized, the first payout
+ * never queues for want of a pool. A `batchAll` leg that fails is reported as an event and the
+ * batch still completes, so a half-applied motion is possible; it is recoverable (payouts revert
+ * and wait), and this probe and the checklist read the resulting state, not the outcome.
  *
  * What runs here:
  *   0. the Base receiver: `--receiver <address>` takes the live one (the `005-deploy-receiver`
@@ -38,7 +43,7 @@
  * canary swaps the message core's guardian SET for one key we hold (as in _probeBasejumpDelivery);
  * the verification path is untouched. The canary is scaffolding, not part of either proposal.
  *
- *   npx tsx chopsticks/probes/_probeBasejumpBaseGoLive.ts [--receiver <address>] [--root]
+ *   npx tsx chopsticks/probes/_probeBasejumpBaseGoLive.ts [--receiver <address>] [--root] [--float <EURC>]
  *
  * `--root` enacts both from Root instead (what a single Root referendum would do).
  */
@@ -107,14 +112,25 @@ const TREASURY_ACCOUNT = `0x6d6f646c70792f7472737279${"00".repeat(20)}` as Hex;
 
 // ─── Proposal parameters ─────────────────────────────────────────
 
-/** The float: 10,000 EURC, the size of both earlier floats (#319 EURC, #404 USDC). */
-const POOL_SEED = 10_000_000_000n;
-/** Bought by the referendum. The treasury held 972.155197 EURC at the time of writing; buying 9,050
- *  covers the seed and leaves about 22 EURC. Checked live below — re-read before submitting. */
-const EURC_BUY = 9_050_000_000n;
-/** router.buy ceiling: 2% over the 10,102.245649 USDT this route spent for 9,050 EURC on a fork at
- *  Hydration block 16,702,200. Re-measure before submitting. */
-const MAX_USDT_IN = 10_310_000_000n;
+/** The float in whole EURC (`--float`, default 10,000: the size of both earlier floats, #319 EURC and
+ *  #404 USDC). The one parameter of the referendum; the purchase and its ceiling follow from it. */
+const floatArg = process.argv.indexOf("--float");
+const FLOAT_EURC = floatArg >= 0 ? Number(process.argv[floatArg + 1]) : 10_000;
+if (!Number.isInteger(FLOAT_EURC) || FLOAT_EURC <= 0) throw new Error("--float needs a whole EURC amount");
+const POOL_SEED = BigInt(FLOAT_EURC) * 1_000_000n;
+/** EURC needed: (float - the treasury's EURC), rounded UP to 50 EURC, read at the fork block. */
+const BUY_STEP = 50_000_000n;
+/**
+ * USDT sold per EURC needed: 1.14, about 2% over the 1.1163 a 9,050 EURC purchase cost on a fork at
+ * Hydration block 16,702,200 (a fork reading — re-measure before submitting). The referendum SELLS
+ * this exact USDT with the EURC needed as its minimum out. Not `router.buy`: on the same fork a
+ * 19,050 EURC buy with that ceiling failed `Stableswap.InsufficientBalance` while the same purchase
+ * as a sell succeeded, so the sell is the form both float sizes share. Any EURC over the minimum
+ * stays in the Treasury.
+ */
+const USDT_PER_EURC_X100 = 114n;
+/** The Hydration money market's aEURC token; its EURC balance is what can still be withdrawn. */
+const AEURC_TOKEN = "0xCA30f9FF99394C55DEda293df223E3740635C72e" as Hex;
 
 /**
  * USDT → EURC, explicit. Neither end is in the Omnipool, so an empty route fails. The `Aave` legs
@@ -362,6 +378,10 @@ async function main(): Promise<void> {
       retry(fn, () =>
         pub.readContract({ address: receiver, abi: RECEIVER_ABI, functionName: fn as never, args: args as never }),
       ) as Promise<T>;
+    const mmWithdrawable = () =>
+      retry("balanceOf", () =>
+        pub.readContract({ address: EURC_HYDRATION, abi: ERC20_ABI, functionName: "balanceOf", args: [AEURC_TOKEN] }),
+      );
     const poolEurc = () =>
       retry("balanceOf", () =>
         pub.readContract({ address: EURC_HYDRATION, abi: ERC20_ABI, functionName: "balanceOf", args: [LANDING] }),
@@ -454,8 +474,14 @@ async function main(): Promise<void> {
     record("Base EURC not yet mapped", before.eurcRoute === ZERO, before.eurcRoute);
     record("Base receiver not yet authorized", before.receiverAuthorized === false);
     record("admin can pay EVM gas", before.adminGas > 0n);
-    record("treasury EURC + purchase covers the float", before.treasuryEurc + EURC_BUY >= POOL_SEED,
-      `${amt(before.treasuryEurc + EURC_BUY, "EURC")} ≥ ${amt(POOL_SEED, "EURC")}`);
+    const shortfall = POOL_SEED > before.treasuryEurc ? POOL_SEED - before.treasuryEurc : 0n;
+    const EURC_MIN_OUT = ((shortfall + BUY_STEP - 1n) / BUY_STEP) * BUY_STEP;
+    const USDT_IN = (EURC_MIN_OUT * USDT_PER_EURC_X100) / 100n;
+    const mmBefore = await mmWithdrawable();
+    console.log(`   float                ${amt(POOL_SEED, "EURC")}  → sell ${amt(USDT_IN, "USDT")} for at least ${amt(EURC_MIN_OUT, "EURC")}`);
+    console.log(`   money market EURC    ${amt(mmBefore, "EURC")} withdrawable`);
+    record("treasury EURC + minimum bought covers the float", before.treasuryEurc + EURC_MIN_OUT >= POOL_SEED,
+      `${amt(before.treasuryEurc + EURC_MIN_OUT, "EURC")} ≥ ${amt(POOL_SEED, "EURC")}`);
 
     // ── 1. the calldata ──
     const adminCall = (evmInput: Hex) =>
@@ -479,9 +505,9 @@ async function main(): Promise<void> {
 
     const refLegs = [
       {
-        label: `router.buy(USDT → EURC, ${amt(EURC_BUY, "EURC")} out, at most ${amt(MAX_USDT_IN, "USDT")} in)`,
+        label: `router.sell(USDT → EURC, ${amt(USDT_IN, "USDT")} in, at least ${amt(EURC_MIN_OUT, "EURC")} out)`,
         call: meta.tx.dispatcher.dispatchAsTreasury(
-          meta.tx.router.buy(USDT_ASSET_ID, EURC_ASSET_ID, EURC_BUY, MAX_USDT_IN, USDT_TO_EURC_ROUTE),
+          meta.tx.router.sell(USDT_ASSET_ID, EURC_ASSET_ID, USDT_IN, EURC_MIN_OUT, USDT_TO_EURC_ROUTE),
         ),
       },
       {
@@ -581,10 +607,12 @@ async function main(): Promise<void> {
     const treasuryUsdtAfter = await tokenBalance(treasurySub, USDT_ASSET_ID);
     const treasuryEurcAfter = await tokenBalance(treasurySub, EURC_ASSET_ID);
     const usdtSpent = before.treasuryUsdt - treasuryUsdtAfter;
-    console.log(`   treasury USDT spent  ${amt(usdtSpent, "USDT")}  (${(Number(usdtSpent) / Number(EURC_BUY)).toFixed(4)} USDT per EURC)`);
+    const eurcBought = treasuryEurcAfter + POOL_SEED - before.treasuryEurc;
+    console.log(`   treasury USDT spent  ${amt(usdtSpent, "USDT")} for ${amt(eurcBought, "EURC")}  (${(Number(usdtSpent) / Number(eurcBought)).toFixed(4)} USDT per EURC)`);
     console.log(`   treasury EURC left   ${amt(treasuryEurcAfter, "EURC")}`);
-    record("treasury bought the EURC within the ceiling", usdtSpent > 0n && usdtSpent <= MAX_USDT_IN, amt(usdtSpent, "USDT"));
-    record("treasury EURC = before + bought - float", treasuryEurcAfter === before.treasuryEurc + EURC_BUY - POOL_SEED);
+    console.log(`   money market EURC    ${amt(mmBefore, "EURC")} → ${amt(await mmWithdrawable(), "EURC")} withdrawable`);
+    record("treasury sold exactly the USDT in", usdtSpent === USDT_IN, amt(usdtSpent, "USDT"));
+    record("treasury bought at least the EURC needed", eurcBought >= EURC_MIN_OUT, amt(eurcBought, "EURC"));
     const poolAfterSeed = await poolEurc();
     record("landing holds the float", poolAfterSeed === before.poolEurc + POOL_SEED, amt(poolAfterSeed, "EURC"));
 

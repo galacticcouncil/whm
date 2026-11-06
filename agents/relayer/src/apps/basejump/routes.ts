@@ -1,4 +1,4 @@
-import type { Address } from "viem";
+import { isAddress, type Address } from "viem";
 
 import { WORMHOLE } from "../../chains";
 import type { ChainId } from "../../types";
@@ -28,7 +28,8 @@ export const ROUTES: BasejumpRoute[] = [
   {
     // EURC. Fill both from deployments/prod/basejump-base.json once `pnpm migrate:basejump-base`
     // has run: sourceEmitter = 001-deploy-emitter.proxyAddress, receiver = 005-deploy-receiver
-    // .proxyAddress. Until then the app skips this route (see app.ts). Checklist:
+    // .proxyAddress. Until then the app skips this route (see app.ts). The emitter stays
+    // disarmed until the Base TC Safe arms it after this route is live. Checklist:
     // docs/basejump/base-eurc.md.
     source: "base",
     sourceChain: WORMHOLE.base,
@@ -37,6 +38,8 @@ export const ROUTES: BasejumpRoute[] = [
   },
 ];
 
+/** A real, non-zero 20-byte address: anything else ("", "0x0", the placeholder) counts as unfilled. */
+const filled = (a: string): boolean => isAddress(a, { strict: false }) && a.toLowerCase() !== NOT_DEPLOYED;
+
 /** A route both of whose addresses are filled in. */
-export const isDeployed = (route: BasejumpRoute): boolean =>
-  route.sourceEmitter.toLowerCase() !== NOT_DEPLOYED && route.receiver.toLowerCase() !== NOT_DEPLOYED;
+export const isDeployed = (route: BasejumpRoute): boolean => filled(route.sourceEmitter) && filled(route.receiver);

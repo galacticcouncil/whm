@@ -158,7 +158,7 @@ per-token.
 | Ethereum chain id | `2` |
 | `BasejumpEmitter` (Ethereum) | `0xa72e2bf29c840eb93adbb9ee1aa41580f01c9944` |
 | `BasejumpReceiver` (Hydration) | `0x35bf3a1b9ac564c8f66c97cea1ee410cd3f97c8a` |
-| `BasejumpLanding` (Hydration) | `0x70e9b12c3b19cb5f0e59984a5866278ab69df976` (impl `0x4ea0d58a…e31f`) |
+| `BasejumpLanding` (Hydration) | `0x70e9b12c3b19cb5f0e59984a5866278ab69df976` (impl `0xd04b8996…b1f6` since the 2026-09-17 upgrade; read 2026-11-07) |
 | USDC (Ethereum) | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
 | USDC (Hydration, asset 21) | `0x0000000000000000000000000000000100000015` |
 | NTT manager (Ethereum, LOCKING) | `0x447b2c7485A3d6813F8197E605b10BcCD8dd8398` |
@@ -303,9 +303,12 @@ Migration [`basejump-base`](../../migrations/definitions/basejump-base/) deploys
 run). The settlement leg exists: Base EURC manager `0xD1dc…d89a` (LOCKING) peers with Hydration's
 `0x8dd1…bc4C` (BURNING, `token()` = asset 44), and the relayer's `ntt` routes carry it. The pool
 does not: referendum #404 unmapped Base EURC and moved the EURC float to USDC, so step 2 is a TC
-motion and step 4 a Treasury referendum. Step 010 of the migration records the motion's landing
-calls; [`_probeBasejumpBaseGoLive`](../../chopsticks/probes/_probeBasejumpBaseGoLive.ts) builds
-both proposals and enacts them on a fork. Checklist and referendum draft: [base-eurc.md](base-eurc.md).
+motion and step 4 a Treasury referendum. Unlike the Ethereum corridor, the migration leaves the
+emitter **disarmed** (`landing` unset), and the Base TC Safe arms it with `setLanding` only after
+the motion, the float and the relayer route are in place, so no user can send into a corridor that
+cannot yet pay. Steps 010 and 011 record the motion's landing calls and the Safe's arming call;
+[`_probeBasejumpBaseGoLive`](../../chopsticks/probes/_probeBasejumpBaseGoLive.ts) builds both
+proposals and enacts them on a fork. Checklist and referendum draft: [base-eurc.md](base-eurc.md).
 
 ### Arbitrum → Hydration (USDC) — blocked
 
