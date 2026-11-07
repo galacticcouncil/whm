@@ -39,34 +39,49 @@ export interface PayoutKeeperDeps {
   alertAfterMs: number;
   /** How long to wait for a sent call's receipt before leaving it to the next tick. */
   receiptTimeoutMs: number;
-  /** Alert sink. Called at most once per queued payout, plus once when an alerted one is paid. */
+  /** Alert sink. Once per cause per queued payout, plus once when an alerted one is paid. */
   notify(message: string): Promise<void>;
   /** Clock, injectable for the fork probe. */
   now?: () => number;
 }
+
+/**
+ * Why a head gets an alert. `waiting`: it has been unpaid for `alertAfterMs` (pool short, the call
+ * would revert, or a sent call is not mined). `reverting`: calls that simulated clean reverted on
+ * chain `MAX_REVERTS_PER_HEAD` times. One alert per cause per head, so a head that first waits on
+ * the pool and then starts losing the float race is reported twice, never more.
+ */
+type Cause = "waiting" | "reverting";
 
 /** What the keeper knows about the current head. Reset whenever the head moves. */
 interface Head {
   id: bigint;
   /** When this process first saw it at the head. A restart resets it. */
   since: number;
-  alerted: boolean;
+  /** Causes already alerted for this head. */
+  alerted: Set<Cause>;
   /** A `fulfillPending` this process sent while this entry was the head, not yet seen mined. */
   sent?: Hash;
   /** Calls for this head that simulated clean and then reverted on chain, in this window. */
   reverts: number;
-  /** When `reverts` reached the cap. The count resets `alertAfterMs` later. */
+  /** When `reverts` reached the cap. The count resets one pause later. */
   cappedAt?: number;
+  /** How many times this head has hit the cap; each pause is twice the last, up to 6 h. */
+  caps: number;
 }
 
 /**
  * A call that simulates clean can still revert on chain: the simulation runs on the latest block,
  * and a delivery this app sent just before can spend the float in the next one. That is worth a
  * retry, but not an unbounded one: after this many, the keeper stops sending for this head and
- * alerts at once, then tries again `alertAfterMs` later. So at most this many sends per head per
- * alert interval.
+ * alerts at once, then pauses: `alertAfterMs`, doubling each time the cap is hit again for the
+ * same head, up to `MAX_REVERT_PAUSE_MS`. So at most this many sends per pause, and in the
+ * steady state at most this many per 6 h.
  */
 export const MAX_REVERTS_PER_HEAD = 3;
+
+/** The longest pause after the cap: a head that never pays costs at most 3 calls per 6 h. */
+export const MAX_REVERT_PAUSE_MS = 6 * 60 * 60_000;
 
 /**
  * Pays queued Basejump payouts as soon as the landing can cover them.
@@ -84,7 +99,7 @@ export const MAX_REVERTS_PER_HEAD = 3;
  *
  * An unobserved send is never repeated blindly. After a send for head `i`, nothing is sent again
  * until either the head moves past `i` or the call's receipt shows it reverted, and after
- * `MAX_REVERTS_PER_HEAD` such reverts nothing is sent for `i` for `alertAfterMs`. A call that is
+ * `MAX_REVERTS_PER_HEAD` such reverts nothing is sent for `i` for a growing pause. A call that is
  * never mined (dropped, or stuck behind a nonce gap) leaves the keeper checking its receipt and,
  * after `alertAfterMs`, alerting; it does not send a second one.
  *
@@ -128,11 +143,11 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     h: Head,
     what: string,
     reason: string,
-    force = false,
+    cause: Cause = "waiting",
   ): Promise<void> {
     const waited = now() - h.since;
-    if (h.alerted || (!force && waited < alertAfterMs)) return;
-    h.alerted = true;
+    if (h.alerted.has(cause) || (cause === "waiting" && waited < alertAfterMs)) return;
+    h.alerted.add(cause);
     const msg =
       `WARN queued Basejump payout #${h.id} of ${what} waiting ` +
       `${Math.round(waited / 60_000)} min ` +
@@ -148,12 +163,14 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
 
     if (head && h > head.id) {
       log.info(`queued payout #${head.id} paid (head now ${h})`);
-      if (head.alerted) await notify(`OK queued Basejump payout #${head.id} paid (head now ${h})`);
+      if (head.alerted.size > 0) {
+        await notify(`OK queued Basejump payout #${head.id} paid (head now ${h})`);
+      }
       head = undefined;
     }
     if (h >= tail) return;
     if (!head) {
-      head = { id: h, since: now(), alerted: false, reverts: 0 };
+      head = { id: h, since: now(), alerted: new Set(), reverts: 0, caps: 0 };
       log.info(`queued payout #${h} at the head (${tail - h} queued)`);
     }
     const current = head;
@@ -198,11 +215,22 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     }
 
     if (current.reverts >= MAX_REVERTS_PER_HEAD) {
-      current.cappedAt ??= now();
-      if (now() - current.cappedAt < alertAfterMs) {
-        log.warn(`#${h}: ${current.reverts} calls reverted on chain; not sending for it for now`);
+      if (current.cappedAt === undefined) {
+        current.cappedAt = now();
+        current.caps++;
+      }
+      // 30 min, 1 h, 2 h, 4 h, then 6 h each time (with the default alert interval).
+      const pause = Math.max(
+        alertAfterMs,
+        Math.min(alertAfterMs * 2 ** (current.caps - 1), MAX_REVERT_PAUSE_MS),
+      );
+      if (now() - current.cappedAt < pause) {
+        log.warn(
+          `#${h}: ${current.reverts} calls reverted on chain; ` +
+            `paused ${Math.round(pause / 60_000)} min`,
+        );
         const reason = `${current.reverts} fulfillPending calls simulated clean, then reverted`;
-        await alertIfOverdue(current, what, reason, true);
+        await alertIfOverdue(current, what, reason, "reverting");
         return;
       }
       log.info(`#${h}: revert cap expired; trying again`);

@@ -84,7 +84,9 @@ meantime, and every later payout waits behind it. If the same process later sees
 an all-clear. Alert state lives in memory: a restart restarts the clock and forgets the alert, so a
 head paid across a restart gets no all-clear, and one still waiting is alerted again after a new
 interval. A call that simulates clean but reverts on chain (a delivery spent the float first) is
-retried up to 3 times, then paused for one alert interval.
+retried up to 3 times, then that payout is paused and gets one alert. The pause repeats, with no
+further alert, and doubles each time: 30 min, 1 h, 2 h, 4 h, then 6 h. A payout that never pays
+costs at most 3 calls per 6 h once the pause reaches 6 h. Each cause (waiting, reverting) is alerted at most once per payout.
 
 ### `psm-hydration` and `psm-base`
 
