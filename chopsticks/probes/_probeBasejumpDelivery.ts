@@ -402,9 +402,9 @@ async function main(): Promise<void> {
     console.log(`   pool       ${poolQ} ${poolQ === poolAfter ? "✅ untouched" : "❌ moved"}`);
     console.log(`   recipient  ${recipQ} ${recipQ === recipAfter ? "✅ unpaid" : "❌ paid"}`);
     console.log(
-      `   ⇒ a drained pool silently queues with no revert signal. Nothing calls fulfillPending()`,
+      `   ⇒ a drained pool silently queues with no revert signal. The basejump relayer app calls`,
     );
-    console.log(`     automatically — the keeper in mrelayer is what closes this (R3).`);
+    console.log(`     fulfillPending() once the pool covers it (_probeBasejumpQueuedPayouts.ts, R3).`);
   } finally {
     await teardownForks(nets);
   }

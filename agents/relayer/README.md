@@ -71,6 +71,26 @@ A landing revert unwinds the VAA, so a retry is always safe; a pool shortfall qu
 reverting, so the only failures are transient and the retry budget is sized in hours. Latency is the
 point, so it does not wait on Wormholescan for the source tx hash.
 
+**Queued payouts.** When the landing's float is short, the payout queues instead of paying. The app
+then pays it from the same wallet ([payouts.ts](src/apps/basejump/payouts.ts)): after each delivery
+and every `QUEUED_PAYOUT_POLL_SECONDS`, it reads the queue head, the head's amount and the pool's
+balance of that asset, and calls `fulfillPending()` only when the pool covers it and a simulation
+passes. That call takes no arguments and pays the head to the recipient stored on chain; it is the
+only call this adds. The landing is read from each route's receiver, not configured.
+
+A head that stays unpaid for `QUEUED_PAYOUT_ALERT_MINUTES` (the pool is not refilled, or the call
+reverts, e.g. a dispatch that always fails) gets one Discord alert. Nothing is sent for it in the
+meantime, and every later payout waits behind it. If the same process later sees it paid, it posts
+an all-clear. Alert state lives in memory: a restart restarts the clock and forgets the alert, so a
+head paid across a restart gets no all-clear, and one still waiting is alerted again after a new
+interval. A call that simulates clean but reverts on chain (a delivery spent the float first) is
+retried up to 3 times, then that payout is paused and gets one alert. The pause repeats, with no
+further alert, and doubles each time: 30 min, 1 h, 2 h, 4 h, then 6 h. These steps assume the
+default 30 min `QUEUED_PAYOUT_ALERT_MINUTES`: the first pause equals the alert interval and they
+scale with it, while the 6 h ceiling is fixed (a 1 min interval gives 1, 2, 4 ... min, so many more
+calls before 6 h is reached). A payout that never pays costs at most 3 calls per 6 h once the pause
+reaches 6 h. Each cause (waiting, reverting) is alerted at most once per payout.
+
 ### `psm-hydration` and `psm-base`
 
 Relays the HOLLAR peg stability module's two legs ([docs/psm/spec.md](../../docs/psm/spec.md)) — one
@@ -113,7 +133,9 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `REDIS_HOST`          | Redis host                                        | `localhost`                           |
 | `REDIS_PORT`          | Redis port                                        | `6379`                                |
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
-| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts                       | optional                              |
+| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts; `basejump` also queued payouts | optional                    |
+| `QUEUED_PAYOUT_POLL_SECONDS` | How often `basejump` checks the landing's queue | `60`                           |
+| `QUEUED_PAYOUT_ALERT_MINUTES` | Alert once when a queued payout waits longer (`basejump`) | `30`               |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |
