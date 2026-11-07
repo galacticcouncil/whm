@@ -32,16 +32,20 @@ export const RETRY_MAX_MS = 30 * 60_000;
 /** Node's timer limit: a longer delay is silently clamped to 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
+/** Below this a "positive" value is a typo, and the timer would fire back to back. */
+const MIN_TIMER_MS = 1_000;
+
 /**
- * A positive number of `unit`s from env, as milliseconds, at most `MAX_TIMER_MS` (about 24.8
- * days). Fails at startup on anything else, so a typo cannot turn into a timer that fires
- * constantly or an alert that never does.
+ * A number of `unit`s from env, as milliseconds, from `MIN_TIMER_MS` (1 s) to `MAX_TIMER_MS`
+ * (about 24.8 days). Fails at startup on anything else, so a typo cannot turn into a timer that
+ * fires constantly or an alert that never does.
  */
 function positiveMs(name: string, fallback: number, unitMs: number): number {
   const v = optNum(name, fallback);
-  if (!Number.isFinite(v) || v <= 0 || v * unitMs > MAX_TIMER_MS) {
+  const ms = v * unitMs;
+  if (!Number.isFinite(ms) || ms < MIN_TIMER_MS || ms > MAX_TIMER_MS) {
     throw new Error(
-      `${name} must be a positive number up to ${MAX_TIMER_MS} ms, got ${process.env[name]}`,
+      `${name} must be between 1 s and about 24.8 days, got ${process.env[name]}`,
     );
   }
   return v * unitMs;

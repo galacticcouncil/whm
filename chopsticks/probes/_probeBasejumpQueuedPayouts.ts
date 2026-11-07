@@ -468,7 +468,8 @@ async function main(): Promise<void> {
     const recipSub = ss58(RECIPIENT);
     const recipBefore = await usdc(recipSub);
     const stop = keeper.start(1_000);
-    for (let i = 0; i < 60 && (await read("pendingHead")) === head0; i++) await sleep(1_000);
+    // A fork block takes ~30 s, longer with other forks running: wait up to 3 min.
+    for (let i = 0; i < 180 && (await read("pendingHead")) === head0; i++) await sleep(1_000);
     stop();
     record("the timer alone paid it", (await read("pendingHead")) === head0 + 1n);
     await shim.sealed();
@@ -492,57 +493,85 @@ async function main(): Promise<void> {
     record("pool −5 USDC", poolAfter === FLOAT - PAYOUT, `${poolAfter}`);
     record("one all-clear after the alert", hook.posts.length === 2 && hook.posts[1].startsWith(`OK queued Basejump payout #${head0} paid`), hook.posts[1] ?? "none");
 
-    // ── D. A call that simulates clean and reverts on chain, three times ──
+    // ── D. A payout that first waits on the pool, then keeps losing the float race ──
     // Constructs the race where a delivery this app sent just before spends the float: the shim
     // empties the pool after the keeper's simulation and before its call is sealed, then refills
-    // it. The keeper must stop after 3 reverts, alert at once, and try again one alert interval
-    // later, when it pays.
-    console.log(`\n── D. Three calls lose the float race; the cap pauses, then resets ──`);
+    // it. Checks: one alert per cause (pool short, then reverting); after 3 reverts a pause of
+    // 30 min, then 60 min after the cap is hit again; paid once the race stops.
+    console.log(`\n── D. Pool short, then the float race; alerts per cause, growing pause ──`);
     const D_PAYOUT = 2_000_000n;
+    const MIN = 60_000;
     await setPool(0n);
     record(`a ${D_PAYOUT} USDC-unit payout queues`, await queuePayout(D_PAYOUT, RECIPIENT));
-    await setPool(FLOAT);
     const headD = await read("pendingHead");
     const recipD = await usdc(recipSub);
     const sentBeforeD = sentToLanding().length;
     const sealedBeforeD = sealedFromKeeper().length;
     const postsBeforeD = hook.posts.length;
+    const postsD = () => hook.posts.slice(postsBeforeD);
+    const sentD = () => sentToLanding().length - sentBeforeD;
+    const revertedD = () => sealedFromKeeper().slice(sealedBeforeD).filter((x) => !x.ok).length;
+
+    clock = 0;
+    await keeper.poke();
+    clock = 31 * MIN;
+    await keeper.poke();
+    record(
+      "pool short for 30 min: one alert naming the pool",
+      postsD().length === 1 && postsD()[0].includes("the pool holds 0 USDC"),
+      postsD()[0] ?? "none",
+    );
+
     const poolTo = (free: bigint) =>
       hydration.setStorage({ Tokens: { Accounts: [[[landingSub, USDC_ASSET_ID], { free }]] } });
+    await setPool(FLOAT);
     shim.hooks.beforeSeal = async (from) => from === keeperAddr && poolTo(0n);
     shim.hooks.afterSeal = async (from) => from === keeperAddr && poolTo(FLOAT);
-    clock = 0;
-    const revertedD = () => sealedFromKeeper().slice(sealedBeforeD).filter((x) => !x.ok).length;
-    for (let i = 0; i < 30 && revertedD() < 3; i++) {
+    /** Poke until `n` of this stage's calls have reverted, then once more to see the last one. */
+    const raceUntil = async (n: number) => {
+      for (let i = 0; i < 30 && revertedD() < n; i++) {
+        await keeper.poke();
+        await shim.sealed();
+      }
       await keeper.poke();
-      await shim.sealed();
-    }
-    await keeper.poke(); // observes the third revert and hits the cap
+    };
+
+    const t1 = 32 * MIN;
+    clock = t1;
+    await raceUntil(3);
+    record("three calls sent, all reverted on chain", sentD() === 3 && revertedD() === 3, `${sentD()} sent, ${revertedD()} reverted`);
+    record(
+      "cap hit: one more alert, naming the new cause",
+      postsD().length === 2 && postsD()[1].includes("simulated clean, then reverted"),
+      postsD()[1] ?? "none",
+    );
+    clock = t1 + 29 * MIN;
+    for (let i = 0; i < 3; i++) await keeper.poke();
+    record("first pause (30 min): nothing more sent", sentD() === 3);
+
+    const t2 = t1 + 31 * MIN;
+    clock = t2;
+    await raceUntil(6);
+    record("after the pause: three more calls, all reverted", sentD() === 6 && revertedD() === 6, `${sentD()} sent, ${revertedD()} reverted`);
+    record("cap hit again: no new alert (same cause)", postsD().length === 2, `${postsD().length} posts`);
+    clock = t2 + 31 * MIN;
+    for (let i = 0; i < 3; i++) await keeper.poke();
+    record("second pause grows to 60 min: nothing sent at 31 min", sentD() === 6, `${sentD()} sent`);
+
     shim.hooks.beforeSeal = undefined;
     shim.hooks.afterSeal = undefined;
-    const capSends = sentToLanding().length - sentBeforeD;
-    record("three calls sent, all reverted on chain", capSends === 3 && revertedD() === 3, `${capSends} sent, ${revertedD()} reverted`);
-    const capPosts = hook.posts.slice(postsBeforeD);
-    record(
-      "one alert at once, before 30 min",
-      capPosts.length === 1 && capPosts[0].includes("simulated clean, then reverted"),
-      capPosts[0] ?? "none",
-    );
-    clock = ALERT_AFTER_MS - 60_000;
-    for (let i = 0; i < 3; i++) await keeper.poke();
-    await shim.sealed();
-    record("within the interval: nothing more sent", sentToLanding().length - sentBeforeD === 3);
-    clock = ALERT_AFTER_MS + 60_000;
+    clock = t2 + 61 * MIN;
     await keeper.poke();
     await shim.sealed();
     await keeper.poke();
     await shim.sealed();
-    record("after one interval the cap resets and pays it", (await read("pendingHead")) === headD + 1n, `head ${await read("pendingHead")}`);
+    record("after 60 min, with the race over, it pays", (await read("pendingHead")) === headD + 1n, `head ${await read("pendingHead")}`);
     record("recipient +2 USDC", (await usdc(recipSub)) - recipD === D_PAYOUT);
-    record("four calls in total for this payout", sentToLanding().length - sentBeforeD === 4);
+    record("seven calls in total for this payout", sentD() === 7, `${sentD()} sent`);
     record(
-      "all-clear after the paid payout",
-      hook.posts.slice(postsBeforeD).some((m) => m.startsWith(`OK queued Basejump payout #${headD} paid`)),
+      "one all-clear",
+      postsD().length === 3 && postsD()[2].startsWith(`OK queued Basejump payout #${headD} paid`),
+      postsD()[2] ?? "none",
     );
 
     // ── C. A head that can never be paid ──
