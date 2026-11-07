@@ -17,18 +17,30 @@ import type { MigrationConfig } from "./types";
  *     deployments/archive/basejump-base-ntt.json. Replaced rather than upgraded because
  *     dropping its unused tokenBridge slot would shift every slot after it.
  *
- * Base steps (001-004) deploy FRESH. That keeps every wiring call on the deployer key,
- * removes all storage-layout risk, and reduces the Safe's involvement to the disarm plus
- * accepting ownership in step 009.
+ * Base steps (001-004) deploy FRESH and leave the emitter DISARMED: step 002 only checks that
+ * `landing` is unset, so `bridgeViaWormhole` reverts `LandingNotSet` before pulling any token.
+ * That keeps every wiring call on the deployer key and removes all storage-layout risk. The Safe
+ * accepts ownership in step 009 and, as the very last switch-on act, arms the emitter with the
+ * call step 011 records.
  *
  * Hydration steps (005-008) deploy the receiver and wire it to the emitter deployed in 001,
  * read straight from ctx.outputs — no env-copied address, so the two ends cannot diverge.
  *
- * REUSES the existing landing 0x70e9b12c…df976 — it already holds the EURC pool, is already
- * mapped EURC -> asset 44, and is already TC-owned. Nothing here deploys or configures it.
- * Because it is TC-owned, authorizing the receiver on it is a TC action, NOT a step here —
- * see docs/basejump/spec.md. That call is the go-live switch; until it lands the
- * corridor stays dark and this migration is safe to run in full.
+ * REUSES the existing landing 0x70e9b12c…df976, shared with basejump-ethereum and TC-owned.
+ * Nothing here deploys or configures it. It does NOT serve Base EURC today: referendum #404
+ * unmapped EURC, withdrew the EURC float and seeded USDC. Opening the corridor therefore takes two
+ * governance actions after this migration, then the Safe's arming call, none of them a step here:
+ *
+ *   - Treasury referendum: buy EURC and send the float to the landing
+ *   - TC motion on the landing: setDestAsset(EURC, asset 44), then
+ *     setAuthorizedBridge(<005-deploy-receiver.proxyAddress>, true)
+ *   - Base TC Safe: emitter.setLanding(pad(landing))   <- go-live switch, LAST
+ *
+ * Steps 010 and 011 send nothing: 010 checks the landing and the EURC settlement leg and records
+ * the motion's two landing calls, built from this run's receiver; 011 checks the emitter and
+ * records the Safe's arming call. Because the emitter stays disarmed until that call, no user can
+ * send EURC into the corridor before its Hydration end is mapped, funded and authorized, so this
+ * migration is safe to run in full at any time. Checklist: docs/basejump/base-eurc.md.
  *
  * Inbound only, by code rather than by configuration: the emitter declares no receive path
  * and the receiver no send path. Hydration -> Base is out of scope.

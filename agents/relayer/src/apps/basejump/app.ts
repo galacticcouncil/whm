@@ -16,7 +16,11 @@ import {
   RETRY_MAX_MS,
   RPC_HYDRATION,
 } from "./config";
-import { ROUTES, type BasejumpRoute } from "./routes";
+import { ROUTES as ALL_ROUTES, isDeployed, type BasejumpRoute } from "./routes";
+
+// A corridor whose migration has not run has no emitter to subscribe to. Skipped, loudly, rather
+// than refusing to start: refusing would also stop the corridors that are live.
+const ROUTES = ALL_ROUTES.filter(isDeployed);
 
 // `completeTransfer` is a thin alias over the inherited public `receiveMessage`; submitting the
 // latter keeps the shared Hydration helper. Errors declared so a revert is logged by name — the
@@ -54,6 +58,9 @@ async function start(): Promise<void> {
   logger.info(`  account: ${account.address} (nonce ${nonce})`);
   for (const route of ROUTES) {
     logger.info(`  ${route.source} ${route.sourceEmitter} -> ${route.receiver}`);
+  }
+  for (const route of ALL_ROUTES.filter((r) => !isDeployed(r))) {
+    logger.warn(`  ${route.source} NOT RELAYED: addresses not filled in routes.ts`);
   }
 
   async function handle(route: BasejumpRoute, ctx: RelayerCtx, next: Next): Promise<void> {
