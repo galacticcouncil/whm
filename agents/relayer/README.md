@@ -84,36 +84,16 @@ so a funded backlog clears in one run rather than one payout per poll, up to
 waits for the next poll). Any other outcome (pool short, simulated revert, revert on chain, no
 receipt, replaced transaction, a stale head read) ends the run exactly as before.
 
-A head that stays unpaid for `QUEUED_PAYOUT_ALERT_MINUTES` (the pool is not refilled, or the call
-reverts, e.g. a dispatch that always fails) gets one Discord alert, worded as head-blocking time. Nothing is sent for it in the
-meantime, and every later payout waits behind it. If the same process later sees it paid, it posts
-an all-clear. Alert state lives in memory: a restart restarts the clock and forgets the alert, so a
-head paid across a restart gets no all-clear, and one still waiting is alerted again after a new
-interval. A call that simulates clean but reverts on chain (a delivery spent the float first) is
-retried up to 3 times, then that payout is paused and gets one alert. The pause repeats, with no
-further alert, and doubles each time: 30 min, 1 h, 2 h, 4 h, then 6 h. These steps assume the
-default 30 min `QUEUED_PAYOUT_ALERT_MINUTES`: the first pause equals the alert interval and they
-scale with it, while the 6 h ceiling is fixed (a 1 min interval gives 1, 2, 4 ... min, so many more
-calls before 6 h is reached). A payout that never pays costs at most 3 calls per 6 h once the pause
-reaches 6 h. Each cause (waiting, reverting) is alerted at most once per payout by one process; a
-restart forgets both.
+While the pool is short or the simulation reverts, nothing is sent for the head. Alerts, with
+`T` = `QUEUED_PAYOUT_ALERT_MINUTES` (default 30):
 
-A separate backlog alert covers time spent behind earlier entries, which the head-blocking clock
-excludes: when the oldest queued payout has been queued for `QUEUED_PAYOUT_ALERT_MINUTES`, one alert
-gives its age and the queue depth, and an all-clear follows when the queue empties or the oldest
-entry is younger than half the interval (so steady arrivals around the threshold do not flap). While
-that alert is out it is posted again each time the oldest age reaches the next doubling of the
-interval (2x, 4x, 8x ...; 60 min, 2 h, 4 h ... with the default 30 min), so a much worse backlog is
-reported again; an age that jumps past several doublings at once gives one post. It is held back,
-first post and re-posts alike, while the head's own head-blocking alert is out (that one already
-says everything waits). The landing stores no enqueue time (a pending transfer is
-asset, amount and recipient), so the age is counted from when this process first saw the entry, and
-the alert text says so. An entry queued before this process started is under-aged by its whole
-wait before that start (time under an earlier process, the downtime, and any time the queue could
-not be read). A keeper that restarts more often than `QUEUED_PAYOUT_ALERT_MINUTES` sends no backlog
-alert and no time-based head-blocking alert (pool short, simulated revert, send not seen mined). The
-reverting alert has no clock (it fires at the 3-revert cap, worded as head-blocking time), so it
-still fires once per process. Alert state lives in memory.
+| Alert | Trigger | First post | Repeat | Clear |
+| --- | --- | --- | --- | --- |
+| Head `waiting` (`WARN ... head-blocking for N min`) | the same entry is at the head while the pool is short, the simulation reverts, or the keeper's sent call has no receipt | when it has been at the head for `T`, counted from when this process first saw it there | never for that entry | `OK ... paid` when the head moves past it |
+| Head `reverting` (`WARN ... head-blocking for N min`) | 3 of the keeper's calls for that entry simulated clean, then reverted on chain; no clock | at the 3rd revert | never for that entry; sending for it pauses `T`, then `2T`, `4T` ... up to 6 h (or `T` if longer), each time 3 more calls revert | `OK ... paid` when the head moves past it |
+| Backlog (`WARN ... backlog`) | the oldest entry's age, counted from when this process first saw it queued; the message gives the age, the queue depth and the next re-alert age | at age `T`, unless a head alert is out for that entry | posted again at age `2T`, `4T`, `8T` ... while out (one post per jump past several), unless a head alert is out for that entry | `OK ... backlog cleared` when the queue is empty or the oldest age is below `T/2` |
+
+All alert state is in process memory; a restart forgets it all.
 
 ### `psm-hydration` and `psm-base`
 

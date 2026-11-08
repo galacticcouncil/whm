@@ -1,0 +1,701 @@
+/**
+ * The queued-payout keeper over an in-memory landing that applies `fulfillPending`'s rules
+ * (contracts/src/basejump/BasejumpLanding.sol:98-111: pay the head when the pool covers it, else
+ * revert; a success moves `pendingHead` by one), with a mock clock. Money rows (S1-S7, S11, S13):
+ * one send per head, no send while a send is unobserved, no spin on an unpayable head. Alert rows
+ * (S8-S12c, A1, A2, B1-B4): each row of the README's alert table.
+ *
+ * Run: `pnpm test` in agents/relayer (node:test through the root's tsx; no RPC, no Redis).
+ */
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import logger from "../../logger";
+import { createPayoutKeeper } from "./payouts";
+
+logger.silent = true;
+
+const LANDING = "0x00000000000000000000000000000000000000aa" as const;
+const SRC = "0x0000000000000000000000000000000000000015" as const;
+const DEST = "0x0000000100000000000000000000000000000015" as const;
+const MIN = 60_000;
+
+type Rcpt = { transactionHash: string; status: "success" | "reverted" };
+
+function world() {
+  const w = {
+    head: 0n,
+    tail: 0n,
+    amounts: new Map<bigint, bigint>(),
+    pool: 0n,
+    receipts: new Map<string, Rcpt>(),
+    sends: [] as { hash: string; headAtSend: bigint }[],
+    reads: 0,
+    staleHead: undefined as bigint | undefined, // next pendingHead read returns this once
+    dispatchFails: new Set<bigint>(),
+    // what happens on writeContract: "mine" now, "hold" (never mined unless released), or custom
+    onSend: (hash: string) => w.mine(hash),
+    onWait: async (_hash: string) => {},
+    replaceWith: undefined as undefined | ((hash: string) => Rcpt | undefined),
+    enqueue(amount: bigint) {
+      w.amounts.set(w.tail, amount);
+      w.tail++;
+    },
+    exec(): "success" | "reverted" {
+      if (w.head >= w.tail) return "reverted";
+      const amt = w.amounts.get(w.head)!;
+      if (w.pool < amt) return "reverted";
+      if (w.dispatchFails.has(w.head)) return "reverted";
+      w.pool -= amt;
+      w.amounts.delete(w.head);
+      w.head++;
+      return "success";
+    },
+    mine(hash: string) {
+      w.receipts.set(hash, { transactionHash: hash, status: w.exec() });
+    },
+  };
+  let n = 0;
+  const publicClient: any = {
+    async readContract({ functionName, args }: any) {
+      w.reads++;
+      switch (functionName) {
+        case "pendingHead": {
+          if (w.staleHead !== undefined) {
+            const s = w.staleHead;
+            w.staleHead = undefined;
+            return s;
+          }
+          return w.head;
+        }
+        case "pendingTail":
+          return w.tail;
+        case "pendingTransfers":
+          return [SRC, w.amounts.get(args[0]) ?? 0n, "0x" + "11".repeat(32)];
+        case "destAssetFor":
+          return DEST;
+        case "balanceOf":
+          return w.pool;
+        case "symbol":
+          return "USDC";
+        case "decimals":
+          return 6;
+      }
+      throw new Error("unexpected read " + functionName);
+    },
+    async simulateContract() {
+      w.reads++;
+      if (w.head >= w.tail) throw new Error("NoPendingTransfers");
+      if (w.pool < w.amounts.get(w.head)!) throw new Error("InsufficientBalance");
+      if (w.dispatchFails.has(w.head)) throw new Error("DispatchFailed");
+      return {};
+    },
+    async getBlock() {
+      return { baseFeePerGas: null };
+    },
+    async getGasPrice() {
+      return 1n;
+    },
+    async waitForTransactionReceipt({ hash }: any) {
+      w.reads++;
+      await w.onWait(hash);
+      if (w.replaceWith) {
+        const r = w.replaceWith(hash);
+        if (r) return r;
+      }
+      const r = w.receipts.get(hash);
+      if (!r) throw new Error("timeout");
+      return r;
+    },
+    async getTransactionReceipt({ hash }: any) {
+      w.reads++;
+      const r = w.receipts.get(hash);
+      if (!r) throw new Error("not found");
+      return r;
+    },
+  };
+  const wallet: any = {
+    chain: { id: 222222, name: "hydration" },
+    async writeContract() {
+      const hash = "0x" + (++n).toString(16).padStart(64, "0");
+      w.sends.push({ hash, headAtSend: w.head });
+      w.onSend(hash);
+      return hash;
+    },
+  };
+  let nonce = 0;
+  const queue: any = {
+    async add(task: any) {
+      await task.submit(nonce++);
+    },
+  };
+  return { w, clients: { publicClient, wallet, account: { address: "0x01" } } as any, queue };
+}
+
+function keeperFor(env: ReturnType<typeof world>, clock: { t: number }, extra: any = {}) {
+  const posts: string[] = [];
+  const k = createPayoutKeeper({
+    clients: env.clients,
+    queue: env.queue,
+    landing: LANDING,
+    alertAfterMs: 30 * MIN,
+    receiptTimeoutMs: 1,
+    notify: async (m) => void posts.push(m),
+    now: () => clock.t,
+    ...extra,
+  });
+  return { k, posts };
+}
+
+const backlogWarns = (posts: string[]) => posts.filter((p) => p.startsWith("WARN queued Basejump backlog"));
+const backlogOks = (posts: string[]) => posts.filter((p) => p.startsWith("OK queued Basejump backlog"));
+const headWarns = (posts: string[]) => posts.filter((p) => p.includes("head-blocking"));
+const distinctHeads = (e: ReturnType<typeof world>) =>
+  new Set(e.w.sends.map((s) => s.headAtSend)).size === e.w.sends.length;
+const ageOf = (p: string) => Number(/queued (\d+) min since/.exec(p)?.[1]);
+
+// ── Money rows ──
+
+test("S1 one poke, no concurrent poke: sends = maxPerRun (10), one per head", async () => {
+  const e = world();
+  for (let i = 0; i < 25; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  await k.poke();
+  assert.equal(e.w.sends.length, 10);
+  assert.equal(e.w.head, 10n);
+  assert.ok(distinctHeads(e));
+});
+
+test("S1b pokes landing during the round: the cap is per round (25 sends), still one per head", async () => {
+  const e = world();
+  for (let i = 0; i < 25; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  e.w.onWait = async () => void k.poke();
+  await k.poke();
+  assert.equal(e.w.sends.length, 25);
+  assert.equal(e.w.head, 25n);
+  assert.ok(distinctHeads(e));
+});
+
+test("S2 stale head read after own success ends the round; the next poke continues", async () => {
+  const e = world();
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  e.w.onSend = (h) => {
+    e.w.mine(h);
+    e.w.staleHead = e.w.head - 1n; // next read lags one block
+  };
+  await k.poke();
+  assert.equal(e.w.sends.length, 1);
+  assert.equal(e.w.head, 1n);
+  e.w.onSend = (h) => e.w.mine(h);
+  await k.poke();
+  assert.equal(e.w.sends.length, 3);
+  assert.equal(e.w.head, 3n);
+});
+
+test("S3 a third party pays the head first: ours pays the next, 2 sends clear 3", async () => {
+  const e = world();
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  let first = true;
+  e.w.onSend = (h) => {
+    if (first) {
+      first = false;
+      e.w.exec(); // third party's fulfillPending lands first
+    }
+    e.w.mine(h);
+  };
+  await k.poke();
+  assert.equal(e.w.sends.length, 2);
+  assert.equal(e.w.head, 3n);
+});
+
+test("S3b race lost, then a short pool: 1 send over 20 pokes", async () => {
+  const e = world();
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 3_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  let first = true;
+  e.w.onSend = (h) => {
+    if (first) {
+      first = false;
+      e.w.exec();
+    }
+    e.w.mine(h);
+  };
+  for (let i = 0; i < 20; i++) await k.poke();
+  assert.equal(e.w.sends.length, 1);
+  assert.equal(e.w.head, 1n);
+});
+
+test("S4 a replacement receipt (other hash, success) is not progress: round ends after 1 send", async () => {
+  const e = world();
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  e.w.onSend = () => {}; // ours never mines
+  e.w.replaceWith = () => ({ transactionHash: "0x" + "ee".repeat(32), status: "success" });
+  await k.poke();
+  assert.equal(e.w.sends.length, 1);
+});
+
+test("S5 an unmined send: 1 send over 51 pokes, 5 reads per poke", async () => {
+  const e = world();
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  e.w.onSend = () => {};
+  await k.poke();
+  const r0 = e.w.reads;
+  for (let i = 0; i < 50; i++) await k.poke();
+  assert.equal(e.w.sends.length, 1);
+  assert.equal((e.w.reads - r0) / 50, 5);
+});
+
+test("S6 an unpayable head (dispatch fails) behind a funded pool: 0 sends over 50 pokes", async () => {
+  const e = world();
+  for (let i = 0; i < 5; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  const { k } = keeperFor(e, { t: 0 });
+  const r0 = e.w.reads;
+  for (let i = 0; i < 50; i++) await k.poke();
+  assert.equal(e.w.sends.length, 0);
+  assert.equal(e.w.reads - r0, 302);
+});
+
+test("S7 a success, then an on-chain revert of the next head ends the round at 2 sends", async () => {
+  const e = world();
+  for (let i = 0; i < 4; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  let c = 0;
+  e.w.onSend = (h) => {
+    if (++c === 2) e.w.pool = 0n; // a delivery spends the float between simulate and inclusion
+    e.w.mine(h);
+    if (c === 2) e.w.pool = 100_000_000n;
+  };
+  await k.poke();
+  assert.equal(e.w.sends.length, 2);
+  assert.equal(e.w.head, 1n);
+});
+
+test("S11 receipt not seen in-pass, later mined reverted: the next poke observes it and pays", async () => {
+  const e = world();
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  const held: string[] = [];
+  e.w.onSend = (h) => void held.push(h);
+  await k.poke();
+  // mine it as a revert (a delivery spent the float), then refill
+  e.w.pool = 0n;
+  e.w.mine(held[0]);
+  e.w.pool = 100_000_000n;
+  e.w.onSend = (h) => e.w.mine(h);
+  await k.poke();
+  assert.equal(e.w.sends.length, 2);
+  assert.equal(e.w.head, 1n);
+});
+
+test("S13 queue.add rejects after the send went out: no second send while unobserved", async () => {
+  const e = world();
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const { k } = keeperFor(e, { t: 0 });
+  e.w.onSend = () => {}; // never observed mined
+  let nonce = 0;
+  e.queue.add = async (task: any) => {
+    await task.submit(nonce++);
+    throw new Error("unproven");
+  };
+  for (let i = 0; i < 30; i++) await k.poke();
+  assert.equal(e.w.sends.length, 1);
+  e.w.mine(e.w.sends[0].hash);
+  e.w.onSend = (h) => e.w.mine(h);
+  for (let i = 0; i < 10; i++) await k.poke();
+  assert.equal(e.w.sends.length, 3);
+  assert.equal(e.w.head, 3n);
+  assert.ok(distinctHeads(e));
+});
+
+// ── Alert table, row head `waiting` ──
+
+test("S8 waiting: counted from this process's first sighting; backlog held back; OK when paid", async () => {
+  const e = world();
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const A = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 25 * MIN; clock.t += MIN) await A.k.poke();
+  const B = keeperFor(e, clock);
+  let postsAt55 = -1;
+  for (clock.t = 26 * MIN; clock.t <= 56 * MIN; clock.t += MIN) {
+    await B.k.poke();
+    if (clock.t === 55 * MIN) postsAt55 = B.posts.length;
+  }
+  assert.equal(A.posts.length, 0);
+  assert.equal(postsAt55, 0);
+  assert.equal(B.posts.length, 1);
+  assert.match(B.posts[0], /^WARN queued Basejump payout #0 .* head-blocking for 30 min .*the pool holds 0 USDC/);
+  assert.equal(backlogWarns(B.posts).length, 0);
+  e.w.pool = 2_000_000n;
+  clock.t += MIN;
+  await B.k.poke();
+  assert.equal(B.posts[1], "OK queued Basejump payout #0 paid (head now 1)");
+});
+
+test("S8b crash loop every 26 min for 24 h, pool short: 0 posts", async () => {
+  const e2 = world();
+  e2.w.enqueue(2_000_000n);
+  e2.w.pool = 0n;
+  const c2 = { t: 0 };
+  let total = 0;
+  for (let start = 0; start < 24 * 60 * MIN; start += 26 * MIN) {
+    const P = keeperFor(e2, c2);
+    for (c2.t = start; c2.t <= start + 25 * MIN; c2.t += MIN) await P.k.poke();
+    total += P.posts.length;
+  }
+  assert.equal(total, 0);
+});
+
+test("S9 waiting, dispatch fails: 1 post in 24 h with 145 entries arriving behind it", async () => {
+  const e = world();
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 24 * 60 * MIN; clock.t += MIN) {
+    if (clock.t % (10 * MIN) === 0) e.w.enqueue(2_000_000n);
+    await k.poke();
+  }
+  assert.equal(posts.length, 1);
+  assert.match(posts[0], /head-blocking for 30 min .*DispatchFailed/);
+  assert.equal(e.w.tail - e.w.head, 146n);
+});
+
+test("B1 waiting, own send has no receipt: 1 post at 30 min at the head, never a second send", async () => {
+  const e = world();
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.onSend = () => {};
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 120 * MIN; clock.t += MIN) await k.poke();
+  assert.equal(e.w.sends.length, 1);
+  assert.equal(posts.length, 1);
+  assert.match(posts[0], /head-blocking for 30 min .*not seen mined/);
+});
+
+// ── Alert table, row head `reverting` ──
+
+test("S8d reverting has no clock: crash loop every 26 min, every send reverts: 56 posts, one per process", async () => {
+  const e = world();
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.onSend = (h) => {
+    e.w.pool = 0n;
+    e.w.mine(h);
+    e.w.pool = 100_000_000n;
+  };
+  const c = { t: 0 };
+  const all: string[] = [];
+  let processes = 0;
+  for (let start = 0; start < 24 * 60 * MIN; start += 26 * MIN) {
+    processes++;
+    const P = keeperFor(e, c);
+    for (c.t = start; c.t <= start + 25 * MIN; c.t += MIN) await P.k.poke();
+    assert.equal(P.posts.length, 1);
+    all.push(...P.posts);
+  }
+  assert.equal(processes, 56);
+  assert.equal(all.length, 56);
+  assert.equal(headWarns(all).length, 56);
+  assert.match(all[0], /head-blocking for 3 min .*3 fulfillPending calls simulated clean, then reverted/);
+});
+
+test("B2 reverting in one process for 24 h: 1 post, pauses 30, 60, 120, 240, then 360 min; OK when paid", async () => {
+  const e = world();
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  let losing = true;
+  e.w.onSend = (h) => {
+    if (losing) e.w.pool = 0n;
+    e.w.mine(h);
+    e.w.pool = 100_000_000n;
+  };
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  const sendAt: number[] = [];
+  for (clock.t = 0; clock.t <= 24 * 60 * MIN; clock.t += MIN) {
+    const n = e.w.sends.length;
+    await k.poke();
+    for (let i = n; i < e.w.sends.length; i++) sendAt.push(clock.t / MIN);
+  }
+  assert.equal(posts.length, 1);
+  // three reverts per window, one per poke; the cap is seen on the poke after the third, and the
+  // pause runs from there
+  const windows = sendAt.filter((_, i) => i % 3 === 0);
+  const gaps = windows.slice(1).map((t, i) => t - (windows[i] + 3));
+  assert.deepEqual(gaps.slice(0, 5), [30, 60, 120, 240, 360]);
+  assert.ok(gaps.slice(5).every((g) => g === 360));
+  losing = false;
+  for (let i = 0; i < 400; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(e.w.head, 1n);
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1], "OK queued Basejump payout #0 paid (head now 1)");
+});
+
+// ── Alert table, row backlog ──
+
+test("S8c backlog first post at a first-seen age of 30 min after a restart (true age 56)", async () => {
+  const e = world();
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const A = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 25 * MIN; clock.t += MIN) await A.k.poke();
+  const B = keeperFor(e, clock);
+  let at = -1;
+  for (clock.t = 26 * MIN; clock.t <= 70 * MIN; clock.t += MIN) {
+    if (clock.t === 50 * MIN) e.w.pool = 2_000_000n;
+    const n = backlogWarns(B.posts).length;
+    await B.k.poke();
+    if (at < 0 && backlogWarns(B.posts).length > n) at = clock.t / MIN;
+  }
+  const bl = backlogWarns(B.posts);
+  assert.equal(bl.length, 1);
+  assert.equal(at, 56);
+  assert.equal(
+    bl[0],
+    "WARN queued Basejump backlog on landing `0x00000000000000000000000000000000000000aa`: " +
+      "oldest payout #1 queued 30 min since this keeper process first saw it, 1 queued, " +
+      "next re-alert age 60 min.",
+  );
+});
+
+test("S10 steady arrivals, each paid at 31 min: 1 WARN, 0 OK in 2 h (no flapping)", async () => {
+  const e = world();
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  const queuedAt = new Map<bigint, number>();
+  for (clock.t = 0; clock.t <= 120 * MIN; clock.t += MIN) {
+    if (clock.t % (2 * MIN) === 0) {
+      queuedAt.set(e.w.tail, clock.t);
+      e.w.enqueue(1n);
+    }
+    const ha = queuedAt.get(e.w.head);
+    e.w.pool = ha !== undefined && clock.t - ha >= 31 * MIN ? 1n : 0n;
+    await k.poke();
+  }
+  assert.equal(backlogWarns(posts).length, 1);
+  assert.equal(backlogOks(posts).length, 0);
+});
+
+test("S12 OK when the queue empties, none in a 3 h band at 20 min, and a later 40-min stall alerts again", async () => {
+  const e = world();
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (let i = 0; i < 40; i++) e.w.enqueue(1n); // all first seen at t=0
+  await k.poke();
+  clock.t = 31 * MIN;
+  e.w.pool = 0n;
+  await k.poke();
+  const qAt = new Map<bigint, number>();
+  for (let id = 0n; id < 40n; id++) qAt.set(id, 0);
+  e.w.pool = 40n; // pay all 40 originals now
+  await k.poke();
+  await k.poke();
+  await k.poke();
+  await k.poke();
+  await k.poke();
+  e.w.pool = 0n;
+  for (clock.t = 32 * MIN; clock.t <= 32 * MIN + 180 * MIN; clock.t += MIN) {
+    qAt.set(e.w.tail, clock.t);
+    e.w.enqueue(1n);
+    const ha = qAt.get(e.w.head);
+    e.w.pool = ha !== undefined && clock.t - ha >= 20 * MIN ? 1n : 0n; // each paid at 20 min (in band)
+    await k.poke();
+  }
+  assert.equal(backlogOks(posts).length, 1);
+  assert.match(backlogOks(posts)[0], /cleared \(queue empty\)$/);
+  e.w.pool = 0n;
+  for (let j = 0; j < 40; j++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(backlogWarns(posts).length, 2);
+  assert.equal(headWarns(posts).length, 2);
+});
+
+test("S12c a worse stall after an outstanding WARN re-alerts at the doublings (2 posts, oldest 169 min)", async () => {
+  const e = world();
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  const qAt = new Map<bigint, number>();
+  const step = async (cover: (age: number) => boolean) => {
+    clock.t += MIN;
+    qAt.set(e.w.tail, clock.t);
+    e.w.enqueue(1n);
+    let n = 0n;
+    for (let id = e.w.head; id < e.w.tail; id++) {
+      const q = qAt.get(id)!;
+      if (cover(clock.t - q)) n++;
+      else break;
+    }
+    e.w.pool = n;
+    await k.poke();
+  };
+  for (let j = 0; j < 60; j++) await step((a) => a >= 31 * MIN);
+  for (let j = 0; j < 180; j++) await step((a) => a >= 20 * MIN);
+  const p0 = posts.length;
+  let maxAge = 0;
+  for (let j = 0; j < 240; j++) {
+    const refill = j % 25 === 0;
+    await step((a) => refill && a >= 35 * MIN);
+    const q = qAt.get(e.w.head);
+    if (q !== undefined) maxAge = Math.max(maxAge, clock.t - q);
+  }
+  const phase = posts.slice(p0);
+  assert.equal(maxAge, 169 * MIN);
+  assert.equal(phase.length, 2);
+  assert.deepEqual(backlogWarns(phase).map(ageOf), [60, 120]);
+  assert.equal(backlogWarns(posts).length, 3);
+});
+
+/**
+ * Advisor world: an entry every 5 min, each head paid 25 min after it reached the head (so no
+ * head alert), so the oldest first-seen age grows without bound.
+ */
+async function advisorWorld(restartAt: number | undefined, endAt: number) {
+  const e = world();
+  const clock = { t: 0 };
+  const queuedAt = new Map<bigint, number>();
+  const procs = [keeperFor(e, clock)];
+  let headSince = 0;
+  let lastHead = 0n;
+  const at: { t: number; trueAge: number; post: string }[] = [];
+  for (clock.t = 0; clock.t <= endAt * MIN; clock.t += MIN) {
+    if (restartAt !== undefined && clock.t === restartAt * MIN) procs.push(keeperFor(e, clock));
+    if (clock.t % (5 * MIN) === 0) {
+      queuedAt.set(e.w.tail, clock.t);
+      e.w.enqueue(1n);
+    }
+    if (e.w.head !== lastHead) {
+      lastHead = e.w.head;
+      headSince = clock.t;
+    }
+    e.w.pool = clock.t - headSince >= 25 * MIN ? 1n : 0n;
+    const P = procs[procs.length - 1];
+    const n = P.posts.length;
+    await P.k.poke();
+    for (const post of P.posts.slice(n)) {
+      at.push({ t: clock.t / MIN, trueAge: (clock.t - queuedAt.get(e.w.head)!) / MIN, post });
+    }
+  }
+  return { at, posts: procs.flatMap((p) => p.posts) };
+}
+
+test("A1 doubling: backlog posts at oldest ages 30, 60, 120, 240 min; no head alert", async () => {
+  const { at, posts } = await advisorWorld(undefined, 300);
+  assert.deepEqual(backlogWarns(posts).map(ageOf), [30, 60, 120, 240]);
+  assert.equal(headWarns(posts).length, 0);
+  assert.deepEqual(
+    at.map((x) => /next re-alert age (\d+) min/.exec(x.post)?.[1]).map(Number),
+    [60, 120, 240, 480],
+  );
+});
+
+test("A2 restart at 45 min: no post at the promised 60 min; the new process's first says 30 min at a true 65", async () => {
+  const { at, posts } = await advisorWorld(45, 120);
+  assert.equal(headWarns(posts).length, 0);
+  assert.equal(at[0].t, 35);
+  assert.equal(ageOf(at[0].post), 30);
+  assert.match(at[0].post, /next re-alert age 60 min/);
+  // the new process (from 45) posts nothing until 75, when its count reaches 30 min
+  assert.equal(at[1].t, 75);
+  assert.match(at[1].post, /oldest payout #2 queued 30 min since/);
+  assert.equal(at[1].trueAge, 65);
+});
+
+test("B3 an age that jumps past several doublings gives one post; the next waits for the next doubling", async () => {
+  const e = world();
+  const c = { t: 0 };
+  const { k, posts } = keeperFor(e, c);
+  for (let i = 0; i < 6; i++) e.w.enqueue(1n);
+  await k.poke();
+  c.t = 150 * MIN;
+  e.w.pool = 1n;
+  await k.poke(); // pays #0; #1 is a fresh head, 150 min since first seen
+  for (let j = 0; j < 10; j++) {
+    c.t += MIN;
+    await k.poke();
+  }
+  assert.equal(backlogWarns(posts).length, 1);
+  // move the head every 20 min so no head alert holds the backlog post back
+  for (const t of [170, 190, 210, 230]) {
+    c.t = t * MIN;
+    e.w.pool = 1n;
+    await k.poke();
+  }
+  c.t = 239 * MIN;
+  await k.poke();
+  assert.equal(backlogWarns(posts).length, 1);
+  c.t = 240 * MIN;
+  await k.poke();
+  assert.deepEqual(backlogWarns(posts).map(ageOf), [150, 240]);
+  assert.equal(headWarns(posts).length, 0);
+});
+
+test("B4 a re-post is held back while a head alert is out for the oldest entry", async () => {
+  const e = world();
+  const c = { t: 0 };
+  const { k, posts } = keeperFor(e, c);
+  for (let i = 0; i < 3; i++) e.w.enqueue(1n);
+  await k.poke();
+  c.t = 20 * MIN;
+  e.w.pool = 1n;
+  await k.poke(); // pays #0 at 20; #1 heads, first seen at 0
+  e.w.pool = 0n;
+  for (c.t = 21 * MIN; c.t <= 200 * MIN; c.t += MIN) await k.poke();
+  // #1: backlog at age 30 (head 10 min), then head alert at 50 (head 30 min); age 60, 120 pass held
+  assert.deepEqual(backlogWarns(posts).map(ageOf), [30]);
+  assert.equal(headWarns(posts).length, 1);
+  assert.match(headWarns(posts)[0], /payout #1 .*head-blocking for 30 min/);
+});
+
+test("B5 OK when the oldest age falls below 15 min with the queue not empty", async () => {
+  const e = world();
+  const c = { t: 0 };
+  const { k, posts } = keeperFor(e, c);
+  e.w.enqueue(1n);
+  e.w.enqueue(1n);
+  await k.poke();
+  c.t = 20 * MIN;
+  e.w.pool = 1n;
+  await k.poke(); // pays #0; #1 heads at 20, first seen at 0
+  e.w.pool = 0n;
+  for (c.t = 21 * MIN; c.t <= 31 * MIN; c.t += MIN) await k.poke();
+  assert.deepEqual(backlogWarns(posts).map(ageOf), [30]);
+  e.w.enqueue(1n); // #2, first seen at 31
+  for (c.t = 32 * MIN; c.t <= 34 * MIN; c.t += MIN) await k.poke();
+  c.t = 35 * MIN;
+  e.w.pool = 1n;
+  await k.poke(); // pays #1; #2 first seen at 32, so 3 min old
+  assert.equal(e.w.tail - e.w.head, 1n);
+  assert.deepEqual(backlogOks(posts), [
+    "OK queued Basejump backlog on landing `0x00000000000000000000000000000000000000aa` cleared (oldest payout #2 is 3 min old)",
+  ]);
+  assert.equal(headWarns(posts).length, 0);
+});
