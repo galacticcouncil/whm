@@ -28,12 +28,15 @@ address that cannot send a transaction itself.
   (2, 4, 8, 16, 30 min) makes the first real attempt about 30 min after the transfer at the default.
 - Then it reads the Base transceiver's `isVAAConsumed` and the manager's `isMessageExecuted`, skips a
   transfer either marks done, simulates, and sends `receiveMessage`. A send whose receipt never came
-  is kept in memory, and the retry looks at that hash first: its receipt is the outcome; while a node
-  still knows it, nothing is read or sent; only once it is unknown (dropped) does the retry read and
-  send again.
+  is kept in memory (every hash sent for the transfer), and the retry looks at those hashes first: a
+  receipt for any of them is the outcome; while the node asked still knows one, nothing is read or
+  sent; when it knows none (dropped, or a node behind a load balancer that never saw it), the retry
+  reads and may send again. Run it with the queue that holds its nonce until a receipt (whm#39), so
+  such a repeat goes out at the same nonce.
 - After a receipt, the manager's own event in that receipt is the verdict: `TransferRedeemed` is
-  delivered, `InboundTransferQueued` is queued, and a receipt with neither is retried. Reads made
-  after a receipt are pinned to its block, so a lagging node cannot answer with the state before it.
+  delivered, `InboundTransferQueued` is queued, and a receipt with neither is retried. Every state
+  read is pinned to one block (the receipt's, or the node's current block before a send), so a
+  lagging node cannot answer part of a verdict with an older state.
 - A transfer the Base manager holds under its inbound rate limit is reported `queued` at warn, with a
   Discord alert: someone must call `completeInboundQueuedTransfer` after the delay. The app does not.
   A Discord post that fails (network error or HTTP 4xx/5xx) is logged at error with its status, body
