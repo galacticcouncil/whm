@@ -1,4 +1,4 @@
-import { fromSeq, opt, optNum, req, rpc } from "../../config";
+import { fromSeq, opt, req, rpc } from "../../config";
 import { WORMHOLE } from "../../chains";
 
 /**
@@ -44,6 +44,14 @@ export function fromSequenceFromHydration() {
   return { [WORMHOLE.hydration]: BigInt(raw) };
 }
 
+export const DEFAULT_GRACE_SECONDS = 15 * 60;
+
+/**
+ * One day. The engine's retry budget for `ntt-base` is about 23 h (`RETRIES_BASE`), so a grace past
+ * a day would spend every attempt waiting and the transfer would only ever reach the give-up alert.
+ */
+export const MAX_GRACE_SECONDS = 86_400;
+
 /**
  * How old a Hydration -> Base VAA must be before `ntt-base` acts on it, from the VAA's own
  * timestamp (the Hydration block time the guardians sign). `ntt-base` is a backstop: the user's
@@ -54,8 +62,25 @@ export function fromSequenceFromHydration() {
  * `NTT_BASE_GRACE_SECONDS` overrides it. A VAA under the grace period is thrown back to the engine,
  * whose backoff runs at about +2, +6, +14 and +30 min, so at 900 s the first real attempt comes about
  * 30 min after the transfer (4 of the 50 runs spent waiting).
+ *
+ * Validated at startup: a whole number of seconds from 0 to `MAX_GRACE_SECONDS`, else `ntt-base`
+ * refuses to start. Anything looser fails open: `Number("oops")` is NaN and `age < NaN` is false,
+ * so the backstop would act at once; a negative value does the same, and a huge one never acts. A
+ * function, like `fromSequenceFromHydration`, so the `ntt` app, which imports this module, never
+ * reads it.
+ *
+ * @throws When set to anything but a whole number from 0 to `MAX_GRACE_SECONDS`.
  */
-export const GRACE_SECONDS = optNum("NTT_BASE_GRACE_SECONDS", 15 * 60);
+export function graceSeconds(): number {
+  const raw = (process.env.NTT_BASE_GRACE_SECONDS ?? "").trim();
+  if (raw === "") return DEFAULT_GRACE_SECONDS;
+  if (!/^\d+$/.test(raw) || Number(raw) > MAX_GRACE_SECONDS) {
+    throw new Error(
+      `NTT_BASE_GRACE_SECONDS must be a whole number of seconds from 0 to ${MAX_GRACE_SECONDS}, got "${raw}"`,
+    );
+  }
+  return Number(raw);
+}
 
 /**
  * `ntt-base`'s retry policy. Unlike `RETRIES` above it carries a backoff: without one the engine

@@ -11,18 +11,18 @@ import type { Next, RelayerCtx } from "../../types";
 import {
   APP_NAME_BASE,
   fromSequenceFromHydration,
-  GRACE_SECONDS,
+  graceSeconds,
   RETRIES_BASE,
   RETRY_BASE_MS,
   RETRY_MAX_MS,
   RPC_BASE,
 } from "./config";
-import { discordAlert, runOutbound } from "./outbound";
+import { discordAlert, runOutbound, type SentLedger } from "./outbound";
 import { BASE_ROUTES } from "./routes";
 
 /**
  * Delivers NTT transfers **from Hydration to Base** as a backstop: each transfer VAA from a
- * `BASE_ROUTES` Hydration transceiver that nobody has delivered `GRACE_SECONDS` after it was signed
+ * `BASE_ROUTES` Hydration transceiver that nobody has delivered `graceSeconds()` after it was signed
  * is submitted to that route's Base transceiver, which pays the recipient named in the signed
  * message. The user's own claim or the Wormhole Executor normally delivers first; this covers the
  * transfers nobody claims, such as one to an address that cannot send a transaction itself.
@@ -34,6 +34,7 @@ import { BASE_ROUTES } from "./routes";
  */
 async function start(): Promise<void> {
   const startingSequence = fromSequenceFromHydration();
+  const grace = graceSeconds();
   const key = privateKeyBase();
   const clients = await baseClients(RPC_BASE, key);
   const { account, publicClient } = clients;
@@ -55,6 +56,7 @@ async function start(): Promise<void> {
   const queue = createQueue({ publicClient, account, ...alerts() });
   const nonce = await queue.init();
   logger.info(`  account: ${account.address} (nonce ${nonce})`);
+  logger.info(`  grace: ${grace} s`);
   for (const route of BASE_ROUTES) {
     logger.info(`  ${route.token}: ${route.sourceEmitter} @ ${WORMHOLE.hydration} -> ${route.transceiver}`);
   }
@@ -65,6 +67,9 @@ async function start(): Promise<void> {
     backoff: { baseMs: RETRY_BASE_MS, maxMs: RETRY_MAX_MS },
     startingSequence,
   });
+
+  // Sends without a known outcome, across every job of this process (see `SentLedger`).
+  const sent: SentLedger = new Map();
 
   for (const route of BASE_ROUTES) {
     const handle = async (ctx: RelayerCtx, next: Next): Promise<void> => {
@@ -77,7 +82,7 @@ async function start(): Promise<void> {
       const alert = discordAlert(alerts().discordWebhook, log);
       // relayer-engine passes the bullmq attempt count (from 1) and the budget on ctx.storage.job.
       const job = (ctx as { storage?: { job?: { attempts: number; maxAttempts: number } } }).storage?.job;
-      const outcome = await runOutbound(route, vaa, clients, queue, log, { graceSeconds: GRACE_SECONDS, alert }, job);
+      const outcome = await runOutbound(route, vaa, clients, queue, log, { graceSeconds: grace, sent, alert }, job);
       log.info(`${route.token} to Base: ${outcome}`);
       return next();
     };

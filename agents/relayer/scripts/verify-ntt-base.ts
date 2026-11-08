@@ -22,7 +22,15 @@ import { createQueue } from "../src/engine/queue";
 import logger from "../src/logger";
 import type { ParsedVaa } from "../src/types";
 
-import { deliverOutbound, managerDigest, outboundAbi, runOutbound, vaaHash, type Outcome } from "../src/apps/ntt/outbound";
+import {
+  deliverOutbound,
+  managerDigest,
+  outboundAbi,
+  runOutbound,
+  vaaHash,
+  type Outcome,
+  type SentLedger,
+} from "../src/apps/ntt/outbound";
 import { BASE_ROUTES } from "../src/apps/ntt/routes";
 
 /**
@@ -162,8 +170,11 @@ async function main(): Promise<void> {
   const nonce = () => publicClient.getTransactionCount({ address: account.address });
 
   const alerts: string[] = [];
+  // One process's ledger of sends without an outcome; fresh per case, like the queue.
+  let sent: SentLedger = new Map();
   const deliverOpts = (now?: number) => ({
     graceSeconds: GRACE,
+    sent,
     now: now === undefined ? undefined : () => now,
     alert: async (m: string) => void alerts.push(m),
   });
@@ -188,6 +199,7 @@ async function main(): Promise<void> {
   async function scenario(name: string, body: () => Promise<void>): Promise<void> {
     logger.info(`--- ${name}`);
     alerts.length = 0;
+    sent = new Map();
     queue = createQueue({ publicClient, account, warnMultiplier: 50n });
     await queue.init();
     const [c, x] = await guards();
