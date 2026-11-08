@@ -91,9 +91,20 @@ forwarded.
 
 ### Landing — `transfer(sourceAsset, amount, recipient)`
 
-Resolves `destAssetFor[sourceAsset]`. If the pool balance suffices, dispatches `currencies.transfer`
-through the `0x0401` precompile (pallet 79, call 0; `currencyId = uint32(uint160(destAsset))`);
-otherwise it **queues** a `PendingTransfer` (FIFO), drained by `fulfillPending()`.
+Resolves `destAssetFor[sourceAsset]`. If the pool balance of that asset covers everything already
+reserved for it (`reservedFor[destAsset]`, the queued and parked amounts) plus this amount, it
+dispatches `currencies.transfer` through the `0x0401` precompile (pallet 79, call 0;
+`currencyId = uint32(uint160(destAsset))`); otherwise it **queues** a `PendingTransfer` (FIFO) and
+reserves its amount, drained by `fulfillPending()`. A newer payout therefore never spends liquidity
+an older payout of the same asset waits for, and other assets keep paying directly. While an entry
+queued before this rule existed is at the head (it reserved nothing), every payout queues behind it.
+
+A head the runtime refuses for good (an amount below the asset's existential deposit to an empty
+account) makes `fulfillPending()` revert every time. `parkPending()` (permissionless) pays the head
+if its dispatch succeeds, or else moves it to `parkedTransfers` and advances the head. It refuses
+an unfunded head, and it hands the dispatch a fixed `PARK_DISPATCH_GAS`, so a caller's gas limit
+cannot fail a payable head. A parked entry keeps its reservation and is paid by
+`fulfillParked(id)` (permissionless) once its dispatch succeeds.
 
 The landing takes no `data`. The payload field exists for a future corridor whose `recipient` is a
 contract needing Hydration-side action once funds land — an inbound intent. Reaching a callback
@@ -146,7 +157,7 @@ per-token.
    replay a VAA is needed.
 5. **A shortfall does not revert.** Invariant 4 covers misconfiguration, not an empty pool: the
    landing queues and consumes the VAA. Nothing calls `fulfillPending()` automatically. Alarm on
-   `pendingTail - pendingHead > 0`.
+   `pendingTail - pendingHead > 0`, and on a `TransferParked` event.
 6. **Corridor isolation.** The receiver authorizes exactly one emitter per source chain.
 
 ## Configuration
@@ -209,7 +220,8 @@ whose implementation does not match the current source is brought up to it with
 [`basejump-landing-upgrade`](../../migrations/definitions/basejump-landing-upgrade/): it builds,
 checks the artifact against the selector the live receiver calls, deploys the current
 `BasejumpLanding` implementation and records the `upgradeToAndCall` calldata for the TC. Storage
-layout is unchanged, so the pool balance, routes, authorizations and queue carry over. Vet it with
+is append-only (slots 0-5 unchanged; the FIFO / park upgrade added slots 6-8, no initializer), so
+the pool balance, routes, authorizations and queue carry over. Vet it with
 `_probeBasejumpLandingUpgrade.ts --impl <address>`, which enacts the TC motion on a fork and
 replays the real VAAs waiting on the corridor. The `basejump` relayer can run before the motion
 enacts — its retry budget spans days — but a VAA that exhausts it needs a manual replay.

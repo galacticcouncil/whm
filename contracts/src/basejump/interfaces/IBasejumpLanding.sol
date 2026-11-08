@@ -9,6 +9,8 @@ interface IBasejumpLanding {
     event PendingTransferFulfilled(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
     event Withdrawn(address indexed asset, uint256 amount, address indexed to);
     event DestAssetUpdated(address indexed sourceAsset, address indexed destAsset);
+    event TransferParked(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
+    event ParkedTransferFulfilled(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount);
 
     // ─── Errors ──────────────────────────────────────────────────
 
@@ -18,11 +20,15 @@ interface IBasejumpLanding {
     error NoPendingTransfers();
     error InsufficientBalance();
     error AssetNotConfigured(address sourceAsset);
+    error InsufficientGas();
+    error NotParked(uint256 id);
 
     // ─── Core ────────────────────────────────────────────────────
 
     function transfer(address sourceAsset, uint256 amount, bytes32 recipient, bytes memory data) external;
     function fulfillPending() external;
+    function parkPending() external;
+    function fulfillParked(uint256 id) external;
 
     // ─── Views ───────────────────────────────────────────────────
 
@@ -32,6 +38,9 @@ interface IBasejumpLanding {
     function pendingHead() external view returns (uint256);
     function pendingTail() external view returns (uint256);
     function pendingTransfers(uint256 id) external view returns (address sourceAsset, uint256 amount, bytes32 recipient);
+    function reservedFor(address destAsset) external view returns (uint256);
+    function reservedAssetOf(uint256 id) external view returns (address);
+    function parkedTransfers(uint256 id) external view returns (address sourceAsset, uint256 amount, bytes32 recipient);
 
     // ─── Admin ───────────────────────────────────────────────────
 
