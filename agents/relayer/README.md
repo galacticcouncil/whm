@@ -144,8 +144,10 @@ until a transaction at that nonce is known to have mined, then hands the task it
 the next task get the next nonce. A wait without a receipt (180 s per round) re-reads the wallet's nonce:
 mined past it means the nonce is spent (this task's receipt, or a reject when another transaction took
 it); pending means keep waiting; neither means the send was dropped, and it is sent again at the same
-nonce. One transaction in flight per wallet, and a send stuck pending holds the lane, with a Discord
-alert once per held nonce.
+nonce. A send at the held nonce that a node refuses without a revert (already known, underpriced, any
+other wording, an RPC error) keeps the lane held too, so no later message is handed an occupied nonce.
+One transaction in flight per wallet, and a send that never mines and never leaves every mempool holds
+the lane (later messages wait, unsent), with a Discord alert once per task waiting on it.
 
 ## Production
 

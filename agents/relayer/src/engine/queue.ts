@@ -390,9 +390,10 @@ export function createQueue(deps: QueueDeps) {
      *
      * @param task What to send, and how to label it in the log.
      * @returns The receipt of a transaction this task sent, once mined (success OR reverted: the
-     *          caller reads `status`); undefined when nothing was sent because the work turned out
-     *          to be already done (or can never succeed). Rejects on anything unproven, for the
-     *          caller to hand back to the engine.
+     *          caller reads `status`); undefined when the simulate said the work is already done
+     *          (or can never succeed). Undefined does NOT mean nothing went out: when that verdict
+     *          came on a repeat send, the first send may still be pending and may still mine.
+     *          Rejects on anything unproven, for the caller to hand back to the engine.
      */
     add(task: Task): Promise<TransactionReceipt | undefined> {
       return new Promise<TransactionReceipt | undefined>((resolve, reject) => {
