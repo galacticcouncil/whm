@@ -78,8 +78,14 @@ balance of that asset, and calls `fulfillPending()` only when the pool covers it
 passes. That call takes no arguments and pays the head to the recipient stored on chain; it is the
 only call this adds. The landing is read from each route's receiver, not configured.
 
+After a `fulfillPending` whose own receipt shows success, the same run continues with the new head,
+so a funded backlog clears in one run rather than one payout per poll, up to
+`QUEUED_PAYOUT_MAX_PER_RUN` payouts (default 10, integer 1 to 100, validated at startup; the rest
+waits for the next poll). Any other outcome (pool short, simulated revert, revert on chain, no
+receipt, replaced transaction, a stale head read) ends the run exactly as before.
+
 A head that stays unpaid for `QUEUED_PAYOUT_ALERT_MINUTES` (the pool is not refilled, or the call
-reverts, e.g. a dispatch that always fails) gets one Discord alert. Nothing is sent for it in the
+reverts, e.g. a dispatch that always fails) gets one Discord alert, worded as head-blocking time. Nothing is sent for it in the
 meantime, and every later payout waits behind it. If the same process later sees it paid, it posts
 an all-clear. Alert state lives in memory: a restart restarts the clock and forgets the alert, so a
 head paid across a restart gets no all-clear, and one still waiting is alerted again after a new
@@ -90,6 +96,15 @@ default 30 min `QUEUED_PAYOUT_ALERT_MINUTES`: the first pause equals the alert i
 scale with it, while the 6 h ceiling is fixed (a 1 min interval gives 1, 2, 4 ... min, so many more
 calls before 6 h is reached). A payout that never pays costs at most 3 calls per 6 h once the pause
 reaches 6 h. Each cause (waiting, reverting) is alerted at most once per payout.
+
+A separate backlog alert covers time spent behind earlier entries, which the head-blocking clock
+excludes: when the oldest queued payout has been queued for `QUEUED_PAYOUT_ALERT_MINUTES`, one alert
+gives its age and the queue depth, and an all-clear follows when the queue empties or the oldest
+entry is younger than the interval. It is held back while the head's own head-blocking alert is out
+(that one already says everything waits). The landing stores no enqueue time (a pending transfer is
+asset, amount and recipient), so the age is counted from when this process first saw the entry, and
+the alert text says so. An entry queued before the keeper started is under-aged by the keeper's
+downtime; after a restart the clock restarts. Alert state lives in memory.
 
 ### `psm-hydration` and `psm-base`
 
@@ -135,7 +150,8 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
 | `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts; `basejump` also queued payouts | optional                    |
 | `QUEUED_PAYOUT_POLL_SECONDS` | How often `basejump` checks the landing's queue | `60`                           |
-| `QUEUED_PAYOUT_ALERT_MINUTES` | Alert once when a queued payout waits longer (`basejump`) | `30`               |
+| `QUEUED_PAYOUT_ALERT_MINUTES` | Alert once when a queued payout waits longer, at the head or in the backlog (`basejump`) | `30` |
+| `QUEUED_PAYOUT_MAX_PER_RUN` | Most payouts one keeper run sends before the next poll (`basejump`) | `10`                    |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |

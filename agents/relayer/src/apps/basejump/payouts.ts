@@ -35,8 +35,14 @@ export interface PayoutKeeperDeps {
   /** The app's submission queue. Sharing it keeps these calls on the app wallet's nonce lane. */
   queue: Queue;
   landing: Address;
-  /** Alert once when the same queued payout has been at the head for this long. */
+  /**
+   * Alert once when the same queued payout has been at the head for this long (head-blocking
+   * time), and once when the oldest queued payout, at any position, has waited this long since
+   * this process first saw it queued (backlog age).
+   */
   alertAfterMs: number;
+  /** Most payouts one run sends before leaving the rest to the next poll. Default 10. */
+  maxPerRun?: number;
   /** How long to wait for a sent call's receipt before leaving it to the next tick. */
   receiptTimeoutMs: number;
   /** Alert sink. Once per cause per queued payout, plus once when an alerted one is paid. */
@@ -108,11 +114,22 @@ export const MAX_REVERT_PAUSE_MS = 6 * 60 * 60_000;
  */
 export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   const { clients, queue, landing, alertAfterMs, receiptTimeoutMs, notify } = deps;
+  const maxPerRun = deps.maxPerRun ?? 10;
   const { publicClient, account } = clients;
   const now = deps.now ?? Date.now;
   const log = logger.child({ keeper: "basejump-queued-payouts", landing });
 
   let head: Head | undefined;
+  /**
+   * When this process first saw each queued id, for the backlog alert. The landing stores no enqueue
+   * time (`PendingTransfer` is asset, amount, recipient), so the age is first-seen time: an entry
+   * queued before this process started is under-aged by the keeper's downtime. Ids below the head
+   * are dropped.
+   */
+  const firstSeen = new Map<bigint, number>();
+  let nextUnseen = 0n;
+  /** The backlog alert is out; cleared (with an OK message) when the queue empties or ages out. */
+  let backlogAlerted = false;
   let running: Promise<void> | undefined;
   let again = false;
 
@@ -149,17 +166,65 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     if (h.alerted.has(cause) || (cause === "waiting" && waited < alertAfterMs)) return;
     h.alerted.add(cause);
     const msg =
-      `WARN queued Basejump payout #${h.id} of ${what} waiting ` +
+      `WARN queued Basejump payout #${h.id} of ${what} head-blocking for ` +
       `${Math.round(waited / 60_000)} min ` +
       `at the head of landing \`${landing}\`: ${reason}. Every later payout waits behind it.`;
     log.warn(msg);
     await notify(msg);
   }
 
-  async function pass(): Promise<void> {
+  /**
+   * Backlog alert: the oldest queued payout (the head) has waited `alertAfterMs` since first seen,
+   * counting time behind earlier entries, which the head-blocking clock does not. Skipped while the
+   * head's own head-blocking alert is out, since that one already says everything waits. Once per
+   * crossing; an OK message when it clears.
+   */
+  async function backlogCheck(h: bigint, tail: bigint): Promise<void> {
+    if (h >= tail) {
+      await clearBacklog(`queue empty`);
+      return;
+    }
+    const age = now() - (firstSeen.get(h) ?? now());
+    if (age < alertAfterMs) {
+      await clearBacklog(`oldest payout #${h} is ${Math.round(age / 60_000)} min old`);
+      return;
+    }
+    if (backlogAlerted || (head && head.id === h && head.alerted.size > 0)) return;
+    backlogAlerted = true;
+    const msg =
+      `WARN queued Basejump backlog on landing \`${landing}\`: oldest payout #${h} has been queued ` +
+      `${Math.round(age / 60_000)} min (counted from when this keeper first saw it, so a payout ` +
+      `queued before the keeper started is under-aged by its downtime), ${tail - h} queued.`;
+    log.warn(msg);
+    await notify(msg);
+  }
+
+  async function clearBacklog(why: string): Promise<void> {
+    if (!backlogAlerted) return;
+    backlogAlerted = false;
+    log.info(`queued backlog cleared (${why})`);
+    await notify(`OK queued Basejump backlog on landing \`${landing}\` cleared (${why})`);
+  }
+
+  /** One pass: read the queue, then pay the head when the pool covers it. */
+  async function pass(): Promise<boolean> {
     const read = (functionName: "pendingHead" | "pendingTail") =>
       publicClient.readContract({ address: landing, abi: landingAbi, functionName });
     const [h, tail] = await Promise.all([read("pendingHead"), read("pendingTail")]);
+    if (nextUnseen < h) nextUnseen = h;
+    for (; nextUnseen < tail; nextUnseen++) firstSeen.set(nextUnseen, now());
+    for (const id of firstSeen.keys()) if (id < h) firstSeen.delete(id);
+    try {
+      return await payHead(h, tail);
+    } finally {
+      await backlogCheck(h, tail).catch((e) =>
+        log.warn(`backlog check failed: ${(e as Error).message ?? String(e)}`),
+      );
+    }
+  }
+
+  /** Pays the head if it can. Resolves true only when this call saw its own send mined and succeeded. */
+  async function payHead(h: bigint, tail: bigint): Promise<boolean> {
 
     if (head && h > head.id) {
       log.info(`queued payout #${head.id} paid (head now ${h})`);
@@ -168,7 +233,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       }
       head = undefined;
     }
-    if (h >= tail) return;
+    if (h >= tail) return false;
     if (!head) {
       head = { id: h, since: now(), alerted: new Set(), reverts: 0, caps: 0 };
       log.info(`queued payout #${h} at the head (${tail - h} queued)`);
@@ -206,9 +271,9 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
           `fulfillPending ${current.sent} sent, not seen mined. If it was dropped, every later ` +
             `send of this app, deliveries included, waits behind its nonce`,
         );
-        return;
+        return false;
       }
-      if (receipt.status === "success") return; // the head read raced the block; next pass sees it
+      if (receipt.status === "success") return false; // the head read raced the block; next pass sees it
       log.warn(`#${h}: fulfillPending ${current.sent} reverted on chain; nothing was paid`);
       current.sent = undefined;
       current.reverts++;
@@ -231,7 +296,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
         );
         const reason = `${current.reverts} fulfillPending calls simulated clean, then reverted`;
         await alertIfOverdue(current, what, reason, "reverting");
-        return;
+        return false;
       }
       log.info(`#${h}: revert cap expired; trying again`);
       current.reverts = 0;
@@ -250,7 +315,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     if (balance < amount) {
       log.info(`#${h}: waiting for the pool (holds ${balance}, needs ${amount})`);
       await alertIfOverdue(current, what, `the pool holds ${await describeOr(destAsset, balance)}`);
-      return;
+      return false;
     }
 
     try {
@@ -264,7 +329,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       const name = revertName(e) ?? (e as Error).message;
       log.warn(`#${h}: fulfillPending would revert (${name}); not sending`);
       await alertIfOverdue(current, what, `fulfillPending reverts with ${name}`);
-      return;
+      return false;
     }
 
     const sent: { hash?: Hash } = {};
@@ -278,7 +343,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
           n,
         )),
     });
-    if (!sent.hash) return;
+    if (!sent.hash) return false;
     current.sent = sent.hash;
 
     const receipt = await publicClient
@@ -286,33 +351,44 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       .catch(() => undefined);
     if (!receipt) {
       log.info(`#${h}: fulfillPending ${sent.hash} sent, receipt not seen yet`);
-      return;
+      return false;
     }
     // viem follows a replacement at the same nonce; only this call's own receipt counts.
     if (receipt.transactionHash.toLowerCase() !== sent.hash.toLowerCase()) {
       log.warn(`#${h}: fulfillPending ${sent.hash} was replaced by ${receipt.transactionHash}`);
       current.sent = undefined;
-      return;
+      return false;
     }
     if (receipt.status === "success") {
       log.info(`#${h}: fulfillPending ${sent.hash} mined`);
-    } else {
-      log.warn(`#${h}: fulfillPending ${sent.hash} reverted on chain; nothing was paid`);
-      current.sent = undefined;
-      current.reverts++;
+      return true;
     }
+    log.warn(`#${h}: fulfillPending ${sent.hash} reverted on chain; nothing was paid`);
+    current.sent = undefined;
+    current.reverts++;
+    return false;
   }
 
   async function describeOr(asset: Address, amount: bigint): Promise<string> {
     return asset === zeroAddress ? amount.toString() : describe(asset, amount);
   }
 
-  /** Run passes until no poke arrived during the last one. Never throws. */
+  /**
+   * Run passes until no poke arrived during the last one. Within a round, a pass that saw its own
+   * `fulfillPending` mined and successful is followed by another for the new head, up to
+   * `maxPerRun` payouts; any other outcome (nothing queued, pool short, revert, no receipt,
+   * replaced, a stale head read) ends the round exactly as a single pass always did. Never throws.
+   */
   async function loop(): Promise<void> {
     do {
       again = false;
       try {
-        await pass();
+        for (let paid = 0; paid < maxPerRun; paid++) {
+          if (!(await pass())) break;
+          if (paid + 1 === maxPerRun) {
+            log.info(`${maxPerRun} payouts sent this run; the rest waits for the next poll`);
+          }
+        }
       } catch (e) {
         log.warn(`queued payout pass failed: ${(e as Error).message ?? String(e)}`);
       }

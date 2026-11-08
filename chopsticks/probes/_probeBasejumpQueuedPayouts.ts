@@ -155,7 +155,7 @@ interface Sent {
 function startShim(net: Network, forkHttp: string) {
   const api = net.client.getUnsafeApi();
   /** Every transaction accepted, in order; `sent` holds the sealed ones with their outcome. */
-  const accepted: { hash: Hex; from: Hex; to: string | undefined; data: Hex }[] = [];
+  const accepted: { hash: Hex; from: Hex; to: string | undefined; data: Hex; nonce: number }[] = [];
   const sent: Sent[] = [];
   const nonces = new Map<string, number>();
   const dropped: { hash: Hex; gasPrice: bigint; priceAtSeal: bigint }[] = [];
@@ -192,7 +192,7 @@ function startShim(net: Network, forkHttp: string) {
         }
         nonces.set(from, expected + 1);
         const hash = keccak256(raw);
-        accepted.push({ hash, from: from as Hex, to: tx.to ?? undefined, data: (tx.data ?? "0x") as Hex });
+        accepted.push({ hash, from: from as Hex, to: tx.to ?? undefined, data: (tx.data ?? "0x") as Hex, nonce: tx.nonce ?? expected });
         sealing = sealing.then(async () => {
           await hooks.beforeSeal?.(from);
           const res = await sendRawEthTx(net, raw).finally(() => hooks.afterSeal?.(from));
@@ -240,6 +240,32 @@ function startShim(net: Network, forkHttp: string) {
           effectiveGasPrice: "0x0",
           contractAddress: null,
           type: "0x2",
+        };
+      }
+      case "eth_getTransactionByHash": {
+        // viem's waitForTransactionReceipt starts here; the fork has no such method, which made it
+        // throw at once, so a poke returned before its own receipt. Answered like a node: pending
+        // (blockNumber null) until sealed.
+        const h = String(params[0]).toLowerCase();
+        const a = accepted.find((x) => x.hash.toLowerCase() === h);
+        if (!a) return null;
+        const s = sent.find((x) => x.hash.toLowerCase() === h);
+        return {
+          hash: a.hash,
+          from: a.from,
+          to: a.to ?? null,
+          input: a.data,
+          nonce: numberToHex(a.nonce),
+          value: "0x0",
+          gas: "0x0",
+          gasPrice: "0x0",
+          type: "0x0",
+          blockHash: s?.blockHash ?? null,
+          blockNumber: s ? numberToHex(s.blockNumber) : null,
+          transactionIndex: s ? "0x0" : null,
+          v: "0x0",
+          r: "0x0",
+          s: "0x0",
         };
       }
       case "eth_gasPrice": {
@@ -572,6 +598,79 @@ async function main(): Promise<void> {
       "one all-clear",
       postsD().length === 3 && postsD()[2].startsWith(`OK queued Basejump payout #${headD} paid`),
       postsD()[2] ?? "none",
+    );
+
+    // ── E. A funded backlog drains in ONE poke; the backlog alert covers time behind the head ──
+    // E1: two queued payouts, pool covers both: a single poke pays both (the run continues with the
+    // new head after each confirmed success). E2: two queued, the head waits 31 min (head-blocking
+    // alert), the pool then covers only the head: the run pays it, the second entry is a fresh head
+    // but has been queued 31 min, so the backlog alert fires; funding it clears with an OK.
+    console.log(`\n── E. Funded backlog drains in one poke; backlog alert ──`);
+    const E_PAYOUT = 2_000_000n;
+    // A fork block takes 20-90 s, so a poke must outwait it for the run's "continue with the new
+    // head" step to be what the checks see: this keeper waits up to 3 min for each receipt.
+    const keeperE = createPayoutKeeper({
+      clients,
+      queue,
+      landing: LANDING,
+      alertAfterMs: ALERT_AFTER_MS,
+      receiptTimeoutMs: 180_000,
+      notify: discordNotifier(hook.url),
+      now: () => clock,
+    });
+    await setPool(0n);
+    record("E1: first payout queues", await queuePayout(E_PAYOUT, RECIPIENT));
+    record("E1: second payout queues", await queuePayout(E_PAYOUT, RECIPIENT));
+    const headE1 = await read("pendingHead");
+    const recipE1 = await usdc(recipSub);
+    const sentBeforeE1 = sentToLanding().length;
+    const sealedBeforeE1 = sealedFromKeeper().length;
+    clock = 0;
+    await keeperE.poke();
+    await setPool(FLOAT);
+    await keeperE.poke();
+    await shim.sealed();
+    record("E1: ONE poke moved the head by two", (await read("pendingHead")) === headE1 + 2n, `head ${await read("pendingHead")} from ${headE1}`);
+    record("E1: exactly two fulfillPending sent, both succeeded", sentToLanding().length - sentBeforeE1 === 2 && sealedFromKeeper().slice(sealedBeforeE1).length === 2 && sealedFromKeeper().slice(sealedBeforeE1).every((x) => x.ok));
+    record("E1: recipient +4 USDC", (await usdc(recipSub)) - recipE1 === 2n * E_PAYOUT);
+
+    await setPool(0n);
+    record("E2: first payout queues", await queuePayout(E_PAYOUT, RECIPIENT));
+    record("E2: second payout queues", await queuePayout(E_PAYOUT, RECIPIENT));
+    const headE2 = await read("pendingHead");
+    const postsBeforeE2 = hook.posts.length;
+    const postsE2 = () => hook.posts.slice(postsBeforeE2);
+    clock = 0;
+    await keeperE.poke();
+    clock = 31 * 60_000;
+    await keeperE.poke();
+    record(
+      "E2: 31 min behind a short pool: one head-blocking alert, no backlog alert yet",
+      postsE2().length === 1 && postsE2()[0].includes("head-blocking") && !postsE2()[0].includes("backlog"),
+      postsE2()[0] ?? "none",
+    );
+    await setPool(E_PAYOUT);
+    await keeperE.poke();
+    await shim.sealed();
+    await keeperE.poke();
+    record("E2: the head was paid and the second entry is the head", (await read("pendingHead")) === headE2 + 1n, `head ${await read("pendingHead")}`);
+    const backlogPosts = () => postsE2().filter((m) => m.includes("backlog") && m.startsWith("WARN"));
+    record(
+      "E2: backlog alert fires for the second entry (31 min old, though a fresh head)",
+      backlogPosts().length === 1 && backlogPosts()[0].includes(`oldest payout #${headE2 + 1n}`) && backlogPosts()[0].includes("31 min"),
+      backlogPosts()[0] ?? "none",
+    );
+    for (let i = 0; i < 3; i++) await keeperE.poke();
+    record("E2: backlog alert fires once", backlogPosts().length === 1);
+    await setPool(FLOAT);
+    await keeperE.poke();
+    await shim.sealed();
+    await keeperE.poke();
+    record("E2: queue empty after funding", (await read("pendingHead")) === (await read("pendingTail")));
+    record(
+      "E2: backlog OK on clear",
+      postsE2().filter((m) => m.startsWith("OK queued Basejump backlog")).length === 1,
+      postsE2().at(-1) ?? "none",
     );
 
     // ── C. A head that can never be paid ──

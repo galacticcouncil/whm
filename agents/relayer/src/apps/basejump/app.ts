@@ -12,6 +12,7 @@ import {
   APP_NAME,
   FROM_SEQUENCE,
   QUEUED_PAYOUT_ALERT_MS,
+  QUEUED_PAYOUT_MAX_PER_RUN,
   QUEUED_PAYOUT_POLL_MS,
   QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS,
   RETRIES,
@@ -73,6 +74,7 @@ async function start(): Promise<void> {
       queue,
       landing,
       alertAfterMs: QUEUED_PAYOUT_ALERT_MS,
+      maxPerRun: QUEUED_PAYOUT_MAX_PER_RUN,
       receiptTimeoutMs: QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS,
       notify: discordNotifier(alerting.discordWebhook),
     });

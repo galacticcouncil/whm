@@ -64,3 +64,20 @@ export const QUEUED_PAYOUT_ALERT_MS = positiveMs("QUEUED_PAYOUT_ALERT_MINUTES", 
 
 /** How long a pass waits for its own `fulfillPending` receipt before leaving it to the next one. */
 export const QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS = 120_000;
+
+/**
+ * The most payouts one keeper run sends before it stops and leaves the rest to the next poll. After a
+ * confirmed `fulfillPending` the run continues with the new head, so a funded backlog clears in one
+ * run instead of one payout per poll; the cap bounds RPC reads and gas spent in a single run.
+ * An integer from 1 to 100; anything else fails at startup.
+ */
+export const QUEUED_PAYOUT_MAX_PER_RUN = boundedInt("QUEUED_PAYOUT_MAX_PER_RUN", 10, 1, 100);
+
+/** An integer from env between `min` and `max` inclusive; fails at startup on anything else. */
+function boundedInt(name: string, fallback: number, min: number, max: number): number {
+  const v = optNum(name, fallback);
+  if (!Number.isInteger(v) || v < min || v > max) {
+    throw new Error(`${name} must be an integer from ${min} to ${max}, got ${process.env[name]}`);
+  }
+  return v;
+}
