@@ -27,10 +27,17 @@ address that cannot send a transaction itself.
   timestamp (the Hydration block time). A younger one is handed back to the engine, whose backoff
   (2, 4, 8, 16, 30 min) makes the first real attempt about 30 min after the transfer at the default.
 - Then it reads the Base transceiver's `isVAAConsumed` and the manager's `isMessageExecuted`, skips a
-  transfer either marks done, simulates, and sends `receiveMessage`. A send it did not see land is
-  retried only through those reads.
+  transfer either marks done, simulates, and sends `receiveMessage`. A send whose receipt never came
+  is kept in memory, and the retry looks at that hash first: its receipt is the outcome; while a node
+  still knows it, nothing is read or sent; only once it is unknown (dropped) does the retry read and
+  send again.
+- After a receipt, the manager's own event in that receipt is the verdict: `TransferRedeemed` is
+  delivered, `InboundTransferQueued` is queued, and a receipt with neither is retried. Reads made
+  after a receipt are pinned to its block, so a lagging node cannot answer with the state before it.
 - A transfer the Base manager holds under its inbound rate limit is reported `queued` at warn, with a
   Discord alert: someone must call `completeInboundQueuedTransfer` after the delay. The app does not.
+  A Discord post that fails (network error or HTTP 4xx/5xx) is logged at error with its status, body
+  and the undelivered line.
 - Every other refusal is retried (simulate only, so no gas), `InvalidVaa` included: a valid VAA reads
   as invalid while Base waits for a guardian-set upgrade. A transfer still undelivered after the last
   of 50 attempts (about 23 h) raises an alert.
@@ -38,7 +45,9 @@ address that cannot send a transaction itself.
 Its own process and Base wallet (`PRIVKEY_BASE`, a value different from `psm-base`'s). Same queue as
 every app: it warns, and alerts `DISCORD_WEBHOOK_URL` when set, below `GAS_WARN_MULTIPLIER` times the
 cost of 1,000,000 gas, and exits — this container only — below that cost once. A delivery uses about
-340,000 gas. `FROM_SEQ_HYDRATION` is required. Check on a Base fork:
+340,000 gas. `FROM_SEQ_HYDRATION` is required. `NTT_BASE_GRACE_SECONDS` must be a whole number from 0
+to 86400, or the process refuses to start. Unit tests: `pnpm --filter @whm/relayer test`
+([src/apps/ntt/outbound.test.ts](src/apps/ntt/outbound.test.ts)). Check on a Base fork:
 [scripts/verify-ntt-base.ts](scripts/verify-ntt-base.ts).
 
 ### `ntt-near`
@@ -140,7 +149,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
 | `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts                       | optional                              |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
-| `NTT_BASE_GRACE_SECONDS` | Backstop delay before `ntt-base` acts on a VAA | `900`                                 |
+| `NTT_BASE_GRACE_SECONDS` | Backstop delay before `ntt-base` acts on a VAA (0-86400 s) | `900`                      |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |
 | `APP_NAME`            | Engine namespace override — **see below**         | per-app                               |
