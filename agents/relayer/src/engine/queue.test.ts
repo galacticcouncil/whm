@@ -97,7 +97,9 @@ function setup(chain: FakeChain) {
     account: { address: ADDRESS } as Account,
     warnMultiplier: 1n,
     receiptTimeoutMs: 1,
-    roundDelayMs: 0,
+    // 1 ms, not 0: every round yields to timers, so a wrong lane fails the per-test timeout
+    // instead of spinning on microtasks.
+    roundDelayMs: 1,
   });
   const task = (label: string): Task => ({
     label,
@@ -109,7 +111,10 @@ function setup(chain: FakeChain) {
 
 const tick = () => new Promise((r) => setImmediate(r));
 
-test("happy path: the task gets its own receipt and the lane moves one nonce", async () => {
+/** Every test fails in 5 s rather than hanging when the lane never lets go. */
+const T = { timeout: 5_000 };
+
+test("happy path: the task gets its own receipt and the lane moves one nonce", T, async () => {
   const chain = new FakeChain();
   chain.onWait = (hash) => chain.mine(hash);
   const { queue, task } = setup(chain);
@@ -120,7 +125,7 @@ test("happy path: the task gets its own receipt and the lane moves one nonce", a
   assert.equal(queue.nonce, 8);
 });
 
-test("receipt timeout, send still pending: the lane holds the nonce, nothing is sent again", async () => {
+test("receipt timeout, send still pending: the lane holds the nonce, nothing is sent again", T, async () => {
   const chain = new FakeChain();
   const labelOf = (hash: Hash) => chain.sends.find((s) => s.hash === hash)?.label;
   let release!: () => void;
@@ -139,7 +144,10 @@ test("receipt timeout, send still pending: the lane holds the nonce, nothing is 
   let aDone = false;
   const a = queue.add(task("A")).then((r) => ((aDone = true), r));
   const b = queue.add(task("B"));
-  while (chain.waits < 3) await tick();
+  for (let i = 0; chain.waits < 3; i++) {
+    assert.ok(i < 10_000, "A never reached its third receipt wait");
+    await tick();
+  }
   // Two receipt timeouts in, A is still unresolved: B is not sent, and A is not sent again.
   assert.equal(aDone, false);
   assert.deepEqual(chain.sends.map((s) => `${s.label}@${s.nonce}`), ["A@7"]);
@@ -156,7 +164,7 @@ test("receipt timeout, send still pending: the lane holds the nonce, nothing is 
   );
 });
 
-test("receipt timeout, send dropped: sent again at the SAME nonce, never past a gap", async () => {
+test("receipt timeout, send dropped: sent again at the SAME nonce, never past a gap", T, async () => {
   const chain = new FakeChain();
   chain.onWait = (hash, call) => {
     if (call === 1) chain.pool.delete(hash); // the first send leaves every mempool
@@ -175,7 +183,7 @@ test("receipt timeout, send dropped: sent again at the SAME nonce, never past a 
   assert.equal(chain.mined, 9, "no gap: every nonce the lane used mined");
 });
 
-test("receipt wait fails while the send mined: the nonce read finds this task's receipt", async () => {
+test("receipt wait fails while the send mined: the nonce read finds this task's receipt", T, async () => {
   const chain = new FakeChain();
   const client = chain.client();
   // A lagging receipt wait: it throws although the transaction mined.
@@ -188,7 +196,7 @@ test("receipt wait fails while the send mined: the nonce read finds this task's 
     account: { address: ADDRESS } as Account,
     warnMultiplier: 1n,
     receiptTimeoutMs: 1,
-    roundDelayMs: 0,
+    roundDelayMs: 1,
   });
   await queue.init();
   const r = await queue.add({ label: "A", logger: silent, submit: async (n) => chain.send("A", n) });
@@ -197,7 +205,7 @@ test("receipt wait fails while the send mined: the nonce read finds this task's 
   assert.equal(queue.nonce, 8);
 });
 
-test("a foreign transaction took the nonce: the task rejects, the lane moves past the spent nonce", async () => {
+test("a foreign transaction took the nonce: the task rejects, the lane moves past the spent nonce", T, async () => {
   const chain = new FakeChain();
   chain.onWait = (_hash, call) => {
     if (call === 1) {
@@ -219,7 +227,7 @@ test("a foreign transaction took the nonce: the task rejects, the lane moves pas
   assert.deepEqual(chain.sends.map((s) => `${s.label}@${s.nonce}`), ["A@7", "A@8"]);
 });
 
-test("a reverted receipt is handed to the caller, not hidden", async () => {
+test("a reverted receipt is handed to the caller, not hidden", T, async () => {
   const chain = new FakeChain();
   chain.onWait = (hash) => chain.mine(hash, "reverted");
   const { queue, task } = setup(chain);
