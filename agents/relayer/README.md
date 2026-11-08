@@ -80,7 +80,7 @@ only call this adds. The landing is read from each route's receiver, not configu
 
 After a `fulfillPending` whose own receipt shows success, the same run continues with the new head,
 so a funded backlog clears in one run rather than one payout per poll, up to
-`QUEUED_PAYOUT_MAX_PER_RUN` payouts (default 10, integer 1 to 100, validated at startup; the rest
+`QUEUED_PAYOUT_MAX_PER_RUN` payouts per round (a poke arriving mid-round starts the next round at once; default 10, integer 1 to 100, validated at startup; the rest
 waits for the next poll). Any other outcome (pool short, simulated revert, revert on chain, no
 receipt, replaced transaction, a stale head read) ends the run exactly as before.
 
@@ -100,11 +100,13 @@ reaches 6 h. Each cause (waiting, reverting) is alerted at most once per payout.
 A separate backlog alert covers time spent behind earlier entries, which the head-blocking clock
 excludes: when the oldest queued payout has been queued for `QUEUED_PAYOUT_ALERT_MINUTES`, one alert
 gives its age and the queue depth, and an all-clear follows when the queue empties or the oldest
-entry is younger than the interval. It is held back while the head's own head-blocking alert is out
+entry is younger than half the interval (so steady arrivals around the threshold do not flap). It is held back while the head's own head-blocking alert is out
 (that one already says everything waits). The landing stores no enqueue time (a pending transfer is
 asset, amount and recipient), so the age is counted from when this process first saw the entry, and
-the alert text says so. An entry queued before the keeper started is under-aged by the keeper's
-downtime; after a restart the clock restarts. Alert state lives in memory.
+the alert text says so. An entry queued before this process started is under-aged by its whole
+wait before that start (time under an earlier process, the downtime, and any time the queue could
+not be read). A keeper that restarts more often than `QUEUED_PAYOUT_ALERT_MINUTES` sends neither
+this alert nor the head-blocking one. Alert state lives in memory.
 
 ### `psm-hydration` and `psm-base`
 

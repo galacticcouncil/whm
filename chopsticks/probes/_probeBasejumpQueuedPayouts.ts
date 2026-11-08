@@ -673,6 +673,31 @@ async function main(): Promise<void> {
       postsE2().at(-1) ?? "none",
     );
 
+    // E3: the cap. With maxPerRun 1, a funded two-entry backlog moves by exactly one per poke.
+    const keeperCap = createPayoutKeeper({
+      clients,
+      queue,
+      landing: LANDING,
+      alertAfterMs: ALERT_AFTER_MS,
+      maxPerRun: 1,
+      receiptTimeoutMs: 180_000,
+      notify: discordNotifier(hook.url),
+      now: () => clock,
+    });
+    await setPool(0n);
+    record("E3: first payout queues", await queuePayout(E_PAYOUT, RECIPIENT));
+    record("E3: second payout queues", await queuePayout(E_PAYOUT, RECIPIENT));
+    const headE3 = await read("pendingHead");
+    clock = 0;
+    await keeperCap.poke();
+    await setPool(FLOAT);
+    await keeperCap.poke();
+    await shim.sealed();
+    record("E3: cap 1: one poke moved the head by exactly one", (await read("pendingHead")) === headE3 + 1n, `head ${await read("pendingHead")} from ${headE3}`);
+    await keeperCap.poke();
+    await shim.sealed();
+    record("E3: the next poke pays the second", (await read("pendingHead")) === headE3 + 2n);
+
     // ── C. A head that can never be paid ──
     console.log(`\n── C. A head that can never be paid ──`);
     const tiny = ed > 1n ? ed - 1n : 1n;

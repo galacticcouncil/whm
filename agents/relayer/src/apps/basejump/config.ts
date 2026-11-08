@@ -66,9 +66,10 @@ export const QUEUED_PAYOUT_ALERT_MS = positiveMs("QUEUED_PAYOUT_ALERT_MINUTES", 
 export const QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS = 120_000;
 
 /**
- * The most payouts one keeper run sends before it stops and leaves the rest to the next poll. After a
- * confirmed `fulfillPending` the run continues with the new head, so a funded backlog clears in one
- * run instead of one payout per poll; the cap bounds RPC reads and gas spent in a single run.
+ * The most payouts one keeper round sends before it stops and leaves the rest to the next one. After a
+ * confirmed `fulfillPending` the round continues with the new head, so a funded backlog clears in
+ * one round instead of one payout per poll. The cap is per round, not per poke: a poke that arrives
+ * during a round starts the next round at once, so it bounds RPC reads and gas per round only.
  * An integer from 1 to 100; anything else fails at startup.
  */
 export const QUEUED_PAYOUT_MAX_PER_RUN = boundedInt("QUEUED_PAYOUT_MAX_PER_RUN", 10, 1, 100);

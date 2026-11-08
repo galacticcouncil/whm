@@ -123,12 +123,14 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   /**
    * When this process first saw each queued id, for the backlog alert. The landing stores no enqueue
    * time (`PendingTransfer` is asset, amount, recipient), so the age is first-seen time: an entry
-   * queued before this process started is under-aged by the keeper's downtime. Ids below the head
-   * are dropped.
+   * queued before this process started is under-aged by its WHOLE wait before that start (time under
+   * an earlier process, the downtime, and any time the queue could not be read), because this map
+   * is in memory. A keeper that restarts more often than `alertAfterMs` therefore sends neither
+   * this alert nor the head-blocking one. Ids below the head are dropped.
    */
   const firstSeen = new Map<bigint, number>();
   let nextUnseen = 0n;
-  /** The backlog alert is out; cleared (with an OK message) when the queue empties or ages out. */
+  /** The backlog alert is out; cleared (with an OK message) when the queue empties or the oldest age falls below half the threshold. */
   let backlogAlerted = false;
   let running: Promise<void> | undefined;
   let again = false;
@@ -177,7 +179,8 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * Backlog alert: the oldest queued payout (the head) has waited `alertAfterMs` since first seen,
    * counting time behind earlier entries, which the head-blocking clock does not. Skipped while the
    * head's own head-blocking alert is out, since that one already says everything waits. Once per
-   * crossing; an OK message when it clears.
+   * crossing; it clears (OK message) when the queue empties or the oldest age is below half of
+   * `alertAfterMs`, so steady arrivals around the threshold do not flap.
    */
   async function backlogCheck(h: bigint, tail: bigint): Promise<void> {
     if (h >= tail) {
@@ -185,16 +188,18 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       return;
     }
     const age = now() - (firstSeen.get(h) ?? now());
-    if (age < alertAfterMs) {
+    if (age < alertAfterMs / 2) {
       await clearBacklog(`oldest payout #${h} is ${Math.round(age / 60_000)} min old`);
       return;
     }
+    if (age < alertAfterMs) return;
     if (backlogAlerted || (head && head.id === h && head.alerted.size > 0)) return;
     backlogAlerted = true;
     const msg =
       `WARN queued Basejump backlog on landing \`${landing}\`: oldest payout #${h} has been queued ` +
-      `${Math.round(age / 60_000)} min (counted from when this keeper first saw it, so a payout ` +
-      `queued before the keeper started is under-aged by its downtime), ${tail - h} queued.`;
+      `${Math.round(age / 60_000)} min (counted from when this keeper process first saw it; a ` +
+      `restart resets the count, so a payout already queued then is under-aged by all of its wait ` +
+      `before that start), ${tail - h} queued.`;
     log.warn(msg);
     await notify(msg);
   }
@@ -336,15 +341,19 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     await queue.add({
       label: `basejump queued payout #${h}`,
       logger: log,
-      submit: async (n) =>
-        (sent.hash = await submit(
+      // `current.sent` is set here, the moment the send returns a hash, so it survives a queue whose
+      // `add` rejects after the transaction went out.
+      submit: async (n) => {
+        sent.hash = await submit(
           clients,
           { to: landing, abi: landingAbi, functionName: "fulfillPending", args: [] },
           n,
-        )),
+        );
+        current.sent = sent.hash;
+        return sent.hash;
+      },
     });
     if (!sent.hash) return false;
-    current.sent = sent.hash;
 
     const receipt = await publicClient
       .waitForTransactionReceipt({ hash: sent.hash, timeout: receiptTimeoutMs })
