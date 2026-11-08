@@ -82,12 +82,23 @@ export interface QueueDeps {
  * - not mined, but known pending: the send is still in a mempool; keep waiting (alerted once).
  * - neither: the send was dropped; send again at the SAME nonce (`submit` simulates again first).
  *
+ * A send that fails WITHOUT a revert at a nonce the lane knows may be occupied (this task's earlier
+ * send, or one an earlier task left unmined) is never the task's failure. A node that holds the
+ * earlier send refuses a second one at the same nonce, under whatever wording it uses, and a node
+ * behind a load balancer may not see that send at all. So the lane keeps holding and goes round
+ * again (wait, re-read, send again at the same nonce) until the nonce mines, and no later task is
+ * handed the occupied nonce in the meantime. Only a revert (the simulate's verdict) or a first send
+ * at a nonce nothing is known to occupy leaves the lane with the task.
+ *
  * So the lane never skips a nonce (a dropped send no longer strands every later one behind a gap),
  * and a message is never sent at a later nonce while an earlier send of it can still mine (a late
  * first send can no longer turn the retry into a reverted, gas-burning replay). Every repeat of a
  * send uses the nonce of the first, and one nonce mines once. The cost is throughput and liveness:
- * one transaction in flight per wallet, and a send stuck pending holds every later one until it
- * mines or leaves the mempool. Both are logged each round and alerted once per nonce.
+ * one transaction in flight per wallet, and a nonce held by a send that never mines and never
+ * leaves every mempool (stuck underpriced; there is no fee bump) holds the lane: later tasks wait
+ * behind it, unsent, while it is logged each round and alerted once per task that waits on it. A
+ * mined transaction retracted by a reorg and then dropped (the chain's nonce falls below the lane)
+ * is not recovered: the lane stays above the chain until a restart.
  */
 export function createQueue(deps: QueueDeps) {
   const { publicClient, account, warnMultiplier } = deps;
@@ -98,6 +109,17 @@ export function createQueue(deps: QueueDeps) {
   let started = false;
   let lowBalanceWarned = false;
   let chainLabel: string | undefined;
+  /**
+   * A nonce a task left the lane at after broadcasting there, without that nonce being seen mined
+   * (its repeat send simulated as done or dead). A send may still be pending at it.
+   */
+  let occupiedAt: number | undefined;
+
+  /** Move the lane to `to`; whatever occupied the old nonce no longer matters. */
+  function advance(to: number): void {
+    nonce = to;
+    occupiedAt = undefined;
+  }
 
   async function label(): Promise<string> {
     if (chainLabel) return chainLabel;
@@ -184,13 +206,23 @@ export function createQueue(deps: QueueDeps) {
 
   /**
    * Hold the lane at nonce `n` until a transaction at `n` is known to have mined, and return this
-   * task's receipt. Sets `nonce` past `n` exactly when `n` is known spent.
+   * task's receipt. Moves the lane past `n` exactly when `n` is known spent.
    *
+   * @param first The task's first send at `n`, or undefined when that send failed without a revert
+   *   (`refused`): then nothing of this task is known to be out, and the round sends again at `n`.
+   * @returns The receipt, or "requeue" when `n` mined while this task had nothing out at it (the
+   *   task goes again at the new nonce).
    * @throws When `n` was spent by a transaction this task did not send (nothing it sent can mine
-   *   now), or when a repeat send fails; the outer classification then applies.
+   *   now); a revert from a repeat send (the outer classification applies); or `refused` itself when
+   *   nothing is known to occupy `n` (a failure before anything went out, e.g. an RPC error).
    */
-  async function settle(task: Task, n: number, first: Hash): Promise<TransactionReceipt> {
-    const sent: Hash[] = [first];
+  async function settle(
+    task: Task,
+    n: number,
+    first: Hash | undefined,
+    refused?: unknown,
+  ): Promise<TransactionReceipt | "requeue"> {
+    const sent: Hash[] = first ? [first] : [];
     const ours = (r: TransactionReceipt) =>
       sent.some((h) => h.toLowerCase() === r.transactionHash.toLowerCase());
     const pause = () =>
@@ -203,15 +235,16 @@ export function createQueue(deps: QueueDeps) {
           return undefined;
         });
     let alerted = false;
-    let wait = true;
+    let wait = sent.length > 0;
 
     for (let round = 1; ; round++) {
       const receipt = wait ? await waitReceipt(task, sent[sent.length - 1]) : undefined;
-      wait = true;
+      if (!wait) await pause();
+      wait = sent.length > 0;
       if (receipt) {
         // A receipt means nonce n mined. viem follows a same-nonce replacement and returns ITS
         // receipt, so check the hash: only a transaction this task sent is this task's outcome.
-        nonce = n + 1;
+        advance(n + 1);
         if (ours(receipt)) return receipt;
         throw new Error(
           `${task.label}: nonce ${n} was taken by ${receipt.transactionHash}, not by this task's ` +
@@ -221,7 +254,12 @@ export function createQueue(deps: QueueDeps) {
 
       const mined = await count("latest");
       if (mined !== undefined && mined > n) {
-        nonce = n + 1;
+        if (sent.length === 0) {
+          // Nothing of this task's is out: whatever held n mined. Go again at the chain's nonce.
+          advance(mined);
+          return "requeue";
+        }
+        advance(n + 1);
         const own = await anyReceipt(sent);
         if (own) return own;
         throw new Error(
@@ -232,32 +270,45 @@ export function createQueue(deps: QueueDeps) {
 
       const held =
         `${await label().catch(() => "chain")} lane held at nonce ${n} by ${task.label} ` +
-        `(${sent.join(", ")}), round ${round}`;
+        `(${sent.length ? sent.join(", ") : "send refused"}), round ${round}`;
+
+      const known = mined === undefined ? undefined : await count("pending");
+      const occupied = sent.length > 0 || occupiedAt === n || (known !== undefined && known > n);
+      if (!occupied) {
+        // This task sent nothing and nothing is known at n: the first send's failure stands.
+        throw refused;
+      }
       if (!alerted) {
         alerted = true;
         await notifyDiscord(`WARN ${held}: no receipt yet`);
       }
-
-      const known = mined === undefined ? undefined : await count("pending");
       if (known === undefined || known > n) {
         // Still pending in a mempool, or the chain could not be read: keep the nonce, wait again.
         task.logger.warn(`${held}: ${known === undefined ? "nonce unreadable" : "still pending"}, waiting`);
-        await pause();
+        if (sent.length > 0) await pause();
+        else wait = false;
         continue;
       }
 
-      // Not mined and not pending: dropped. Send again under the same nonce; a throw here goes to
-      // the caller's classification with the lane still at n.
+      // Not mined and not pending on this node: send again under the same nonce.
       task.logger.warn(`${held}: not mined and not pending, sending again at nonce ${n}`);
       try {
         const again = await task.submit(n);
         task.logger.info(`${task.label} sent again in ${again} (nonce ${n})`);
         sent.push(again);
+        wait = true;
       } catch (e) {
-        if (!((e as Error).message ?? "").includes("nonce too low")) throw e;
-        // Mined after all, between the reads and the send: read the nonce again without waiting.
-        wait = false;
-        await pause();
+        if (revertName(e) !== undefined) {
+          // The simulate's verdict leaves the lane, but a send of ours may still be out at n.
+          if (sent.length > 0) occupiedAt = n;
+          throw e;
+        }
+        // Any other refusal ("already known", "replacement transaction underpriced", "nonce too
+        // low", a pool error in any wording, an RPC error): n may be occupied by a send this node
+        // cannot see. Hold, and read again next round; never hand n to the next task.
+        task.logger.warn(`${task.label}: send at nonce ${n} refused, holding: ${(e as Error).message?.split("\n")[0]}`);
+        if (sent.length > 0) await pause();
+        else wait = false;
       }
     }
   }
@@ -270,9 +321,23 @@ export function createQueue(deps: QueueDeps) {
     const n = nonce;
 
     try {
-      const hash = await task.submit(n);
-      task.logger.info(`${task.label} submitted in ${hash} (nonce ${n})`);
-      const receipt = await settle(task, n, hash);
+      let hash: Hash | undefined;
+      let refused: unknown;
+      try {
+        hash = await task.submit(n);
+        task.logger.info(`${task.label} submitted in ${hash} (nonce ${n})`);
+      } catch (e) {
+        // A revert is the simulate's verdict: classified below. Anything else may be a refusal of
+        // a nonce another send occupies; `settle` decides, never the error's wording.
+        if (revertName(e) !== undefined) throw e;
+        refused = e;
+      }
+      const receipt = await settle(task, n, hash, refused);
+      if (receipt === "requeue") {
+        task.logger.info(`${task.label}: nonce ${n} mined meanwhile, going again at ${nonce}`);
+        pending.unshift(task);
+        return;
+      }
       task.logger.info(`${task.label} mined in ${receipt.transactionHash} (${receipt.status})`);
       task.logger.info(`Next nonce: ${nonce}`);
       task.resolve(receipt);
@@ -292,7 +357,7 @@ export function createQueue(deps: QueueDeps) {
         task.resolve(undefined);
       } else if (message.includes("nonce too low")) {
         task.logger.info("nonce too low, reloading");
-        nonce = await publicClient.getTransactionCount({ address: account.address });
+        advance(await publicClient.getTransactionCount({ address: account.address }));
         pending.unshift(task);
       } else {
         // Not proven finished — a queued settlement, a failing forward, an RPC blip. Hand it
@@ -312,7 +377,7 @@ export function createQueue(deps: QueueDeps) {
     async init(): Promise<number> {
       await checkBalance();
       started = true;
-      nonce = await publicClient.getTransactionCount({ address: account.address });
+      advance(await publicClient.getTransactionCount({ address: account.address }));
       return nonce;
     },
 
