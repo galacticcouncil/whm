@@ -158,9 +158,10 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
     ///      `PARK_DISPATCH_GAS`, checked before the call, so the caller's gas limit cannot make it
     ///      fail. A head whose dispatch succeeds is simply paid, exactly as `fulfillPending` would.
     ///      Bound: the stipend is tied to today's runtime. If a runtime upgrade raises the
-    ///      `currencies.transfer` weight above `PARK_DISPATCH_GAS`, the precompile fails every
-    ///      dispatch for gas and `parkPending` parks every funded, payable head; each stays reserved
-    ///      and `fulfillParked` (which forwards all remaining gas) pays it.
+    ///      `currencies.transfer` weight above the weight `PARK_DISPATCH_GAS` converts to, the
+    ///      precompile fails every dispatch for gas and `parkPending` parks every funded, payable
+    ///      head; each stays reserved and `fulfillParked` (which forwards all but 1/64 of the
+    ///      remaining gas) pays it.
     function parkPending() external {
         if (pendingHead >= pendingTail) revert NoPendingTransfers();
 
@@ -262,8 +263,9 @@ contract BasejumpLanding is Initializable, UUPSUpgradeable, IBasejumpLanding {
     }
 
     /// @notice Emergency withdrawal of ERC20 tokens
-    /// @dev May take funds reserved for queued or parked entries. Afterwards every newcomer of that
-    ///      asset queues and `fulfillPending` reverts InsufficientBalance until the pool is refunded.
+    /// @dev May take funds reserved for queued or parked entries. While the balance is below that
+    ///      asset's reservation every newcomer of it queues, and `fulfillPending` reverts
+    ///      InsufficientBalance while the balance is below the head's amount.
     function withdraw(address asset, uint256 amount, address to) external onlyOwner {
         IERC20(asset).safeTransfer(to, amount);
         emit Withdrawn(asset, amount, to);

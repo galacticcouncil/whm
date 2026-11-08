@@ -593,31 +593,67 @@ contract BasejumpLandingTest is Test {
         basejumpLanding.parkPending();
     }
 
-    /// @notice EIP-150 boundary: for every caller gas limit in the swept windows, a payable head
-    ///         whose dispatch needs the full stipend is either paid or the call reverts; it is never
-    ///         parked. Pins the `PARK_DISPATCH_GAS / 63 + 10_000` margin, not only the check.
-    function testParkPendingGasSweepNeverParksPayableHead() public {
+    /// @dev One `parkPending` attempt at caller gas `g`, state rolled back. Returns
+    ///      (insufficientGas revert, parked, paid).
+    function _parkAt(uint256 g) internal returns (bool lowGas, bool parked, bool paid) {
+        uint256 snap = vm.snapshotState();
+        (bool ok, bytes memory ret) = address(basejumpLanding).call{gas: g}(abi.encodeCall(BasejumpLanding.parkPending, ()));
+        (address p,,) = basejumpLanding.parkedTransfers(0);
+        lowGas = !ok && ret.length >= 4 && bytes4(ret) == IBasejumpLanding.InsufficientGas.selector;
+        parked = p != address(0);
+        paid = ok && !parked && basejumpLanding.pendingHead() == 1;
+        vm.revertToState(snap);
+    }
+
+    /// @dev Queue a payable head behind a dispatch that needs the full stipend, then locate the
+    ///      threshold: the smallest caller gas that does not revert InsufficientGas.
+    function _locateParkThreshold() internal returns (uint256 threshold) {
         uint256 headAmount = _queueHead();
         usdc.mint(address(basejumpLanding), headAmount - POOL_AMOUNT);
         vm.clearMockedCalls();
         vm.etch(DISPATCH_PRECOMPILE, address(new NeedsFullStipend()).code);
 
-        uint256 parked;
-        uint256 paid;
-        // Fine window around the threshold (about 587k caller gas here), then a coarse sweep.
-        // Bounded to fit the default test gas limit.
-        for (uint256 pass = 0; pass < 2; pass++) {
-            (uint256 from, uint256 to, uint256 step) = pass == 0 ? (570_000, 600_000, 5) : (100_000, 3_000_000, 49_999);
-            for (uint256 g = from; g < to; g += step) {
-                uint256 snap = vm.snapshotState();
-                (bool ok,) = address(basejumpLanding).call{gas: g}(abi.encodeCall(BasejumpLanding.parkPending, ()));
-                (address p,,) = basejumpLanding.parkedTransfers(0);
-                if (p != address(0)) parked++;
-                if (ok && p == address(0) && basejumpLanding.pendingHead() == 1) paid++;
-                vm.revertToState(snap);
-            }
+        uint256 lo = 300_000; // below the stipend: always InsufficientGas
+        uint256 hi = 3_000_000; // ample: never InsufficientGas
+        (bool loLow,,) = _parkAt(lo);
+        (bool hiLow,,) = _parkAt(hi);
+        assertTrue(loLow && !hiLow, "threshold not bracketed");
+        while (hi - lo > 1) {
+            uint256 mid = (lo + hi) / 2;
+            (bool midLow,,) = _parkAt(mid);
+            if (midLow) lo = mid;
+            else hi = mid;
         }
+        threshold = hi;
+    }
+
+    /// @dev Sweep [from, to) at step 5; returns (InsufficientGas reverts, parked, paid).
+    function _sweepPark(uint256 from, uint256 to) internal returns (uint256 lowGas, uint256 parked, uint256 paid) {
+        for (uint256 g = from; g < to; g += 5) {
+            (bool l, bool pk, bool pd) = _parkAt(g);
+            if (l) lowGas++;
+            if (pk) parked++;
+            if (pd) paid++;
+        }
+    }
+
+    /// @notice EIP-150 boundary, located rather than hard-coded: from 20k caller gas below the
+    ///         InsufficientGas threshold up to it, a payable head is never parked and the window
+    ///         holds an InsufficientGas revert. Split from the upper half to fit the test gas limit.
+    function testParkPendingGasSweepBelowThresholdNeverParks() public {
+        uint256 threshold = _locateParkThreshold();
+        (uint256 lowGas, uint256 parked,) = _sweepPark(threshold - 20_000, threshold);
+        assertGt(lowGas, 0, "window holds no InsufficientGas revert");
         assertEq(parked, 0, "a payable head was parked for some caller gas limit");
-        assertGt(paid, 0, "no gas limit paid the head");
+    }
+
+    /// @notice From the located threshold up to 20k above it, a payable head whose dispatch needs
+    ///         the full stipend is paid, never parked. Pins the `PARK_DISPATCH_GAS / 63 + 10_000`
+    ///         margin, not only the check: without it the band just above the threshold parks.
+    function testParkPendingGasSweepAboveThresholdNeverParks() public {
+        uint256 threshold = _locateParkThreshold();
+        (, uint256 parked, uint256 paid) = _sweepPark(threshold, threshold + 20_000);
+        assertGt(paid, 0, "window holds no payment");
+        assertEq(parked, 0, "a payable head was parked for some caller gas limit");
     }
 }
