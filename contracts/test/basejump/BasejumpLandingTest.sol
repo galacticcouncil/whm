@@ -45,6 +45,13 @@ contract GasHungryDispatch {
     }
 }
 
+/// @dev Succeeds only when it received (nearly) the whole 500k PARK_DISPATCH_GAS stipend.
+contract NeedsFullStipend {
+    fallback() external {
+        if (gasleft() < 499_900) revert("out of gas");
+    }
+}
+
 contract BasejumpLandingTest is Test {
     BasejumpLanding public basejumpLanding;
     MockERC20 public usdc;
@@ -584,5 +591,33 @@ contract BasejumpLandingTest is Test {
     function testParkPendingRevertsNoPending() public {
         vm.expectRevert(IBasejumpLanding.NoPendingTransfers.selector);
         basejumpLanding.parkPending();
+    }
+
+    /// @notice EIP-150 boundary: for every caller gas limit in the swept windows, a payable head
+    ///         whose dispatch needs the full stipend is either paid or the call reverts; it is never
+    ///         parked. Pins the `PARK_DISPATCH_GAS / 63 + 10_000` margin, not only the check.
+    function testParkPendingGasSweepNeverParksPayableHead() public {
+        uint256 headAmount = _queueHead();
+        usdc.mint(address(basejumpLanding), headAmount - POOL_AMOUNT);
+        vm.clearMockedCalls();
+        vm.etch(DISPATCH_PRECOMPILE, address(new NeedsFullStipend()).code);
+
+        uint256 parked;
+        uint256 paid;
+        // Fine window around the threshold (about 587k caller gas here), then a coarse sweep.
+        // Bounded to fit the default test gas limit.
+        for (uint256 pass = 0; pass < 2; pass++) {
+            (uint256 from, uint256 to, uint256 step) = pass == 0 ? (570_000, 600_000, 5) : (100_000, 3_000_000, 49_999);
+            for (uint256 g = from; g < to; g += step) {
+                uint256 snap = vm.snapshotState();
+                (bool ok,) = address(basejumpLanding).call{gas: g}(abi.encodeCall(BasejumpLanding.parkPending, ()));
+                (address p,,) = basejumpLanding.parkedTransfers(0);
+                if (p != address(0)) parked++;
+                if (ok && p == address(0) && basejumpLanding.pendingHead() == 1) paid++;
+                vm.revertToState(snap);
+            }
+        }
+        assertEq(parked, 0, "a payable head was parked for some caller gas limit");
+        assertGt(paid, 0, "no gas limit paid the head");
     }
 }
