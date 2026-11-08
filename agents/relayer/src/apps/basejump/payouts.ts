@@ -36,16 +36,20 @@ export interface PayoutKeeperDeps {
   queue: Queue;
   landing: Address;
   /**
-   * Alert once when the same queued payout has been at the head for this long (head-blocking
-   * time), and once when the oldest queued payout, at any position, has waited this long since
-   * this process first saw it queued (backlog age).
+   * Within one process: alert once when the same queued payout has been at the head for this long
+   * (head-blocking time; the reverting alert ignores it), and when the oldest queued payout, at any
+   * position, has waited this long since this process first saw it queued (backlog age; again at
+   * 2x, 4x ... this while that alert stays out).
    */
   alertAfterMs: number;
   /** Most payouts one run sends before leaving the rest to the next poll. Default 10. */
   maxPerRun?: number;
   /** How long to wait for a sent call's receipt before leaving it to the next tick. */
   receiptTimeoutMs: number;
-  /** Alert sink. Once per cause per queued payout, plus once when an alerted one is paid. */
+  /**
+   * Alert sink. Head alerts: once per cause per queued payout per process, plus once when an
+   * alerted one is paid. Backlog alerts and their all-clear: see `backlogCheck`.
+   */
   notify(message: string): Promise<void>;
   /** Clock, injectable for the fork probe. */
   now?: () => number;
@@ -54,8 +58,9 @@ export interface PayoutKeeperDeps {
 /**
  * Why a head gets an alert. `waiting`: it has been unpaid for `alertAfterMs` (pool short, the call
  * would revert, or a sent call is not mined). `reverting`: calls that simulated clean reverted on
- * chain `MAX_REVERTS_PER_HEAD` times. One alert per cause per head, so a head that first waits on
- * the pool and then starts losing the float race is reported twice, never more.
+ * chain `MAX_REVERTS_PER_HEAD` times. One alert per cause per head per process, so a head that first
+ * waits on the pool and then starts losing the float race is reported twice by one process, never
+ * more (a restart forgets both).
  */
 type Cause = "waiting" | "reverting";
 
@@ -100,8 +105,8 @@ export const MAX_REVERT_PAUSE_MS = 6 * 60 * 60_000;
  * A head that does not become payable (the pool stays short, or the call reverts, e.g. a dispatch
  * that always fails) blocks everything behind it until it is paid or the Technical Committee acts
  * (`withdraw` or an upgrade). The keeper
- * never retries such a head into a revert: it sends nothing and alerts once when the same head
- * has waited longer than `alertAfterMs`.
+ * never retries such a head into a revert: it sends nothing and alerts once per process when the
+ * same head has waited longer than `alertAfterMs`.
  *
  * An unobserved send is never repeated blindly. After a send for head `i`, nothing is sent again
  * until either the head moves past `i` or the call's receipt shows it reverted, and after
@@ -125,13 +130,20 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * time (`PendingTransfer` is asset, amount, recipient), so the age is first-seen time: an entry
    * queued before this process started is under-aged by its WHOLE wait before that start (time under
    * an earlier process, the downtime, and any time the queue could not be read), because this map
-   * is in memory. A keeper that restarts more often than `alertAfterMs` therefore sends neither
-   * this alert nor the head-blocking one. Ids below the head are dropped.
+   * is in memory. A keeper that restarts more often than `alertAfterMs` therefore sends no backlog
+   * alert and no time-based head-blocking alert (pool short, simulated revert, send not seen mined).
+   * The reverting alert has no clock: it fires at the `MAX_REVERTS_PER_HEAD` cap, so it still fires
+   * once per process. Ids below the head are dropped.
    */
   const firstSeen = new Map<bigint, number>();
   let nextUnseen = 0n;
-  /** The backlog alert is out; cleared (with an OK message) when the queue empties or the oldest age falls below half the threshold. */
-  let backlogAlerted = false;
+  /**
+   * While the backlog alert is out, the oldest age at which it is posted again: twice the age
+   * threshold after the first post, doubling after each re-post. Undefined when no backlog alert is
+   * out. Cleared (with an OK message) when the queue empties or the oldest age falls below half the
+   * threshold.
+   */
+  let backlogNextMs: number | undefined;
   let running: Promise<void> | undefined;
   let again = false;
 
@@ -178,9 +190,11 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   /**
    * Backlog alert: the oldest queued payout (the head) has waited `alertAfterMs` since first seen,
    * counting time behind earlier entries, which the head-blocking clock does not. Skipped while the
-   * head's own head-blocking alert is out, since that one already says everything waits. Once per
-   * crossing; it clears (OK message) when the queue empties or the oldest age is below half of
-   * `alertAfterMs`, so steady arrivals around the threshold do not flap.
+   * head's own head-blocking alert is out, since that one already says everything waits. Posted
+   * when the oldest age reaches `alertAfterMs`, then again at 2x, 4x, 8x ... `alertAfterMs` while
+   * the alert stays out, so a much worse backlog is reported again. It clears (OK message) when the
+   * queue empties or the oldest age is below half of `alertAfterMs`, so steady arrivals around the
+   * threshold do not flap.
    */
   async function backlogCheck(h: bigint, tail: bigint): Promise<void> {
     if (h >= tail) {
@@ -192,21 +206,24 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       await clearBacklog(`oldest payout #${h} is ${Math.round(age / 60_000)} min old`);
       return;
     }
-    if (age < alertAfterMs) return;
-    if (backlogAlerted || (head && head.id === h && head.alerted.size > 0)) return;
-    backlogAlerted = true;
+    if (age < (backlogNextMs ?? alertAfterMs)) return;
+    if (head && head.id === h && head.alerted.size > 0) return;
+    let next = 2 * (backlogNextMs ?? alertAfterMs);
+    while (next > 0 && next <= age) next *= 2; // one post per jump, however many doublings it skipped
+    backlogNextMs = next;
     const msg =
       `WARN queued Basejump backlog on landing \`${landing}\`: oldest payout #${h} has been queued ` +
       `${Math.round(age / 60_000)} min (counted from when this keeper process first saw it; a ` +
       `restart resets the count, so a payout already queued then is under-aged by all of its wait ` +
-      `before that start), ${tail - h} queued.`;
+      `before that start), ${tail - h} queued. Alerted again at an oldest age of ` +
+      `${Math.round(backlogNextMs / 60_000)} min unless the head's own alert is out then.`;
     log.warn(msg);
     await notify(msg);
   }
 
   async function clearBacklog(why: string): Promise<void> {
-    if (!backlogAlerted) return;
-    backlogAlerted = false;
+    if (backlogNextMs === undefined) return;
+    backlogNextMs = undefined;
     log.info(`queued backlog cleared (${why})`);
     await notify(`OK queued Basejump backlog on landing \`${landing}\` cleared (${why})`);
   }

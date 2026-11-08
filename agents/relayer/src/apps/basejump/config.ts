@@ -56,7 +56,7 @@ function positiveMs(name: string, fallback: number, unitMs: number): number {
 export const QUEUED_PAYOUT_POLL_MS = positiveMs("QUEUED_PAYOUT_POLL_SECONDS", 60, 1_000);
 
 /**
- * Alert once when the same queued payout has stayed at the head this long. A short float clears in
+ * Alert once per process when the same queued payout has stayed at the head this long. A short float clears in
  * about one settlement (~13-25 min), so 30 min means something else is wrong: the pool is not
  * being refilled, or the head can never be paid and is holding every later payout behind it.
  */

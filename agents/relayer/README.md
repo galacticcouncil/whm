@@ -95,18 +95,25 @@ further alert, and doubles each time: 30 min, 1 h, 2 h, 4 h, then 6 h. These ste
 default 30 min `QUEUED_PAYOUT_ALERT_MINUTES`: the first pause equals the alert interval and they
 scale with it, while the 6 h ceiling is fixed (a 1 min interval gives 1, 2, 4 ... min, so many more
 calls before 6 h is reached). A payout that never pays costs at most 3 calls per 6 h once the pause
-reaches 6 h. Each cause (waiting, reverting) is alerted at most once per payout.
+reaches 6 h. Each cause (waiting, reverting) is alerted at most once per payout by one process; a
+restart forgets both.
 
 A separate backlog alert covers time spent behind earlier entries, which the head-blocking clock
 excludes: when the oldest queued payout has been queued for `QUEUED_PAYOUT_ALERT_MINUTES`, one alert
 gives its age and the queue depth, and an all-clear follows when the queue empties or the oldest
-entry is younger than half the interval (so steady arrivals around the threshold do not flap). It is held back while the head's own head-blocking alert is out
-(that one already says everything waits). The landing stores no enqueue time (a pending transfer is
+entry is younger than half the interval (so steady arrivals around the threshold do not flap). While
+that alert is out it is posted again each time the oldest age reaches the next doubling of the
+interval (2x, 4x, 8x ...; 60 min, 2 h, 4 h ... with the default 30 min), so a much worse backlog is
+reported again; an age that jumps past several doublings at once gives one post. It is held back,
+first post and re-posts alike, while the head's own head-blocking alert is out (that one already
+says everything waits). The landing stores no enqueue time (a pending transfer is
 asset, amount and recipient), so the age is counted from when this process first saw the entry, and
 the alert text says so. An entry queued before this process started is under-aged by its whole
 wait before that start (time under an earlier process, the downtime, and any time the queue could
-not be read). A keeper that restarts more often than `QUEUED_PAYOUT_ALERT_MINUTES` sends neither
-this alert nor the head-blocking one. Alert state lives in memory.
+not be read). A keeper that restarts more often than `QUEUED_PAYOUT_ALERT_MINUTES` sends no backlog
+alert and no time-based head-blocking alert (pool short, simulated revert, send not seen mined). The
+reverting alert has no clock (it fires at the 3-revert cap, worded as head-blocking time), so it
+still fires once per process. Alert state lives in memory.
 
 ### `psm-hydration` and `psm-base`
 

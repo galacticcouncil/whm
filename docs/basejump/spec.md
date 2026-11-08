@@ -146,7 +146,8 @@ per-token.
    replay a VAA is needed.
 5. **A shortfall does not revert.** Invariant 4 covers misconfiguration, not an empty pool: the
    landing queues and consumes the VAA. The `basejump` relayer app calls `fulfillPending()` once
-   the pool covers the head, and alerts when the same head waits longer than 30 min.
+   the pool covers the head, and alerts when one keeper process has seen the same head wait longer
+   than 30 min (the default; see the relayer README for the restart bound).
 6. **Corridor isolation.** The receiver authorizes exactly one emitter per source chain.
 
 ## Configuration
