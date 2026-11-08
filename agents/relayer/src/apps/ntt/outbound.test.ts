@@ -36,6 +36,9 @@ const TRANSCEIVER = `0x${"bb".repeat(20)}` as Address;
 const BASE = 30;
 const BLOCK = 1_000n;
 const OUR_TX = `0x${"01".repeat(32)}` as Hash;
+const OUR_TX2 = `0x${"02".repeat(32)}` as Hash;
+/** The node's current block, which every pre-send read must be pinned to. */
+const HEAD = 990n;
 
 const route = {
   token: "EURC",
@@ -73,8 +76,12 @@ function managerLog(eventName: "InboundTransferQueued" | "TransferRedeemed", d: 
   };
 }
 
-function receipt(status: "success" | "reverted", logs: ReturnType<typeof managerLog>[] = []): TransactionReceipt {
-  return { transactionHash: OUR_TX, status, blockNumber: BLOCK, logs } as unknown as TransactionReceipt;
+function receipt(
+  status: "success" | "reverted",
+  logs: ReturnType<typeof managerLog>[] = [],
+  transactionHash: Hash = OUR_TX,
+): TransactionReceipt {
+  return { transactionHash, status, blockNumber: BLOCK, logs } as unknown as TransactionReceipt;
 }
 
 /** Captures what the logger writes, one `level: message` per line. */
@@ -104,14 +111,17 @@ interface Reads {
 
 function harness(opts: {
   reads?: Reads;
-  wait?: () => Promise<TransactionReceipt>;
+  wait?: (hash: Hash) => Promise<TransactionReceipt>;
   receipts?: Record<Hash, TransactionReceipt>;
   pending?: Hash[];
   sent?: SentLedger;
+  /** The queue's `add`; default: master's shape (one submit at 7, resolves with nothing). */
+  add?: (task: { submit: (n: number) => Promise<Hash> }) => Promise<unknown>;
 }) {
   const r = opts.reads ?? {};
   const calls: { fn: string; at: string }[] = [];
   let sends = 0;
+  let waits = 0;
   const read = (fn: string, at: string) => {
     calls.push({ fn, at });
     if (r.unserved?.includes(at)) throw new Error(`header not found (block ${at})`);
@@ -132,10 +142,14 @@ function harness(opts: {
   const publicClient = {
     readContract: async (a: { functionName: string; blockNumber?: bigint }) =>
       read(a.functionName, a.blockNumber === undefined ? "latest" : a.blockNumber.toString()),
+    getBlockNumber: async () => HEAD,
     simulateContract: async () => ({}),
     getBlock: async () => ({}),
     getGasPrice: async () => 1n,
-    waitForTransactionReceipt: opts.wait ?? (async () => receipt("success", [managerLog("TransferRedeemed")])),
+    waitForTransactionReceipt: async ({ hash }: { hash: Hash }) => {
+      waits++;
+      return (opts.wait ?? (async () => receipt("success", [managerLog("TransferRedeemed")])))(hash);
+    },
     getTransactionReceipt: async ({ hash }: { hash: Hash }) => {
       const found = opts.receipts?.[hash];
       if (!found) throw new TransactionReceiptNotFoundError({ hash });
@@ -148,10 +162,12 @@ function harness(opts: {
   };
   const clients = {
     publicClient,
-    wallet: { chain: { id: 8453, name: "base" }, writeContract: async () => ((sends++), OUR_TX) },
+    wallet: { chain: { id: 8453, name: "base" }, writeContract: async () => (++sends === 1 ? OUR_TX : OUR_TX2) },
     account: { address: `0x${"11".repeat(20)}` },
   } as unknown as ChainClients;
-  const queue = { add: async (task: { submit: (n: number) => Promise<Hash> }) => void (await task.submit(7)) } as unknown as Queue;
+  const queue = {
+    add: opts.add ?? (async (task: { submit: (n: number) => Promise<Hash> }) => void (await task.submit(7))),
+  } as unknown as Queue;
   const alerts: string[] = [];
   const sent = opts.sent ?? new Map();
   const { log, lines } = capture();
@@ -162,7 +178,7 @@ function harness(opts: {
       sent,
       alert: async (m) => void alerts.push(m),
     });
-  return { run, calls, alerts, sent, lines, sends: () => sends };
+  return { run, calls, alerts, sent, lines, sends: () => sends, waits: () => waits };
 }
 
 test("queued in the receipt's logs: queued and alerted, though latest still reads an empty queue", async () => {
@@ -220,7 +236,7 @@ test("a receipt timeout leaves the send in the ledger; the retry sends nothing w
   const first = harness({ sent, wait: async () => Promise.reject(new Error("Timed out while waiting")) });
   await assert.rejects(first.run(), /Timed out/);
   assert.equal(first.sends(), 1);
-  assert.equal(sent.get(digest), OUR_TX);
+  assert.deepEqual(sent.get(digest), [OUR_TX]);
 
   const pending = harness({ sent, pending: [OUR_TX] });
   await assert.rejects(pending.run(), /no receipt yet; not sending again/);
@@ -234,10 +250,78 @@ test("a receipt timeout leaves the send in the ledger; the retry sends nothing w
 });
 
 test("a dropped earlier send is forgotten and the retry reads and sends again", async () => {
-  const sent: SentLedger = new Map([[digest, OUR_TX]]);
+  const sent: SentLedger = new Map([[digest, [OUR_TX]]]);
   const h = harness({ sent });
   assert.equal(await h.run(), "delivered");
   assert.equal(h.sends(), 1);
+});
+
+test("pre-send reads are one block's answers: a node behind on the queue entry cannot hide a queued transfer", async () => {
+  const head = HEAD.toString();
+  // Someone else's delivery was queued at HEAD. A read at latest from a lagging node has no entry.
+  const h = harness({
+    add: async () => assert.fail("must not send"),
+    reads: { consumed: { [head]: true }, executed: { [head]: true }, queued: { [head]: true } },
+  });
+  assert.equal(await h.run(), "queued");
+  assert.equal(h.alerts.length, 1);
+  assert.ok(h.calls.length >= 3 && h.calls.every((c) => c.at === head), "every pre-send read pinned to one block number");
+
+  const unserved = harness({ add: async () => assert.fail("must not send"), reads: { unserved: [head] } });
+  await assert.rejects(unserved.run(), /header not found/);
+});
+
+test("a queue that returns the receipt (whm#39): it is the outcome, also when it is the first of two same-nonce sends", async () => {
+  const h = harness({
+    add: async (task) => {
+      await task.submit(7);
+      await task.submit(7); // the queue sent again at the held nonce
+      return receipt("success", [managerLog("TransferRedeemed")], OUR_TX); // ...and the FIRST mined
+    },
+    wait: async () => assert.fail("no second wait after the queue's receipt"),
+  });
+  assert.equal(await h.run(), "delivered");
+  assert.equal(h.waits(), 0);
+  assert.equal(h.sent.size, 0);
+});
+
+test("a queue that returns nothing (master): the wait on the last send accepts a receipt for any of our sends", async () => {
+  const h = harness({
+    add: async (task) => {
+      await task.submit(7);
+      await task.submit(7);
+    },
+    wait: async () => receipt("success", [managerLog("TransferRedeemed")], OUR_TX), // viem followed to the first
+  });
+  assert.equal(await h.run(), "delivered");
+
+  const foreign = `0x${"99".repeat(32)}` as Hash;
+  const replaced = harness({ wait: async () => receipt("success", [managerLog("TransferRedeemed")], foreign) });
+  await assert.rejects(replaced.run(), /was replaced by/);
+});
+
+test("every send of a transfer stays in the ledger; a receipt for any of them settles the retry", async () => {
+  const sent: SentLedger = new Map();
+  const first = harness({
+    sent,
+    add: async (task) => {
+      await task.submit(7);
+      await task.submit(7);
+    },
+    wait: async () => Promise.reject(new Error("Timed out while waiting")),
+  });
+  await assert.rejects(first.run(), /Timed out/);
+  assert.deepEqual(sent.get(digest), [OUR_TX, OUR_TX2]);
+
+  const retry = harness({ sent, receipts: { [OUR_TX]: receipt("success", [managerLog("TransferRedeemed")]) } });
+  assert.equal(await retry.run(), "delivered");
+  assert.equal(retry.sends(), 0);
+});
+
+test("a TransferRedeemed of this digest emitted by another contract is not the manager's verdict", async () => {
+  const other = { ...managerLog("TransferRedeemed"), address: `0x${"ef".repeat(20)}` as Address };
+  const h = harness({ wait: async () => receipt("success", [other]) });
+  await assert.rejects(h.run(), /not proven delivered/);
 });
 
 test("discordAlert logs an HTTP error with its status and body", async () => {

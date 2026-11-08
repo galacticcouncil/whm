@@ -121,12 +121,13 @@ export type Outcome =
   | "queued";
 
 /**
- * This process's sends that have no known outcome yet: manager digest -> transaction hash. Written
- * when a send is broadcast, deleted once its receipt is read. In memory: a restart forgets it, and
- * the queue then starts from the chain's mined nonce, so a send still pending is competed with at
- * its own nonce, where only one of the two can mine.
+ * This process's sends that have no known outcome yet: manager digest -> every transaction hash
+ * sent for it (a queue that holds its nonce may send one transfer more than once, always at one
+ * nonce). Written when a send is broadcast, deleted once a receipt for one of them is read. In
+ * memory: a restart forgets it, and the queue then starts from the chain's mined nonce, so a send
+ * still pending is competed with at its own nonce, where only one of the two can mine.
  */
-export type SentLedger = Map<Hash, Hash>;
+export type SentLedger = Map<Hash, Hash[]>;
 
 export interface DeliverOptions {
   /** Act only on a VAA at least this old, measured from the VAA's own timestamp. */
@@ -177,19 +178,29 @@ export function discordAlert(webhook: string | undefined, log: typeof logger) {
  * queue submit, and `submit` simulates before it spends a nonce.
  *
  * Never a blind retry: a throw hands the job back to the engine, and the retry starts again from
- * the reads, so a transaction that landed after all reads as done. A send whose receipt never came
- * (a receipt wait that timed out) stays in `opts.sent`, and the retry looks at that hash first: its
- * receipt, when there is one, is the outcome; while it is still known to a node the retry throws
- * and sends nothing; only once no node knows it (dropped) does the retry read and send again.
+ * the reads, so a transaction that landed after all reads as done. Sends whose receipt never came
+ * (a receipt wait that timed out) stay in `opts.sent`, and the retry looks at those hashes first: a
+ * receipt for any of them is the outcome; while the node asked still knows one, the retry throws and
+ * sends nothing; when the node asked knows none of them, the retry reads and may send again. That
+ * is one node's view: behind a load balancer a send another node still holds can be sent again. On
+ * a queue that holds its nonce until a receipt (whm#39) that second send is at the same nonce and
+ * only one can mine; on a queue that moves on at broadcast it is at a later nonce, where the
+ * transceiver reverts it on the consumed VAA (gas spent, never a second payment).
+ *
+ * The queue's own receipt, when it returns one (whm#39's queue), is the outcome; a queue that
+ * returns nothing (resolves at broadcast) is followed by a wait on this pass's last send. A receipt
+ * counts as this delivery's when its hash is any of the hashes this pass sent; any other (a
+ * replacement by a transaction we did not send) throws.
  *
  * The verdict after a receipt comes from the receipt: the manager's `InboundTransferQueued(digest)`
  * in its logs is `queued`, its `TransferRedeemed(digest)` is `delivered`, and a successful receipt
- * carrying neither throws (not proven). Every state read made after a receipt is pinned to the
- * receipt's block, so a node behind the one that served the receipt cannot answer with the state
- * before it; a node that cannot serve that block throws, for a retry. A send whose receipt is not
- * this delivery's own (a replacement) throws. A send that reverted is re-read at its block: a
- * consumed VAA means someone else's delivery landed first in the same block (gas spent, nothing
- * lost); anything else throws.
+ * carrying neither throws (not proven; the retry then reads the guards, which call it
+ * `already-delivered` if the VAA is consumed: unreachable with the manager threshold of 1, where
+ * consume and execute are one transaction). Every state read is pinned to one block: the receipt's
+ * after a send, the node's current block number before one, so the replay guards and the queue entry
+ * are one epoch's answers; a node that cannot serve that block throws, for a retry. A send that
+ * reverted is re-read at its block: a consumed VAA means someone else's delivery landed first in the
+ * same block (gas spent, nothing lost); anything else throws.
  *
  * @param route The outbound route the VAA arrived on.
  * @param vaa The parsed VAA.
@@ -231,10 +242,11 @@ export async function deliverOutbound(
   /**
    * Done (and whether queued under the inbound limit), or still open.
    *
-   * @param at Block to read at: a receipt's block after a send, so a lagging node cannot answer
-   *   with the state before it; omitted (latest) before anything was sent.
+   * @param at Block every read is made at: a receipt's block after a send, so a lagging node cannot
+   *   answer with the state before it; before a send, one `getBlockNumber()` taken by the caller,
+   *   so the guards and the queue entry are read at the same block.
    */
-  async function state(at?: bigint): Promise<"open" | "done" | "queued"> {
+  async function state(at: bigint): Promise<"open" | "done" | "queued"> {
     const [consumed, executed] = await Promise.all([
       publicClient.readContract({
         address: route.transceiver,
@@ -260,7 +272,7 @@ export async function deliverOutbound(
    *
    * @param at Block to read at, as for `state`.
    */
-  async function queuedReport(at?: bigint): Promise<string | undefined> {
+  async function queuedReport(at: bigint): Promise<string | undefined> {
     const queued = await publicClient.readContract({
       address: route.manager,
       abi: outboundAbi,
@@ -287,7 +299,7 @@ export async function deliverOutbound(
    * Log and alert a queued transfer. When it is known queued from a receipt's logs, the alert goes
    * out even if the entry's details cannot be read at that block: the line then says so.
    */
-  async function reportQueued(at?: bigint): Promise<"queued"> {
+  async function reportQueued(at: bigint): Promise<"queued"> {
     let line: string | undefined;
     let why = "no queue entry at that block";
     try {
@@ -319,11 +331,17 @@ export async function deliverOutbound(
     return undefined;
   }
 
-  /** What a receipt for our own send `sentHash` says. Clears the send from the ledger. */
-  async function settled(receipt: TransactionReceipt, sentHash: Hash): Promise<Outcome> {
+  /**
+   * What a receipt at our sends' nonce says. Clears the ledger: a receipt there means the nonce is
+   * spent, so none of the other sends can mine.
+   *
+   * @param ours Every hash this pass (or an earlier one) sent for this transfer.
+   */
+  async function settled(receipt: TransactionReceipt, ours: Hash[]): Promise<Outcome> {
     opts.sent.delete(digest);
-    if (receipt.transactionHash.toLowerCase() !== sentHash.toLowerCase()) {
-      throw new Error(`ntt-base ${route.token}: delivery ${sentHash} was replaced by ${receipt.transactionHash}`);
+    const sentHash = receipt.transactionHash;
+    if (!ours.some((h) => h.toLowerCase() === sentHash.toLowerCase())) {
+      throw new Error(`ntt-base ${route.token}: delivery ${ours.join(", ")} was replaced by ${sentHash}`);
     }
     if (receipt.status !== "success") {
       const after = await state(receipt.blockNumber);
@@ -342,47 +360,60 @@ export async function deliverOutbound(
     );
   }
 
-  // An earlier send of this transfer whose receipt never came: settle it before anything else.
-  const earlier = opts.sent.get(digest);
-  if (earlier) {
-    const receipt = await publicClient.getTransactionReceipt({ hash: earlier }).catch((e) => {
-      if (e instanceof TransactionReceiptNotFoundError) return undefined;
-      throw e;
-    });
-    if (receipt) return settled(receipt, earlier);
-    const known = await publicClient.getTransaction({ hash: earlier }).catch((e) => {
-      if (e instanceof TransactionNotFoundError) return undefined;
-      throw e;
-    });
-    if (known) {
-      throw new Error(`ntt-base ${route.token}: earlier delivery ${earlier} has no receipt yet; not sending again`);
+  // Earlier sends of this transfer whose receipt never came: settle them before anything else.
+  const earlier = opts.sent.get(digest) ?? [];
+  if (earlier.length > 0) {
+    for (const h of earlier) {
+      const receipt = await publicClient.getTransactionReceipt({ hash: h }).catch((e) => {
+        if (e instanceof TransactionReceiptNotFoundError) return undefined;
+        throw e;
+      });
+      if (receipt) return settled(receipt, earlier);
     }
-    log.warn(`${route.token} transfer: earlier delivery ${earlier} is unknown to the node (dropped); reading again`);
+    for (const h of earlier) {
+      const known = await publicClient.getTransaction({ hash: h }).catch((e) => {
+        if (e instanceof TransactionNotFoundError) return undefined;
+        throw e;
+      });
+      if (known) {
+        throw new Error(`ntt-base ${route.token}: earlier delivery ${h} has no receipt yet; not sending again`);
+      }
+    }
+    log.warn(`${route.token} transfer: earlier deliveries ${earlier.join(", ")} unknown to the node (dropped); reading again`);
     opts.sent.delete(digest);
   }
 
-  const before = await state();
-  if (before === "queued") return reportQueued();
+  const beforeAt = await publicClient.getBlockNumber();
+  const before = await state(beforeAt);
+  if (before === "queued") return reportQueued(beforeAt);
   if (before === "done") {
     log.info(`${route.token} transfer already delivered on Base`);
     return "already-delivered";
   }
 
-  const sent: { hash?: Hash } = {};
-  await queue.add({
+  const mine: Hash[] = [];
+  // Typed `unknown`: master's queue resolves with nothing, whm#39's with the receipt.
+  const out: unknown = await queue.add({
     label: `${route.token} transfer to Base`,
     logger: log,
     submit: async (n) => {
-      sent.hash = await receiveMessage(clients, outboundAbi, route.transceiver, vaa.bytes, n);
-      opts.sent.set(digest, sent.hash);
-      return sent.hash;
+      const sentHash = await receiveMessage(clients, outboundAbi, route.transceiver, vaa.bytes, n);
+      mine.push(sentHash);
+      opts.sent.set(digest, [...mine]);
+      return sentHash;
     },
   });
 
-  if (!sent.hash) {
+  if (out !== undefined && out !== null && typeof out === "object" && "transactionHash" in out) {
+    // The queue held its nonce until this receipt and checked it is one of ours.
+    return settled(out as TransactionReceipt, mine);
+  }
+
+  if (mine.length === 0) {
     // The queue resolved without sending: the simulate refused as done. Read what is now on Base.
-    const after = await state();
-    if (after === "queued") return reportQueued();
+    const afterAt = await publicClient.getBlockNumber();
+    const after = await state(afterAt);
+    if (after === "queued") return reportQueued(afterAt);
     if (after === "done") {
       log.info(`${route.token} transfer delivered by someone else first; nothing sent`);
       return "completed-elsewhere";
@@ -391,9 +422,11 @@ export async function deliverOutbound(
     throw new Error(`ntt-base ${route.token}: not sent and not delivered`);
   }
 
-  // A throw here (a receipt wait that timed out) leaves the send in `opts.sent` for the retry.
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: sent.hash });
-  return settled(receipt, sent.hash);
+  // A queue that resolved at broadcast (or after a repeat send simulated as done): wait on the last
+  // send; viem follows a same-nonce replacement, and `settled` accepts any of our own hashes. A
+  // throw here (a receipt wait that timed out) leaves every send in `opts.sent` for the retry.
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: mine[mine.length - 1] });
+  return settled(receipt, mine);
 }
 
 /**
