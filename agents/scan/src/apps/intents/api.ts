@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
 
-import { getOrder, getQuote, listOrders, listQuotes } from "./db";
+import { getOrder, listOrders } from "./db";
 import { tokenMetadata } from "./metadata";
 
-/** Register the intents read API. Orders and quotes are separate tables under one domain. */
+/** Register the intents read API. */
 export function routes(app: FastifyInstance): void {
   // Static path, registered before `/:id` so a sequence lookup never captures it.
   app.get("/api/tokens", async () => tokenMetadata());
@@ -13,7 +13,7 @@ export function routes(app: FastifyInstance): void {
   }>("/api/orders", async (req) => {
     const q = req.query;
     return listOrders({
-      state: q.state,
+      state: q.state ? q.state.split(",").filter(Boolean) : undefined,
       address: q.address,
       limit: Math.min(Number(q.limit ?? 100), 1000),
       offset: Number(q.offset ?? 0),
@@ -22,16 +22,6 @@ export function routes(app: FastifyInstance): void {
 
   app.get<{ Params: { id: string } }>("/api/orders/:id", async (req, reply) => {
     const row = await getOrder(req.params.id);
-    if (!row) return reply.code(404).send({ error: "not found" });
-    return row;
-  });
-
-  app.get<{ Querystring: { limit?: string; offset?: string } }>("/api/quotes", async (req) =>
-    listQuotes(Math.min(Number(req.query.limit ?? 100), 1000), Number(req.query.offset ?? 0)),
-  );
-
-  app.get<{ Params: { id: string } }>("/api/quotes/:id", async (req, reply) => {
-    const row = await getQuote(req.params.id);
     if (!row) return reply.code(404).send({ error: "not found" });
     return row;
   });

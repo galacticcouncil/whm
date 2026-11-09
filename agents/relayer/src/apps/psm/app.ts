@@ -2,13 +2,13 @@ import type { Hash } from "viem";
 
 import { EVM_CHAIN_ID, WORMHOLE } from "../../chains";
 import { alerts, engineConfig } from "../../config";
+import type { ChainClients } from "../../clients/hydration";
+import { hydrationReader, receiveMessage } from "../../clients/hydration";
 import { createApp } from "../../engine/app";
 import { onEmitter } from "../../engine/emitter";
 import { createAlerter } from "../../engine/notify";
 import { parkedAlert } from "../../engine/parked";
 import { createQueue, type Queue } from "../../engine/queue";
-import type { ChainClients } from "../../engine/hydration";
-import { hydrationReader, receiveMessage } from "../../engine/hydration";
 import logger from "../../logger";
 import type { ChainId, Next, RelayerApp, RelayerCtx } from "../../types";
 
@@ -57,7 +57,9 @@ export async function assertDestination(
 ): Promise<void> {
   const expected = EVM_CHAIN_ID[destinationChain];
   if (expected === undefined) {
-    throw new Error(`psm: no EVM chain id is known for destination chain ${destinationChain} (see EVM_CHAIN_ID in chains.ts)`);
+    throw new Error(
+      `psm: no EVM chain id is known for destination chain ${destinationChain} (see EVM_CHAIN_ID in chains.ts)`,
+    );
   }
   const walletChain = clients.wallet.chain.id;
   const publicChain = clients.publicClient.chain.id;
@@ -91,7 +93,12 @@ export async function assertDestination(
  * @param clients Destination chain's account and clients, built once for the process.
  * @param queue Shared submission queue for this process's single wallet.
  */
-export function wireRoutes(app: RelayerApp, routes: PsmRoute[], clients: ChainClients, queue: Queue): void {
+export function wireRoutes(
+  app: RelayerApp,
+  routes: PsmRoute[],
+  clients: ChainClients,
+  queue: Queue,
+): void {
   for (const route of routes) {
     async function handle(ctx: RelayerCtx, next: Next): Promise<void> {
       const { vaa, sourceTxHash } = ctx;
@@ -127,7 +134,9 @@ export function wireRoutes(app: RelayerApp, routes: PsmRoute[], clients: ChainCl
         // replacement carried this same delivery (a gas bump), the message reads as processed and
         // the retry resolves; when it carried anything else, the retry delivers.
         if (receipt.transactionHash.toLowerCase() !== sent.hash.toLowerCase()) {
-          throw new Error(`psm ${route.name}: delivery ${sent.hash} was replaced by ${receipt.transactionHash}`);
+          throw new Error(
+            `psm ${route.name}: delivery ${sent.hash} was replaced by ${receipt.transactionHash}`,
+          );
         }
         if (receipt.status !== "success") {
           throw new Error(`psm ${route.name}: delivery ${sent.hash} reverted on chain`);
@@ -190,7 +199,9 @@ export async function makeApp(
   logger.info(`  account: ${account.address} (nonce ${nonce})`);
   logger.info(`  destination chain: ${destinationChain}`);
   for (const route of routes) {
-    logger.info(`  ${route.name}: ${route.sourceEmitter} @ ${route.sourceChain} -> ${route.destinationContract}`);
+    logger.info(
+      `  ${route.name}: ${route.sourceEmitter} @ ${route.sourceChain} -> ${route.destinationContract}`,
+    );
   }
 
   const app = createApp(engineConfig(), {

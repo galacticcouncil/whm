@@ -36,7 +36,7 @@ import { privateKeyToAccount } from "viem/accounts";
 
 import { base, hydration, WORMHOLE } from "../src/chains";
 import { optWhole } from "../src/config";
-import type { ChainClients } from "../src/engine/hydration";
+import type { ChainClients } from "../src/clients/hydration";
 import { every } from "../src/engine/loop";
 import { createAlerter, notifyDiscord, type Alerter } from "../src/engine/notify";
 import { parkedAlert } from "../src/engine/parked";

@@ -23,14 +23,14 @@ export const hydration = defineChain({
   rpcUrls: { default: { http: [] } },
 });
 
-/** Base's EVM chain id — asserted at startup so a misconfigured RPC fails loudly (see `../engine/base`). */
+/** Base's EVM chain id — asserted at startup so a misconfigured RPC fails loudly (see `./clients/base`). */
 export const BASE_EVM_CHAIN_ID = viemBase.id;
 
 /**
  * Base, from viem's built-in definition, with one override: `rpcUrls.default.http` emptied out to
  * `[]`, same as `hydration` above.
  *
- * Without that override, `http(rpcUrl)` in `../engine/base` falls back to viem's built-in
+ * Without that override, `http(rpcUrl)` in `./clients/base` falls back to viem's built-in
  * `https://mainnet.base.org` whenever `rpcUrl` is falsy (`http`'s own source:
  * `const url_ = url || chain?.rpcUrls.default.http[0]`), so `baseClients("")` would silently sign
  * against a real public endpoint instead of failing. `chain?.rpcUrls.default.http[0]` being

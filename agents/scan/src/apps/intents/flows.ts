@@ -4,9 +4,9 @@ import { LogMessagePublishedEvt } from "../../abi";
 import { CHAINS } from "../../chains";
 import { vaaId } from "../../ingest/vaa";
 import type { Flow, LogEvent } from "../../types";
-import { INTENT_EMITTER } from "../../watch";
+import { INTENT } from "../../deployments";
 
-import { OrderPlacedEvt, OrderProcessedEvt, QuotePublishedEvt, RelayFeePaidEvt } from "./abi";
+import { OrderPlacedEvt, OrderProcessedEvt, RelayFeePaidEvt } from "./abi";
 
 /**
  * The forwarding instruction the emitter publishes beside each settlement:
@@ -45,14 +45,6 @@ interface FeePaid {
   transferSequence: bigint;
   relayer: `0x${string}`;
   fee: bigint;
-}
-
-interface QuoteTerms {
-  authPath: `0x${string}`;
-  publisher: `0x${string}`;
-  quoteId: `0x${string}`;
-  recipient: string;
-  messageSequence: bigint;
 }
 
 const sequence = (a: { transferSequence: bigint }) => a.transferSequence.toString();
@@ -163,10 +155,11 @@ export const orders: Flow = {
        * without needing the transaction it shared with `OrderPlaced`.
        */
       role: "wormhole-core",
+      chains: ["hydration"],
       abi: LogMessagePublishedEvt,
       state: "placed",
       key: (a: Published) => {
-        if (a.sender.toLowerCase() !== INTENT_EMITTER.toLowerCase()) return null;
+        if (a.sender.toLowerCase() !== INTENT.emitter.toLowerCase()) return null;
         try {
           return decodeAbiParameters(INSTRUCTION, a.payload)[0].toString();
         } catch {
@@ -176,47 +169,6 @@ export const orders: Flow = {
       patch: (a: Published, ev: LogEvent) => ({
         settlement_sequence: a.sequence.toString(),
         instruction_vaa: vaaId(CHAINS[ev.chain].wormholeId, a.sender, a.sequence),
-      }),
-    },
-  ],
-};
-
-/**
- * Standing authorizations: the terms a NEAR account is derived from, published once per route
- * rather than once per order.
- *
- * Its own table because it is its own key space — an order names a settlement sequence, a quote
- * names the hash of its terms — but the same domain, because an order placed against a derived
- * account only means anything beside the quote it derives from.
- */
-export const quotes: Flow = {
-  name: "quotes",
-  table: "intent_quotes",
-  key: { column: "auth_path", type: "TEXT" },
-  states: { published: 0 },
-  columns: {
-    publisher: "TEXT",
-    quote_id: "TEXT",
-    recipient: "TEXT",
-    message_sequence: "BIGINT",
-    published: "JSONB",
-  },
-  indexes: [
-    `CREATE INDEX IF NOT EXISTS idx_intent_quotes_quote_id ON intent_quotes (quote_id);`,
-    `CREATE INDEX IF NOT EXISTS idx_intent_quotes_recipient ON intent_quotes (recipient);`,
-  ],
-  legs: [
-    {
-      role: "intent-quote",
-      abi: QuotePublishedEvt,
-      state: "published",
-      key: (a: QuoteTerms) => a.authPath.toLowerCase(),
-      patch: (a: QuoteTerms, ev: LogEvent) => ({
-        publisher: a.publisher.toLowerCase(),
-        quote_id: a.quoteId.toLowerCase(),
-        recipient: a.recipient,
-        message_sequence: a.messageSequence.toString(),
-        published: ev.ref,
       }),
     },
   ],

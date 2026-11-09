@@ -16,6 +16,20 @@ Redeems NTT transfers **into Hydration** from Ethereum, Base, Solana, and Sui. W
 deployed origin transceivers ([routes.ts](src/apps/ntt/routes.ts)) and submits each transfer VAA to
 that route's Hydration transceiver.
 
+### `ntt-near`
+
+Completes UTXO withdrawals **from Hydration on NEAR** ([withdraw](../../docs/near-utxo/withdraw/spec.md)).
+Each coin's emitter settles over NTT to the account its destination address derives and logs that
+account beside it; this calls `complete(vaa, account)` on the coin's NEAR manager for it. Nobody holds
+a key for a derived account, so somebody has to.
+
+Same shape as `intent`: only the settlement is subscribed to, and the account is read from the source
+transaction's `WithdrawRequested` (its indexed `sequence` and `nearAccount`), since a NEAR transfer
+names its recipient as `sha256(account_id)`. A settlement without one is a raw transfer and is
+skipped. One route per coin in [routes.ts](src/apps/ntt-near/routes.ts) — ZEC today; the app refuses
+to run on a blank one. Signs on NEAR with `NEAR_ACCOUNT_ID` / `NEAR_PRIVKEY`; each `complete`
+attaches 0.01 NEAR, the unused part refunded.
+
 ### `oracle`
 
 Relays oracle price and rate VAAs **into Hydration**. Each source chain has its own OracleReceiver
@@ -195,6 +209,9 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `RPC_ROBINHOOD`       | Robinhood Chain RPC (`oracle-robinhood` only)     | `https://rpc.mainnet.chain.robinhood.com` |
 | `RPC_BASE`            | Base RPC (`psm-base` only); must serve `eth_getLogs`, which `mainnet.base.org` refuses | Required (`psm-base`) |
 | `PRIVKEY_BASE`        | Base signing key (`psm-base` only)                | Required                              |
+| `RPC_NEAR`            | NEAR RPC (`ntt-near` only)                        | `https://free.rpc.fastnear.com`       |
+| `NEAR_ACCOUNT_ID`     | NEAR signing account (`ntt-near` only)            | Required                              |
+| `NEAR_PRIVKEY`        | Its `ed25519:` secret key (`ntt-near` only)       | Required                              |
 | `PSM_KEEPER`          | `on`/`off`: the psm keepers send                  | `on`                                  |
 | `PSM_FLUSH_FROM_ID`   | First pending-mint id the flush keeper reads      | `0`                                   |
 | `PSM_LOG_CHUNK_BLOCKS` | Blocks per vault `eth_getLogs` query (`psm-base`); lower it for a provider that caps the range | `1000` |
@@ -249,7 +266,7 @@ The type check is `tsc -p agents/relayer --noEmit` from the repo root; it covers
 ## Production
 
 ```bash
-pnpm --filter @whm/relayer build        # → dist/{ntt,oracle,oracle-robinhood,intent,basejump,psm-hydration,psm-base}/app.js
+pnpm --filter @whm/relayer build        # → dist/{ntt,ntt-near,oracle,oracle-robinhood,intent,basejump,psm-hydration,psm-base}/app.js
 pnpm --filter @whm/relayer start:oracle
 pnpm --filter @whm/relayer docker:up
 ```

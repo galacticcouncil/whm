@@ -1,6 +1,6 @@
 /**
  * Verification for the Base chain client and signer. Runs the REAL `baseClients()`
- * from `../src/engine/base`, the REAL `receiveMessage()`/`submit()` from `../src/engine/hydration`
+ * from `../src/clients/base`, the REAL `receiveMessage()`/`submit()` from `../src/clients/hydration`
  * (destination chain travels on `ChainClients`, so it works unchanged against Base), and the REAL
  * `createQueue()` from `../src/engine/queue`, against real viem clients, with only the HTTP
  * transport mocked (`globalThis.fetch` intercepted, not the viem client objects) — the same
@@ -21,12 +21,12 @@
  *      each priced off the block it was actually built against (checked against viem's own default
  *      fee formula — `chainFees`'s generic branch calls `client.estimateFeesPerGas()`, computed
  *      here from viem's source rather than guessed), and signed by `KEY_A`'s recovered address
- *      specifically — not merely "some account". `submit()` (`../src/engine/hydration.ts`) calls
+ *      specifically — not merely "some account". `submit()` (`../src/clients/hydration.ts`) calls
  *      `chainFees()` fresh on every call and sets fee fields explicitly on every write, so there is
  *      no per-client memoization for a persistent Base client to go stale against — unlike the
  *      pre-#21 shape, where a chain-level `fees.estimateFeesPerGas` hook plus viem's own
  *      per-client `eip1559NetworkCache` made a persistent client's *second* submission a real risk
- *      (see `../src/engine/hydration.ts`'s `ChainClients` doc comment, and
+ *      (see `../src/clients/hydration.ts`'s `ChainClients` doc comment, and
  *      `verify-hydration-fees.ts` groups C/D for that mechanism, reproduced there against
  *      Hydration). This check only establishes that Base's real factory produces correct,
  *      independently-priced transactions across two calls; it does not exercise a cache because
@@ -55,7 +55,7 @@
  *
  * Manual source mutants (not reproduced in-script, since each mutates a checked-in file rather
  * than an in-memory copy; each is restored after its check):
- *   - Remove the chain-id assertion from `baseClients` (`../src/engine/base.ts`). Check 1 alone
+ *   - Remove the chain-id assertion from `baseClients` (`../src/clients/base.ts`). Check 1 alone
  *     goes red: the mismatched-RPC scenario resolves instead of throwing (both its sub-assertions
  *     fail), while every other check is unaffected.
  *   - `baseClients` returns a `wallet` built against `hydration` (imported from `../chains`) instead
@@ -90,10 +90,10 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { baseClients } from "../src/engine/base";
+import { baseClients } from "../src/clients/base";
 import { BASE_EVM_CHAIN_ID } from "../src/chains";
 import { privateKey, privateKeyBase } from "../src/config";
-import { receiveMessage } from "../src/engine/hydration";
+import { receiveMessage } from "../src/clients/hydration";
 import { createQueue } from "../src/engine/queue";
 import logger from "../src/logger";
 

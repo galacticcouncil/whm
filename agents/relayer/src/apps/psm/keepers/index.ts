@@ -1,7 +1,7 @@
 import type { Address, Chain, PublicClient, Transport } from "viem";
 
 import { WORMHOLE } from "../../../chains";
-import type { ChainClients } from "../../../engine/hydration";
+import type { ChainClients } from "../../../clients/hydration";
 import { every } from "../../../engine/loop";
 import type { Alerter } from "../../../engine/notify";
 import type { Queue } from "../../../engine/queue";

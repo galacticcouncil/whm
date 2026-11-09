@@ -54,8 +54,8 @@ import { privateKeyToAccount } from "viem/accounts";
 
 import { receiverAbi } from "../src/apps/psm/abi";
 import { RETRIES, RETRY_BASE_MS, RETRY_MAX_MS } from "../src/apps/psm/config";
-import { baseClients } from "../src/engine/base";
-import { hydrationClients, receiveMessage, type ChainClients } from "../src/engine/hydration";
+import { baseClients } from "../src/clients/base";
+import { hydrationClients, receiveMessage, type ChainClients } from "../src/clients/hydration";
 import { createQueue } from "../src/engine/queue";
 import { isDead, isDone } from "../src/engine/revert";
 import logger from "../src/logger";

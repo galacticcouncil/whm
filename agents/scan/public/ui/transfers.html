@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Transfers · Hydration scan</title>
+    <script>
+      try {
+        var t = localStorage.getItem("explorer-theme");
+        if (t !== "light" && t !== "dark") {
+          t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <link rel="preload" href="/fonts/GazpachoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/GeistMonoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/shared/style.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <label class="search xl">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input id="q" type="text" placeholder="Search by address or tx hash" autocomplete="off" spellcheck="false" />
+        <span class="hint">↵</span>
+      </label>
+
+      <div class="list-head">
+        <div class="list-title">
+          <span class="conn"><span class="dot"></span></span>Live transfers
+        </div>
+        <div class="fbar" id="fbar"><button type="button" class="freset" id="reset" hidden>Reset</button></div>
+      </div>
+
+      <div class="panel">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Type</th>
+              <th>From</th>
+              <th>To</th>
+              <th>Amount</th>
+              <th class="r">Status</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="pager" id="pager"></div>
+      </div>
+    </main>
+
+    <script type="module">
+      import {
+        NAV,
+        addrLink,
+        agoLong,
+        at,
+        chainBadge,
+        chainLabel,
+        esc,
+        filterDrop,
+        filterToggle,
+        json,
+        live,
+        pager,
+        pill,
+        statusBadge,
+        statusLabel,
+        tokenAmount,
+        tokenIcon,
+        topbar,
+      } from "/shared/app.js";
+
+      topbar("scan", NAV, { conn: false });
+
+      /** This section's app, through the UI's proxy. */
+      const API = "/api/transfers";
+
+      const LIMIT = 25;
+      const el = (id) => document.getElementById(id);
+
+      /** Each kind of transfer, as the type column and the Actions filter name it. */
+      const TYPE = {
+        transfer: ["Transfer", "var(--neutral)"],
+        deposit: ["Deposit", "var(--green)"],
+        withdraw: ["Withdraw", "var(--amber)"],
+        intent: ["Intent", "var(--lavender)"],
+        basejump: ["Basejump", "var(--sky)"],
+      };
+
+      // ─── State, mirrored in the URL so a filtered view can be shared ───
+
+      const KEYS = ["from", "to", "asset", "type", "status"];
+      const url = new URLSearchParams(location.search);
+      const state = Object.fromEntries(KEYS.map((k) => [k, new Set((url.get(k) ?? "").split(",").filter(Boolean))]));
+      let page = Math.max(1, Number(url.get("page") ?? 1));
+      el("q").value = url.get("q") ?? "";
+
+      let meta = { chains: [], assets: [], types: [], statuses: [] };
+      const toggle = filterToggle(el("fbar"));
+      const assetMeta = (symbol) => meta.assets.find((a) => a.symbol === symbol) ?? { symbol, assetId: null };
+
+      function sync() {
+        const p = new URLSearchParams();
+        const q = el("q").value.trim();
+        if (q) p.set("q", q);
+        for (const k of KEYS) if (state[k].size) p.set(k, [...state[k]].join(","));
+        if (page > 1) p.set("page", page);
+        history.replaceState(null, "", p.size ? `?${p}` : location.pathname);
+        el("reset").hidden = !q && KEYS.every((k) => state[k].size === 0);
+        // Chains counts once, whichever side is set.
+        const set = [state.from.size || state.to.size, state.asset.size, state.type.size, state.status.size];
+        toggle.count(set.filter(Boolean).length);
+        return p;
+      }
+
+      // ─── Rows ───
+
+      /** When it was sent: its age; the exact moment on hover, and on the detail page. */
+      const when = (ms) =>
+        ms
+          ? `<span class="mono muted" title="${esc(at(ms))}">${agoLong(ms)}</span>`
+          : '<span class="dim">—</span>';
+
+      /** One end: the chain's badge and the account, on one row. */
+      const end = (chain, address) =>
+        `<span class="end-row">${chainBadge(chain)}${addrLink(address, chain)}</span>`;
+
+      /** The amount moved. Fees are the detail page's business. */
+      const amounts = (r) => tokenAmount(r.amount, { ...assetMeta(r.symbol), decimals: r.decimals ?? 18 });
+
+      const typeCell = (t) => pill(...(TYPE[t] ?? [t, "var(--neutral)"]));
+
+      let shown = new Set();
+
+      function render(items, fresh) {
+        if (!items.length) {
+          el("rows").innerHTML = '<tr><td class="table-error" colspan="6">No transfers match.</td></tr>';
+          shown = new Set();
+          return;
+        }
+        el("rows").innerHTML = items
+          .map((r) => {
+            const href = `/transfer/${encodeURIComponent(r.id)}`;
+            const isNew = fresh && !shown.has(r.id);
+            return `<tr class="clickable${isNew ? " row-new" : ""}" data-href="${href}">
+              <td data-label="Time">${when(r.time)}</td>
+              <td data-label="Type">${typeCell(r.type)}</td>
+              <td data-label="From">${end(r.from_chain, r.from_address)}</td>
+              <td data-label="To">${end(r.to_chain, r.to_address)}</td>
+              <td data-label="Amount">${amounts(r)}</td>
+              <td class="r" data-label="Status">${statusBadge(r.status, { compact: true, title: `${statusLabel(r.status)} · ${r.stage}` })}</td>
+            </tr>`;
+          })
+          .join("");
+        shown = new Set(items.map((r) => r.id));
+      }
+
+      /** Skeleton rows: the real grid, shimmering, until the first answer. */
+      function skeleton() {
+        const widths = ["58%", "42%", "70%", "36%", "52%", "48%", "64%", "40%"];
+        el("rows").innerHTML = Array.from(
+          { length: 8 },
+          (_, i) =>
+            `<tr class="sk-tr">${Array.from({ length: 6 }, (_, j) => `<td style="--w:${widths[(i + j) % widths.length]}"></td>`).join("")}</tr>`,
+        ).join("");
+      }
+
+      // Whole-row navigation, except where a link or a button was clicked.
+      el("rows").addEventListener("click", (e) => {
+        if (e.target.closest("a, button")) return;
+        const href = e.target.closest("tr")?.dataset.href;
+        if (href) location.href = href;
+      });
+
+      async function load(fresh = false) {
+        const p = sync();
+        p.delete("page");
+        p.set("limit", LIMIT);
+        p.set("offset", (page - 1) * LIMIT);
+        el("rows").classList.add("rows-pending");
+        const data = await json(`${API}/transfers?${p}`);
+        el("rows").classList.remove("rows-pending");
+        if (!data) {
+          el("rows").innerHTML =
+            '<tr><td class="table-error" colspan="6"><strong>Could not load transfers.</strong></td></tr>';
+          return;
+        }
+        render(data.items, fresh);
+        const pages = Math.max(1, Math.ceil(data.total / LIMIT));
+        el("pager").innerHTML = pager(page, pages);
+      }
+
+      el("pager").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-page]");
+        if (!b || b.disabled) return;
+        page = Number(b.dataset.page);
+        load();
+      });
+
+      const refilter = () => {
+        page = 1;
+        load();
+      };
+
+      let typing;
+      el("q").addEventListener("input", () => {
+        clearTimeout(typing);
+        typing = setTimeout(refilter, 300);
+      });
+      el("q").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          clearTimeout(typing);
+          refilter();
+        }
+      });
+
+      // ─── Filters ───
+
+      const drops = [];
+      el("reset").addEventListener("click", () => {
+        el("q").value = "";
+        for (const k of KEYS) state[k].clear();
+        for (const d of drops) d.paint();
+        refilter();
+      });
+
+      async function mountFilters() {
+        meta = (await json(`${API}/filters`)) ?? meta;
+        const fbar = el("fbar");
+        const reset = el("reset");
+        const mount = (spec) => {
+          const host = document.createElement("div");
+          fbar.insertBefore(host, reset);
+          drops.push(filterDrop(host, spec, state, refilter));
+        };
+        const chainOpts = meta.chains.map((c) => ({ value: c, label: chainLabel(c), html: chainBadge(c) }));
+        mount({
+          label: "Chains",
+          title: "Select chains",
+          search: true,
+          cols: [
+            { key: "from", title: "Origin", options: chainOpts },
+            { key: "to", title: "Destination", options: chainOpts },
+          ],
+        });
+        mount({
+          label: "Assets",
+          title: "Filter by assets",
+          search: true,
+          cols: [
+            {
+              key: "asset",
+              options: meta.assets.map((a) => ({ value: a.symbol, label: a.symbol, html: `${tokenIcon(a)}<span>${esc(a.symbol)}</span>` })),
+            },
+          ],
+        });
+        mount({
+          label: "Actions",
+          cols: [{ key: "type", options: meta.types.map((t) => ({ value: t, label: (TYPE[t] ?? [t])[0], html: typeCell(t) })) }],
+        });
+        mount({
+          label: "Status",
+          cols: [
+            {
+              key: "status",
+              options: meta.statuses.map((s) => ({
+                value: s,
+                label: statusLabel(s),
+                html: `${statusBadge(s, { compact: true })}<span>${esc(statusLabel(s))}</span>`,
+              })),
+            },
+          ],
+        });
+      }
+
+      // ─── Live ───
+
+      // Any rail's change reloads the first page, and what arrived flashes — rows come from several
+      // tables and a redraw is cheaper than working out which one moved. A burst coalesces.
+      let pending;
+      skeleton();
+      mountFilters().then(() =>
+        live(
+          "ntt,utxo,utxo-signs,basejump",
+          () => {
+            if (page !== 1) return;
+            clearTimeout(pending);
+            pending = setTimeout(() => load(true), 300);
+          },
+          () => load(),
+          API,
+        ),
+      );
+    </script>
+  </body>
+</html>

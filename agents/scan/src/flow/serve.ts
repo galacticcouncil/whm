@@ -1,26 +1,14 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { extname, resolve } from "node:path";
-
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { CHAINS, chainId } from "../chains";
-import { chainCursors, pool, readerState } from "../db";
+import { chainCursors, listenRows, pool, readerState } from "../db";
 import { WATCH } from "../watch";
 import log from "../logger";
 import { port } from "../config";
 import type { Flow } from "../types";
 import { validLegs } from "./schema";
-import { subscribe } from "./subscribers";
-
-const MIME: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-};
+import { broadcast, subscribe } from "./subscribers";
 
 /** The part of a watcher /api/status needs; only ingest has any. */
 export interface WatcherLike {
@@ -29,12 +17,17 @@ export interface WatcherLike {
 }
 
 export interface ServeOptions {
-  /** Domain name — the reader's identity, and the directory its pages come from. */
+  /** Domain name — the reader's identity. */
   name: string;
   flows: Flow[];
   /** The domain's own endpoints, conventionally under `/api/`. */
   routes?: (app: FastifyInstance) => void;
   watchers?: WatcherLike[];
+  /**
+   * Flows another process owns whose changes this domain's subscribers also follow — relayed onto its own
+   * stream as `{ id, state }`, for the page to refetch.
+   */
+  follow?: string[];
 }
 
 /**
@@ -52,7 +45,8 @@ export async function stateCounts(f: Flow): Promise<Record<string, number>> {
 }
 
 /**
- * Boot a domain's HTTP surface: liveness, status, the live stream, its pages, and its own routes.
+ * Boot a domain's HTTP surface: liveness, status, the live stream, and its own routes. Pages are the
+ * UI's, not a domain's.
  *
  * @param opts What the domain owns.
  * @returns The fastify instance, already listening.
@@ -99,7 +93,20 @@ export async function serve(opts: ServeOptions): Promise<FastifyInstance> {
     };
   });
 
-  // Server-sent row changes. `?flow=` narrows a page to the one table it renders.
+  if (opts.follow?.length) {
+    const follow = new Set(opts.follow);
+    listenRows((n) => {
+      if (!follow.has(n.flow)) return;
+      broadcast({
+        flow: n.flow,
+        kind: n.kind,
+        record: { id: n.id, state: n.state },
+        previousState: n.previousState,
+      });
+    });
+  }
+
+  // Server-sent row changes. `?flow=` narrows a page to the tables it renders, comma-separated.
   app.get<{ Querystring: { flow?: string } }>("/api/events", (req, reply) => {
     reply.hijack();
     const raw = reply.raw;
@@ -113,9 +120,9 @@ export async function serve(opts: ServeOptions): Promise<FastifyInstance> {
     raw.write("retry: 3000\n\n");
     raw.write(": connected\n\n");
 
-    const want = req.query.flow;
+    const want = req.query.flow ? new Set(req.query.flow.split(",")) : null;
     const unsubscribe = subscribe((u) => {
-      if (want && u.flow !== want) return;
+      if (want && !want.has(u.flow)) return;
       raw.write(`event: ${u.kind}\ndata: ${JSON.stringify(u)}\n\n`);
     });
     const heartbeat = setInterval(() => raw.write(": heartbeat\n\n"), 15_000);
@@ -130,73 +137,9 @@ export async function serve(opts: ServeOptions): Promise<FastifyInstance> {
   });
 
   opts.routes?.(app);
-  pages(app, opts.name);
 
   await app.register(cors, { origin: true });
   await app.listen({ port, host: "0.0.0.0" });
   log.info(`listening on :${port}`);
   return app;
-}
-
-/**
- * Serve the domain's static pages, read once at boot.
- *
- * Pages live in `public/<domain>/` so each container ships only its own, and the styling they share
- * lives once in `public/shared/`. `index.html` is the root; every other page answers both a list
- * path and a detail path, and decides between them client-side.
- *
- * @param app Fastify instance.
- * @param name Domain name — cwd-relative, beside the bundle.
- */
-function pages(app: FastifyInstance, name: string): void {
-  serveDir(app, resolve("public", "shared"), "/shared");
-
-  const dir = resolve("public", name);
-  if (!existsSync(dir)) {
-    log.warn(`[ui] no public/${name} — this domain serves no pages`);
-    return;
-  }
-
-  for (const file of readdirSync(dir)) {
-    const send = asset(dir, file);
-    if (!send) continue;
-    if (!file.endsWith(".html")) {
-      app.get(`/${file}`, send);
-      continue;
-    }
-    const page = file.slice(0, -5);
-    if (page === "index") {
-      app.get("/", send);
-      log.info("[ui] /");
-      continue;
-    }
-    app.get(`/${page}`, send);
-    app.get(`/${page}/:id`, send);
-    log.info(`[ui] /${page}, /${page}/:id`);
-  }
-}
-
-/** Serve every recognised file in a directory under a prefix, verbatim. */
-function serveDir(app: FastifyInstance, dir: string, prefix: string): void {
-  if (!existsSync(dir)) return;
-  for (const file of readdirSync(dir)) {
-    const send = asset(dir, file);
-    if (send) app.get(`${prefix}/${file}`, send);
-  }
-}
-
-/**
- * A handler returning one file, read at boot.
- *
- * @returns null for a type we do not serve.
- */
-function asset(dir: string, file: string) {
-  const type = MIME[extname(file)];
-  if (!type) return null;
-  const path = resolve(dir, file);
-  const body = type.startsWith("image/") ? readFileSync(path) : readFileSync(path, "utf-8");
-  return async (_req: unknown, reply: { type(t: string): void }) => {
-    reply.type(type);
-    return body;
-  };
 }

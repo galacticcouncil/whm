@@ -1,0 +1,134 @@
+{
+  "checkedAt": "2026-10-21T11:13:39.594Z",
+  "note": "Sourcify exact source matches. External explorer jobs require separate confirmation; an external verificationId does not establish success.",
+  "records": [
+    {
+      "jobUrl": "https://sourcify.dev/server/v2/verify/8c89651b-6805-4742-b77b-3c27e98a440e",
+      "verificationId": "8c89651b-6805-4742-b77b-3c27e98a440e",
+      "jobFinishTime": "2026-10-21T11:10:25Z",
+      "match": "exact_match",
+      "creationMatch": "exact_match",
+      "runtimeMatch": "exact_match",
+      "chainId": "1",
+      "address": "0xEf47b42D2872C440232BD3E9224B224793f964F2",
+      "verifiedAt": "2026-10-21T11:10:25Z",
+      "matchId": "56657132",
+      "compilerVersion": "0.8.35+commit.47b9dedd",
+      "evmVersion": "osaka",
+      "externalVerifications": {
+        "etherscan": {
+          "error": "Daily limit of 500 source code submissions reached"
+        },
+        "routescan": {
+          "verificationId": "4eb76497-0627-56cd-9b62-07c599c6daea",
+          "statusUrl": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?module=contract&action=checkverifystatus&chainid=1&guid=4eb76497-0627-56cd-9b62-07c599c6daea",
+          "explorerUrl": "https://routescan.io/address/0xEf47b42D2872C440232BD3E9224B224793f964F2?chainid=1",
+          "contractApiUrl": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?module=contract&action=getabi&chainid=1&address=0xEf47b42D2872C440232BD3E9224B224793f964F2"
+        },
+        "blockscout": {
+          "error": "Explorer verification request failed (429): {\"message\":\"Too many requests. Increase limits now at https://dev.blockscout.com\",\"result\":null,\"status\":\"0\"}"
+        }
+      }
+    },
+    {
+      "jobUrl": "https://sourcify.dev/server/v2/verify/0134411d-06a2-4d57-adcc-3f03f2ff1e5d",
+      "verificationId": "0134411d-06a2-4d57-adcc-3f03f2ff1e5d",
+      "jobFinishTime": "2026-10-21T11:10:33Z",
+      "match": "exact_match",
+      "creationMatch": "exact_match",
+      "runtimeMatch": "exact_match",
+      "chainId": "1",
+      "address": "0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83",
+      "verifiedAt": "2026-10-15T16:11:57Z",
+      "matchId": "56168919",
+      "compilerVersion": "0.8.35+commit.47b9dedd",
+      "evmVersion": "osaka",
+      "externalVerifications": {
+        "etherscan": {
+          "error": "Daily limit of 500 source code submissions reached"
+        },
+        "routescan": {
+          "verificationId": "1#0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83",
+          "statusUrl": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?module=contract&action=checkverifystatus&chainid=1&guid=1%230xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83",
+          "explorerUrl": "https://routescan.io/address/0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83?chainid=1",
+          "contractApiUrl": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?module=contract&action=getabi&chainid=1&address=0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83"
+        },
+        "blockscout": {
+          "error": "Explorer verification request failed (429): {\"message\":\"Too many requests. Increase limits now at https://dev.blockscout.com\",\"result\":null,\"status\":\"0\"}"
+        }
+      }
+    },
+    {
+      "jobUrl": "https://sourcify.dev/server/v2/verify/9ed5a61c-c4d5-43ce-8835-cba310233b1a",
+      "verificationId": "9ed5a61c-c4d5-43ce-8835-cba310233b1a",
+      "jobFinishTime": "2026-10-21T11:11:03Z",
+      "match": "exact_match",
+      "creationMatch": "exact_match",
+      "runtimeMatch": "exact_match",
+      "chainId": "8453",
+      "address": "0x8830B6eB2e015184B86Cfa3a0A759CD55FF47A4B",
+      "verifiedAt": "2026-10-21T09:44:31Z",
+      "matchId": "56654504",
+      "compilerVersion": "0.8.34+commit.80d5c536",
+      "evmVersion": "prague",
+      "externalVerifications": {
+        "etherscan": {
+          "error": "Daily limit of 500 source code submissions reached"
+        },
+        "blockscout": {
+          "error": "Explorer verification request failed (403)"
+        }
+      }
+    },
+    {
+      "jobUrl": "https://sourcify.dev/server/v2/verify/f6194276-466d-44e6-a6e7-2252af4b68c0",
+      "verificationId": "f6194276-466d-44e6-a6e7-2252af4b68c0",
+      "jobFinishTime": "2026-10-21T11:11:18Z",
+      "match": "exact_match",
+      "creationMatch": "exact_match",
+      "runtimeMatch": "exact_match",
+      "chainId": "4663",
+      "address": "0xEf47b42D2872C440232BD3E9224B224793f964F2",
+      "verifiedAt": "2026-10-21T11:11:18Z",
+      "matchId": "56657187",
+      "compilerVersion": "0.8.35+commit.47b9dedd",
+      "evmVersion": "osaka",
+      "externalVerifications": {
+        "etherscan": {
+          "verificationId": "sqkaslzh4cdfha1fnk1eu3m5sm3myruvzzdwedfsk75laec5le",
+          "statusUrl": "https://api.etherscan.io/v2/api?chainid=4663&module=contract&action=checkverifystatus&guid=sqkaslzh4cdfha1fnk1eu3m5sm3myruvzzdwedfsk75laec5le",
+          "explorerUrl": "https://robin.etherscan.io//address/0xEf47b42D2872C440232BD3E9224B224793f964F2",
+          "contractApiUrl": "https://api.etherscan.io/v2/api?chainid=4663&module=contract&action=getabi&address=0xEf47b42D2872C440232BD3E9224B224793f964F2"
+        },
+        "blockscout": {
+          "error": "Explorer verification request failed (403)"
+        }
+      }
+    },
+    {
+      "jobUrl": "https://sourcify.dev/server/v2/verify/9044418f-1ed1-4cf4-a964-d15106894d1c",
+      "verificationId": "9044418f-1ed1-4cf4-a964-d15106894d1c",
+      "jobFinishTime": "2026-10-21T11:11:31Z",
+      "match": "exact_match",
+      "creationMatch": "exact_match",
+      "runtimeMatch": "exact_match",
+      "chainId": "4663",
+      "address": "0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83",
+      "verifiedAt": "2026-10-21T11:11:31Z",
+      "matchId": "56657194",
+      "compilerVersion": "0.8.35+commit.47b9dedd",
+      "evmVersion": "osaka",
+      "externalVerifications": {
+        "etherscan": {
+          "verificationId": "e82m3pdgi5jeacii7hyxrav9tmy1unjxbicmtlxnsyua9gxs4s",
+          "statusUrl": "https://api.etherscan.io/v2/api?chainid=4663&module=contract&action=checkverifystatus&guid=e82m3pdgi5jeacii7hyxrav9tmy1unjxbicmtlxnsyua9gxs4s",
+          "explorerUrl": "https://robin.etherscan.io//address/0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83",
+          "contractApiUrl": "https://api.etherscan.io/v2/api?chainid=4663&module=contract&action=getabi&address=0xCEaab5A5AF21141a501FF5b561b6Cc3d4c55eF83"
+        },
+        "blockscout": {
+          "error": "Explorer verification request failed (403)"
+        }
+      }
+    }
+  ]
+}

@@ -5,12 +5,12 @@ import log from "../../logger";
 import { WATCH } from "../../watch";
 
 import { routes } from "./api";
-import { orders, quotes } from "./flows";
+import { orders } from "./flows";
 import { tokenMetadata } from "./metadata";
 import { SettlementPoller } from "./settlement";
 
 const NAME = "intents";
-const FLOWS = [orders, quotes];
+const FLOWS = [orders];
 
 /**
  * NEAR-Intents: orders placed on Hydration and forwarded on Ethereum, beside the standing
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   await drain.initSchema();
 
   subscribe((u) => {
-    const id = (u.record.transfer_sequence ?? u.record.auth_path) as string;
+    const id = u.record.transfer_sequence as string;
     if (u.kind === "created") log.info(`+ [${u.flow}] ${id} [${u.record.state}]`);
     else if (u.previousState !== u.record.state) {
       log.info(`~ [${u.flow}] ${id} [${u.previousState} -> ${u.record.state}]`);

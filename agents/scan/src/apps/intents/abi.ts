@@ -14,8 +14,3 @@ export const OrderProcessedEvt = parseAbiItem(
 export const RelayFeePaidEvt = parseAbiItem(
   "event RelayFeePaid(uint64 indexed transferSequence, address indexed relayer, uint256 fee)",
 );
-
-/** Hydration — IntentQuoteEmitter. `authPath` is the MPC derivation path the terms hash to. */
-export const QuotePublishedEvt = parseAbiItem(
-  "event QuotePublished(bytes32 indexed authPath, address indexed publisher, bytes32 indexed quoteId, string recipient, uint64 messageSequence)",
-);

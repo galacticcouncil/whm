@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "start:ntt": "node dist/ntt/app.js",
+    "start:ntt-near": "node dist/ntt-near/app.js",
     "start:oracle": "node dist/oracle/app.js",
     "start:oracle-robinhood": "node dist/oracle-robinhood/app.js",
     "start:intent": "node dist/intent/app.js",
@@ -28,6 +29,7 @@
   "dependencies": {
     "@certusone/wormhole-sdk": "0.10.18",
     "@wormhole-foundation/relayer-engine": "^0.3.2",
+    "near-api-js": "^7.3.1",
     "viem": "^2.38.3",
     "winston": "^3.8.2"
   },

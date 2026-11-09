@@ -2,8 +2,8 @@ import { decodeAbiParameters, parseAbi, parseAbiParameters, toHex } from "viem";
 
 import { boot } from "../../boot";
 import { alerts, engineConfig, privateKey } from "../../config";
+import { hydrationClients, receiveMessage } from "../../clients/hydration";
 import { createApp } from "../../engine/app";
-import { hydrationClients, receiveMessage } from "../../engine/hydration";
 import { createQueue } from "../../engine/queue";
 import logger from "../../logger";
 import type { Next, RelayerCtx } from "../../types";

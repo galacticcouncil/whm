@@ -1,12 +1,11 @@
 import { banner } from "../banner";
-import { CHAINS } from "../chains";
+import { CHAINS, watcher } from "../chains";
 import { drainIntervalMs } from "../config";
 import { initCore, notifyEvents } from "../db";
 import { Drain, serve } from "../flow";
 import log from "../logger";
 import type { Watch } from "../types";
 import { enabled, WATCH } from "../watch";
-import { EvmWatcher, SubstrateWatcher } from "../watchers";
 
 import { messages } from "./flows/messages";
 import { ntt } from "./flows/ntt";
@@ -31,13 +30,9 @@ async function main(): Promise<void> {
     throw new Error("no chain enabled — set an RPC_<CHAIN>_WSS for something in the watch list");
   }
 
-  const watchers = [...byChain].map(([name, watches]) => {
-    const cfg = CHAINS[name];
-    const nudge = (chain: string) => void notifyEvents(chain);
-    return cfg.kind === "evm"
-      ? new EvmWatcher(cfg, watches, nudge)
-      : new SubstrateWatcher(cfg, watches, nudge);
-  });
+  const watchers = [...byChain].map(([name, watches]) =>
+    watcher(CHAINS[name], watches, (chain) => void notifyEvents(chain)),
+  );
 
   for (const [name, watches] of byChain) {
     log.info(`  chain: ${name} — ${watches.map((w) => `${w.role}@${w.from}`).join(", ")}`);

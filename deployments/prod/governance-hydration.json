@@ -1,0 +1,41 @@
+{
+  "migration": "governance-hydration",
+  "environment": "prod",
+  "startedAt": "2026-10-15T13:28:22.643Z",
+  "completedAt": "2026-10-15T13:28:34.919Z",
+  "steps": [
+    {
+      "name": "001-deploy-dispatcher-implementation",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xfddb5acb121a6abab4919cfc1672250697163bed",
+        "deployTxHash": "0x6c2cf20f5a496ec2d1a3879ec71bcaedd38f1de6f9099678beb90edfe3dec0df",
+        "runtimeCodeHash": "0x56947a9ff7894620c0b2573b1caace80a4f77154f0e019c122083eb6eb271337",
+        "proxiableUUID": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+      },
+      "error": null,
+      "startedAt": "2026-10-15T13:28:22.644Z",
+      "completedAt": "2026-10-15T13:28:25.922Z"
+    },
+    {
+      "name": "002-deploy-dispatcher-proxy",
+      "status": "completed",
+      "output": {
+        "proxyAddress": "0x00302167f9597b9d90bd342311c5c4be39bf0fa0",
+        "deployTxHash": "0x6eb921b32a7c4a58f047baf723ceb791055af67ca3b31d2d46e6e81bacd98e38",
+        "runtimeCodeHash": "0xce38e3061ecb0c2a71d7e8d1587624a16fd04dfd2350bd77fa078a994e30f141",
+        "implAddress": "0xFddB5ACb121A6abAb4919CFC1672250697163BED",
+        "wormholeCore": "0x3792a6d63c31941B2805181771795D9176fA82A1",
+        "wormholeId": "73",
+        "governanceCaller": "0xaa7e0000000000000000000000000000000aA7e2",
+        "nextGovernanceNonce": "1",
+        "governanceCallerBalance": "0",
+        "governanceCallerNonce": "0",
+        "wormholeMessageFee": "0"
+      },
+      "error": null,
+      "startedAt": "2026-10-15T13:28:25.922Z",
+      "completedAt": "2026-10-15T13:28:34.918Z"
+    }
+  ]
+}

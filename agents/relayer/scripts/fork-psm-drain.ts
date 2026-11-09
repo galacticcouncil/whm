@@ -28,8 +28,8 @@ import {
 import { privateKeyToAccount, sign } from "viem/accounts";
 
 import { base } from "../src/chains";
-import { baseClients } from "../src/engine/base";
-import { receiveMessage } from "../src/engine/hydration";
+import { baseClients } from "../src/clients/base";
+import { receiveMessage } from "../src/clients/hydration";
 import { createAlerter } from "../src/engine/notify";
 import { createQueue } from "../src/engine/queue";
 import logger from "../src/logger";

@@ -7,7 +7,7 @@ import {
   type TransactionReceipt,
 } from "viem";
 
-import { submit, type Call, type ChainClients } from "../../../engine/hydration";
+import { submit, type Call, type ChainClients } from "../../../clients/hydration";
 import type { Alerter } from "../../../engine/notify";
 import type { Task } from "../../../engine/queue";
 import logger from "../../../logger";

@@ -41,8 +41,8 @@ import {
 } from "viem";
 
 import { onEmitter } from "../src/engine/emitter";
-import { baseClients } from "../src/engine/base";
-import { hydrationClients, receiveMessage, type ChainClients } from "../src/engine/hydration";
+import { baseClients } from "../src/clients/base";
+import { hydrationClients, receiveMessage, type ChainClients } from "../src/clients/hydration";
 import { createQueue } from "../src/engine/queue";
 import { receiverAbi } from "../src/apps/psm/abi";
 import { assertDestination, makeApp, wireRoutes, type ClientFactory } from "../src/apps/psm/app";
@@ -1225,12 +1225,12 @@ async function main() {
     // The client factory by its own name from its own module (an alias would let one chain's
     // factory answer to the other's, and the call below would still read right).
     record(
-      squash(baseSrc).includes('import { baseClients } from "../../engine/base";'),
-      "composition: base.ts imports baseClients from ../../engine/base under its own name",
+      squash(baseSrc).includes('import { baseClients } from "../../clients/base";'),
+      "composition: base.ts imports baseClients from ../../clients/base under its own name",
     );
     record(
-      squash(hydrationSrc).includes('import { hydrationClients } from "../../engine/hydration";'),
-      "composition: hydration.ts imports hydrationClients from ../../engine/hydration under its own name",
+      squash(hydrationSrc).includes('import { hydrationClients } from "../../clients/hydration";'),
+      "composition: hydration.ts imports hydrationClients from ../../clients/hydration under its own name",
     );
 
     // The wiring itself. makeApp is driven above with arguments chosen here, so an entry point that
