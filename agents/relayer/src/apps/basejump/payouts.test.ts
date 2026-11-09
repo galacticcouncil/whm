@@ -1133,6 +1133,90 @@ test("F4 the finalized head cannot be read: nothing is read, no OK, never 'paid'
   assert.match(okFor(posts, 0)[0], / paid /);
 });
 
+const stallWarns = (posts: string[]) => posts.filter((p) => / parked check on landing .* stalled at #/.test(p));
+const stallOks = (posts: string[]) => posts.filter((p) => p.startsWith("OK queued Basejump parked check"));
+
+test("ST1 finalized head never readable, own park of a funded head: one stall WARN in 24 h, nothing says paid; the park alert once it answers", async () => {
+  const e = world();
+  e.w.parkable = true;
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  e.w.finalizedFails = true;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 24 * 60 * MIN; clock.t += MIN) await k.poke();
+  assert.deepEqual(e.w.sends.map((s) => [s.fn, s.headAtSend]), [["parkPending", 0n], ["fulfillPending", 1n], ["fulfillPending", 2n]]);
+  assert.equal(stallWarns(posts).length, 1);
+  assert.match(stallWarns(posts)[0], /stalled at #0 for 15 min \(head now 3\): last read failed: finalized head read failed\./);
+  assert.ok(!posts.some((p) => / paid/.test(p)));
+  assert.equal(posts.length, 1);
+  e.w.finalizedFails = false;
+  clock.t += MIN;
+  await k.poke();
+  assert.equal(parkWarns(posts).length, 1);
+  assert.match(parkWarns(posts)[0], /payout #0 .*by this keeper's parkPending/);
+  assert.deepEqual(stallOks(posts), [
+    "OK queued Basejump parked check on landing `0x00000000000000000000000000000000000000aa` resumed: read back to #3 (head now 3).",
+  ]);
+});
+
+test("ST2 short read failures and the finalized lag stay below the stall threshold: no stall alert", async () => {
+  const e = world();
+  e.w.parkable = true;
+  e.w.finalizedLag = 2n;
+  for (let i = 0; i < 5; i++) e.w.seal();
+  for (let i = 0; i < 4; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  let n = 0;
+  failStorage(e, () => (n++ % 7 === 0 ? Promise.resolve(new Error("blip")) : undefined));
+  for (let i = 0; i < 120; i++) {
+    clock.t += MIN;
+    await k.poke();
+    if (i % 3 === 0) e.w.seal(); // blocks keep coming, so the finalized head moves
+  }
+  assert.equal(e.w.head, 4n);
+  assert.deepEqual(stallWarns(posts), []);
+});
+
+test("ST3 a scan stuck on an unreadable word alerts once at the threshold, and a later stall alerts again", async () => {
+  const e = world();
+  for (let i = 0; i < 2; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 4_000_000n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock, { scanStallAfterMs: 5 * MIN });
+  let down = true;
+  failStorage(e, () => (down ? viemErr(NODE_FAULT, "0x" + "00".repeat(32)) : undefined));
+  for (let i = 0; i < 4; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(stallWarns(posts).length, 0); // 4 min < 5
+  for (let i = 0; i < 30; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(stallWarns(posts).length, 1);
+  down = false;
+  clock.t += MIN;
+  await k.poke();
+  assert.equal(stallOks(posts).length, 1);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 2_000_000n;
+  down = true; // #2 is paid while reads fail again: a new stall at #2
+  clock.t += MIN;
+  await k.poke();
+  for (let i = 0; i < 10; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(e.w.head, 3n);
+  assert.equal(stallWarns(posts).length, 2);
+  assert.ok(!posts.some((p) => / paid/.test(p)));
+});
+
 test("W2 a parked entry whose only non-zero word is the recipient is still parked", async () => {
   const e = world();
   e.w.parkable = true;

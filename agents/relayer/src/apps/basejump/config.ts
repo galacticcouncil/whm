@@ -66,6 +66,15 @@ export const QUEUED_PAYOUT_POLL_MS = positiveMs("QUEUED_PAYOUT_POLL_SECONDS", 60
  */
 export const QUEUED_PAYOUT_ALERT_MS = positiveMs("QUEUED_PAYOUT_ALERT_MINUTES", 30, 60_000);
 
+/**
+ * The parked-check stall alert's threshold, in whole minutes from 5 to 1440 (README alert table).
+ * The keeper reads parked entries at the finalized head, about 19 blocks (about 2 min) behind the
+ * latest, so a few minutes without progress is normal; 15 min without it means the finalized head
+ * or the entry cannot be read, and every park alert and all-clear behind it is held.
+ */
+export const QUEUED_PAYOUT_SCAN_STALL_MS =
+  boundedInt("QUEUED_PAYOUT_SCAN_STALL_MINUTES", 15, 5, 1440) * 60_000;
+
 /** How long a pass waits for its own `fulfillPending` receipt before leaving it to the next one. */
 export const QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS = 120_000;
 

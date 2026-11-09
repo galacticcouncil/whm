@@ -787,8 +787,11 @@ async function main(): Promise<void> {
         (await read<bigint>("reservedFor", [USDC_PRECOMPILE])) === TINY + BEHIND &&
         (await read<Hex>("reservedAssetOf", [A])).toLowerCase() === USDC_PRECOMPILE);
     const parkPosts = hook.posts.slice(postsBeforePark);
-    record("one parked alert, naming A, this keeper's own parkPending and the pool",
-      parkPosts.length === 1 && parkPosts[0].includes(`payout #${A} of`) && parkPosts[0].includes("parked on landing") &&
+    // The alert's amount and recipient, as the keeper read them from slot 8 (a wrong slot reads other words).
+    const aWhat = `payout #${A} of ${Number(TINY) / 1e6} USDC (asset ${USDC_ASSET_ID}) parked on landing`;
+    const aTo = `recipient ${EMPTY_RECIPIENT.toLowerCase()}`;
+    record("one parked alert, naming A with its amount and recipient, this keeper's own parkPending and the pool",
+      parkPosts.length === 1 && parkPosts[0].includes(aWhat) && parkPosts[0].includes(aTo) &&
         parkPosts[0].includes("by this keeper's parkPending") && parkPosts[0].includes("pool holding"),
       parkPosts[0] ?? "none");
     record("the park ended the round: B not paid in the same poke", (await read<bigint>("pendingHead")) === B);
@@ -813,8 +816,8 @@ async function main(): Promise<void> {
     const keeper2 = await newKeeper();
     await pokeSettled(keeper2, 2);
     const restartPosts = hook.posts.slice(postsBeforeRestart);
-    record("restarted keeper: exactly one alert, A parked, read from the scan (not its own park)",
-      restartPosts.length === 1 && restartPosts[0].includes(`payout #${A} of`) && restartPosts[0].includes("parked on landing") &&
+    record("restarted keeper: exactly one alert, A parked with its amount and recipient, read from the scan (not its own park)",
+      restartPosts.length === 1 && restartPosts[0].includes(aWhat) && restartPosts[0].includes(aTo) &&
         !restartPosts[0].includes("by this keeper's") && restartPosts[0].includes("head then"),
       restartPosts[0] ?? "none");
     record("restarted keeper sends nothing", keeperTxs().length === txBeforeRestart);

@@ -15,6 +15,7 @@ import {
   QUEUED_PAYOUT_MAX_PER_RUN,
   QUEUED_PAYOUT_POLL_MS,
   QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS,
+  QUEUED_PAYOUT_SCAN_STALL_MS,
   RETRIES,
   RETRY_BASE_MS,
   RETRY_MAX_MS,
@@ -83,6 +84,7 @@ async function start(): Promise<void> {
       alertAfterMs: QUEUED_PAYOUT_ALERT_MS,
       maxPerRun: QUEUED_PAYOUT_MAX_PER_RUN,
       receiptTimeoutMs: QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS,
+      scanStallAfterMs: QUEUED_PAYOUT_SCAN_STALL_MS,
       notify: discordNotifier(alerting.discordWebhook),
     });
   });

@@ -92,9 +92,19 @@ export interface PayoutKeeperDeps {
   receiptTimeoutMs: number;
   /** Alert sink for every WARN and OK message (rules in the README's alert table). */
   notify(message: string): Promise<void>;
+  /**
+   * The parked-check stall alert's threshold: how long the read-back scan may stay at one id below
+   * the latest head without advancing (the README's alert table, "parked check stalled"). It must be
+   * well above the finalized lag (about 19 blocks, about 2 min), which delays every read. Default
+   * 15 min.
+   */
+  scanStallAfterMs?: number;
   /** Clock, injectable for the fork probe. */
   now?: () => number;
 }
+
+/** The default parked-check stall threshold. */
+export const DEFAULT_SCAN_STALL_MS = 15 * 60_000;
 
 /**
  * Why a head gets an alert. `waiting`: `now - Head.since >= alertAfterMs` while the pool is short,
@@ -172,6 +182,7 @@ export const MAX_REVERT_PAUSE_MS = 6 * 60 * 60_000;
 export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   const { clients, queue, landing, alertAfterMs, receiptTimeoutMs, notify } = deps;
   const maxPerRun = deps.maxPerRun ?? 10;
+  const scanStallAfterMs = deps.scanStallAfterMs ?? DEFAULT_SCAN_STALL_MS;
   const { publicClient, account } = clients;
   const now = deps.now ?? Date.now;
   const log = logger.child({ keeper: "basejump-queued-payouts", landing });
@@ -206,6 +217,13 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   const leftUnread = new Set<bigint>();
   /** This process's own parks not yet read back at a finalized block: the alert's detail. */
   const ownParks = new Map<bigint, string>();
+  /**
+   * The read-back scan not advancing while below the latest head: since when (this process's clock),
+   * at which id, the last reason, and whether the stall alert is out. Undefined while the scan keeps
+   * up or advances. While it stalls, no park alert and no all-clear can come for that id or any
+   * later one, the keeper's own parks included, so the stall itself is alerted once.
+   */
+  let stall: { at: bigint; since: number; reason: string; alerted: boolean } | undefined;
 
   const assets = new Map<Address, { symbol: string; decimals: number | undefined }>();
 
@@ -375,7 +393,10 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * parked. The slot is read from storage (`readParked`), on every implementation: a landing that
    * never had parking holds nothing there, and one rolled back after a park still holds the entry.
    * Any failed read (the block, the head, or a word of an entry) stops the scan; it resumes at the
-   * same id on the next pass, and that id counts as not read. Never throws.
+   * same id on the next pass, and that id counts as not read. Never throws. A scan that stays at one
+   * id below the latest head for `scanStallAfterMs` (a finalized head that cannot be read, a word
+   * that keeps failing) posts the stall alert once (`stallCheck`), since it holds every later park
+   * alert and all-clear.
    *
    * Bound: "empty means paid" holds on three conditions: (1) the read is on the canonical chain,
    * which reading at the finalized head ensures; (2) slot 8 is `parkedTransfers` with the
@@ -388,7 +409,53 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * @param h The `pendingHead` this pass read.
    */
   async function scanParked(h: bigint): Promise<void> {
-    if (scanFrom >= h) return;
+    const before = scanFrom;
+    let reason = "";
+    if (scanFrom < h) reason = await scanOnce();
+    await stallCheck(h, before, reason);
+  }
+
+  /**
+   * The parked-check stall alert (README alert table): one WARN when the scan has stayed at the
+   * same id below the latest head `h` for `scanStallAfterMs`, and one OK when it advances or
+   * reaches `h`. Never throws past `notify`.
+   *
+   * @param h The latest `pendingHead` this pass read.
+   * @param before `scanFrom` before this pass's scan.
+   * @param reason Why this pass did not advance ("" when it did, or had nothing to read).
+   */
+  async function stallCheck(h: bigint, before: bigint, reason: string): Promise<void> {
+    if (scanFrom > before || scanFrom >= h) {
+      if (stall?.alerted) {
+        log.info(`parked check resumed at #${scanFrom}`);
+        await notify(
+          `OK queued Basejump parked check on landing \`${landing}\` resumed: read back to #${scanFrom} ` +
+            `(head now ${h}).`,
+        );
+      }
+      stall = undefined;
+      return;
+    }
+    if (!stall || stall.at !== scanFrom) stall = { at: scanFrom, since: now(), reason, alerted: false };
+    stall.reason = reason || stall.reason;
+    const waited = now() - stall.since;
+    if (stall.alerted || waited < scanStallAfterMs) return;
+    stall.alerted = true;
+    const msg =
+      `WARN queued Basejump parked check on landing \`${landing}\` stalled at #${scanFrom} for ` +
+      `${Math.round(waited / 60_000)} min (head now ${h}): ${stall.reason}. Payouts from #${scanFrom} on ` +
+      `are not read back: no park alert and no all-clear for them until it resumes.`;
+    log.warn(msg);
+    await notify(msg);
+  }
+
+  /**
+   * One pass of the read-back scan (see `scanParked`).
+   *
+   * @returns "" when it read at least one id, else why not (the error, or the finalized head).
+   */
+  async function scanOnce(): Promise<string> {
+    const start = scanFrom;
     try {
       const blockNumber = await finalizedBlock();
       const headAt = await publicClient.readContract({
@@ -410,8 +477,11 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
         leftUnread.delete(scanFrom);
         ownParks.delete(scanFrom);
       }
+      return scanFrom > start ? "" : `the finalized head (block ${blockNumber}) is at head ${headAt}`;
     } catch (e) {
-      log.warn(`parked check from #${scanFrom} failed: ${(e as Error).message ?? String(e)}`);
+      const why = (e as Error).message ?? String(e);
+      log.warn(`parked check from #${scanFrom} failed: ${why}`);
+      return `last read failed: ${why}`.slice(0, 300);
     }
   }
 

@@ -102,10 +102,14 @@ is sent for the head. Every entry below the head, from id 0 in each process, is 
 `parkedTransfers` at one **finalized** block whose `pendingHead` is past it (up to 100 per poll);
 the head and the entry's words are read at that same block. Sends and dry runs stay at the latest
 block. Reading at the finalized head means a block that is later retracted can never produce
-"paid", at the cost of a delay: an all-clear or a park alert comes about 19 blocks (about 2 min)
-after the head moves (finalized lagged latest by 19 blocks, measured 2026-11-09 on
-rpc.hydradx.cloud). The keeper's own park is read back at once only when the finalized head has
-reached its receipt's block, else by the scan. The entry is read from the landing's storage, not
+"paid", at the cost of a delay: an all-clear or a park alert comes about 16-19 blocks (about 2 min)
+after the head moves (finalized lagged latest by 16 and 19 blocks, measured 2026-11-09 on
+rpc.hydradx.cloud). The keeper's own park is alerted at a finalized block at or after its
+receipt's: at once when the finalized head has already reached that block, else by the scan. While
+the finalized head (or an entry) cannot be read, nothing is read back: no park alert, the keeper's
+own included, and no all-clear, until the scan resumes. That stall is itself alerted once after
+`QUEUED_PAYOUT_SCAN_STALL_MINUTES` (default 15, an integer from 5 to 1440; it must stay well above
+the finalized lag). The entry is read from the landing's storage, not
 through the getter: the three words at
 `keccak256(abi.encode(id, 8)) + 0, 1, 2` (`parkedTransfers` is storage slot 8; source asset, amount,
 recipient), so the answer is the same on every implementation, including one rolled back to before
@@ -125,8 +129,9 @@ Alerts, with
 | --- | --- | --- | --- | --- |
 | Head `waiting` (`WARN ... head-blocking for N min`) | the same entry is at the head while the pool is short, the simulation reverts (`parkPending`'s too, when tried), or the keeper's sent call has no receipt | when it has been at the head for `T`, counted from when this process first saw it there | never for that entry | when the head moves past it: `OK ... paid` once its `parkedTransfers` slot reads empty at a finalized block past it (at once if already read, else from the scan, about 19 blocks later); nothing while it is not read (a failed read is retried each poll and never yields `paid`); nothing if it was parked (the parked alert instead) |
 | Head `reverting` (`WARN ... head-blocking for N min`) | 3 of the keeper's calls for that entry simulated clean, then reverted on chain; no clock | at the 3rd revert | never for that entry; sending for it pauses `T`, then `2T`, `4T` ... up to 6 h (or `T` if longer), each time 3 more calls revert | as for `waiting` |
-| Parked (`WARN ... parked on landing`) | an entry is found in `parkedTransfers`: at the block of the keeper's own successful `parkPending` receipt, or (anyone's park) when read back below the head; the message gives the amount, the recipient, the head at the read, and for its own park the transaction and the pool balance it saw | at once | never for that entry in this process | never: nothing posts when `fulfillParked` pays it, and the keeper never calls `fulfillParked`. Recovery: `fulfillPending.ts --fulfill-parked <id>` (above) |
+| Parked (`WARN ... parked on landing`) | an entry is found in `parkedTransfers` at a finalized block: for the keeper's own successful `parkPending`, at a finalized block at or after its receipt's, or (anyone's park, or its own when the finalized head had not reached the receipt yet) when the scan reads it back below the head; the message gives the amount, the recipient, the head at the read (scan only), and for its own park the transaction and the pool balance it saw | when read: about 16-19 blocks after the park, later while the parked check is stalled | never for that entry in this process | never: nothing posts when `fulfillParked` pays it, and the keeper never calls `fulfillParked`. Recovery: `fulfillPending.ts --fulfill-parked <id>` (above) |
 | Parked, at startup (same message) | an entry still in `parkedTransfers` when a new process reads from id 0 | at its first read in that process | never for that entry in this process | as for Parked |
+| Parked check stalled (`WARN ... parked check ... stalled at #N`) | the read-back scan stays at the same id below the latest head without advancing (the finalized head or an entry cannot be read, or the finalized head stops moving); every park alert and all-clear from that id on is held meanwhile; the message gives the id, the minutes, the latest head and the last reason | when it has stayed for `QUEUED_PAYOUT_SCAN_STALL_MINUTES` (default 15) | never while that stall lasts (a new stall at a later id alerts again) | `OK ... parked check ... resumed` when the scan advances or reaches the head |
 | Backlog (`WARN ... backlog`) | the oldest entry's age, counted from when this process first saw it queued; the message gives the age, the queue depth and the next re-alert age | at age `T`, unless a head alert is out for that entry | posted again at age `2T`, `4T`, `8T` ... while out (one post per jump past several), unless a head alert is out for that entry | `OK ... backlog cleared` when the queue is empty or the oldest age is below `T/2` |
 
 All alert state is in process memory; a restart forgets it all.
@@ -177,6 +182,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `QUEUED_PAYOUT_POLL_SECONDS` | How often `basejump` checks the landing's queue | `60`                           |
 | `QUEUED_PAYOUT_ALERT_MINUTES` | Alert once when a queued payout waits longer, at the head or in the backlog (`basejump`) | `30` |
 | `QUEUED_PAYOUT_MAX_PER_RUN` | Most payouts one keeper run sends before the next poll (`basejump`) | `10`                    |
+| `QUEUED_PAYOUT_SCAN_STALL_MINUTES` | Alert once when the parked read-back has not advanced for this long (`basejump`; integer 5 to 1440) | `15` |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |
