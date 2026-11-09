@@ -317,11 +317,10 @@ async function main() {
       "fresh-per-call pricing: both submissions carry Base's chain id",
       () => console.log("  tx1.chainId:", tx1.chainId, "tx2.chainId:", tx2.chainId),
     );
-    // `startsWith`, not `===`: viem's http transport can normalize a bare host into a URL with a
-    // trailing slash, so an exact-equality check here would be a false negative on the real client,
-    // not just a missed mutant.
+    // Origin, not the raw string: viem's http transport can add a trailing slash to a bare host.
+    const mockOrigin = new URL(MOCK_RPC_URL).origin;
     record(
-      urls.length > 0 && urls.every((u) => u.startsWith(MOCK_RPC_URL)),
+      urls.length > 0 && urls.every((u) => URL.canParse(u) && new URL(u).origin === mockOrigin),
       "fresh-per-call pricing: every request targets the RPC url baseClients() was given",
       () => console.log("  urls:", urls),
     );
