@@ -1,9 +1,13 @@
 import {
+  encodeAbiParameters,
   formatUnits,
+  keccak256,
   parseAbi,
+  toHex,
   zeroAddress,
   type Address,
   type Hash,
+  type Hex,
 } from "viem";
 
 import { submit, type ChainClients } from "../../clients/hydration";
@@ -25,7 +29,6 @@ export const landingAbi = parseAbi([
   "function pendingHead() view returns (uint256)",
   "function pendingTail() view returns (uint256)",
   "function pendingTransfers(uint256 id) view returns (address sourceAsset, uint256 amount, bytes32 recipient)",
-  "function parkedTransfers(uint256 id) view returns (address sourceAsset, uint256 amount, bytes32 recipient)",
   "function destAssetFor(address sourceAsset) view returns (address)",
   "function fulfillPending() external",
   "function parkPending() external",
@@ -38,17 +41,30 @@ export const landingAbi = parseAbi([
 /** The landing writes this keeper sends. */
 type Write = "fulfillPending" | "parkPending";
 
-/** ERC-1967 implementation slot of the landing's UUPS proxy. */
-export const ERC1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+/**
+ * Storage slot of the landing's `parkedTransfers` mapping (`mapping(uint256 => PendingTransfer)`).
+ * `forge inspect BasejumpLanding storageLayout` puts it at slot 8, after `reservedFor` (6) and
+ * `reservedAssetOf` (7), all appended below the pre-upgrade fields 0-5; the landing's UUPS rule is
+ * append-only ("every field above keeps its slot"), and
+ * `BasejumpLandingTest.testParkedEntryStorageLayoutForTheKeeper` pins this slot and the field order.
+ */
+export const PARKED_TRANSFERS_SLOT = 8n;
 
 /**
- * `parkedTransfers(uint256)`. An implementation whose code does not contain these four bytes
- * cannot dispatch the getter, so it predates parking (measured 2026-11-09: absent from the live
- * pre-upgrade implementation, while `fulfillPending` and `pendingHead` are present).
+ * The first of the three words entry `id` occupies in `parkedTransfers`: `keccak256(abi.encode(id,
+ * 8))`. `PendingTransfer` is (address sourceAsset, uint256 amount, bytes32 recipient), one word
+ * each (an address followed by a uint256 is not packed), at this slot + 0, + 1 and + 2.
+ *
+ * @param id The queue id.
+ * @returns The slot of the entry's `sourceAsset` word.
  */
-export const PARKED_TRANSFERS_SELECTOR = "3abcdfc4";
+export function parkedEntrySlot(id: bigint): bigint {
+  return BigInt(
+    keccak256(encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [id, PARKED_TRANSFERS_SLOT])),
+  );
+}
 
-/** Most `parkedTransfers` reads one pass makes; a longer range continues on the next pass. */
+/** Most entries one pass reads back from `parkedTransfers`; a longer range continues on the next pass. */
 export const PARK_SCAN_MAX_PER_PASS = 100;
 
 const erc20Abi = parseAbi([
@@ -139,8 +155,9 @@ export const MAX_REVERT_PAUSE_MS = 6 * 60 * 60_000;
  * acts (`withdraw` or an upgrade); the keeper sends nothing for it.
  *
  * Every entry below the head, from id 0 in each process, is read back from `parkedTransfers` at
- * one block whose `pendingHead` is past it; one found there is alerted once per process (the
- * README's alert table, "parked"). A failed read is never taken as paid.
+ * one block whose `pendingHead` is past it, straight from the landing's storage (slot 8), so the
+ * answer does not depend on which implementation is live; one found there is alerted once per
+ * process (the README's alert table, "parked"). A failed read is never taken as paid.
  *
  * Within one process, an unobserved send is never repeated blindly: after a send for head `i`
  * (recorded in `Head.sent`, in process memory), nothing is sent again until either the head moves
@@ -179,11 +196,6 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * restarted process reads (and alerts) every entry still parked.
    */
   let scanFrom = 0n;
-  /**
-   * Whether each implementation the landing proxy pointed at has `parkedTransfers`, from its code.
-   * Keyed by address, so an upgrade is decided afresh.
-   */
-  const parkingByImpl = new Map<Address, boolean>();
   /** Ids found parked (and alerted) by this process. */
   const parked = new Set<bigint>();
 
@@ -266,7 +278,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * The park alert: once per id per process, measurements only.
    *
    * @param id The parked entry.
-   * @param entry `parkedTransfers(id)` as read.
+   * @param entry `parkedTransfers(id)` as read from storage.
    * @param headAt `pendingHead` at the block `entry` was read at, when read.
    * @param detail Extra measurements (this keeper's own call and the pool it saw), or "".
    */
@@ -293,33 +305,57 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   }
 
   /**
-   * Whether the landing's current implementation has `parkedTransfers`, from a positive read: the
-   * ERC-1967 slot at `blockNumber`, then that implementation's code. Throws when either read fails
-   * or comes back empty; the caller then treats the entries as not read.
+   * Entry `id` of `parkedTransfers`, read from the landing's storage at `blockNumber`: the three
+   * words at `parkedEntrySlot(id)` + 0, + 1, + 2 (`eth_getStorageAt`), not through the getter, so
+   * the answer does not depend on which implementation the proxy points at. A landing rolled back to
+   * an implementation without `parkedTransfers` still holds an entry parked before the rollback in
+   * slot 8, and this reads it. Every word must come back as a hex word; any failed or malformed
+   * read throws, and the caller counts the entry as not read.
+   *
+   * Empty means all three words are zero, which is what `delete parkedTransfers[id]` leaves and what
+   * a never-parked id holds. Any non-zero word means held. No single field is used as the marker:
+   * the landing itself checks none of them for zero at enqueue (`transfer` accepts any amount and
+   * recipient, and `setDestAsset` accepts source asset 0), so each can be zero in a real entry.
+   *
+   * @param id The queue id.
+   * @param blockNumber The block to read at.
+   * @returns The entry, or undefined when the slot is empty.
    */
-  async function landingHasParking(blockNumber: bigint): Promise<boolean> {
-    const word = await publicClient.getStorageAt({ address: landing, slot: ERC1967_IMPL_SLOT, blockNumber });
-    const impl = (word ? `0x${word.slice(-40)}` : zeroAddress).toLowerCase() as Address;
-    if (impl === zeroAddress) throw new Error("landing implementation slot read empty");
-    let has = parkingByImpl.get(impl);
-    if (has === undefined) {
-      const code = await publicClient.getCode({ address: impl, blockNumber });
-      if (!code || code === "0x") throw new Error(`no code read at implementation ${impl}`);
-      has = code.toLowerCase().includes(PARKED_TRANSFERS_SELECTOR);
-      parkingByImpl.set(impl, has);
-      log.info(`landing implementation ${impl} ${has ? "has" : "has no"} parkedTransfers`);
-    }
-    return has;
+  async function readParked(
+    id: bigint,
+    blockNumber: bigint,
+  ): Promise<readonly [Address, bigint, Hex] | undefined> {
+    const base = parkedEntrySlot(id);
+    const words = await Promise.all(
+      [0n, 1n, 2n].map(async (k) => {
+        const word = await publicClient.getStorageAt({ address: landing, slot: toHex(base + k, { size: 32 }), blockNumber });
+        if (typeof word !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(word)) {
+          throw new Error(`parkedTransfers(${id}) word ${k} read as ${String(word)}`);
+        }
+        return BigInt(word);
+      }),
+    );
+    if (words.every((w) => w === 0n)) return undefined;
+    const [src, amount, recipient] = words;
+    return [
+      toHex(src & ((1n << 160n) - 1n), { size: 20 }) as Address,
+      amount,
+      toHex(recipient, { size: 32 }),
+    ] as const;
   }
 
   /**
    * Reads back every entry below the head, from id 0 in each process, at one block: ids below
    * that block's `pendingHead` are past the head there, so an empty `parkedTransfers` slot means
-   * paid (`fulfillPending`, `parkPending` or, after a park, `fulfillParked`) and a full one means
-   * parked. When the implementation's code has no `parkedTransfers` (see `landingHasParking`), the
-   * landing cannot park, its head moves only by paying, and the ids are counted as paid unread.
-   * Any failed read (the implementation, its code, or an entry) stops the scan; it resumes at the
+   * paid (`fulfillPending`, `parkPending` or, after a park, `fulfillParked`) and a held one means
+   * parked. The slot is read from storage (`readParked`), on every implementation: a landing that
+   * never had parking holds nothing there, and one rolled back after a park still holds the entry.
+   * Any failed read (the block, the head, or a word of an entry) stops the scan; it resumes at the
    * same id on the next pass, and that id counts as not read. Never throws.
+   *
+   * Bound: "empty means paid" holds while slot 8 is `parkedTransfers` and only a payment clears it,
+   * as in every implementation so far (the pre-upgrade one never writes slot 8). An implementation
+   * that moved the mapping, or cleared an entry without paying it, would read as paid here.
    *
    * @param h The `pendingHead` this pass read.
    */
@@ -333,19 +369,9 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
         functionName: "pendingHead",
         blockNumber,
       });
-      if (!(await landingHasParking(blockNumber))) {
-        if (scanFrom < headAt) scanFrom = headAt;
-        return;
-      }
       for (let n = 0; scanFrom < headAt && n < PARK_SCAN_MAX_PER_PASS; scanFrom++, n++) {
-        const entry = await publicClient.readContract({
-          address: landing,
-          abi: landingAbi,
-          functionName: "parkedTransfers",
-          args: [scanFrom],
-          blockNumber,
-        });
-        if (entry[0] !== zeroAddress) await alertParked(scanFrom, entry, headAt, "");
+        const entry = await readParked(scanFrom, blockNumber);
+        if (entry) await alertParked(scanFrom, entry, headAt, "");
       }
     } catch (e) {
       log.warn(`parked check from #${scanFrom} failed: ${(e as Error).message ?? String(e)}`);
@@ -559,23 +585,19 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     if (fn === "fulfillPending") return true;
 
     // parkPending succeeded: it either paid the head or parked it. Read which at its own block.
-    const entry = await publicClient
-      .readContract({
-        address: landing,
-        abi: landingAbi,
-        functionName: "parkedTransfers",
-        args: [h],
-        blockNumber: receipt.blockNumber,
-      })
-      .catch(() => undefined);
-    if (entry && entry[0] !== zeroAddress) {
+    // A failed read decides nothing here; the scan reads the id again below a later head.
+    const read = await readParked(h, receipt.blockNumber).then(
+      (entry) => ({ entry }),
+      () => undefined,
+    );
+    if (read?.entry) {
       await alertParked(
         h,
-        entry,
+        read.entry,
         undefined,
         `, by this keeper's parkPending ${sent.hash} with the pool holding ${await describeOr(destAsset, balance)}`,
       );
-    } else if (entry) {
+    } else if (read) {
       log.info(`#${h}: parkPending ${sent.hash} paid it`);
     }
     // A park ends the round; the next pass pays the new head.

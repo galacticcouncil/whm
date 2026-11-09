@@ -541,6 +541,32 @@ contract BasejumpLandingTest is Test {
         basejumpLanding.fulfillParked(0);
     }
 
+    /// @notice The relayer's queued-payout keeper reads parked entries straight from the proxy's
+    ///         storage (agents/relayer/src/apps/basejump/payouts.ts, `parkedEntrySlot`): entry `id`
+    ///         is the three words at keccak256(abi.encode(id, 8)) + 0 (sourceAsset), + 1 (amount),
+    ///         + 2 (recipient), and all three are zero once it is paid. This pins that layout.
+    function testParkedEntryStorageLayoutForTheKeeper() public {
+        bytes32 dust = bytes32(uint256(0xD057));
+        _queueDustHeadThenNormal(dust);
+        basejumpLanding.parkPending();
+
+        address proxy = address(basejumpLanding);
+        uint256 base = uint256(keccak256(abi.encode(uint256(0), uint256(8))));
+        // The literal the relayer's payouts.test.ts (L1) pins `parkedEntrySlot(0n)` to.
+        assertEq(base, 0x5eff886ea0ce6ca488a3d6e336d6c0f75f46d19b42c06ce5ee98e42c96d256c7);
+        assertEq(vm.load(proxy, bytes32(base)), bytes32(uint256(uint160(address(sourceUsdc)))), "sourceAsset word");
+        assertEq(uint256(vm.load(proxy, bytes32(base + 1))), 1, "amount word");
+        assertEq(vm.load(proxy, bytes32(base + 2)), dust, "recipient word");
+        // id 1 is still queued, never parked: its parked words are empty.
+        uint256 base1 = uint256(keccak256(abi.encode(uint256(1), uint256(8))));
+        for (uint256 k; k < 3; k++) assertEq(vm.load(proxy, bytes32(base1 + k)), bytes32(0));
+
+        vm.clearMockedCalls();
+        vm.mockCall(DISPATCH_PRECOMPILE, bytes(""), bytes(""));
+        basejumpLanding.fulfillParked(0);
+        for (uint256 k; k < 3; k++) assertEq(vm.load(proxy, bytes32(base + k)), bytes32(0), "paid entry cleared");
+    }
+
     /// @notice parkPending on a payable head pays it, exactly as fulfillPending would.
     function testParkPendingPaysPayableHead() public {
         uint256 headAmount = _queueHead();

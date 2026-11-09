@@ -15,7 +15,7 @@
  *   WETH (asset 20) that pallet_evm charges gas from, and `eth_getTransactionCount` is tracked
  *   locally (the fork mis-decodes it), `eth_gasPrice` is quoted with headroom, `eth_getStorageAt`
  *   reads pallet_evm's `AccountStorages` at the fork head (chopsticks answers zero; the keeper reads
- *   the landing's ERC-1967 slot to learn whether it can park), and a revert's data
+ *   parked entries, `parkedTransfers` = slot 8, straight from the landing's storage), and a revert's data
  *   is moved from the message into `error.data` where a live node puts it. Everything else is
  *   forwarded untouched. The shim also records every transaction the relayer sends, which is
  *   what the "sent nothing" checks count.
@@ -62,7 +62,7 @@ const cjs = <T>(m: T): T => ((m as { default?: T }).default ?? m) as T;
 const { restoreNativeFetch } = cjs(fetchModule);
 const { hydrationClients } = cjs(clientsModule);
 const { createQueue } = cjs(queueModule);
-const { createPayoutKeeper, discordNotifier, landingsOf, ERC1967_IMPL_SLOT } = cjs(payoutsModule);
+const { createPayoutKeeper, discordNotifier, landingsOf, parkedEntrySlot } = cjs(payoutsModule);
 
 restoreNativeFetch();
 
@@ -444,15 +444,20 @@ async function main(): Promise<void> {
     const head0 = await read("pendingHead");
     const tail0 = await read("pendingTail");
     record("live queue is empty at the fork block", head0 === tail0, `head ${head0}, tail ${tail0}`);
-    // The keeper counts a head that left as paid only when the landing's implementation code has no
-    // parkedTransfers selector (a landing that cannot park). Read the same two facts here.
-    const implWord = await clients.publicClient.getStorageAt({ address: LANDING, slot: ERC1967_IMPL_SLOT as Hex });
-    const impl = `0x${(implWord ?? "0x").slice(-40)}` as Hex;
-    const implCode = (await clients.publicClient.getCode({ address: impl })) ?? "0x";
+    // The keeper counts a head that left as paid when its parkedTransfers words (slot 8) read empty
+    // from storage at a block past it. Read the same words here, through the same shim, with a
+    // positive control: slot 3 (pendingHead) through the same path must read the live head.
+    const slotWord = async (slot: bigint) =>
+      BigInt((await clients.publicClient.getStorageAt({ address: LANDING, slot: toHex(slot, { size: 32 }) })) ?? "0x");
+    let heldBelowHead = 0;
+    for (let id = 0n; id < head0; id++) {
+      for (let k = 0n; k < 3n; k++) if ((await slotWord(parkedEntrySlot(id) + k)) !== 0n) heldBelowHead++;
+    }
+    const headWord = await slotWord(3n);
     record(
-      "the live landing's implementation code has no parkedTransfers selector (pre-upgrade: heads that leave count as paid)",
-      implCode.length > 2 && !implCode.toLowerCase().includes("3abcdfc4") && implCode.toLowerCase().includes("633404563d"), // positive control: PUSH4 fulfillPending()
-      `${impl}, ${(implCode.length - 2) / 2} bytes`,
+      "the live landing holds no parked entry below the head (slot 8 words read from storage; heads that leave count as paid)",
+      head0 > 0n && headWord === head0 && heldBelowHead === 0, // positive control: slot 3 reads pendingHead
+      `slot 3 = ${headWord}, ${heldBelowHead} non-zero parked words for ids 0..${head0 - 1n}`,
     );
 
     // Never build a block while the shim is sealing one: two concurrent newBlock calls deadlock.
@@ -536,7 +541,7 @@ async function main(): Promise<void> {
     record("queue empty", headB === head0 + 1n && headB === (await read("pendingTail")), `head ${headB}`);
     record("recipient +5 USDC", recipAfter - recipBefore === PAYOUT, `${recipBefore} → ${recipAfter}`);
     record("pool −5 USDC", poolAfter === FLOAT - PAYOUT, `${poolAfter}`);
-    record("one all-clear after the alert, 'paid' (the landing's code cannot park)", hook.posts.length === 2 && hook.posts[1].startsWith(`OK queued Basejump payout #${head0} paid`), hook.posts[1] ?? "none");
+    record("one all-clear after the alert, 'paid' (its parked slot read empty)", hook.posts.length === 2 && hook.posts[1].startsWith(`OK queued Basejump payout #${head0} paid`), hook.posts[1] ?? "none");
 
     // ── D. A payout that first waits on the pool, then keeps losing the float race ──
     // Constructs the race where a delivery this app sent just before spends the float: the shim
@@ -615,7 +620,7 @@ async function main(): Promise<void> {
     record("seven calls in total for this payout", sentD() === 7, `${sentD()} sent`);
     record(
       "one all-clear",
-      postsD().length === 3 && postsD()[2].startsWith(`OK queued Basejump payout #${headD} paid`), // paid: the landing's code cannot park
+      postsD().length === 3 && postsD()[2].startsWith(`OK queued Basejump payout #${headD} paid`), // paid: its parked slot read empty
       postsD()[2] ?? "none",
     );
 
