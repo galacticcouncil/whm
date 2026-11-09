@@ -150,7 +150,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `REDIS_HOST`          | Redis host                                        | `localhost`                           |
 | `REDIS_PORT`          | Redis port                                        | `6379`                                |
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
-| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts                       | optional                              |
+| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas / held-nonce alerts          | optional                              |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
 | `NTT_BASE_GRACE_SECONDS` | Backstop delay before `ntt-base` acts on a VAA (0-86400 s) | `900`                      |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
@@ -171,7 +171,22 @@ pnpm --filter @whm/relayer mainnet-spy
 
 ## Verification
 
-There is no test suite. The type check is `tsc -p agents/relayer --noEmit` from the repo root.
+The type check is `tsc -p agents/relayer --noEmit` from the repo root. `pnpm --filter @whm/relayer test`
+runs the unit tests (`src/**/*.test.ts`, node:test through the root's tsx; no RPC, no Redis). So far
+they cover the submission queue's nonce lane (`src/engine/queue.test.ts`, `src/engine/queue.split.test.ts`)
+and the `ntt-base` delivery (`src/apps/ntt/outbound.test.ts`).
+
+### The nonce lane
+
+Each process has one wallet and one submission queue (`src/engine/queue.ts`). The queue holds a nonce
+until a transaction at that nonce is known to have mined, then hands the task its receipt; only then does
+the next task get the next nonce. A wait without a receipt (180 s per round) re-reads the wallet's nonce:
+mined past it means the nonce is spent (this task's receipt, or a reject when another transaction took
+it); pending means keep waiting; neither means the send was dropped, and it is sent again at the same
+nonce. A send at the held nonce that a node refuses without a revert (already known, underpriced, any
+other wording, an RPC error) keeps the lane held too, so no later message is handed an occupied nonce.
+One transaction in flight per wallet, and a send that never mines and never leaves every mempool holds
+the lane (later messages wait, unsent), with a Discord alert once per task waiting on it.
 
 ## Production
 
