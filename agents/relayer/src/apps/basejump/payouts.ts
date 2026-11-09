@@ -1,6 +1,7 @@
 import {
   BaseError,
   ContractFunctionRevertedError,
+  ExecutionRevertedError,
   formatUnits,
   parseAbi,
   zeroAddress,
@@ -41,14 +42,18 @@ export const landingAbi = parseAbi([
 type Write = "fulfillPending" | "parkPending";
 
 /**
- * Whether the node executed the call and it reverted (as opposed to a transport or RPC failure).
+ * Whether the node executed the call and it reverted (as opposed to a transport or RPC failure):
+ * viem's decoded `ContractFunctionRevertedError`, or its `ExecutionRevertedError`, which it builds
+ * from the node's own "execution reverted" error (the form a revert with empty data takes on a
+ * Hydration fork, measured with the queued-payouts probe).
  * `parkedTransfers` is a public mapping getter on a landing that has it, which cannot revert; a
  * landing from before the FIFO / park upgrade has no such function, so the call reverts there.
  */
 function executedRevert(e: unknown): boolean {
   return (
     e instanceof BaseError &&
-    e.walk((x) => x instanceof ContractFunctionRevertedError) instanceof ContractFunctionRevertedError
+    e.walk((x) => x instanceof ContractFunctionRevertedError || x instanceof ExecutionRevertedError) !==
+      null
   );
 }
 

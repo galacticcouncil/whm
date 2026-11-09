@@ -13,7 +13,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ContractFunctionRevertedError } from "viem";
+import {
+  CallExecutionError,
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  ExecutionRevertedError,
+} from "viem";
 
 import logger from "../../logger";
 import { createPayoutKeeper, landingAbi } from "./payouts";
@@ -865,4 +870,31 @@ test("P5 a head that left with an alert out, parkedTransfers unreadable: OK says
     ["OK queued Basejump payout #0 left the head (head now 1); parkedTransfers(0) not read"],
   );
   assert.equal(parkWarns(posts).length, 0);
+});
+
+test("P6 a landing without parkedTransfers whose revert arrives as the node's 'execution reverted' (as on the fork): OK says paid", async () => {
+  const e = world(); // parkable false: no parkPending, no parkedTransfers
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
+  const real = e.clients.publicClient.readContract;
+  e.clients.publicClient.readContract = async (q: any) => {
+    if (q.functionName === "parkedTransfers") {
+      throw new ContractFunctionExecutionError(
+        new CallExecutionError(new ExecutionRevertedError({ message: "Execution reverted with reason: 0x." }), {}),
+        { abi: landingAbi, functionName: "parkedTransfers", args: [q.args[0]] },
+      );
+    }
+    return real(q);
+  };
+  e.w.pool = 2_000_000n;
+  clock.t += MIN;
+  await k.poke();
+  assert.deepEqual(
+    posts.filter((p) => p.startsWith("OK queued Basejump payout #0")),
+    ["OK queued Basejump payout #0 paid (head now 1)"],
+  );
 });
