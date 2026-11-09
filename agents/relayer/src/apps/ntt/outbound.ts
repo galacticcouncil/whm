@@ -184,8 +184,10 @@ export function discordAlert(webhook: string | undefined, log: typeof logger) {
  * still knows one, the retry throws and sends nothing; when the node asked knows none of them, the
  * retry reads and may send again. That is one node's view: behind a load balancer a send another
  * node still holds can be sent again. The queue holds its nonce until a send at it is known mined
- * (`engine/queue.ts`), so that second send is at the same nonce, or after that nonce was spent, and
- * only one can mine.
+ * (`engine/queue.ts`), so that second send is at the same nonce, where only one of the two can
+ * mine, or at a later nonce only after that nonce was spent (the earlier send has mined or can never
+ * mine); there the transceiver reverts a second delivery of the consumed VAA (gas spent, never a
+ * second payment).
  *
  * The queue resolves with the receipt of a transaction this task sent, and that receipt is the
  * outcome. It resolves with no receipt when the simulate said the work is done: with nothing sent,

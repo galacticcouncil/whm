@@ -126,6 +126,8 @@ function harness(opts: {
   const calls: { fn: string; at: string }[] = [];
   let sends = 0;
   let waits = 0;
+  /** Every hash passed to `waitForTransactionReceipt`, in order. */
+  const waitedOn: Hash[] = [];
   const read = (fn: string, at: string) => {
     calls.push({ fn, at });
     if (r.unserved?.includes(at)) throw new Error(`header not found (block ${at})`);
@@ -152,6 +154,7 @@ function harness(opts: {
     getGasPrice: async () => 1n,
     waitForTransactionReceipt: async ({ hash }: { hash: Hash }) => {
       waits++;
+      waitedOn.push(hash);
       return (opts.wait ?? (async () => receipt("success", [managerLog("TransferRedeemed")])))(hash);
     },
     getTransactionReceipt: async ({ hash }: { hash: Hash }) => {
@@ -185,7 +188,7 @@ function harness(opts: {
       sent,
       alert: async (m) => void alerts.push(m),
     });
-  return { run, calls, alerts, sent, lines, sends: () => sends, waits: () => waits };
+  return { run, calls, alerts, sent, lines, sends: () => sends, waits: () => waits, waitedOn };
 }
 
 test("queued in the receipt's logs: queued and alerted, though latest still reads an empty queue", async () => {
@@ -307,7 +310,7 @@ test("no receipt after a repeat send simulated as done: the wait on the last sen
     wait: async () => receipt("success", [managerLog("TransferRedeemed")], OUR_TX), // viem followed to the first
   });
   assert.equal(await h.run(), "delivered");
-  assert.equal(h.waits(), 1, "one wait, on the last send");
+  assert.deepEqual(h.waitedOn, [OUR_TX2], "one wait, on the last send");
 
   const foreign = `0x${"99".repeat(32)}` as Hash;
   const replaced = harness({
@@ -315,6 +318,19 @@ test("no receipt after a repeat send simulated as done: the wait on the last sen
     wait: async () => receipt("success", [managerLog("TransferRedeemed")], foreign),
   });
   await assert.rejects(replaced.run(), /was replaced by/);
+});
+
+test("no receipt after one send whose repeat simulated as done: the wait on that send is the outcome", async () => {
+  // The usual real-queue shape: the repeat's simulate throws before it is broadcast, so one send.
+  const h = harness({
+    add: async (task) => {
+      await task.submit(7);
+      return undefined;
+    },
+  });
+  assert.equal(await h.run(), "delivered");
+  assert.deepEqual(h.waitedOn, [OUR_TX], "one wait, on the one send");
+  assert.equal(h.sends(), 1);
 });
 
 test("a receipt from the queue that is not one of our sends throws", async () => {
