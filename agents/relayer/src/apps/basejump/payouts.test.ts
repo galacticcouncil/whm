@@ -7,8 +7,10 @@
  * `parkedEntrySlot(id)` + 0..2 and stay there whichever implementation is live, as on chain. Money rows (S1-S7, S11, S13, P1, P2, P4):
  * one send per head, no send while a send is unobserved, no spin on an unpayable head, park only a
  * funded head whose dispatch fails. Alert rows (S8-S12c, A1, A2, B1-B4, P1, P3): each row of the
- * README's alert table. Park-read rows (P5-P10, GA2, C1a, C1b, R1, R3, R9, L1): the entry is read
- * from storage on any implementation, any failed or malformed word is "not read", never "paid".
+ * README's alert table. Park-read rows (P5-P10, GA2, C1a, C1b, R1, R3, R9, L1, W2): the entry is
+ * read from storage on any implementation, any failed or malformed word is "not read", never
+ * "paid". Finalized rows (F1-F4): the head and the words are read at the finalized head, at one
+ * block; the mock keeps each sealed block's state, so a read not pinned to that block answers wrong.
  *
  * Run: `pnpm test` in agents/relayer (node:test through the root's tsx; no RPC, no Redis).
  */
@@ -84,6 +86,12 @@ function world() {
     block: 1n, // the chain's block number; each mined call is its own block
     parked: new Map<bigint, bigint>(), // id -> amount, in storage at parkedEntrySlot(id)
     parkedSrc: new Map<bigint, bigint>(), // a parked entry's source-asset word, when not SRC
+    parkedWords: new Map<bigint, bigint[]>(), // an entry's three raw words, overriding the two maps above
+    // Per-block history: the state at the end of each sealed block, so a read pinned to a block
+    // answers that block's state. Direct mutations by a test belong to the latest block.
+    history: new Map<bigint, { head: bigint; parked: Map<bigint, bigint>; src: Map<bigint, bigint>; words: Map<bigint, bigint[]> }>(),
+    finalizedLag: 0n, // the finalized head is this many blocks behind the latest
+    finalizedFails: false, // the finalized block read fails
     // reads of an entry's first word (one per entry read), with the block asked for
     parkedReads: [] as { id: bigint; blockNumber: bigint | undefined }[],
     reads: 0,
@@ -114,17 +122,35 @@ function world() {
       w.head++;
       return "success";
     },
-    mine(hash: string, fn = "fulfillPending") {
+    /** Seal the latest block (record its end state) and start the next one. */
+    seal() {
+      w.history.set(w.block, {
+        head: w.head,
+        parked: new Map(w.parked),
+        src: new Map(w.parkedSrc),
+        words: new Map(w.parkedWords),
+      });
       w.block++;
+    },
+    /** The state a read at `b` sees: a sealed block's, or the latest. */
+    at(b: bigint | undefined) {
+      if (b === undefined || b >= w.block) return { head: w.head, parked: w.parked, src: w.parkedSrc, words: w.parkedWords };
+      const h = w.history.get(b);
+      if (!h) throw new Error(`no state at block ${b}`);
+      return h;
+    },
+    mine(hash: string, fn = "fulfillPending") {
+      w.seal();
       w.receipts.set(hash, { transactionHash: hash, status: w.exec(fn), blockNumber: w.block });
     },
   };
   let n = 0;
   const publicClient: any = {
-    async readContract({ functionName, args }: any) {
+    async readContract({ functionName, args, blockNumber }: any) {
       w.reads++;
       switch (functionName) {
         case "pendingHead": {
+          if (blockNumber !== undefined) return w.at(blockNumber).head;
           if (w.staleHead !== undefined) {
             const s = w.staleHead;
             w.staleHead = undefined;
@@ -169,9 +195,11 @@ function world() {
         const k = s - parkedEntrySlot(id);
         if (k < 0n || k > 2n) continue;
         if (k === 0n) w.parkedReads.push({ id, blockNumber });
-        const amt = w.parked.get(id);
+        const st = w.at(blockNumber);
+        const amt = st.parked.get(id);
         const word =
-          amt === undefined ? 0n : [w.parkedSrc.get(id) ?? BigInt(SRC), amt, BigInt("0x" + "11".repeat(32))][Number(k)];
+          st.words.get(id)?.[Number(k)] ??
+          (amt === undefined ? 0n : [st.src.get(id) ?? BigInt(SRC), amt, BigInt("0x" + "11".repeat(32))][Number(k)]);
         return toHex(word, { size: 32 });
       }
       throw new Error("unexpected slot " + slot);
@@ -179,8 +207,13 @@ function world() {
     async getCode({ address }: any) {
       return CODE[address];
     },
-    async getBlock() {
-      return { baseFeePerGas: null };
+    async getBlock({ blockTag }: any = {}) {
+      if (blockTag === "finalized") {
+        if (w.finalizedFails) throw new Error("finalized head read failed");
+        const f = w.block - w.finalizedLag;
+        return { number: f < 1n ? 1n : f, baseFeePerGas: null };
+      }
+      return { number: w.block, baseFeePerGas: null };
     },
     async getGasPrice() {
       return 1n;
@@ -919,7 +952,7 @@ function failStorage(e: ReturnType<typeof world>, fail: (slot: string) => Promis
   };
 }
 
-test("P5 a head that left with an alert out, its parked slot unreadable: OK says 'left the head', not 'paid'", async () => {
+test("P5 a head that left with an alert out, its parked slot unreadable: no OK while unread, 'paid' once read", async () => {
   const e = world();
   e.w.parkable = true;
   e.w.enqueue(2_000_000n);
@@ -928,14 +961,21 @@ test("P5 a head that left with an alert out, its parked slot unreadable: OK says
   const clock = { t: 0 };
   const { k, posts } = keeperFor(e, clock);
   for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
-  failStorage(e, () => Promise.resolve(new Error("rpc down")));
+  let down = true;
+  failStorage(e, () => (down ? Promise.resolve(new Error("rpc down")) : undefined));
   e.w.pool = 2_000_000n;
   e.w.exec(); // someone else pays #0
+  for (let i = 0; i < 5; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.deepEqual(posts.filter((p) => p.startsWith("OK queued Basejump payout #0")), []);
+  down = false;
   clock.t += MIN;
   await k.poke();
   assert.deepEqual(
     posts.filter((p) => p.startsWith("OK queued Basejump payout #0")),
-    ["OK queued Basejump payout #0 left the head (head now 1); parkedTransfers(0) not read"],
+    [`OK queued Basejump payout #0 paid (head now 1 at finalized block ${e.w.block})`],
   );
   assert.equal(parkWarns(posts).length, 0);
 });
@@ -978,6 +1018,139 @@ test("P10 a history of 60 paid entries on a landing that never parked: the start
   assert.equal(parkWarns(posts).length, 0);
 });
 
+// ── Finalized-head rows: the paid / parked decision is read only at Hydration's finalized head ──
+
+const okFor = (posts: string[], id: number) => posts.filter((p) => p.startsWith(`OK queued Basejump payout #${id} `));
+
+test("F1 own payout on a block not yet finalized: no 'paid' until the finalized head reaches it; head and words at that block", async () => {
+  const e = world();
+  e.w.finalizedLag = 3n;
+  for (let i = 0; i < 5; i++) e.w.seal(); // a chain longer than the lag
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke(); // waiting alert out on #0
+  e.w.pool = 2_000_000n;
+  clock.t += MIN;
+  await k.poke(); // the keeper pays #0
+  assert.equal(e.w.head, 1n);
+  const paidAt = e.w.receipts.get(e.w.sends[0].hash)!.blockNumber;
+  for (let i = 0; i < 3; i++) {
+    clock.t += MIN;
+    await k.poke();
+    assert.deepEqual(okFor(posts, 0), [], `finalized ${e.w.block - e.w.finalizedLag} < ${paidAt}`);
+    e.w.seal();
+  }
+  clock.t += MIN;
+  await k.poke(); // finalized = latest - 3 = the paying block
+  assert.equal(e.w.block - e.w.finalizedLag, paidAt);
+  assert.deepEqual(okFor(posts, 0), [`OK queued Basejump payout #0 paid (head now 1 at finalized block ${paidAt})`]);
+  const read = e.w.parkedReads.find((r) => r.id === 0n)!;
+  assert.equal(read.blockNumber, paidAt);
+});
+
+test("F2 latest shows #0 paid, the canonical chain parks it (the latest blocks retracted): parked alert, never 'paid'", async () => {
+  const e = world();
+  e.w.parkable = true;
+  e.w.finalizedLag = 3n;
+  for (let i = 0; i < 5; i++) e.w.seal();
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke(); // waiting alert out on #0
+  e.w.pool = 2_000_000n;
+  assert.equal(e.w.exec(), "success"); // someone pays #0 on a best block...
+  e.w.pool = 0n;
+  e.w.seal();
+  for (let i = 0; i < 3; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  // ...which is retracted: on the canonical chain #0 was parked instead (head 1 either way).
+  e.w.parked.set(0n, 2_000_000n);
+  const finalizedNow = e.w.block - e.w.finalizedLag;
+  for (const [b, st] of e.w.history) if (b > finalizedNow && st.head === 1n) st.parked = new Map(e.w.parked);
+  for (let i = 0; i < 5; i++) {
+    e.w.seal();
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(parkWarns(posts).length, 1);
+  assert.match(parkWarns(posts)[0], /^WARN queued Basejump payout #0 .*parkedTransfers\(0\) holds it/);
+  assert.deepEqual(okFor(posts, 0), []);
+});
+
+test("F3 own park on a block not yet finalized: the alert waits for the finalized head and keeps the park's detail", async () => {
+  const e = world();
+  e.w.parkable = true;
+  e.w.finalizedLag = 2n;
+  for (let i = 0; i < 5; i++) e.w.seal();
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  await k.poke(); // the keeper parks #0
+  assert.deepEqual(e.w.sends.map((s) => s.fn), ["parkPending"]);
+  assert.equal(parkWarns(posts).length, 0); // the receipt's block is not finalized yet
+  const parkedAt = e.w.receipts.get(e.w.sends[0].hash)!.blockNumber;
+  e.w.seal();
+  e.w.seal();
+  clock.t += MIN;
+  await k.poke();
+  assert.equal(parkWarns(posts).length, 1);
+  assert.match(
+    parkWarns(posts)[0],
+    /^WARN queued Basejump payout #0 .*holds it, recipient 0x(11){32}, by this keeper's parkPending 0x0+1 with the pool holding 100 USDC \(asset 21\); head then 1\.$/,
+  );
+  assert.ok(e.w.parkedReads.some((r) => r.id === 0n && r.blockNumber === parkedAt));
+});
+
+test("F4 the finalized head cannot be read: nothing is read, no OK, never 'paid'; read once it answers", async () => {
+  const e = world();
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
+  e.w.finalizedFails = true;
+  e.w.pool = 2_000_000n;
+  for (let i = 0; i < 5; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(e.w.head, 1n); // paying does not wait for finality
+  assert.deepEqual(okFor(posts, 0), []);
+  assert.deepEqual(e.w.parkedReads, []);
+  e.w.finalizedFails = false;
+  clock.t += MIN;
+  await k.poke();
+  assert.equal(okFor(posts, 0).length, 1);
+  assert.match(okFor(posts, 0)[0], / paid /);
+});
+
+test("W2 a parked entry whose only non-zero word is the recipient is still parked", async () => {
+  const e = world();
+  e.w.parkable = true;
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
+  e.w.head = 1n; // #0 left the head by a park whose words are (0, 0, recipient)
+  e.w.parkedWords.set(0n, [0n, 0n, BigInt("0x" + "22".repeat(32))]);
+  clock.t += MIN;
+  await k.poke();
+  assert.equal(parkWarns(posts).length, 1);
+  assert.match(parkWarns(posts)[0], /payout #0 .*recipient 0x(22){32}/);
+  assert.deepEqual(okFor(posts, 0), []);
+});
+
 test("GA2 parked under V2, then rolled back to an implementation without parkedTransfers: alerted parked, never 'paid'", async () => {
   const e = world();
   e.w.parkable = true;
@@ -1006,7 +1179,7 @@ test("GA2 parked under V2, then rolled back to an implementation without parkedT
   assert.equal(parkWarns(B.posts).length, 1);
 });
 
-test("P7 one word of a parked entry unreadable or malformed: the entry is not read, the scan stops there, never 'paid'", async () => {
+test("P7 one word of a parked entry unreadable or malformed: the entry is not read, the scan stops there, no OK, never 'paid'", async () => {
   const answers: Array<[string, (slot: string) => Promise<unknown> | undefined]> = [
     ["word 2 node fault", (slot) => (BigInt(slot) === parkedEntrySlot(0n) + 2n ? viemErr(NODE_FAULT, slot) : undefined)],
     ["word 1 revert", (slot) => (BigInt(slot) === parkedEntrySlot(0n) + 1n ? viemErr(LIVE_REVERT, slot) : undefined)],
@@ -1027,7 +1200,7 @@ test("P7 one word of a parked entry unreadable or malformed: the entry is not re
     assert.equal(e.w.head, 2n, label);
     assert.deepEqual(
       posts.filter((p) => p.startsWith("OK queued Basejump payout #0")),
-      ["OK queued Basejump payout #0 left the head (head now 1); parkedTransfers(0) not read"],
+      [], // not read: no all-clear
       label,
     );
   }
@@ -1047,7 +1220,7 @@ test("P7 one word of a parked entry unreadable or malformed: the entry is not re
     await k.poke();
     assert.deepEqual(
       posts.filter((p) => p.startsWith("OK queued Basejump payout #0")),
-      ["OK queued Basejump payout #0 left the head (head now 1); parkedTransfers(0) not read"],
+      [], // not read: no all-clear
       String(bad),
     );
   }

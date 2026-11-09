@@ -99,20 +99,31 @@ receipt, replaced transaction, a stale head read, a `parkPending` sent) ends the
 
 While the pool is short or the simulation reverts (other than a parkable `DispatchFailed`), nothing
 is sent for the head. Every entry below the head, from id 0 in each process, is read back from
-`parkedTransfers` at one block whose `pendingHead` is past it (up to 100 per poll). The entry is
-read from the landing's storage, not through the getter: the three words at
+`parkedTransfers` at one **finalized** block whose `pendingHead` is past it (up to 100 per poll);
+the head and the entry's words are read at that same block. Sends and dry runs stay at the latest
+block. Reading at the finalized head means a block that is later retracted can never produce
+"paid", at the cost of a delay: an all-clear or a park alert comes about 19 blocks (about 2 min)
+after the head moves (finalized lagged latest by 19 blocks, measured 2026-11-09 on
+rpc.hydradx.cloud). The keeper's own park is read back at once only when the finalized head has
+reached its receipt's block, else by the scan. The entry is read from the landing's storage, not
+through the getter: the three words at
 `keccak256(abi.encode(id, 8)) + 0, 1, 2` (`parkedTransfers` is storage slot 8; source asset, amount,
 recipient), so the answer is the same on every implementation, including one rolled back to before
 the park upgrade after an entry was parked. All three words zero is empty (paid); any non-zero word
 is parked. Any failed read (the block, the head, or any word) counts as not read, and the same id
-is read again on the next poll. Bound: "empty means paid" holds while slot 8 stays
-`parkedTransfers` and only a payment clears an entry, as in every landing implementation so far.
+is read again on the next poll. Bound: "empty means paid" holds while (1) the read is on the
+canonical chain (the finalized head), (2) slot 8 stays `parkedTransfers` with its (source asset,
+amount, recipient) word order (pinned by `testParkedEntryStorageLayoutForTheKeeper`), and (3) only
+a payment clears an entry, as in every landing implementation so far; an implementation that
+cleared an entry without paying it would read as paid. An entry whose three words are all zero
+reads as empty; its amount is 0. A parked entry with source asset 0 can never be paid
+(`fulfillParked` reverts `NotParked` for it), and the keeper keeps it as parked.
 Alerts, with
 `T` = `QUEUED_PAYOUT_ALERT_MINUTES` (default 30):
 
 | Alert | Trigger | First post | Repeat | Clear |
 | --- | --- | --- | --- | --- |
-| Head `waiting` (`WARN ... head-blocking for N min`) | the same entry is at the head while the pool is short, the simulation reverts (`parkPending`'s too, when tried), or the keeper's sent call has no receipt | when it has been at the head for `T`, counted from when this process first saw it there | never for that entry | when the head moves past it: `OK ... paid` if its `parkedTransfers` slot read empty below the head; `OK ... left the head ... not read` if it was not read yet (any read failed); nothing if it was parked (the parked alert instead) |
+| Head `waiting` (`WARN ... head-blocking for N min`) | the same entry is at the head while the pool is short, the simulation reverts (`parkPending`'s too, when tried), or the keeper's sent call has no receipt | when it has been at the head for `T`, counted from when this process first saw it there | never for that entry | when the head moves past it: `OK ... paid` once its `parkedTransfers` slot reads empty at a finalized block past it (at once if already read, else from the scan, about 19 blocks later); nothing while it is not read (a failed read is retried each poll and never yields `paid`); nothing if it was parked (the parked alert instead) |
 | Head `reverting` (`WARN ... head-blocking for N min`) | 3 of the keeper's calls for that entry simulated clean, then reverted on chain; no clock | at the 3rd revert | never for that entry; sending for it pauses `T`, then `2T`, `4T` ... up to 6 h (or `T` if longer), each time 3 more calls revert | as for `waiting` |
 | Parked (`WARN ... parked on landing`) | an entry is found in `parkedTransfers`: at the block of the keeper's own successful `parkPending` receipt, or (anyone's park) when read back below the head; the message gives the amount, the recipient, the head at the read, and for its own park the transaction and the pool balance it saw | at once | never for that entry in this process | never: nothing posts when `fulfillParked` pays it, and the keeper never calls `fulfillParked`. Recovery: `fulfillPending.ts --fulfill-parked <id>` (above) |
 | Parked, at startup (same message) | an entry still in `parkedTransfers` when a new process reads from id 0 | at its first read in that process | never for that entry in this process | as for Parked |

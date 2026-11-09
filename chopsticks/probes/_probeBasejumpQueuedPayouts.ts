@@ -15,7 +15,9 @@
  *   WETH (asset 20) that pallet_evm charges gas from, and `eth_getTransactionCount` is tracked
  *   locally (the fork mis-decodes it), `eth_gasPrice` is quoted with headroom, `eth_getStorageAt`
  *   reads pallet_evm's `AccountStorages` at the fork head (chopsticks answers zero; the keeper reads
- *   parked entries, `parkedTransfers` = slot 8, straight from the landing's storage), and a revert's data
+ *   parked entries, `parkedTransfers` = slot 8, straight from the landing's storage),
+ *   `eth_getBlockByNumber("finalized")` is answered from the fork's own finalized head
+ *   (`chain_getFinalizedHead`; the keeper reads parked entries at the finalized head), and a revert's data
  *   is moved from the message into `error.data` where a live node puts it. Everything else is
  *   forwarded untouched. The shim also records every transaction the relayer sends, which is
  *   what the "sent nothing" checks count.
@@ -275,6 +277,14 @@ function startShim(net: Network, forkHttp: string) {
         // transaction priced under that is not included at all. Quote twice the fork's price, so
         // the probe tests the relayer and not the fork's fee drift (see the report).
         return numberToHex(BigInt((await forward("eth_gasPrice", [])) as string) * GAS_PRICE_HEADROOM);
+      }
+      case "eth_getBlockByNumber": {
+        // The keeper reads parked entries at the finalized head. Answer that tag from the fork's
+        // own finalized head (chain_getFinalizedHead), asked for by number; any other tag forwards.
+        if (params[0] !== "finalized") throw new Error("forward");
+        const hash = (await forward("chain_getFinalizedHead", [])) as string;
+        const header = (await forward("chain_getHeader", [hash])) as { number: string };
+        return forward("eth_getBlockByNumber", [header.number, params[1] ?? false]);
       }
       case "eth_getStorageAt": {
         const raw = await retry("AccountStorages", () =>

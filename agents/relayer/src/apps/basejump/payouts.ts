@@ -155,9 +155,10 @@ export const MAX_REVERT_PAUSE_MS = 6 * 60 * 60_000;
  * acts (`withdraw` or an upgrade); the keeper sends nothing for it.
  *
  * Every entry below the head, from id 0 in each process, is read back from `parkedTransfers` at
- * one block whose `pendingHead` is past it, straight from the landing's storage (slot 8), so the
- * answer does not depend on which implementation is live; one found there is alerted once per
- * process (the README's alert table, "parked"). A failed read is never taken as paid.
+ * one FINALIZED block whose `pendingHead` is past it, straight from the landing's storage (slot 8),
+ * so the answer does not depend on which implementation is live and a retracted block cannot
+ * produce it; one found there is alerted once per process (the README's alert table, "parked"). A
+ * failed read is never taken as paid. Sends and dry runs stay at the latest block.
  *
  * Within one process, an unobserved send is never repeated blindly: after a send for head `i`
  * (recorded in `Head.sent`, in process memory), nothing is sent again until either the head moves
@@ -198,6 +199,13 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   let scanFrom = 0n;
   /** Ids found parked (and alerted) by this process. */
   const parked = new Set<bigint>();
+  /**
+   * Heads that left with an alert out before the scan read them at the finalized head. The scan
+   * posts their all-clear (`paid`) when it reads the slot empty, or the park alert when it is held.
+   */
+  const leftUnread = new Set<bigint>();
+  /** This process's own parks not yet read back at a finalized block: the alert's detail. */
+  const ownParks = new Map<bigint, string>();
 
   const assets = new Map<Address, { symbol: string; decimals: number | undefined }>();
 
@@ -305,6 +313,19 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   }
 
   /**
+   * Hydration's finalized block number. The "paid" / parked decision is read only at a finalized
+   * block, so a block that is later retracted can never produce "paid": the best block can be
+   * reorganised away (finalized lagged latest by 19 blocks on 2026-11-09, rpc.hydradx.cloud), and a
+   * scan that advanced past an id on a retracted block would never read it again. Throws when the
+   * node does not name one; the caller then counts the entries as not read.
+   */
+  async function finalizedBlock(): Promise<bigint> {
+    const block = await publicClient.getBlock({ blockTag: "finalized" });
+    if (typeof block?.number !== "bigint") throw new Error("no finalized block number");
+    return block.number;
+  }
+
+  /**
    * Entry `id` of `parkedTransfers`, read from the landing's storage at `blockNumber`: the three
    * words at `parkedEntrySlot(id)` + 0, + 1, + 2 (`eth_getStorageAt`), not through the getter, so
    * the answer does not depend on which implementation the proxy points at. A landing rolled back to
@@ -315,7 +336,9 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * Empty means all three words are zero, which is what `delete parkedTransfers[id]` leaves and what
    * a never-parked id holds. Any non-zero word means held. No single field is used as the marker:
    * the landing itself checks none of them for zero at enqueue (`transfer` accepts any amount and
-   * recipient, and `setDestAsset` accepts source asset 0), so each can be zero in a real entry.
+   * recipient, and `setDestAsset` accepts source asset 0), so each can be zero in a real entry. A
+   * parked entry with source asset 0 can never be paid: `fulfillParked` reverts `NotParked` for it
+   * (BasejumpLanding.sol, `fulfillParked`), so the keeper keeps reporting it as parked, correctly.
    *
    * @param id The queue id.
    * @param blockNumber The block to read at.
@@ -345,7 +368,8 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   }
 
   /**
-   * Reads back every entry below the head, from id 0 in each process, at one block: ids below
+   * Reads back every entry below the head, from id 0 in each process, at one finalized block (see
+   * `finalizedBlock`): the head and the three words of each entry at that same block. Ids below
    * that block's `pendingHead` are past the head there, so an empty `parkedTransfers` slot means
    * paid (`fulfillPending`, `parkPending` or, after a park, `fulfillParked`) and a held one means
    * parked. The slot is read from storage (`readParked`), on every implementation: a landing that
@@ -353,16 +377,20 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * Any failed read (the block, the head, or a word of an entry) stops the scan; it resumes at the
    * same id on the next pass, and that id counts as not read. Never throws.
    *
-   * Bound: "empty means paid" holds while slot 8 is `parkedTransfers` and only a payment clears it,
-   * as in every implementation so far (the pre-upgrade one never writes slot 8). An implementation
-   * that moved the mapping, or cleared an entry without paying it, would read as paid here.
+   * Bound: "empty means paid" holds on three conditions: (1) the read is on the canonical chain,
+   * which reading at the finalized head ensures; (2) slot 8 is `parkedTransfers` with the
+   * (sourceAsset, amount, recipient) word order, pinned by `testParkedEntryStorageLayoutForTheKeeper`;
+   * (3) only a payment clears an entry, as in every implementation so far (the pre-upgrade one never
+   * writes slot 8). An implementation that moved the mapping, or cleared an entry without paying it,
+   * would read as paid here. One false "paid" is accepted: an entry whose three words are all zero
+   * (source asset 0, amount 0, recipient 0) is indistinguishable from empty, and its amount is 0.
    *
    * @param h The `pendingHead` this pass read.
    */
   async function scanParked(h: bigint): Promise<void> {
     if (scanFrom >= h) return;
     try {
-      const blockNumber = await publicClient.getBlockNumber();
+      const blockNumber = await finalizedBlock();
       const headAt = await publicClient.readContract({
         address: landing,
         abi: landingAbi,
@@ -371,7 +399,16 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       });
       for (let n = 0; scanFrom < headAt && n < PARK_SCAN_MAX_PER_PASS; scanFrom++, n++) {
         const entry = await readParked(scanFrom, blockNumber);
-        if (entry) await alertParked(scanFrom, entry, headAt, "");
+        if (entry) {
+          await alertParked(scanFrom, entry, headAt, ownParks.get(scanFrom) ?? "");
+        } else if (leftUnread.has(scanFrom)) {
+          log.info(`queued payout #${scanFrom} paid (head ${headAt} at finalized block ${blockNumber})`);
+          await notify(
+            `OK queued Basejump payout #${scanFrom} paid (head now ${headAt} at finalized block ${blockNumber})`,
+          );
+        }
+        leftUnread.delete(scanFrom);
+        ownParks.delete(scanFrom);
       }
     } catch (e) {
       log.warn(`parked check from #${scanFrom} failed: ${(e as Error).message ?? String(e)}`);
@@ -410,13 +447,10 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
         log.info(`queued payout #${id} paid (head now ${h})`);
         if (head.alerted.size > 0) await notify(`OK queued Basejump payout #${id} paid (head now ${h})`);
       } else {
-        log.info(`queued payout #${id} left the head (head now ${h}); parked state not read`);
-        if (head.alerted.size > 0) {
-          await notify(
-            `OK queued Basejump payout #${id} left the head (head now ${h}); ` +
-              `parkedTransfers(${id}) not read`,
-          );
-        }
+        // Not read at a finalized block yet: the scan posts the all-clear (or the park alert) once
+        // it reads this id there. Nothing is posted until then.
+        log.info(`queued payout #${id} left the head (head now ${h}); parked state not read yet`);
+        if (head.alerted.size > 0) leftUnread.add(id);
       }
       head = undefined;
     }
@@ -584,19 +618,17 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     log.info(`#${h}: ${fn} ${sent.hash} mined`);
     if (fn === "fulfillPending") return true;
 
-    // parkPending succeeded: it either paid the head or parked it. Read which at its own block.
-    // A failed read decides nothing here; the scan reads the id again below a later head.
-    const read = await readParked(h, receipt.blockNumber).then(
-      (entry) => ({ entry }),
-      () => undefined,
-    );
+    // parkPending succeeded: it either paid the head or parked it. Read which at the finalized head,
+    // once that has reached the receipt's block; until then (or on a failed read) the scan reads it
+    // there later and its alert carries this detail. A failed read decides nothing here.
+    const detail =
+      `, by this keeper's parkPending ${sent.hash} with the pool holding ${await describeOr(destAsset, balance)}`;
+    ownParks.set(h, detail);
+    const read = await finalizedBlock()
+      .then(async (at) => (at >= receipt.blockNumber ? { entry: await readParked(h, at) } : undefined))
+      .catch(() => undefined);
     if (read?.entry) {
-      await alertParked(
-        h,
-        read.entry,
-        undefined,
-        `, by this keeper's parkPending ${sent.hash} with the pool holding ${await describeOr(destAsset, balance)}`,
-      );
+      await alertParked(h, read.entry, undefined, detail);
     } else if (read) {
       log.info(`#${h}: parkPending ${sent.hash} paid it`);
     }
