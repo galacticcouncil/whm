@@ -7,8 +7,9 @@ import type { MigrationConfig } from "./types";
  *
  * The receiver calls the landing's four-argument `transfer` (`…, bytes data`); the pool must
  * dispatch exactly that. A landing proxy running an implementation with any other signature
- * reverts on every `completeTransfer`, and no fast-path payout lands. Storage layout is unchanged
- * by the upgrade, and the pool balance and queue are untouched.
+ * reverts on every `completeTransfer`, and no fast-path payout lands. Storage is append-only
+ * across upgrades (slots 0-5 unchanged; the FIFO / park implementation adds slots 6-8 and needs no
+ * initializer), and the pool balance and queue are untouched.
  *
  *   001 deploy BasejumpLanding implementation on Hydration
  *

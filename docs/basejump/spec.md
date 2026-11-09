@@ -49,7 +49,8 @@ BasejumpEmitter
   │    → NttManager 0xeceab645…28fc (BURNING) ─────┘
   │
   └─ FAST (net = gross − assetFee)                BasejumpReceiver
-       wormhole.publishMessage(nonce, payload, 200)   │ landing
+       wormhole.publishMessage(nonce, payload,        │ landing
+         CONSISTENCY_LEVEL)  (Ethereum 200, Base 201) │
        → guardians → relayer (basejump) ──────────────┤
                                                       ▼
                                             IBasejumpLanding.transfer
@@ -70,8 +71,23 @@ Returns `(transferSequence, messageSequence)`.
    it arrives as zero (`ZeroAmountReceived`).
 4. **Settle**: `quoteDeliveryPrice(DEST_CHAIN_ID, hex"00")`, `forceApprove`, then
    `INttManager.transfer{value: price}(actualAmount, DEST_CHAIN_ID, landing)` → `transferSequence`.
-5. **Fast-track**: `_fastTrack` publishes `abi.encode(TransferPayload)` at consistency level
-   **200** → `messageSequence`, and emits `BridgeInitiated`.
+5. **Fast-track**: `_fastTrack` publishes `abi.encode(TransferPayload)` at the implementation's
+   `CONSISTENCY_LEVEL` (**200** on Ethereum, **201** on Base) → `messageSequence`, and emits
+   `BridgeInitiated`.
+
+**Consistency level, per deployment.** `CONSISTENCY_LEVEL` is an `immutable` set by the
+implementation's constructor, which accepts only 200 (instant) or 201 (safe) and reverts on any
+other value. It lives in the implementation's code, not in proxy storage, so the storage layout is
+unchanged and every upgrade chooses the level again through the new implementation's constructor
+argument. In the guardian EVM watcher, 200 is signed at observation and 201 once the block is at or
+below the chain's `safe` head; the constructor accepts no other value (202 would mean finalized, 203
+custom consistency). Both migrations pass the level as a literal, never from the env: `basejump-ethereum`
+passes 200 (the live corridor, unchanged) and `basejump-base` passes 201. The deploy action reads the
+level back from the new implementation, and step 011 refuses to record the arming call unless the
+emitter reports the literal 201. The receiver and landing do not read the level. The deploy action's
+upgrade path does not compare the old and new level, so a future upgrade step (for Ethereum a Safe
+transaction) must check the new implementation's `CONSISTENCY_LEVEL()` against its chain's literal
+(Ethereum 200, Base 201) before it is scheduled.
 
 Settlement precedes publication, and the 3-argument NTT `transfer` overload hardcodes
 `shouldQueue = false`. A rate-limit breach or paused rail therefore reverts the whole call before any
@@ -91,9 +107,20 @@ forwarded.
 
 ### Landing — `transfer(sourceAsset, amount, recipient)`
 
-Resolves `destAssetFor[sourceAsset]`. If the pool balance suffices, dispatches `currencies.transfer`
-through the `0x0401` precompile (pallet 79, call 0; `currencyId = uint32(uint160(destAsset))`);
-otherwise it **queues** a `PendingTransfer` (FIFO), drained by `fulfillPending()`.
+Resolves `destAssetFor[sourceAsset]`. If the pool balance of that asset covers everything already
+reserved for it (`reservedFor[destAsset]`, the queued and parked amounts) plus this amount, it
+dispatches `currencies.transfer` through the `0x0401` precompile (pallet 79, call 0;
+`currencyId = uint32(uint160(destAsset))`); otherwise it **queues** a `PendingTransfer` (FIFO) and
+reserves its amount, drained by `fulfillPending()`. A newer payout therefore never spends liquidity
+an older payout of the same asset waits for, and other assets keep paying directly. While an entry
+queued before this rule existed is at the head (it reserved nothing), every payout queues behind it.
+
+A head the runtime refuses for good (an amount below the asset's existential deposit to an empty
+account) makes `fulfillPending()` revert every time. `parkPending()` (permissionless) pays the head
+if its dispatch succeeds, or else moves it to `parkedTransfers` and advances the head. It refuses
+an unfunded head, and it hands the dispatch a fixed `PARK_DISPATCH_GAS`, so a caller's gas limit
+cannot fail a payable head. A parked entry keeps its reservation and is paid by
+`fulfillParked(id)` (permissionless) once its dispatch succeeds.
 
 The landing takes no `data`. The payload field exists for a future corridor whose `recipient` is a
 contract needing Hydration-side action once funds land — an inbound intent. Reaching a callback
@@ -145,8 +172,12 @@ per-token.
    failure mode where the VAA is consumed but the funds did not move — and so no owner power to
    replay a VAA is needed.
 5. **A shortfall does not revert.** Invariant 4 covers misconfiguration, not an empty pool: the
-   landing queues and consumes the VAA. Nothing calls `fulfillPending()` automatically. Alarm on
-   `pendingTail - pendingHead > 0`.
+   landing queues and consumes the VAA. The `basejump` relayer app calls `fulfillPending()` once
+   the pool covers the head, and alerts when one keeper process has seen the same head wait longer
+   than 30 min (the default; see the relayer README's alert table). A funded head whose dispatch
+   fails it parks with `parkPending()`, and it alerts each parked entry it reads back from
+   `parkedTransfers`. Nothing calls `fulfillParked()` automatically: a parked payout needs a human.
+   Alarm also on a `TransferParked` event.
 6. **Corridor isolation.** The receiver authorizes exactly one emitter per source chain.
 
 ## Configuration
@@ -158,7 +189,7 @@ per-token.
 | Ethereum chain id | `2` |
 | `BasejumpEmitter` (Ethereum) | `0xa72e2bf29c840eb93adbb9ee1aa41580f01c9944` |
 | `BasejumpReceiver` (Hydration) | `0x35bf3a1b9ac564c8f66c97cea1ee410cd3f97c8a` |
-| `BasejumpLanding` (Hydration) | `0x70e9b12c3b19cb5f0e59984a5866278ab69df976` (impl `0x4ea0d58a…e31f`) |
+| `BasejumpLanding` (Hydration) | `0x70e9b12c3b19cb5f0e59984a5866278ab69df976` (impl `0xd04b8996…b1f6` since the 2026-09-17 upgrade; read 2026-11-07) |
 | USDC (Ethereum) | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
 | USDC (Hydration, asset 21) | `0x0000000000000000000000000000000100000015` |
 | NTT manager (Ethereum, LOCKING) | `0x447b2c7485A3d6813F8197E605b10BcCD8dd8398` |
@@ -209,7 +240,8 @@ whose implementation does not match the current source is brought up to it with
 [`basejump-landing-upgrade`](../../migrations/definitions/basejump-landing-upgrade/): it builds,
 checks the artifact against the selector the live receiver calls, deploys the current
 `BasejumpLanding` implementation and records the `upgradeToAndCall` calldata for the TC. Storage
-layout is unchanged, so the pool balance, routes, authorizations and queue carry over. Vet it with
+is append-only (slots 0-5 unchanged; the FIFO / park upgrade added slots 6-8, no initializer), so
+the pool balance, routes, authorizations and queue carry over. Vet it with
 `_probeBasejumpLandingUpgrade.ts --impl <address>`, which enacts the TC motion on a fork and
 replays the real VAAs waiting on the corridor. The `basejump` relayer can run before the motion
 enacts — its retry budget spans days — but a VAA that exhausts it needs a manual replay.
@@ -235,8 +267,9 @@ Two legs, two different needs:
   ([routes.ts](../../agents/relayer/src/apps/basejump/routes.ts)). It does not wait on the source
   tx hash, and retries for days because every failure short of a bad VAA is transient (invariants
   4 and 5), a receiver the TC has not upgraded or armed yet included. A VAA that exhausts the budget
-  parks in the engine's failed queue and needs a manual replay. `fulfillPending()` still needs a
-  keeper.
+  parks in the engine's failed queue and needs a manual replay. The same app pays queued payouts
+  with `fulfillPending()`, and parks a funded head whose dispatch fails with `parkPending()`; it
+  never calls `fulfillParked()` (see the relayer README).
 
 ## Test coverage
 
@@ -244,7 +277,7 @@ Split by what each layer can actually observe.
 
 | Layer | Covers | Notes |
 | --- | --- | --- |
-| [`BasejumpEmitterTest`](../../contracts/test/basejump/BasejumpEmitterTest.sol) | fail-closed settlement, `SettlementRouteNotSet`, disarm-before-pull, delivery-price forwarding, no stale approval | mutation-checked: publishing before settling breaks it |
+| [`BasejumpEmitterTest`](../../contracts/test/basejump/BasejumpEmitterTest.sol) | fail-closed settlement, `SettlementRouteNotSet`, disarm-before-pull, delivery-price forwarding, no stale approval, per-deployment consistency level (201 and 200 reach `publishMessage`, constructor rejects 0, 1, 202, 255) | mutation-checked: publishing before settling breaks it; a hardcoded 200 or a dropped range check breaks the consistency tests |
 | [`BasejumpLandingTest`](../../contracts/test/basejump/BasejumpLandingTest.sol) | pool accounting, queueing, `fulfillPending`, authorization | `0x0401` mocked |
 | [`BasejumpIntegrationTest`](../../contracts/test/integration/BasejumpIntegrationTest.sol) | emitter → receiver → landing, fee split, pool binding, atomicity, replay, queueing | `0x0401` is `vm.mockCall`'d, so **balances do not move here** |
 | [`_probeBasejumpDelivery`](../../chopsticks/probes/_probeBasejumpDelivery.ts) | real message core, real asset-44 precompile, real `0x0401` dispatch, real balance movement, replay, shortfall | Substrate fork |
@@ -296,6 +329,21 @@ step 3 is done.
 Exercised end to end on an Ethereum fork: 10 USDC in settles 10 gross to the landing and publishes
 9.9 net, with `assetFee` 100,000 (0.1 USDC) retained. The settlement logs precede the fast-path
 `LogMessagePublished` in the receipt, which is invariant 2 holding against the real manager.
+
+### Base → Hydration (EURC) — ready, not live
+
+Migration [`basejump-base`](../../migrations/definitions/basejump-base/) deploys both ends (never
+run). The settlement leg exists: Base EURC manager `0xD1dc…d89a` (LOCKING) peers with Hydration's
+`0x8dd1…bc4C` (BURNING, `token()` = asset 44), and the relayer's `ntt` routes carry it. The pool
+does not: referendum #404 unmapped Base EURC and moved the EURC float to USDC, so step 2 is a TC
+motion and step 4 a Treasury referendum. Unlike the Ethereum corridor, the migration leaves the
+emitter **disarmed** (`landing` unset), and the Base TC Safe arms it with `setLanding` only after
+the motion, the float and the relayer route are in place, so no user can send into a corridor that
+cannot yet pay. Its fast path publishes at **safe (201)**, not instant: the VAA is signed only once
+the Base block is in a batch posted to L1, which removes the unsafe-head orphan risk for about a
+minute of extra latency (see [base-eurc.md](base-eurc.md#fast-path-consistency)). Steps 010 and 011 record the motion's landing calls and the Safe's arming call;
+[`_probeBasejumpBaseGoLive`](../../chopsticks/probes/_probeBasejumpBaseGoLive.ts) builds both
+proposals and enacts them on a fork. Checklist and referendum draft: [base-eurc.md](base-eurc.md).
 
 ### Arbitrum → Hydration (USDC) — blocked
 

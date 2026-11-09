@@ -115,9 +115,9 @@ const UNION = `
          COALESCE(b.source_chain, 'ethereum'), b.sender, COALESCE(b.dest_chain, 'hydration'), b.recipient,
          b.source_asset, COALESCE(b.gross_amount, b.net_amount), NULL, b.fee,
          CASE WHEN b.state IN ('completed', 'fulfilled') THEN 'completed'
-              WHEN b.state = 'queued' THEN 'held' ELSE 'pending' END,
+              WHEN b.state IN ('queued', 'parked') THEN 'held' ELSE 'pending' END,
          b.state,
-         ${refs("b.initiated", "b.completed", "b.queued", "b.fulfilled")}
+         ${refs("b.initiated", "b.completed", "b.queued", "b.parked", "b.fulfilled")}
     FROM basejump_transfers b
    WHERE ${validLegs(basejump, "b")}
 `;

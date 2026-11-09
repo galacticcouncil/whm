@@ -14,6 +14,10 @@ const step: MigrationStep = {
       ...ctx.wallet.base,
       wormholeId: Number(required("WORMHOLE_ID_BASE")),
       wormholeCore: required("WORMHOLE_CORE_BASE") as `0x${string}`,
+      // Safe (201): the fast path is signed once the block is under Base's `safe` head. Owner
+      // decision; deliberately not an env value (as Ethereum's literal 200), so no shell or root
+      // .env value can deploy the Base emitter at another level. Step 011 checks the same literal.
+      consistencyLevel: 201,
     });
   },
 };

@@ -78,10 +78,38 @@ event TransferQueued(
 )
 ```
 
-**`PendingTransferFulfilled`** — queued transfer delivered once liquidity arrived.
+**`PendingTransferFulfilled`** — queued transfer delivered once liquidity arrived (by
+`fulfillPending()`, or by `parkPending()` when the head's dispatch succeeded).
 
 ```solidity
 event PendingTransferFulfilled(
+    uint256 indexed id,
+    address indexed sourceAsset,
+    address destAsset,
+    bytes32 recipient,
+    uint256 amount
+)
+```
+
+**`TransferParked`** — `parkPending()` moved the queue head to `parkedTransfers`: the pool held its
+amount but its dispatch failed (e.g. below the asset's existential deposit to an empty account).
+Not paid; still reserved; the queue moves on behind it.
+
+```solidity
+event TransferParked(
+    uint256 indexed id,
+    address indexed sourceAsset,
+    address destAsset,
+    bytes32 recipient,
+    uint256 amount
+)
+```
+
+**`ParkedTransferFulfilled`** — `fulfillParked(id)` paid a parked transfer. Nothing calls it
+automatically: a parked payout needs a human.
+
+```solidity
+event ParkedTransferFulfilled(
     uint256 indexed id,
     address indexed sourceAsset,
     address destAsset,
@@ -98,11 +126,17 @@ delivery is one atomic call on Hydration, so they never appear apart. Ordering:
 1. `BridgeInitiated` on the source — transfer started
 2. `TransferProcessed` on Hydration — fast-path VAA verified
 3. `TransferExecuted` **or** `TransferQueued`, same tx as (2) — delivery outcome
-4. (if queued) `PendingTransferFulfilled` — delivered after settlement replenished the pool
+4. (if queued) `PendingTransferFulfilled` — delivered after settlement replenished the pool, **or**
+   `TransferParked` — moved off the head unpaid because its dispatch failed
+5. (if parked) `ParkedTransferFulfilled` — delivered by `fulfillParked(id)`
+
+All of 4 and 5 carry the queue `id` from `TransferQueued`, which is how they join (namespaced by
+the landing's address).
 
 A revert anywhere in (2)–(3) unwinds both, so a `TransferProcessed` without an outcome event in the
-same transaction cannot happen. `TransferQueued` is the case to alarm on: the VAA is consumed and
-nothing drains the queue automatically.
+same transaction cannot happen. `TransferQueued` means the VAA is consumed and the payout waits on the pool; the `basejump`
+relayer pays it (see the relayer README). `TransferParked` is the case to alarm on: nothing calls
+`fulfillParked` automatically.
 
 ## Correlation
 
@@ -120,7 +154,8 @@ nothing drains the queue automatically.
 | `processed` | `TransferProcessed` seen                         |
 | `completed` | `TransferExecuted` seen                          |
 | `queued`    | `TransferQueued` seen                            |
-| `fulfilled` | `PendingTransferFulfilled` seen (after `queued`) |
+| `parked`    | `TransferParked` seen (after `queued`); outranks `queued`, status `held` |
+| `fulfilled` | `PendingTransferFulfilled` or `ParkedTransferFulfilled` seen (after `queued`); outranks `parked` |
 
 ## Notes
 

@@ -27,7 +27,8 @@ const REPO_CONTEXT =
   'truncating, trimming to 8 decimals. Dependency source you MAY Read: contracts/src/ntt/, ' +
   'contracts/src/utils/, contracts/src/*/interfaces/, contracts/test/, contracts/dependencies/. ' +
   'DESIGN DECISIONS — do NOT report these as findings: consistency level 200 (instant publish is ' +
-  'deliberate and reorg exposure is accepted risk, bounded by the NTT outbound rate limit); a ' +
+  'deliberate and reorg exposure is accepted risk, bounded by the NTT outbound rate limit), and 201 ' +
+  '(safe) for the Base BasejumpEmitter, whose level is a per-deployment constructor immutable; a ' +
   'permissionless OracleEmitter.send (the caller triggers a read and cannot choose its result); ' +
   'permissionless relaying generally; renouncing receiver ownership as the prod end-state.'
 

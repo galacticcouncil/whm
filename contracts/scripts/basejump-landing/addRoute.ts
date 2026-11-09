@@ -11,8 +11,8 @@ import basejumpLandingJson from "../../out/BasejumpLanding.sol/BasejumpLanding.j
 // sourceAsset -> destAsset. Both are onlyOwner (Hydration TC). Prints calldata by default;
 // --send submits directly (requires the owner key via PK_LANDING / PK / --pk).
 //
-// The bridge is the BasejumpReceiver — one receiver serves every corridor, so it is authorized
-// once, not per corridor.
+// The bridge is the corridor's own BasejumpReceiver: one receiver per corridor, so each corridor
+// authorizes its own (docs/basejump/spec.md, "Adding a corridor").
 
 const { optionalArg, requiredEnv } = args;
 const { getWallet } = wallet;

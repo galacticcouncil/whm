@@ -11,12 +11,22 @@ import type { Next, RelayerCtx } from "../../types";
 import {
   APP_NAME,
   FROM_SEQUENCE,
+  QUEUED_PAYOUT_ALERT_MS,
+  QUEUED_PAYOUT_MAX_PER_RUN,
+  QUEUED_PAYOUT_POLL_MS,
+  QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS,
+  QUEUED_PAYOUT_SCAN_STALL_MS,
   RETRIES,
   RETRY_BASE_MS,
   RETRY_MAX_MS,
   RPC_HYDRATION,
 } from "./config";
-import { ROUTES, type BasejumpRoute } from "./routes";
+import { createPayoutKeeper, discordNotifier, landingsOf } from "./payouts";
+import { ROUTES as ALL_ROUTES, isDeployed, type BasejumpRoute } from "./routes";
+
+// A corridor whose migration has not run has no emitter to subscribe to. Skipped, loudly, rather
+// than refusing to start: refusing would also stop the corridors that are live.
+const ROUTES = ALL_ROUTES.filter(isDeployed);
 
 // `completeTransfer` is a thin alias over the inherited public `receiveMessage`; submitting the
 // latter keeps the shared Hydration helper. Errors declared so a revert is logged by name — the
@@ -39,21 +49,48 @@ const transferPayload = parseAbiParameters(
  * Relays Basejump fast-path VAAs into Hydration. Each corridor's emitter publishes a net payout
  * instruction; its own BasejumpReceiver verifies the emitter and pays out of the shared landing in
  * one call. A landing revert unwinds the VAA, so a retry is always safe.
+ *
+ * A landing short of float queues the payout instead. The same wallet then pays queued payouts as
+ * soon as the pool covers them (payouts.ts), after every delivery and on a timer.
  */
 async function start(): Promise<void> {
   const clients = await hydrationClients(RPC_HYDRATION, privateKey());
   const { account, publicClient } = clients;
 
+  const alerting = alerts();
   const queue = createQueue({
     publicClient,
     account,
-    ...alerts(),
+    ...alerting,
   });
 
   const nonce = await queue.init();
   logger.info(`  account: ${account.address} (nonce ${nonce})`);
   for (const route of ROUTES) {
     logger.info(`  ${route.source} ${route.sourceEmitter} -> ${route.receiver}`);
+  }
+  for (const route of ALL_ROUTES.filter((r) => !isDeployed(r))) {
+    logger.warn(`  ${route.source} NOT RELAYED: addresses not filled in routes.ts`);
+  }
+
+  // Queued payouts go through the app's send queue, so they never use a delivery's nonce. They do
+  // compete with deliveries for the float; payouts.ts retries a call that loses that race.
+  const keepers = (await landingsOf(clients, ROUTES.map((r) => r.receiver))).map((landing) => {
+    logger.info(`  queued payouts: landing ${landing}, every ${QUEUED_PAYOUT_POLL_MS / 1000}s`);
+    return createPayoutKeeper({
+      clients,
+      queue,
+      landing,
+      alertAfterMs: QUEUED_PAYOUT_ALERT_MS,
+      maxPerRun: QUEUED_PAYOUT_MAX_PER_RUN,
+      receiptTimeoutMs: QUEUED_PAYOUT_RECEIPT_TIMEOUT_MS,
+      scanStallAfterMs: QUEUED_PAYOUT_SCAN_STALL_MS,
+      notify: discordNotifier(alerting.discordWebhook),
+    });
+  });
+  for (const keeper of keepers) {
+    keeper.start(QUEUED_PAYOUT_POLL_MS);
+    void keeper.poke();
   }
 
   async function handle(route: BasejumpRoute, ctx: RelayerCtx, next: Next): Promise<void> {
@@ -74,6 +111,9 @@ async function start(): Promise<void> {
       logger: log,
       submit: (n) => receiveMessage(clients, receiverAbi, route.receiver, vaa.bytes, n),
     });
+    // A delivery may have queued its payout, or the pool may have been refilled since the last
+    // pass. Not awaited: the keeper never throws, and the delivery's job is already done.
+    for (const keeper of keepers) void keeper.poke();
     return next();
   }
 

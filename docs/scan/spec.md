@@ -58,7 +58,7 @@ chains registry ─→ one watcher per chain ─→ raw `events` table ─→ si
 - `cursors (chain, block_number)` — per-chain ingestion watermark.
 
 **Features own their tables** (created in their `initSchema()`), keyed by a correlation id, advancing monotonically through states:
-- basejump → `transfers` (PK `id`), states `initiated → queued/completed → fulfilled`.
+- basejump → `transfers` (PK `id`), states `initiated → queued/completed → parked → fulfilled` (`parked` only after `queued`).
 - intents → `intents` (PK `intent_id`), states `emitted → published → forwarded`.
 
 ## Chains
@@ -72,8 +72,9 @@ are added with one `evmChain(...)` line + `<PREFIX>_RPC_URL` / `<PREFIX>_START_B
 ### basejump
 
 Source `BridgeInitiated` on EVM chains → landing `TransferExecuted` / `TransferQueued` /
-`PendingTransferFulfilled`. Correlation: deliveries match the oldest un-delivered source by
-`(source_asset, recipient, net_amount)`; queued→fulfilled match by `pending_id`. Orphan deliveries
+`PendingTransferFulfilled` / `TransferParked` / `ParkedTransferFulfilled`. Correlation: deliveries
+match the oldest un-delivered source by `(source_asset, recipient, net_amount)`; queued→parked and
+→fulfilled match by `pending_id`. Orphan deliveries
 (no source yet) get an `orphan-…` id. **Moonbeam hop is intentionally not indexed** — `BridgeInitiated`
 is emitted in the same tx as the Wormhole `LogMessagePublished`, and the source already records
 `message_sequence`, so the proxy leg adds nothing (VAA has instant finality).

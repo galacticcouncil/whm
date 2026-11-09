@@ -5,8 +5,9 @@
  *
  * The receiver calls the landing's four-argument `transfer(address,uint256,bytes32,bytes)`; the
  * live pool dispatches only the three-argument form (0x57cfeeee), so every `completeTransfer`
- * reverts inside the pool. The landing's storage layout is unchanged by the upgrade: the pool
- * balance, routes, authorizations and queue carry over untouched.
+ * reverts inside the pool. The upgrade keeps storage slots 0-5 and appends 6-8 (`reservedFor`,
+ * `reservedAssetOf`, `parkedTransfers`, the FIFO / park upgrade): the pool balance, routes,
+ * authorizations and queue carry over untouched, and the new slots start empty.
  *
  * Owner of the proxy is `0xAA7e…AA7E1`, the runtime's EmergencyAdminAccount. `EmergencyAdminOrigin`
  * is `EitherOf<EnsureRoot, TechCommitteeMajority>`, so the call is a TC motion, not a referendum:
@@ -21,7 +22,7 @@
  *   3. replay VAA seq 0 against the pool as deployed → must revert
  *   4. enact the dispatcher call from a `TechnicalCommittee.Members(threshold, n)` origin via the
  *      scheduler, assert `Upgraded`, assert the ERC1967 slot, assert pool state unchanged
- *   5. replay every fixture VAA → all must pay
+ *   5. replay every fixture VAA → all must pay; nothing queued, parked or reserved after
  *
  *   npx tsx chopsticks/probes/_probeBasejumpLandingUpgrade.ts [--impl <address>] [--root]
  *
@@ -104,6 +105,11 @@ const LANDING_ABI = parseAbi([
   "function destAssetFor(address) view returns (address)",
   "function pendingHead() view returns (uint256)",
   "function pendingTail() view returns (uint256)",
+  "function reservedFor(address) view returns (uint256)",
+  "function parkedTransfers(uint256) view returns (address sourceAsset, uint256 amount, bytes32 recipient)",
+  "function PARK_DISPATCH_GAS() view returns (uint256)",
+  "function parkPending()",
+  "function fulfillParked(uint256 id)",
 ]);
 const RECEIVER_ABI = parseAbi([
   "function processedVaas(bytes32) view returns (bool)",
@@ -114,6 +120,9 @@ const TOPICS: Record<string, string> = {
   "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b": "Upgraded",
   "0x975e82bfde4922e2ce69ecae9a999f21616c5511424de460faee50bfaea5da02": "TransferExecuted",
   "0xf2770afbd8ca70ed04ee6d74687d59e173c6b48585241f5fef3bf03f61aa6149": "TransferQueued",
+  "0xff678153c17ddc90f5ed7be1231bb3f01b69fbd37939d7da7a972ab9eb9e4a26": "PendingTransferFulfilled",
+  "0x466e9dd7c05668ca46f38aa06749afa6bc46518e4052dae1dff2d4b2d8a14647": "TransferParked",
+  "0x321bd937e3c30216bd276ba07ff1cc58a9748a22e80ba606f72bb070e0c42c69": "ParkedTransferFulfilled",
   "0x35b9c14063e796b0ea3be322495ccdd9c07dcad47b1298400a98fbdbd150f66d": "TransferProcessed",
 };
 
@@ -428,6 +437,9 @@ async function main(): Promise<void> {
     record("USDC route unchanged", (await readLanding<Hex>("destAssetFor", [ETH_USDC])).toLowerCase() === stateBefore.usdcRoute.toLowerCase());
     record("queue unchanged", (await readLanding<bigint>("pendingHead")) === stateBefore.pendingHead && (await readLanding<bigint>("pendingTail")) === stateBefore.pendingTail);
     record("pool balance unchanged", (await tokenBalance(landingSub, USDC_ASSET_ID)) === stateBefore.pool);
+    const parkGas = await readLanding<bigint>("PARK_DISPATCH_GAS");
+    record("new impl answers PARK_DISPATCH_GAS (500000)", parkGas === 500_000n, parkGas.toString());
+    record("reservedFor[USDC] starts at 0", (await readLanding<bigint>("reservedFor", [USDC_PRECOMPILE])) === 0n);
 
     // ── 5. every waiting VAA now pays ──
     console.log(`\n── 5. Pool on current code (impl ${impl}) ──`);
@@ -435,6 +447,14 @@ async function main(): Promise<void> {
     const pendingHead = await readLanding<bigint>("pendingHead");
     const pendingTail = await readLanding<bigint>("pendingTail");
     record("nothing queued", pendingHead === pendingTail, `${pendingHead}/${pendingTail}`);
+    const reserved = await readLanding<bigint>("reservedFor", [USDC_PRECOMPILE]);
+    record("nothing reserved for USDC", reserved === 0n, reserved.toString());
+    const parkedIds: bigint[] = [];
+    for (let id = stateBefore.pendingHead; id < pendingHead; id++) {
+      const [src] = await readLanding<[Hex, bigint, Hex]>("parkedTransfers", [id]);
+      if (src.toLowerCase() !== "0x0000000000000000000000000000000000000000") parkedIds.push(id);
+    }
+    record("nothing parked", parkedIds.length === 0, parkedIds.join(","));
 
     const failed = results.filter((r) => !r.ok);
     console.log(

@@ -71,6 +71,73 @@ A landing revert unwinds the VAA, so a retry is always safe; a pool shortfall qu
 reverting, so the only failures are transient and the retry budget is sized in hours. Latency is the
 point, so it does not wait on Wormholescan for the source tx hash.
 
+**Queued payouts.** When the landing's float is short, the payout queues instead of paying. The app
+then pays it from the same wallet ([payouts.ts](src/apps/basejump/payouts.ts)): after each delivery
+and every `QUEUED_PAYOUT_POLL_SECONDS`, it reads the queue head, the head's amount and the pool's
+balance of that asset, and calls `fulfillPending()` only when the pool covers it and a simulation
+passes. That call takes no arguments and pays the head to the recipient stored on chain. The landing
+is read from each route's receiver, not configured.
+
+**Parking.** When the pool covers the head but the `fulfillPending` simulation reverts
+`DispatchFailed` (the runtime refuses the transfer itself, e.g. an amount below the asset's
+existential deposit to an empty account), the keeper simulates and sends `parkPending()` instead.
+It also takes no arguments: it pays the head if its dispatch succeeds (fixed gas stipend), otherwise
+moves it to `parkedTransfers`, still reserved, and advances the head; it refuses an unfunded head
+([BasejumpLanding.sol](../../contracts/src/basejump/BasejumpLanding.sol)). The keeper checks the
+pool before it and never parks an unfunded head. A park ends the run. These two are the only calls
+this adds. **A parked payout needs a human:** the keeper never calls `fulfillParked(id)`; anyone
+can, once the cause is fixed (e.g. the recipient's account is funded), with
+`contracts/scripts/basejump-landing/fulfillPending.ts --proxy <landing> --fulfill-parked <id>`
+([script](../../contracts/scripts/basejump-landing/fulfillPending.ts)). On a landing without
+`parkPending` the simulation reverts and the keeper sends nothing for that head.
+
+After a `fulfillPending` whose own receipt shows success, the same run continues with the new head,
+so a funded backlog clears in one run rather than one payout per poll, up to
+`QUEUED_PAYOUT_MAX_PER_RUN` payouts per round (a poke arriving mid-round starts the next round at once; default 10, integer 1 to 100, validated at startup; the rest
+waits for the next poll). Any other outcome (pool short, simulated revert, revert on chain, no
+receipt, replaced transaction, a stale head read, a `parkPending` sent) ends the run exactly as before.
+
+While the pool is short or the simulation reverts (other than a parkable `DispatchFailed`), nothing
+is sent for the head. Every entry below the head, from id 0 in each process, is read back from
+`parkedTransfers` at one **finalized** block whose `pendingHead` is past it (up to 100 per poll);
+the head and the entry's words are read at that same block. Sends and dry runs stay at the latest
+block. Reading at the finalized head means a block that is later retracted can never produce
+"paid", at the cost of a delay: an all-clear or a park alert comes about 16-19 blocks (about 2 min)
+after the head moves (finalized lagged latest by 16 and 19 blocks, measured 2026-11-09 on
+rpc.hydradx.cloud). The keeper's own park is alerted at a finalized block at or after its
+receipt's: at once when the finalized head has already reached that block, else by the scan. While
+the finalized head (or an entry) cannot be read, nothing is read back: no park alert, the keeper's
+own included, and no all-clear, until the scan resumes. That stall is itself alerted once after
+`QUEUED_PAYOUT_SCAN_STALL_MINUTES` (default 15, an integer from 5 to 1440; it must stay well above
+the finalized lag). The stall state is in process memory: a crash loop that restarts faster than
+the stall time posts nothing (the restarts are the signal), and a process restarted after a stall
+WARN posts the park alert once it reads the entry, but no "resumed" OK for the old WARN. The entry is read from the landing's storage, not
+through the getter: the three words at
+`keccak256(abi.encode(id, 8)) + 0, 1, 2` (`parkedTransfers` is storage slot 8; source asset, amount,
+recipient), so the answer is the same on every implementation, including one rolled back to before
+the park upgrade after an entry was parked. All three words zero is empty (paid); any non-zero word
+is parked. Any failed read (the block, the head, or any word) counts as not read, and the same id
+is read again on the next poll. Bound: "empty means paid" holds while (1) the read is on the
+canonical chain (the finalized head), (2) slot 8 stays `parkedTransfers` with its (source asset,
+amount, recipient) word order (pinned by `testParkedEntryStorageLayoutForTheKeeper`), and (3) only
+a payment clears an entry, as in every landing implementation so far; an implementation that
+cleared an entry without paying it would read as paid. An entry whose three words are all zero
+reads as empty; its amount is 0. A parked entry with source asset 0 can never be paid
+(`fulfillParked` reverts `NotParked` for it), and the keeper keeps it as parked.
+Alerts, with
+`T` = `QUEUED_PAYOUT_ALERT_MINUTES` (default 30):
+
+| Alert | Trigger | First post | Repeat | Clear |
+| --- | --- | --- | --- | --- |
+| Head `waiting` (`WARN ... head-blocking for N min`) | the same entry is at the head while the pool is short, the simulation reverts (`parkPending`'s too, when tried), or the keeper's sent call has no receipt | when it has been at the head for `T`, counted from when this process first saw it there | never for that entry | when the head moves past it: `OK ... paid` once its `parkedTransfers` slot reads empty at a finalized block past it (at once if already read, else from the scan, about 19 blocks later); nothing while it is not read (a failed read is retried each poll and never yields `paid`); nothing if it was parked (the parked alert instead) |
+| Head `reverting` (`WARN ... head-blocking for N min`) | 3 of the keeper's calls for that entry simulated clean, then reverted on chain; no clock | at the 3rd revert | never for that entry; sending for it pauses `T`, then `2T`, `4T` ... up to 6 h (or `T` if longer), each time 3 more calls revert | as for `waiting` |
+| Parked (`WARN ... parked on landing`) | an entry is found in `parkedTransfers` at a finalized block: for the keeper's own successful `parkPending`, at a finalized block at or after its receipt's, or (anyone's park, or its own when the finalized head had not reached the receipt yet) when the scan reads it back below the head; the message gives the amount, the recipient, the head at the read (scan only), and for its own park the transaction and the pool balance it saw | when read: about 16-19 blocks after the park, later while the parked check is stalled | never for that entry in this process | never: nothing posts when `fulfillParked` pays it, and the keeper never calls `fulfillParked`. Recovery: `fulfillPending.ts --fulfill-parked <id>` (above) |
+| Parked, at startup (same message) | an entry still in `parkedTransfers` when a new process reads from id 0 | at its first read in that process | never for that entry in this process | as for Parked |
+| Parked check stalled (`WARN ... parked check ... stalled at #N`) | the read-back scan stays at the same id below the latest head without advancing (the finalized head or an entry cannot be read, or the finalized head stops moving); every park alert and all-clear from that id on is held meanwhile; the message gives the id, the minutes, the latest head and the last reason | when it has stayed for `QUEUED_PAYOUT_SCAN_STALL_MINUTES` (default 15) | never while that stall lasts (a new stall at a later id alerts again) | `OK ... parked check ... resumed` when the scan advances (a latest-head read at or below the scan, a stale answer, clears nothing) |
+| Backlog (`WARN ... backlog`) | the oldest entry's age, counted from when this process first saw it queued; the message gives the age, the queue depth and the next re-alert age | at age `T`, unless a head alert is out for that entry | posted again at age `2T`, `4T`, `8T` ... while out (one post per jump past several), unless a head alert is out for that entry | `OK ... backlog cleared` when the queue is empty or the oldest age is below `T/2` |
+
+All alert state is in process memory; a restart forgets it all.
+
 ### `psm-hydration` and `psm-base`
 
 Relays the HOLLAR peg stability module's two legs ([docs/psm/spec.md](../../docs/psm/spec.md)) — one
@@ -113,7 +180,11 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | `REDIS_HOST`          | Redis host                                        | `localhost`                           |
 | `REDIS_PORT`          | Redis port                                        | `6379`                                |
 | `WORMHOLE_API_KEY`    | Wormholescan API key (raises rate limit)          | optional                              |
-| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts                       | optional                              |
+| `DISCORD_WEBHOOK_URL` | Low-gas / out-of-gas alerts; `basejump` also queued payouts | optional                    |
+| `QUEUED_PAYOUT_POLL_SECONDS` | How often `basejump` checks the landing's queue | `60`                           |
+| `QUEUED_PAYOUT_ALERT_MINUTES` | Alert once when a queued payout waits longer, at the head or in the backlog (`basejump`) | `30` |
+| `QUEUED_PAYOUT_MAX_PER_RUN` | Most payouts one keeper run sends before the next poll (`basejump`) | `10`                    |
+| `QUEUED_PAYOUT_SCAN_STALL_MINUTES` | Alert once when the parked read-back has not advanced for this long (`basejump`; integer 5 to 1440) | `15` |
 | `GAS_WARN_MULTIPLIER` | Warn below this multiple of one submission's cost | `50`                                  |
 | `FROM_SEQ_<CHAIN>`    | Cold-start floor per chain — **see below**        | `0`                                   |
 | `LOG_LEVEL`           | winston level                                     | `info`                                |

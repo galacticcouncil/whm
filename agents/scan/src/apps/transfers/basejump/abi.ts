@@ -15,6 +15,17 @@ export const TransferQueuedEvt = parseAbiItem(
   "event TransferQueued(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount)",
 );
 
+/** Hydration landing — a queued payout paid (by `fulfillPending`, or by `parkPending` when its dispatch succeeded). */
 export const PendingTransferFulfilledEvt = parseAbiItem(
   "event PendingTransferFulfilled(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount)",
+);
+
+/** Hydration landing — `parkPending` moved the queue head aside: the pool held it, its dispatch failed. */
+export const TransferParkedEvt = parseAbiItem(
+  "event TransferParked(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount)",
+);
+
+/** Hydration landing — `fulfillParked` paid a parked payout. */
+export const ParkedTransferFulfilledEvt = parseAbiItem(
+  "event ParkedTransferFulfilled(uint256 indexed id, address indexed sourceAsset, address destAsset, bytes32 recipient, uint256 amount)",
 );
