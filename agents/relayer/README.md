@@ -97,7 +97,9 @@ receipt, replaced transaction, a stale head read, a `parkPending` sent) ends the
 
 While the pool is short or the simulation reverts (other than a parkable `DispatchFailed`), nothing
 is sent for the head. Each entry that leaves the head while the process runs is read back from
-`parkedTransfers` at one block whose `pendingHead` is past it. Alerts, with
+`parkedTransfers` at one block whose `pendingHead` is past it; on a landing without
+`parkedTransfers` (before the FIFO / park upgrade) that read reverts, and the entry counts as paid,
+since such a landing moves its head only by paying. Alerts, with
 `T` = `QUEUED_PAYOUT_ALERT_MINUTES` (default 30):
 
 | Alert | Trigger | First post | Repeat | Clear |

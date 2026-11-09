@@ -13,8 +13,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { ContractFunctionRevertedError } from "viem";
+
 import logger from "../../logger";
-import { createPayoutKeeper } from "./payouts";
+import { createPayoutKeeper, landingAbi } from "./payouts";
 
 logger.silent = true;
 
@@ -86,6 +88,10 @@ function world() {
         case "pendingTransfers":
           return [SRC, w.amounts.get(args[0]) ?? 0n, "0x" + "11".repeat(32)];
         case "parkedTransfers":
+          // A landing without the park upgrade has no such getter: the node executes and reverts.
+          if (!w.parkable) {
+            throw new ContractFunctionRevertedError({ abi: landingAbi, functionName: "parkedTransfers", data: "0x" });
+          }
           return w.parked.has(args[0])
             ? [SRC, w.parked.get(args[0])!, "0x" + "11".repeat(32)]
             : ["0x0000000000000000000000000000000000000000", 0n, "0x" + "00".repeat(32)];
@@ -847,7 +853,7 @@ test("P5 a head that left with an alert out, parkedTransfers unreadable: OK says
   for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
   const real = e.clients.publicClient.readContract;
   e.clients.publicClient.readContract = async (q: any) => {
-    if (q.functionName === "parkedTransfers") throw new Error("rpc down");
+    if (q.functionName === "parkedTransfers") throw new Error("rpc down"); // not an executed revert
     return real(q);
   };
   e.w.pool = 2_000_000n;

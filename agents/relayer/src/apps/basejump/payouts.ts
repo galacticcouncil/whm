@@ -1,4 +1,12 @@
-import { formatUnits, parseAbi, zeroAddress, type Address, type Hash } from "viem";
+import {
+  BaseError,
+  ContractFunctionRevertedError,
+  formatUnits,
+  parseAbi,
+  zeroAddress,
+  type Address,
+  type Hash,
+} from "viem";
 
 import { submit, type ChainClients } from "../../clients/hydration";
 import type { Queue } from "../../engine/queue";
@@ -31,6 +39,18 @@ export const landingAbi = parseAbi([
 
 /** The landing writes this keeper sends. */
 type Write = "fulfillPending" | "parkPending";
+
+/**
+ * Whether the node executed the call and it reverted (as opposed to a transport or RPC failure).
+ * `parkedTransfers` is a public mapping getter on a landing that has it, which cannot revert; a
+ * landing from before the FIFO / park upgrade has no such function, so the call reverts there.
+ */
+function executedRevert(e: unknown): boolean {
+  return (
+    e instanceof BaseError &&
+    e.walk((x) => x instanceof ContractFunctionRevertedError) instanceof ContractFunctionRevertedError
+  );
+}
 
 const erc20Abi = parseAbi([
   "function balanceOf(address who) view returns (uint256)",
@@ -273,7 +293,9 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * Reads back every entry that left the head since the last scan, at one block: ids below that
    * block's `pendingHead` are past the head there, so an empty `parkedTransfers` slot means paid
    * (`fulfillPending`, `parkPending` or, after a park, `fulfillParked`) and a full one means parked.
-   * A failed read stops the scan; it resumes at the same id on the next pass. Never throws.
+   * A read the node executes and reverts means the landing has no `parkedTransfers` (it predates
+   * parking), and such a landing advances its head only by paying, so that entry counts as paid.
+   * Any other failed read stops the scan; it resumes at the same id on the next pass. Never throws.
    *
    * @param h The `pendingHead` this pass read.
    */
@@ -292,14 +314,19 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
         blockNumber,
       });
       for (; scanFrom < headAt; scanFrom++) {
-        const entry = await publicClient.readContract({
-          address: landing,
-          abi: landingAbi,
-          functionName: "parkedTransfers",
-          args: [scanFrom],
-          blockNumber,
-        });
-        if (entry[0] !== zeroAddress) await alertParked(scanFrom, entry, headAt, "");
+        const entry = await publicClient
+          .readContract({
+            address: landing,
+            abi: landingAbi,
+            functionName: "parkedTransfers",
+            args: [scanFrom],
+            blockNumber,
+          })
+          .catch((e) => {
+            if (executedRevert(e)) return undefined; // no parking on this landing: paid
+            throw e;
+          });
+        if (entry && entry[0] !== zeroAddress) await alertParked(scanFrom, entry, headAt, "");
       }
     } catch (e) {
       log.warn(`parked check from #${scanFrom} failed: ${(e as Error).message ?? String(e)}`);
