@@ -178,19 +178,21 @@ export function discordAlert(webhook: string | undefined, log: typeof logger) {
  * queue submit, and `submit` simulates before it spends a nonce.
  *
  * Never a blind retry: a throw hands the job back to the engine, and the retry starts again from
- * the reads, so a transaction that landed after all reads as done. Sends whose receipt never came
- * (a receipt wait that timed out) stay in `opts.sent`, and the retry looks at those hashes first: a
- * receipt for any of them is the outcome; while the node asked still knows one, the retry throws and
- * sends nothing; when the node asked knows none of them, the retry reads and may send again. That
- * is one node's view: behind a load balancer a send another node still holds can be sent again. On
- * a queue that holds its nonce until a receipt (whm#39) that second send is at the same nonce and
- * only one can mine; on a queue that moves on at broadcast it is at a later nonce, where the
- * transceiver reverts it on the consumed VAA (gas spent, never a second payment).
+ * the reads, so a transaction that landed after all reads as done. Sends without a known outcome
+ * (the queue rejected after a send, or a receipt wait here timed out) stay in `opts.sent`, and the
+ * retry looks at those hashes first: a receipt for any of them is the outcome; while the node asked
+ * still knows one, the retry throws and sends nothing; when the node asked knows none of them, the
+ * retry reads and may send again. That is one node's view: behind a load balancer a send another
+ * node still holds can be sent again. The queue holds its nonce until a send at it is known mined
+ * (`engine/queue.ts`), so that second send is at the same nonce, or after that nonce was spent, and
+ * only one can mine.
  *
- * The queue's own receipt, when it returns one (whm#39's queue), is the outcome; a queue that
- * returns nothing (resolves at broadcast) is followed by a wait on this pass's last send. A receipt
- * counts as this delivery's when its hash is any of the hashes this pass sent; any other (a
- * replacement by a transaction we did not send) throws.
+ * The queue resolves with the receipt of a transaction this task sent, and that receipt is the
+ * outcome. It resolves with no receipt when the simulate said the work is done: with nothing sent,
+ * the state is read again; after a repeat send simulated as done, an earlier send at the held nonce
+ * may still mine, so this pass waits on its last send. A receipt counts as this delivery's when its
+ * hash is any of the hashes this pass sent; any other (a replacement by a transaction we did not
+ * send) throws.
  *
  * The verdict after a receipt comes from the receipt: the manager's `InboundTransferQueued(digest)`
  * in its logs is `queued`, its `TransferRedeemed(digest)` is `delivered`, and a successful receipt
@@ -392,8 +394,7 @@ export async function deliverOutbound(
   }
 
   const mine: Hash[] = [];
-  // Typed `unknown`: master's queue resolves with nothing, whm#39's with the receipt.
-  const out: unknown = await queue.add({
+  const out = await queue.add({
     label: `${route.token} transfer to Base`,
     logger: log,
     submit: async (n) => {
@@ -404,9 +405,9 @@ export async function deliverOutbound(
     },
   });
 
-  if (out !== undefined && out !== null && typeof out === "object" && "transactionHash" in out) {
+  if (out) {
     // The queue held its nonce until this receipt and checked it is one of ours.
-    return settled(out as TransactionReceipt, mine);
+    return settled(out, mine);
   }
 
   if (mine.length === 0) {
@@ -422,9 +423,10 @@ export async function deliverOutbound(
     throw new Error(`ntt-base ${route.token}: not sent and not delivered`);
   }
 
-  // A queue that resolved at broadcast (or after a repeat send simulated as done): wait on the last
-  // send; viem follows a same-nonce replacement, and `settled` accepts any of our own hashes. A
-  // throw here (a receipt wait that timed out) leaves every send in `opts.sent` for the retry.
+  // The queue resolved with no receipt after a send: a repeat send at the held nonce simulated as
+  // done, and an earlier send there may still mine. Wait on the last send; viem follows a
+  // same-nonce replacement, and `settled` accepts any of our own hashes. A throw here (a receipt
+  // wait that timed out) leaves every send in `opts.sent` for the retry.
   const receipt = await publicClient.waitForTransactionReceipt({ hash: mine[mine.length - 1] });
   return settled(receipt, mine);
 }

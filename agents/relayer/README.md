@@ -31,8 +31,8 @@ address that cannot send a transaction itself.
   is kept in memory (every hash sent for the transfer), and the retry looks at those hashes first: a
   receipt for any of them is the outcome; while the node asked still knows one, nothing is read or
   sent; when it knows none (dropped, or a node behind a load balancer that never saw it), the retry
-  reads and may send again. Run it with the queue that holds its nonce until a receipt (whm#39), so
-  such a repeat goes out at the same nonce.
+  reads and may send again. The queue holds its nonce until a send is known mined ([The nonce
+  lane](#the-nonce-lane)), so such a repeat goes out at the same nonce, or after that nonce was spent.
 - After a receipt, the manager's own event in that receipt is the verdict: `TransferRedeemed` is
   delivered, `InboundTransferQueued` is queued, and a receipt with neither is retried. Every state
   read is pinned to one block (the receipt's, or the node's current block before a send), so a

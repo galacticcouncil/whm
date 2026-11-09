@@ -111,12 +111,16 @@ interface Reads {
 
 function harness(opts: {
   reads?: Reads;
+  /** `waitForTransactionReceipt`; a reject there under the default queue is the queue rejecting after a send. */
   wait?: (hash: Hash) => Promise<TransactionReceipt>;
   receipts?: Record<Hash, TransactionReceipt>;
   pending?: Hash[];
   sent?: SentLedger;
-  /** The queue's `add`; default: master's shape (one submit at 7, resolves with nothing). */
-  add?: (task: { submit: (n: number) => Promise<Hash> }) => Promise<unknown>;
+  /**
+   * The queue's `add`; default: the nonce lane's shape, one submit at 7, then the queue's own wait
+   * for that send's receipt, which it resolves with (counted in `waits`).
+   */
+  add?: (task: { submit: (n: number) => Promise<Hash> }) => Promise<TransactionReceipt | undefined>;
 }) {
   const r = opts.reads ?? {};
   const calls: { fn: string; at: string }[] = [];
@@ -166,7 +170,10 @@ function harness(opts: {
     account: { address: `0x${"11".repeat(20)}` },
   } as unknown as ChainClients;
   const queue = {
-    add: opts.add ?? (async (task: { submit: (n: number) => Promise<Hash> }) => void (await task.submit(7))),
+    add:
+      opts.add ??
+      (async (task: { submit: (n: number) => Promise<Hash> }) =>
+        publicClient.waitForTransactionReceipt({ hash: await task.submit(7) })),
   } as unknown as Queue;
   const alerts: string[] = [];
   const sent = opts.sent ?? new Map();
@@ -231,10 +238,12 @@ test("a reverted receipt is re-read at its block, not at latest", async () => {
   await assert.rejects(unserved.run(), /header not found/);
 });
 
-test("a receipt timeout leaves the send in the ledger; the retry sends nothing while it is pending", async () => {
+test("the queue rejecting after a send leaves it in the ledger; the retry sends nothing while it is pending", async () => {
   const sent: SentLedger = new Map();
-  const first = harness({ sent, wait: async () => Promise.reject(new Error("Timed out while waiting")) });
-  await assert.rejects(first.run(), /Timed out/);
+  // The queue saw the nonce mined but the node asked had no receipt for our send (it lags).
+  const lagging = new Error("nonce 7 mined, and no receipt for this task's send");
+  const first = harness({ sent, wait: async () => Promise.reject(lagging) });
+  await assert.rejects(first.run(), /no receipt for this task's send/);
   assert.equal(first.sends(), 1);
   assert.deepEqual(sent.get(digest), [OUR_TX]);
 
@@ -271,7 +280,7 @@ test("pre-send reads are one block's answers: a node behind on the queue entry c
   await assert.rejects(unserved.run(), /header not found/);
 });
 
-test("a queue that returns the receipt (whm#39): it is the outcome, also when it is the first of two same-nonce sends", async () => {
+test("the queue's receipt is the outcome, also when it is the first of two same-nonce sends", async () => {
   const h = harness({
     add: async (task) => {
       await task.submit(7);
@@ -285,19 +294,33 @@ test("a queue that returns the receipt (whm#39): it is the outcome, also when it
   assert.equal(h.sent.size, 0);
 });
 
-test("a queue that returns nothing (master): the wait on the last send accepts a receipt for any of our sends", async () => {
+test("no receipt after a repeat send simulated as done: the wait on the last send is the outcome, any of our hashes counts", async () => {
+  // Two sends at the held nonce, then a third simulated as done: the queue resolves with nothing,
+  // while an earlier send may still mine.
+  const twoSentThenDone = async (task: { submit: (n: number) => Promise<Hash> }) => {
+    await task.submit(7);
+    await task.submit(7);
+    return undefined;
+  };
   const h = harness({
-    add: async (task) => {
-      await task.submit(7);
-      await task.submit(7);
-    },
+    add: twoSentThenDone,
     wait: async () => receipt("success", [managerLog("TransferRedeemed")], OUR_TX), // viem followed to the first
   });
   assert.equal(await h.run(), "delivered");
+  assert.equal(h.waits(), 1, "one wait, on the last send");
 
   const foreign = `0x${"99".repeat(32)}` as Hash;
-  const replaced = harness({ wait: async () => receipt("success", [managerLog("TransferRedeemed")], foreign) });
+  const replaced = harness({
+    add: twoSentThenDone,
+    wait: async () => receipt("success", [managerLog("TransferRedeemed")], foreign),
+  });
   await assert.rejects(replaced.run(), /was replaced by/);
+});
+
+test("a receipt from the queue that is not one of our sends throws", async () => {
+  const foreign = `0x${"99".repeat(32)}` as Hash;
+  const h = harness({ wait: async () => receipt("success", [managerLog("TransferRedeemed")], foreign) });
+  await assert.rejects(h.run(), /was replaced by/);
 });
 
 test("every send of a transfer stays in the ledger; a receipt for any of them settles the retry", async () => {
@@ -306,11 +329,11 @@ test("every send of a transfer stays in the ledger; a receipt for any of them se
     sent,
     add: async (task) => {
       await task.submit(7);
-      await task.submit(7);
+      await task.submit(7); // the queue sent again at the held nonce, then rejected
+      throw new Error("nonce 7 mined, and no receipt for this task's sends");
     },
-    wait: async () => Promise.reject(new Error("Timed out while waiting")),
   });
-  await assert.rejects(first.run(), /Timed out/);
+  await assert.rejects(first.run(), /no receipt for this task's sends/);
   assert.deepEqual(sent.get(digest), [OUR_TX, OUR_TX2]);
 
   const retry = harness({ sent, receipts: { [OUR_TX]: receipt("success", [managerLog("TransferRedeemed")]) } });
