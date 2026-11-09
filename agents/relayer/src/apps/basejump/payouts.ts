@@ -417,14 +417,17 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
 
   /**
    * The parked-check stall alert (README alert table): one WARN when the scan has stayed at the
-   * same id below the latest head `h` for `scanStallAfterMs`, and one OK when it advances or
-   * reaches `h`. Never throws past `notify`.
+   * same id below the latest head `h` for `scanStallAfterMs`, and one OK when it advances. With no
+   * stall recorded, a pass with nothing to read (`scanFrom >= h`) keeps none. Never throws past `notify`.
    *
    * @param h The latest `pendingHead` this pass read.
    * @param before `scanFrom` before this pass's scan.
    * @param reason Why this pass did not advance ("" when it did, or had nothing to read).
    */
   async function stallCheck(h: bigint, before: bigint, reason: string): Promise<void> {
+    // Only an advance clears a stall: a latest head at or below the scan without one is a stale
+    // (unpinned) read, since the head never moves back, and must not post "resumed" or restart the clock.
+    if (scanFrom >= h && scanFrom <= before && stall) return;
     if (scanFrom > before || scanFrom >= h) {
       if (stall?.alerted) {
         log.info(`parked check resumed at #${scanFrom}`);

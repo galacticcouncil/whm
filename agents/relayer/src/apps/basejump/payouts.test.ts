@@ -1217,6 +1217,35 @@ test("ST3 a scan stuck on an unreadable word alerts once at the threshold, and a
   assert.ok(!posts.some((p) => / paid/.test(p)));
 });
 
+test("ST4 a stale latest head (at or below the scan) during a stall posts no 'resumed' and keeps the clock; one true OK once it advances", async () => {
+  const e = world();
+  e.w.parkable = true;
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  e.w.finalizedFails = true;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 20 * MIN; clock.t += MIN) await k.poke();
+  assert.equal(e.w.head, 3n);
+  assert.equal(stallWarns(posts).length, 1);
+  const n = posts.length;
+  for (let i = 1; i <= 180; i++) {
+    if (i % 10 === 0) e.w.staleHead = 0n; // a lagging backend answers pendingHead 0 once
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.deepEqual(posts.slice(n), []); // no false "resumed", and the stall stays alerted (no second WARN)
+  e.w.finalizedFails = false;
+  clock.t += MIN;
+  await k.poke();
+  assert.equal(parkWarns(posts).length, 1);
+  assert.match(parkWarns(posts)[0], /payout #0 .*by this keeper's parkPending/);
+  assert.equal(stallOks(posts).length, 1);
+  assert.match(stallOks(posts)[0], /resumed: read back to #3 \(head now 3\)/);
+  assert.equal(stallWarns(posts).length, 1);
+});
+
 test("W2 a parked entry whose only non-zero word is the recipient is still parked", async () => {
   const e = world();
   e.w.parkable = true;
