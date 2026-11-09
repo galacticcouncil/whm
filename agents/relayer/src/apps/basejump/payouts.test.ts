@@ -1,9 +1,12 @@
 /**
  * The queued-payout keeper over an in-memory landing that applies `fulfillPending`'s rules
- * (contracts/src/basejump/BasejumpLanding.sol:98-111: pay the head when the pool covers it, else
- * revert; a success moves `pendingHead` by one), with a mock clock. Money rows (S1-S7, S11, S13):
- * one send per head, no send while a send is unobserved, no spin on an unpayable head. Alert rows
- * (S8-S12c, A1, A2, B1-B4): each row of the README's alert table.
+ * (contracts/src/basejump/BasejumpLanding.sol, `fulfillPending`: pay the head when the pool covers
+ * it, else revert; a success moves `pendingHead` by one) and, when `parkable`, `parkPending`'s
+ * (refuse an unfunded head; pay it if its dispatch succeeds, else move it to `parkedTransfers`;
+ * either way the head moves by one), with a mock clock. Money rows (S1-S7, S11, S13, P1, P2, P4):
+ * one send per head, no send while a send is unobserved, no spin on an unpayable head, park only a
+ * funded head whose dispatch fails. Alert rows (S8-S12c, A1, A2, B1-B4, P1, P3): each row of the
+ * README's alert table.
  *
  * Run: `pnpm test` in agents/relayer (node:test through the root's tsx; no RPC, no Redis).
  */
@@ -29,30 +32,40 @@ function world() {
     amounts: new Map<bigint, bigint>(),
     pool: 0n,
     receipts: new Map<string, Rcpt>(),
-    sends: [] as { hash: string; headAtSend: bigint }[],
+    sends: [] as { hash: string; headAtSend: bigint; fn: string }[],
+    calls: [] as string[], // every simulate and write, as "simulate:fn" / "write:fn"
+    parkable: false, // the landing has parkPending (the FIFO / park upgrade)
+    parked: new Map<bigint, bigint>(),
     reads: 0,
     staleHead: undefined as bigint | undefined, // next pendingHead read returns this once
     dispatchFails: new Set<bigint>(),
     // what happens on writeContract: "mine" now, "hold" (never mined unless released), or custom
-    onSend: (hash: string) => w.mine(hash),
+    onSend: (hash: string, fn: string) => w.mine(hash, fn),
     onWait: async (_hash: string) => {},
     replaceWith: undefined as undefined | ((hash: string) => Rcpt | undefined),
     enqueue(amount: bigint) {
       w.amounts.set(w.tail, amount);
       w.tail++;
     },
-    exec(): "success" | "reverted" {
+    exec(fn = "fulfillPending"): "success" | "reverted" {
+      if (fn === "parkPending" && !w.parkable) return "reverted";
       if (w.head >= w.tail) return "reverted";
       const amt = w.amounts.get(w.head)!;
       if (w.pool < amt) return "reverted";
-      if (w.dispatchFails.has(w.head)) return "reverted";
+      if (w.dispatchFails.has(w.head)) {
+        if (fn !== "parkPending") return "reverted";
+        w.parked.set(w.head, amt); // parked: reserved, not paid
+        w.amounts.delete(w.head);
+        w.head++;
+        return "success";
+      }
       w.pool -= amt;
       w.amounts.delete(w.head);
       w.head++;
       return "success";
     },
-    mine(hash: string) {
-      w.receipts.set(hash, { transactionHash: hash, status: w.exec() });
+    mine(hash: string, fn = "fulfillPending") {
+      w.receipts.set(hash, { transactionHash: hash, status: w.exec(fn) });
     },
   };
   let n = 0;
@@ -72,6 +85,10 @@ function world() {
           return w.tail;
         case "pendingTransfers":
           return [SRC, w.amounts.get(args[0]) ?? 0n, "0x" + "11".repeat(32)];
+        case "parkedTransfers":
+          return w.parked.has(args[0])
+            ? [SRC, w.parked.get(args[0])!, "0x" + "11".repeat(32)]
+            : ["0x0000000000000000000000000000000000000000", 0n, "0x" + "00".repeat(32)];
         case "destAssetFor":
           return DEST;
         case "balanceOf":
@@ -83,12 +100,17 @@ function world() {
       }
       throw new Error("unexpected read " + functionName);
     },
-    async simulateContract() {
+    async simulateContract({ functionName }: any) {
       w.reads++;
+      w.calls.push("simulate:" + functionName);
+      if (functionName === "parkPending" && !w.parkable) throw new Error("execution reverted");
       if (w.head >= w.tail) throw new Error("NoPendingTransfers");
       if (w.pool < w.amounts.get(w.head)!) throw new Error("InsufficientBalance");
-      if (w.dispatchFails.has(w.head)) throw new Error("DispatchFailed");
+      if (functionName !== "parkPending" && w.dispatchFails.has(w.head)) throw new Error("DispatchFailed");
       return {};
+    },
+    async getBlockNumber() {
+      return 1n;
     },
     async getBlock() {
       return { baseFeePerGas: null };
@@ -116,10 +138,11 @@ function world() {
   };
   const wallet: any = {
     chain: { id: 222222, name: "hydration" },
-    async writeContract() {
+    async writeContract({ functionName }: any) {
       const hash = "0x" + (++n).toString(16).padStart(64, "0");
-      w.sends.push({ hash, headAtSend: w.head });
-      w.onSend(hash);
+      w.sends.push({ hash, headAtSend: w.head, fn: functionName });
+      w.calls.push("write:" + functionName);
+      w.onSend(hash, functionName);
       return hash;
     },
   };
@@ -257,7 +280,7 @@ test("S5 an unmined send: 1 send over 51 pokes, 5 reads per poke", async () => {
   assert.equal((e.w.reads - r0) / 50, 5);
 });
 
-test("S6 an unpayable head (dispatch fails) behind a funded pool: 0 sends over 50 pokes", async () => {
+test("S6 an unpayable head (dispatch fails) behind a funded pool, landing without parkPending: 0 sends over 50 pokes", async () => {
   const e = world();
   for (let i = 0; i < 5; i++) e.w.enqueue(2_000_000n);
   e.w.pool = 100_000_000n;
@@ -266,7 +289,8 @@ test("S6 an unpayable head (dispatch fails) behind a funded pool: 0 sends over 5
   const r0 = e.w.reads;
   for (let i = 0; i < 50; i++) await k.poke();
   assert.equal(e.w.sends.length, 0);
-  assert.equal(e.w.reads - r0, 302);
+  // per poke: head, tail, entry, route, balance, simulate fulfillPending, simulate parkPending
+  assert.equal(e.w.reads - r0, 352);
 });
 
 test("S7 a success, then an on-chain revert of the next head ends the round at 2 sends", async () => {
@@ -365,7 +389,7 @@ test("S8b crash loop every 26 min for 24 h, pool short: 0 posts", async () => {
   assert.equal(total, 0);
 });
 
-test("S9 waiting, dispatch fails: 1 post in 24 h with 145 entries arriving behind it", async () => {
+test("S9 waiting, dispatch fails, landing without parkPending: 1 post in 24 h with 145 entries arriving behind it", async () => {
   const e = world();
   e.w.enqueue(2_000_000n);
   e.w.pool = 100_000_000n;
@@ -698,4 +722,141 @@ test("B5 OK when the oldest age falls below 15 min with the queue not empty", as
     "OK queued Basejump backlog on landing `0x00000000000000000000000000000000000000aa` cleared (oldest payout #2 is 3 min old)",
   ]);
   assert.equal(headWarns(posts).length, 0);
+});
+
+// ── Park rows (the FIFO / park landing) ──
+
+const parkWarns = (posts: string[]) => posts.filter((p) => / parked on landing /.test(p));
+
+test("P1 a funded head whose dispatch fails is parked once, the 4 behind it are paid; 1 park alert; never fulfillParked", async () => {
+  const e = world();
+  e.w.parkable = true;
+  for (let i = 0; i < 5; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  await k.poke();
+  assert.equal(e.w.sends.length, 1); // a park ends the round
+  for (let i = 0; i < 50; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.deepEqual(
+    e.w.sends.map((s) => [s.fn, s.headAtSend]),
+    [
+      ["parkPending", 0n],
+      ["fulfillPending", 1n],
+      ["fulfillPending", 2n],
+      ["fulfillPending", 3n],
+      ["fulfillPending", 4n],
+    ],
+  );
+  assert.equal(e.w.head, 5n);
+  assert.deepEqual([...e.w.parked.keys()], [0n]);
+  assert.equal(e.w.pool, 92_000_000n); // the parked 2 USDC stays in the pool
+  assert.deepEqual(posts, [
+    "WARN queued Basejump payout #0 of 2 USDC (asset 21) parked on landing " +
+      "`0x00000000000000000000000000000000000000aa`: parkedTransfers(0) holds it, recipient 0x" +
+      "11".repeat(32) +
+      ", by this keeper's parkPending 0x" +
+      "1".padStart(64, "0") +
+      " with the pool holding 100 USDC (asset 21). fulfillParked(0) pays it; this keeper never calls fulfillParked.",
+  ]);
+  assert.ok(!e.w.calls.some((c) => c.includes("fulfillParked")));
+});
+
+test("P2 a head whose dispatch fails is never parked while the pool is short; parked once funded", async () => {
+  const e = world();
+  e.w.parkable = true;
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 3_000_000n - 1_000_001n; // short of the head
+  e.w.dispatchFails.add(0n);
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 120 * MIN; clock.t += MIN) await k.poke();
+  assert.deepEqual(e.w.calls.filter((c) => c.includes("parkPending")), []);
+  assert.equal(e.w.sends.length, 0);
+  assert.equal(headWarns(posts).length, 1);
+  assert.match(headWarns(posts)[0], /payout #0 .*the pool holds 1\.999999 USDC/);
+  assert.equal(parkWarns(posts).length, 0);
+  e.w.pool = 4_000_000n;
+  clock.t += MIN;
+  await k.poke();
+  clock.t += MIN;
+  await k.poke();
+  assert.deepEqual(e.w.sends.map((s) => s.fn), ["parkPending", "fulfillPending"]);
+  assert.equal(parkWarns(posts).length, 1);
+});
+
+test("P3 parks by someone else are alerted once each from parkedTransfers; no 'paid' OK for a parked head", async () => {
+  const e = world();
+  e.w.parkable = true;
+  for (let i = 0; i < 4; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
+  assert.equal(headWarns(posts).length, 1); // #0 waiting
+  // another caller parks #0 and #1 between two polls
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  e.w.dispatchFails.add(1n);
+  assert.equal(e.w.exec("parkPending"), "success");
+  assert.equal(e.w.exec("parkPending"), "success");
+  e.w.pool = 0n;
+  for (let i = 0; i < 10; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  const parks = parkWarns(posts);
+  assert.equal(parks.length, 2);
+  assert.match(parks[0], /^WARN queued Basejump payout #0 of 2 USDC \(asset 21\) parked on landing .*parkedTransfers\(0\) holds it, recipient 0x(11){32}; head then 2\. fulfillParked\(0\) pays it/);
+  assert.match(parks[1], /^WARN queued Basejump payout #1 .*parkedTransfers\(1\) holds it/);
+  assert.ok(!posts.some((p) => p.startsWith("OK queued Basejump payout #0")));
+  assert.equal(e.w.sends.length, 0);
+});
+
+test("P4 a parkPending that pays (the dispatch succeeds by inclusion): no park alert, the rest paid", async () => {
+  const e = world();
+  e.w.parkable = true;
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  e.w.onSend = (h, fn) => {
+    e.w.dispatchFails.delete(0n); // e.g. the recipient's account was funded meanwhile
+    e.w.mine(h, fn);
+  };
+  const { k, posts } = keeperFor(e, { t: 0 });
+  for (let i = 0; i < 5; i++) await k.poke();
+  assert.deepEqual(e.w.sends.map((s) => s.fn), ["parkPending", "fulfillPending", "fulfillPending"]);
+  assert.equal(e.w.head, 3n);
+  assert.equal(e.w.parked.size, 0);
+  assert.deepEqual(posts, []);
+});
+
+test("P5 a head that left with an alert out, parkedTransfers unreadable: OK says 'left the head', not 'paid'", async () => {
+  const e = world();
+  e.w.parkable = true;
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
+  const real = e.clients.publicClient.readContract;
+  e.clients.publicClient.readContract = async (q: any) => {
+    if (q.functionName === "parkedTransfers") throw new Error("rpc down");
+    return real(q);
+  };
+  e.w.pool = 2_000_000n;
+  e.w.exec(); // someone else pays #0
+  clock.t += MIN;
+  await k.poke();
+  assert.deepEqual(
+    posts.filter((p) => p.startsWith("OK queued Basejump payout #0")),
+    ["OK queued Basejump payout #0 left the head (head now 1); parkedTransfers(0) not read"],
+  );
+  assert.equal(parkWarns(posts).length, 0);
 });

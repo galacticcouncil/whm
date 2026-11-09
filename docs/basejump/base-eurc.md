@@ -138,4 +138,6 @@ be re-measured before submitting.
 
 ## Not covered here
 
-- Nothing calls `fulfillPending()` automatically yet (see [Relaying](spec.md#relaying)).
+- Nothing calls `fulfillParked()` automatically: a parked payout needs a human. The `basejump`
+  relayer app pays queued payouts and parks an unpayable funded head (see
+  [Relaying](spec.md#relaying)).

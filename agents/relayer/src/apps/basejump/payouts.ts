@@ -6,20 +6,31 @@ import { revertName } from "../../engine/revert";
 import logger from "../../logger";
 
 /**
- * The landing's queue, and the one write this module ever makes: `fulfillPending()`. It takes no
- * arguments and is permissionless; the recipient and amount come from the landing's own storage,
- * so the caller cannot redirect a payout or change its size. It pays only the queue head.
+ * The landing's queue, and the two writes this module ever makes: `fulfillPending()` and
+ * `parkPending()`. Both take no arguments and are permissionless; the recipient and amount come
+ * from the landing's own storage, so the caller cannot redirect a payout or change its size. Both
+ * act on the queue head only. `parkPending` pays the head exactly as `fulfillPending` would when
+ * its dispatch succeeds (with a fixed gas stipend), and otherwise moves it to `parkedTransfers`,
+ * still reserved; it reverts `InsufficientBalance` on an unfunded head
+ * (contracts/src/basejump/BasejumpLanding.sol, `parkPending`). `fulfillParked(id)` is never called
+ * here: a parked payout needs a human.
  */
 export const landingAbi = parseAbi([
   "function pendingHead() view returns (uint256)",
   "function pendingTail() view returns (uint256)",
   "function pendingTransfers(uint256 id) view returns (address sourceAsset, uint256 amount, bytes32 recipient)",
+  "function parkedTransfers(uint256 id) view returns (address sourceAsset, uint256 amount, bytes32 recipient)",
   "function destAssetFor(address sourceAsset) view returns (address)",
   "function fulfillPending() external",
+  "function parkPending() external",
   "error NoPendingTransfers()",
   "error InsufficientBalance()",
   "error DispatchFailed()",
+  "error InsufficientGas()",
 ]);
+
+/** The landing writes this keeper sends. */
+type Write = "fulfillPending" | "parkPending";
 
 const erc20Abi = parseAbi([
   "function balanceOf(address who) view returns (uint256)",
@@ -65,8 +76,10 @@ interface Head {
   since: number;
   /** Causes already alerted for this head. */
   alerted: Set<Cause>;
-  /** A `fulfillPending` this process sent while this entry was the head, not yet seen mined. */
+  /** A call this process sent while this entry was the head, not yet seen mined. */
   sent?: Hash;
+  /** Which call `sent` is. */
+  sentFn?: Write;
   /** Calls for this head that simulated clean and then reverted on chain, in this window. */
   reverts: number;
   /** When `reverts` reached the cap. The count resets one pause later. */
@@ -96,10 +109,19 @@ export const MAX_REVERT_PAUSE_MS = 6 * 60 * 60_000;
  * tick it reads the head, the head entry and the pool's balance of that entry's asset, and calls
  * only when the pool covers the head and a simulation of the call passes.
  *
- * A head that does not become payable (the pool stays short, or the call reverts, e.g. a dispatch
- * that always fails) blocks everything behind it until it is paid or the Technical Committee acts
- * (`withdraw` or an upgrade). While the pool is short or the simulation reverts, the keeper
- * sends nothing for it.
+ * A funded head whose `fulfillPending` simulation reverts `DispatchFailed` (the runtime refuses the
+ * transfer itself, e.g. an amount below the existential deposit to an empty account) is parked
+ * instead: the keeper simulates and sends `parkPending()`, which pays the head if its dispatch
+ * succeeds by then and otherwise moves it to `parkedTransfers`, so the entries behind it are paid.
+ * A park ends the round. The keeper never parks an unfunded head (it checks the pool first, and the
+ * landing refuses one), and never calls `fulfillParked`. A head that does not become payable for
+ * any other reason (the pool stays short, another revert, or `parkPending` itself reverts, as on a
+ * landing without it) blocks everything behind it until it is paid or the Technical Committee
+ * acts (`withdraw` or an upgrade); the keeper sends nothing for it.
+ *
+ * Every entry that leaves the head while this process runs is read back from `parkedTransfers` at
+ * one block whose `pendingHead` is past it; one found there is alerted once (the README's alert
+ * table, "parked").
  *
  * Within one process, an unobserved send is never repeated blindly: after a send for head `i`
  * (recorded in `Head.sent`, in process memory), nothing is sent again until either the head moves
@@ -133,6 +155,13 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   let backlogNextMs: number | undefined;
   let running: Promise<void> | undefined;
   let again = false;
+  /**
+   * The lowest id not yet read back from `parkedTransfers` after leaving the head; undefined until
+   * the first head read (entries that left the head before this process started are not read).
+   */
+  let scanFrom: bigint | undefined;
+  /** Ids found parked (and alerted) by this process. */
+  const parked = new Set<bigint>();
 
   const assets = new Map<Address, { symbol: string; decimals: number | undefined }>();
 
@@ -209,6 +238,74 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     await notify(`OK queued Basejump backlog on landing \`${landing}\` cleared (${why})`);
   }
 
+  /**
+   * The park alert: once per id per process, measurements only.
+   *
+   * @param id The parked entry.
+   * @param entry `parkedTransfers(id)` as read.
+   * @param headAt `pendingHead` at the block `entry` was read at, when read.
+   * @param detail Extra measurements (this keeper's own call and the pool it saw), or "".
+   */
+  async function alertParked(
+    id: bigint,
+    entry: readonly [Address, bigint, `0x${string}`],
+    headAt: bigint | undefined,
+    detail: string,
+  ): Promise<void> {
+    if (parked.has(id)) return;
+    parked.add(id);
+    const [sourceAsset, amount, recipient] = entry;
+    const destAsset = await publicClient
+      .readContract({ address: landing, abi: landingAbi, functionName: "destAssetFor", args: [sourceAsset] })
+      .catch(() => zeroAddress);
+    const what =
+      destAsset === zeroAddress ? `${amount} units of ${sourceAsset}` : await describe(destAsset, amount);
+    const msg =
+      `WARN queued Basejump payout #${id} of ${what} parked on landing \`${landing}\`: ` +
+      `parkedTransfers(${id}) holds it, recipient ${recipient}${detail}` +
+      `${headAt === undefined ? "" : `; head then ${headAt}`}. ` +
+      `fulfillParked(${id}) pays it; this keeper never calls fulfillParked.`;
+    log.warn(msg);
+    await notify(msg);
+  }
+
+  /**
+   * Reads back every entry that left the head since the last scan, at one block: ids below that
+   * block's `pendingHead` are past the head there, so an empty `parkedTransfers` slot means paid
+   * (`fulfillPending`, `parkPending` or, after a park, `fulfillParked`) and a full one means parked.
+   * A failed read stops the scan; it resumes at the same id on the next pass. Never throws.
+   *
+   * @param h The `pendingHead` this pass read.
+   */
+  async function scanParked(h: bigint): Promise<void> {
+    if (scanFrom === undefined) {
+      scanFrom = h;
+      return;
+    }
+    if (scanFrom >= h) return;
+    try {
+      const blockNumber = await publicClient.getBlockNumber();
+      const headAt = await publicClient.readContract({
+        address: landing,
+        abi: landingAbi,
+        functionName: "pendingHead",
+        blockNumber,
+      });
+      for (; scanFrom < headAt; scanFrom++) {
+        const entry = await publicClient.readContract({
+          address: landing,
+          abi: landingAbi,
+          functionName: "parkedTransfers",
+          args: [scanFrom],
+          blockNumber,
+        });
+        if (entry[0] !== zeroAddress) await alertParked(scanFrom, entry, headAt, "");
+      }
+    } catch (e) {
+      log.warn(`parked check from #${scanFrom} failed: ${(e as Error).message ?? String(e)}`);
+    }
+  }
+
   /** One pass: read the queue, then pay the head when the pool covers it. */
   async function pass(): Promise<boolean> {
     const read = (functionName: "pendingHead" | "pendingTail") =>
@@ -217,6 +314,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     if (nextUnseen < h) nextUnseen = h;
     for (; nextUnseen < tail; nextUnseen++) firstSeen.set(nextUnseen, now());
     for (const id of firstSeen.keys()) if (id < h) firstSeen.delete(id);
+    await scanParked(h);
     try {
       return await payHead(h, tail);
     } finally {
@@ -226,13 +324,27 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     }
   }
 
-  /** Pays the head if it can. Resolves true only when this call saw its own send mined and succeeded. */
+  /**
+   * Pays the head if it can, or parks it (see above). Resolves true only when this call saw its own
+   * `fulfillPending` mined and succeeded; a park, or a `parkPending` that paid, resolves false.
+   */
   async function payHead(h: bigint, tail: bigint): Promise<boolean> {
 
     if (head && h > head.id) {
-      log.info(`queued payout #${head.id} paid (head now ${h})`);
-      if (head.alerted.size > 0) {
-        await notify(`OK queued Basejump payout #${head.id} paid (head now ${h})`);
+      const id = head.id;
+      if (parked.has(id)) {
+        log.info(`queued payout #${id} parked (head now ${h})`); // the park alert was posted
+      } else if (scanFrom !== undefined && scanFrom > id) {
+        log.info(`queued payout #${id} paid (head now ${h})`);
+        if (head.alerted.size > 0) await notify(`OK queued Basejump payout #${id} paid (head now ${h})`);
+      } else {
+        log.info(`queued payout #${id} left the head (head now ${h}); parked state not read`);
+        if (head.alerted.size > 0) {
+          await notify(
+            `OK queued Basejump payout #${id} left the head (head now ${h}); ` +
+              `parkedTransfers(${id}) not read`,
+          );
+        }
       }
       head = undefined;
     }
@@ -266,18 +378,19 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       const receipt = await publicClient
         .getTransactionReceipt({ hash: current.sent })
         .catch(() => undefined);
+      const fn = current.sentFn ?? "fulfillPending";
       if (!receipt) {
-        log.info(`#${h}: fulfillPending ${current.sent} not mined yet, checking`);
+        log.info(`#${h}: ${fn} ${current.sent} not mined yet, checking`);
         await alertIfOverdue(
           current,
           what,
-          `fulfillPending ${current.sent} sent, not seen mined. If it was dropped, every later ` +
+          `${fn} ${current.sent} sent, not seen mined. If it was dropped, every later ` +
             `send of this app, deliveries included, waits behind its nonce`,
         );
         return false;
       }
       if (receipt.status === "success") return false; // the head read raced the block; next pass sees it
-      log.warn(`#${h}: fulfillPending ${current.sent} reverted on chain; nothing was paid`);
+      log.warn(`#${h}: ${fn} ${current.sent} reverted on chain; nothing was paid or parked`);
       current.sent = undefined;
       current.reverts++;
     }
@@ -297,7 +410,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
           `#${h}: ${current.reverts} calls reverted on chain; ` +
             `paused ${Math.round(pause / 60_000)} min`,
         );
-        const reason = `${current.reverts} fulfillPending calls simulated clean, then reverted`;
+        const reason = `${current.reverts} ${current.sentFn ?? "fulfillPending"} calls simulated clean, then reverted`;
         await alertIfOverdue(current, what, reason, "reverting");
         return false;
       }
@@ -321,6 +434,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       return false;
     }
 
+    let fn: Write = "fulfillPending";
     try {
       await publicClient.simulateContract({
         address: landing,
@@ -330,24 +444,47 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       });
     } catch (e) {
       const name = revertName(e) ?? (e as Error).message;
-      log.warn(`#${h}: fulfillPending would revert (${name}); not sending`);
-      await alertIfOverdue(current, what, `fulfillPending reverts with ${name}`);
-      return false;
+      if (name !== "DispatchFailed") {
+        log.warn(`#${h}: fulfillPending would revert (${name}); not sending`);
+        await alertIfOverdue(current, what, `fulfillPending reverts with ${name}`);
+        return false;
+      }
+      // Funded (checked above), and the runtime refuses the transfer itself: park it, so the
+      // entries behind it are paid. parkPending pays it instead if the dispatch succeeds by then.
+      try {
+        await publicClient.simulateContract({
+          address: landing,
+          abi: landingAbi,
+          functionName: "parkPending",
+          account,
+        });
+      } catch (e2) {
+        const name2 = revertName(e2) ?? (e2 as Error).message;
+        log.warn(`#${h}: fulfillPending reverts DispatchFailed, parkPending would revert (${name2}); not sending`);
+        await alertIfOverdue(
+          current,
+          what,
+          `fulfillPending reverts with DispatchFailed, parkPending reverts with ${name2}`,
+        );
+        return false;
+      }
+      fn = "parkPending";
     }
 
     const sent: { hash?: Hash } = {};
     await queue.add({
-      label: `basejump queued payout #${h}`,
+      label: `basejump queued payout #${h} (${fn})`,
       logger: log,
       // `current.sent` is set here, the moment the send returns a hash, so it survives a queue whose
       // `add` rejects after the transaction went out.
       submit: async (n) => {
         sent.hash = await submit(
           clients,
-          { to: landing, abi: landingAbi, functionName: "fulfillPending", args: [] },
+          { to: landing, abi: landingAbi, functionName: fn, args: [] },
           n,
         );
         current.sent = sent.hash;
+        current.sentFn = fn;
         return sent.hash;
       },
     });
@@ -357,22 +494,45 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       .waitForTransactionReceipt({ hash: sent.hash, timeout: receiptTimeoutMs })
       .catch(() => undefined);
     if (!receipt) {
-      log.info(`#${h}: fulfillPending ${sent.hash} sent, receipt not seen yet`);
+      log.info(`#${h}: ${fn} ${sent.hash} sent, receipt not seen yet`);
       return false;
     }
     // viem follows a replacement at the same nonce; only this call's own receipt counts.
     if (receipt.transactionHash.toLowerCase() !== sent.hash.toLowerCase()) {
-      log.warn(`#${h}: fulfillPending ${sent.hash} was replaced by ${receipt.transactionHash}`);
+      log.warn(`#${h}: ${fn} ${sent.hash} was replaced by ${receipt.transactionHash}`);
       current.sent = undefined;
       return false;
     }
-    if (receipt.status === "success") {
-      log.info(`#${h}: fulfillPending ${sent.hash} mined`);
-      return true;
+    if (receipt.status !== "success") {
+      log.warn(`#${h}: ${fn} ${sent.hash} reverted on chain; nothing was paid or parked`);
+      current.sent = undefined;
+      current.reverts++;
+      return false;
     }
-    log.warn(`#${h}: fulfillPending ${sent.hash} reverted on chain; nothing was paid`);
-    current.sent = undefined;
-    current.reverts++;
+    log.info(`#${h}: ${fn} ${sent.hash} mined`);
+    if (fn === "fulfillPending") return true;
+
+    // parkPending succeeded: it either paid the head or parked it. Read which at its own block.
+    const entry = await publicClient
+      .readContract({
+        address: landing,
+        abi: landingAbi,
+        functionName: "parkedTransfers",
+        args: [h],
+        blockNumber: receipt.blockNumber,
+      })
+      .catch(() => undefined);
+    if (entry && entry[0] !== zeroAddress) {
+      await alertParked(
+        h,
+        entry,
+        undefined,
+        `, by this keeper's parkPending ${sent.hash} with the pool holding ${await describeOr(destAsset, balance)}`,
+      );
+    } else if (entry) {
+      log.info(`#${h}: parkPending ${sent.hash} paid it`);
+    }
+    // A park ends the round; the next pass pays the new head.
     return false;
   }
 
@@ -384,7 +544,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
    * Run passes until no poke arrived during the last one. Within a round, a pass that saw its own
    * `fulfillPending` mined and successful is followed by another for the new head, up to
    * `maxPerRun` payouts; any other outcome (nothing queued, pool short, revert, no receipt,
-   * replaced, a stale head read) ends the round exactly as a single pass always did. Never throws.
+   * replaced, a stale head read, a `parkPending` sent) ends the round exactly as a single pass always did. Never throws.
    */
   async function loop(): Promise<void> {
     do {

@@ -174,8 +174,10 @@ per-token.
 5. **A shortfall does not revert.** Invariant 4 covers misconfiguration, not an empty pool: the
    landing queues and consumes the VAA. The `basejump` relayer app calls `fulfillPending()` once
    the pool covers the head, and alerts when one keeper process has seen the same head wait longer
-   than 30 min (the default; see the relayer README's alert table). Alarm also on a
-   `TransferParked` event.
+   than 30 min (the default; see the relayer README's alert table). A funded head whose dispatch
+   fails it parks with `parkPending()`, and it alerts each parked entry it reads back from
+   `parkedTransfers`. Nothing calls `fulfillParked()` automatically: a parked payout needs a human.
+   Alarm also on a `TransferParked` event.
 6. **Corridor isolation.** The receiver authorizes exactly one emitter per source chain.
 
 ## Configuration
@@ -266,7 +268,8 @@ Two legs, two different needs:
   tx hash, and retries for days because every failure short of a bad VAA is transient (invariants
   4 and 5), a receiver the TC has not upgraded or armed yet included. A VAA that exhausts the budget
   parks in the engine's failed queue and needs a manual replay. The same app pays queued payouts
-  with `fulfillPending()` (see the relayer README).
+  with `fulfillPending()`, and parks a funded head whose dispatch fails with `parkPending()`; it
+  never calls `fulfillParked()` (see the relayer README).
 
 ## Test coverage
 
