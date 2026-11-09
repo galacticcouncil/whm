@@ -6,7 +6,11 @@ Two-rail data flow, wire format, and contract relationships. Design rationale li
 ## Ethereum → Hydration
 
 Both rails leave the same transaction. The fast one pays the user in ~2 min; the slow one replenishes
-the pool it was paid from, ~13 min later.
+the pool it was paid from, ~13 min later. The diagram shows the Ethereum emitter, which publishes at
+consistency 200 (instant). The Base EURC emitter is the same contract built with 201 (safe), so its
+fast VAA is signed only after the block reaches Base's `safe` head: about 2.2-3.5 min end to end (the
+spec's ~2 min plus the measured 14-91 s safe-head lag); see
+[base-eurc.md](base-eurc.md#fast-path-consistency).
 
 ```
 A: Ethereum (source)            Relay (off-chain)          B: Hydration (dest)

@@ -49,7 +49,8 @@ BasejumpEmitter
   │    → NttManager 0xeceab645…28fc (BURNING) ─────┘
   │
   └─ FAST (net = gross − assetFee)                BasejumpReceiver
-       wormhole.publishMessage(nonce, payload, 200)   │ landing
+       wormhole.publishMessage(nonce, payload,        │ landing
+         CONSISTENCY_LEVEL)  (Ethereum 200, Base 201) │
        → guardians → relayer (basejump) ──────────────┤
                                                       ▼
                                             IBasejumpLanding.transfer
@@ -70,8 +71,23 @@ Returns `(transferSequence, messageSequence)`.
    it arrives as zero (`ZeroAmountReceived`).
 4. **Settle**: `quoteDeliveryPrice(DEST_CHAIN_ID, hex"00")`, `forceApprove`, then
    `INttManager.transfer{value: price}(actualAmount, DEST_CHAIN_ID, landing)` → `transferSequence`.
-5. **Fast-track**: `_fastTrack` publishes `abi.encode(TransferPayload)` at consistency level
-   **200** → `messageSequence`, and emits `BridgeInitiated`.
+5. **Fast-track**: `_fastTrack` publishes `abi.encode(TransferPayload)` at the implementation's
+   `CONSISTENCY_LEVEL` (**200** on Ethereum, **201** on Base) → `messageSequence`, and emits
+   `BridgeInitiated`.
+
+**Consistency level, per deployment.** `CONSISTENCY_LEVEL` is an `immutable` set by the
+implementation's constructor, which accepts only 200 (instant) or 201 (safe) and reverts on any
+other value. It lives in the implementation's code, not in proxy storage, so the storage layout is
+unchanged and every upgrade chooses the level again through the new implementation's constructor
+argument. In the guardian EVM watcher, 200 is signed at observation and 201 once the block is at or
+below the chain's `safe` head; the constructor accepts no other value (202 would mean finalized, 203
+custom consistency). Both migrations pass the level as a literal, never from the env: `basejump-ethereum`
+passes 200 (the live corridor, unchanged) and `basejump-base` passes 201. The deploy action reads the
+level back from the new implementation, and step 011 refuses to record the arming call unless the
+emitter reports the literal 201. The receiver and landing do not read the level. The deploy action's
+upgrade path does not compare the old and new level, so a future upgrade step (for Ethereum a Safe
+transaction) must check the new implementation's `CONSISTENCY_LEVEL()` against its chain's literal
+(Ethereum 200, Base 201) before it is scheduled.
 
 Settlement precedes publication, and the 3-argument NTT `transfer` overload hardcodes
 `shouldQueue = false`. A rate-limit breach or paused rail therefore reverts the whole call before any
@@ -171,7 +187,7 @@ per-token.
 | Ethereum chain id | `2` |
 | `BasejumpEmitter` (Ethereum) | `0xa72e2bf29c840eb93adbb9ee1aa41580f01c9944` |
 | `BasejumpReceiver` (Hydration) | `0x35bf3a1b9ac564c8f66c97cea1ee410cd3f97c8a` |
-| `BasejumpLanding` (Hydration) | `0x70e9b12c3b19cb5f0e59984a5866278ab69df976` (impl `0x4ea0d58a…e31f`) |
+| `BasejumpLanding` (Hydration) | `0x70e9b12c3b19cb5f0e59984a5866278ab69df976` (impl `0xd04b8996…b1f6` since the 2026-09-17 upgrade; read 2026-11-07) |
 | USDC (Ethereum) | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
 | USDC (Hydration, asset 21) | `0x0000000000000000000000000000000100000015` |
 | NTT manager (Ethereum, LOCKING) | `0x447b2c7485A3d6813F8197E605b10BcCD8dd8398` |
@@ -258,7 +274,7 @@ Split by what each layer can actually observe.
 
 | Layer | Covers | Notes |
 | --- | --- | --- |
-| [`BasejumpEmitterTest`](../../contracts/test/basejump/BasejumpEmitterTest.sol) | fail-closed settlement, `SettlementRouteNotSet`, disarm-before-pull, delivery-price forwarding, no stale approval | mutation-checked: publishing before settling breaks it |
+| [`BasejumpEmitterTest`](../../contracts/test/basejump/BasejumpEmitterTest.sol) | fail-closed settlement, `SettlementRouteNotSet`, disarm-before-pull, delivery-price forwarding, no stale approval, per-deployment consistency level (201 and 200 reach `publishMessage`, constructor rejects 0, 1, 202, 255) | mutation-checked: publishing before settling breaks it; a hardcoded 200 or a dropped range check breaks the consistency tests |
 | [`BasejumpLandingTest`](../../contracts/test/basejump/BasejumpLandingTest.sol) | pool accounting, queueing, `fulfillPending`, authorization | `0x0401` mocked |
 | [`BasejumpIntegrationTest`](../../contracts/test/integration/BasejumpIntegrationTest.sol) | emitter → receiver → landing, fee split, pool binding, atomicity, replay, queueing | `0x0401` is `vm.mockCall`'d, so **balances do not move here** |
 | [`_probeBasejumpDelivery`](../../chopsticks/probes/_probeBasejumpDelivery.ts) | real message core, real asset-44 precompile, real `0x0401` dispatch, real balance movement, replay, shortfall | Substrate fork |
@@ -310,6 +326,21 @@ step 3 is done.
 Exercised end to end on an Ethereum fork: 10 USDC in settles 10 gross to the landing and publishes
 9.9 net, with `assetFee` 100,000 (0.1 USDC) retained. The settlement logs precede the fast-path
 `LogMessagePublished` in the receipt, which is invariant 2 holding against the real manager.
+
+### Base → Hydration (EURC) — ready, not live
+
+Migration [`basejump-base`](../../migrations/definitions/basejump-base/) deploys both ends (never
+run). The settlement leg exists: Base EURC manager `0xD1dc…d89a` (LOCKING) peers with Hydration's
+`0x8dd1…bc4C` (BURNING, `token()` = asset 44), and the relayer's `ntt` routes carry it. The pool
+does not: referendum #404 unmapped Base EURC and moved the EURC float to USDC, so step 2 is a TC
+motion and step 4 a Treasury referendum. Unlike the Ethereum corridor, the migration leaves the
+emitter **disarmed** (`landing` unset), and the Base TC Safe arms it with `setLanding` only after
+the motion, the float and the relayer route are in place, so no user can send into a corridor that
+cannot yet pay. Its fast path publishes at **safe (201)**, not instant: the VAA is signed only once
+the Base block is in a batch posted to L1, which removes the unsafe-head orphan risk for about a
+minute of extra latency (see [base-eurc.md](base-eurc.md#fast-path-consistency)). Steps 010 and 011 record the motion's landing calls and the Safe's arming call;
+[`_probeBasejumpBaseGoLive`](../../chopsticks/probes/_probeBasejumpBaseGoLive.ts) builds both
+proposals and enacts them on a fork. Checklist and referendum draft: [base-eurc.md](base-eurc.md).
 
 ### Arbitrum → Hydration (USDC) — blocked
 

@@ -14,6 +14,9 @@ const step: MigrationStep = {
       ...ctx.wallet.ethereum,
       wormholeId: Number(required("WORMHOLE_ID_ETHEREUM")),
       wormholeCore: required("WORMHOLE_CORE_ETHEREUM") as `0x${string}`,
+      // Instant (200), as deployed: deliberately not an env value, so no env edit can move the
+      // live Ethereum corridor, or an implementation built for it, off 200.
+      consistencyLevel: 200,
     });
   },
 };
