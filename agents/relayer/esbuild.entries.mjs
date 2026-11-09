@@ -13,6 +13,8 @@ export const entryPoints = {
   // src/apps/psm/hydration.ts's doc comment for why.
   "psm-hydration/app": "src/apps/psm/hydration.ts",
   "psm-base/app": "src/apps/psm/base.ts",
+  // ntt delivers into Hydration; ntt-base delivers Hydration -> Base with its own Base wallet.
+  "ntt-base/app": "src/apps/ntt/base.ts",
 };
 
 /**

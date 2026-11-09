@@ -1,5 +1,3 @@
-import type { Hash } from "viem";
-
 import { EVM_CHAIN_ID } from "../../chains";
 import { alerts, engineConfig } from "../../config";
 import type { ChainClients } from "../../clients/hydration";
@@ -98,42 +96,21 @@ export function wireRoutes(
         sequence: vaa.sequence.toString(),
       });
 
-      // The queue resolves a task once its transaction is broadcast, or once the work turns out to
-      // be done already, and never reads a receipt. A delivery that simulated clean can still
-      // revert on chain: a pause or a spent limit landing first in the same block, or a gas limit
-      // estimated on the other path. So keep the hash, read the receipt once the queue lets go of
-      // the task, and throw on a revert: the engine then retries the job with backoff, and the
-      // retry simulates again, so a pause is named and waited out and a delivery that someone else
-      // made reads as done. No hash means nothing was sent (the work was already done), so there
-      // is no receipt to read.
-      const sent: { hash?: Hash } = {};
-      await queue.add({
+      // The queue resolves a task with the receipt of a transaction this task sent (it holds the
+      // nonce until that is known, and refuses a receipt of a same-nonce replacement it did not
+      // send), or with no receipt when nothing was sent because the work was already done. A
+      // delivery that simulated clean can still revert on chain: a pause or a spent limit landing
+      // first in the same block, or a gas limit estimated on the other path. So throw on a
+      // revert: the engine then retries the job with backoff, and the retry simulates again, so a
+      // pause is named and waited out and a delivery that someone else made reads as done.
+      const receipt = await queue.add({
         label: route.name,
         logger: log,
-        submit: async (n) =>
-          (sent.hash = await receiveMessage(
-            clients,
-            receiverAbi,
-            route.destinationContract,
-            vaa.bytes,
-            n,
-          )),
+        submit: (n) =>
+          receiveMessage(clients, receiverAbi, route.destinationContract, vaa.bytes, n),
       });
-      if (sent.hash) {
-        const receipt = await clients.publicClient.waitForTransactionReceipt({ hash: sent.hash });
-        // viem follows a replacement at the same nonce and returns the replacing transaction's
-        // receipt, so a success here can belong to some other transaction. Only a receipt for this
-        // delivery's own hash counts. After a replacement the retry simulates again: when the
-        // replacement carried this same delivery (a gas bump), the message reads as processed and
-        // the retry resolves; when it carried anything else, the retry delivers.
-        if (receipt.transactionHash.toLowerCase() !== sent.hash.toLowerCase()) {
-          throw new Error(
-            `psm ${route.name}: delivery ${sent.hash} was replaced by ${receipt.transactionHash}`,
-          );
-        }
-        if (receipt.status !== "success") {
-          throw new Error(`psm ${route.name}: delivery ${sent.hash} reverted on chain`);
-        }
+      if (receipt && receipt.status !== "success") {
+        throw new Error(`psm ${route.name}: delivery ${receipt.transactionHash} reverted on chain`);
       }
       return next();
     }
