@@ -5,15 +5,20 @@ import { readFileSync } from "node:fs";
 import {
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
+  createPublicClient,
   encodeErrorResult,
   encodeFunctionData,
   formatUnits,
+  http,
   parseAbi,
   type Address,
+  type Chain,
   type Hex,
+  type PublicClient,
+  type Transport,
 } from "viem";
 
-import { registerHydration } from "../src/chains";
+import { base, registerHydration } from "../src/chains";
 import { baseClients } from "../src/clients/base";
 import type { ChainClients } from "../src/clients/hydration";
 import { privateKeyBase, req } from "../src/config";
@@ -134,7 +139,17 @@ async function main(): Promise<void> {
   if (!route) throw new Error("VAA is not from a BASE_ROUTES emitter");
   check(real.emitterChain === 73, `VAA from Hydration, sequence ${real.sequence}`);
 
-  const clients: ChainClients = await baseClients(rpcUrl, privateKeyBase());
+  // The delivery code pins its reads to `getBlockNumber()`, which viem caches for up to 4 s. Each
+  // case below reverts the fork to the snapshot block, so a cached number from the case before
+  // names a block the fork no longer has. The check's public client therefore caches nothing; the
+  // wallet and the chain-id check are `baseClients`' own.
+  const clients: ChainClients = {
+    ...(await baseClients(rpcUrl, privateKeyBase())),
+    publicClient: createPublicClient({ chain: base, transport: http(rpcUrl), cacheTime: 0 }) as unknown as PublicClient<
+      Transport,
+      Chain
+    >,
+  };
   const { publicClient, account } = clients;
   // A fresh queue per case: a revert rewinds the account's nonce, which a queue keeps in memory.
   let queue = createQueue({ publicClient, account, warnMultiplier: 50n });
