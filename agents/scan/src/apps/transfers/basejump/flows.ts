@@ -3,8 +3,10 @@ import { normalizeRecipient } from "../../../utils";
 
 import {
   BridgeInitiatedEvt,
+  ParkedTransferFulfilledEvt,
   PendingTransferFulfilledEvt,
   TransferExecutedEvt,
+  TransferParkedEvt,
   TransferQueuedEvt,
 } from "./abi";
 
@@ -103,20 +105,47 @@ async function findInitiated(
 }
 
 /**
+ * The row a queue-id event belongs to: the one the queued leg tagged with this id, still without
+ * `column`. The queue id is exact, so these legs need no heuristic.
+ */
+const byPendingId =
+  (column: "parked" | "fulfilled", kind: string) => async (a: Queued, ev: LogEvent, db: Queryable) => {
+    const r = await db.query(
+      `SELECT id FROM basejump_transfers WHERE pending_id = $1 AND ${column} IS NULL LIMIT 1`,
+      [pendingKey(ev, a.id)],
+    );
+    return r.rows[0]?.id ?? orphan(ev, kind);
+  };
+
+/** The fields every queue-id event carries, plus its own ref column. */
+const queuedPatch = (column: "parked" | "fulfilled") => (a: Queued, ev: LogEvent) => ({
+  dest_chain: ev.chain,
+  dest_asset: a.destAsset.toLowerCase(),
+  source_asset: a.sourceAsset.toLowerCase(),
+  recipient: normalizeRecipient(a.recipient),
+  net_amount: a.amount.toString(),
+  pending_id: pendingKey(ev, a.id),
+  [column]: ev.ref,
+});
+
+/**
  * Basejump transfers: the fast path out of the landing pool, correlated back to the source that
  * paid for it.
  *
  * The lifecycle branches — a payout either clears the pool straight away or waits on a shortfall —
- * so `completed` and `queued` are alternatives at the same rank, and only `fulfilled` outranks
- * them. The settlement leg riding NTT beside all of this is `ntt_transfers`, joined rather than
- * duplicated.
+ * so `completed` and `queued` are alternatives at the same rank. A queued payout is either paid
+ * (`fulfilled`) or parked first (`parked`: `parkPending` moved it off the head because its dispatch
+ * failed), and a parked one is paid later by `fulfillParked`, which also lands in `fulfilled`. So
+ * `parked` outranks `queued`, and `fulfilled` outranks both: a row reads parked until it is paid,
+ * whichever order the events are read in. The settlement leg riding NTT beside all of this is
+ * `ntt_transfers`, joined rather than duplicated.
  */
 export const basejump: Flow = {
   name: "basejump",
   table: "basejump_transfers",
   key: { column: "id", type: "TEXT" },
-  states: { initiated: 0, completed: 1, queued: 1, fulfilled: 2 },
-  requires: { completed: "initiated", queued: "initiated", fulfilled: "queued" },
+  states: { initiated: 0, completed: 1, queued: 1, parked: 2, fulfilled: 3 },
+  requires: { completed: "initiated", queued: "initiated", parked: "queued", fulfilled: "queued" },
   columns: {
     source_chain: "TEXT",
     source_asset: "TEXT",
@@ -134,6 +163,9 @@ export const basejump: Flow = {
     initiated: "JSONB",
     completed: "JSONB",
     queued: "JSONB",
+    /** `TransferParked`: the payout left the queue head unpaid and waits for `fulfillParked`. */
+    parked: "JSONB",
+    /** `PendingTransferFulfilled`, or `ParkedTransferFulfilled` for a parked payout. */
     fulfilled: "JSONB",
   },
   indexes: [
@@ -205,27 +237,25 @@ export const basejump: Flow = {
       }),
     },
     {
-      // The queue id is exact, so this one leg needs no heuristic — it finds the row the queued
-      // leg already tagged.
       role: "basejump-landing",
       abi: PendingTransferFulfilledEvt,
       state: "fulfilled",
-      key: async (a: Queued, ev: LogEvent, db: Queryable) => {
-        const r = await db.query(
-          `SELECT id FROM basejump_transfers WHERE pending_id = $1 AND fulfilled IS NULL LIMIT 1`,
-          [pendingKey(ev, a.id)],
-        );
-        return r.rows[0]?.id ?? orphan(ev, "fulfill");
-      },
-      patch: (a: Queued, ev: LogEvent) => ({
-        dest_chain: ev.chain,
-        dest_asset: a.destAsset.toLowerCase(),
-        source_asset: a.sourceAsset.toLowerCase(),
-        recipient: normalizeRecipient(a.recipient),
-        net_amount: a.amount.toString(),
-        pending_id: pendingKey(ev, a.id),
-        fulfilled: ev.ref,
-      }),
+      key: byPendingId("fulfilled", "fulfill"),
+      patch: queuedPatch("fulfilled"),
+    },
+    {
+      role: "basejump-landing",
+      abi: TransferParkedEvt,
+      state: "parked",
+      key: byPendingId("parked", "park"),
+      patch: queuedPatch("parked"),
+    },
+    {
+      role: "basejump-landing",
+      abi: ParkedTransferFulfilledEvt,
+      state: "fulfilled",
+      key: byPendingId("fulfilled", "parked-fulfill"),
+      patch: queuedPatch("fulfilled"),
     },
   ],
 };

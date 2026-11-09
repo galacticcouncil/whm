@@ -12,6 +12,7 @@
     "build": "node ./esbuild.dist.mjs",
     "clean": "rm -rf dist/",
     "dev": "node ./esbuild.dev.mjs",
+    "test": "node --import tsx --test --test-force-exit \"src/**/*.test.ts\"",
     "dev:db": "docker compose -f docker-compose.dev.yml up -d",
     "admin": "esbuild src/admin.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/admin.js --log-level=warning && node --env-file=.env dist/admin.js",
     "docker:build": "docker build -t galacticcouncil/scan:latest .",

@@ -223,6 +223,18 @@
               rows: queued ? [["", '<span class="dim">landing pool was short</span>']] : [["", money(r.net_amount, v)]],
               since,
             }),
+            // Parked: the pool held it, its dispatch failed, so parkPending moved it off the queue
+            // head. Paid only by fulfillParked, into the same fulfilled card.
+            queued && r.parked
+              ? legCard({
+                  where: v.to_chain,
+                  kind: "parked",
+                  ref: r.parked,
+                  held: !r.fulfilled,
+                  rows: [["", '<span class="dim">dispatch failed; waits for fulfillParked</span>']],
+                  since,
+                })
+              : "",
             queued
               ? legCard({ where: v.to_chain, kind: "fulfilled", ref: r.fulfilled, rows: [["", money(r.net_amount, v)]], pending: !r.fulfilled, since })
               : "",
