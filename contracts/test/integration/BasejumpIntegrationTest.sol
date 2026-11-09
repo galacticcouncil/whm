@@ -127,7 +127,8 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         usdcHydration = new MockERC20();
 
         // Source deployment (Base). tokenBridge = 0x0 — the NTT path never reads it.
-        BasejumpEmitter sourceImpl = new BasejumpEmitter();
+        // A USDC corridor, configured as basejump-ethereum deploys it: instant (200).
+        BasejumpEmitter sourceImpl = new BasejumpEmitter(200);
         basejumpBase = BasejumpEmitter(
             address(
                 new ERC1967Proxy(
@@ -281,7 +282,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
         assertEq(published.sourceAsset, address(usdcBase), "wrong sourceAsset published");
         assertEq(published.recipient, hydrationRecipient, "wrong recipient published");
         assertEq(published.transferSequence, transferSeq, "settlement sequence not correlated");
-        assertEq(lastPublishedConsistency(), 200, "must publish at instant finality");
+        assertEq(lastPublishedConsistency(), 200, "must publish at the implementation's level (200 here)");
     }
 
     /// @notice `data` is the inbound-intent channel: a recipient that is a Hydration contract needs
@@ -419,7 +420,7 @@ contract BasejumpIntegrationTest is Test, MockWormhole {
     }
 
     function testLandingNotSet() public {
-        BasejumpEmitter impl = new BasejumpEmitter();
+        BasejumpEmitter impl = new BasejumpEmitter(200);
         BasejumpEmitter fresh = BasejumpEmitter(
             address(
                 new ERC1967Proxy(address(impl), abi.encodeCall(BasejumpEmitter.initialize, (address(this))))

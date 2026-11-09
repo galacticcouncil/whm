@@ -55,7 +55,9 @@ not reason about it.
 - **Wormhole**: `parseAndVerifyVM` checks guardian signatures and nothing else — the emitter check is
   the caller's job. Relaying is **permissionless**: anyone can submit any VAA to any receiver, in any
   order, at any delay. `vm.timestamp` is the source-block time. Consistency 200 = instant publish;
-  **200 is deliberate across this repo** and reorg exposure is accepted risk, not a finding.
+  **200 is deliberate across this repo** and reorg exposure is accepted risk, not a finding. The one
+  exception is deliberate too: `BasejumpEmitter` takes its level per deployment (constructor
+  immutable, 200 or 201), and the Base EURC emitter publishes at 201 (safe).
 - **NTT v2 is the settlement rail.** The 3-arg `transfer` overload hardcodes `shouldQueue = false`, so
   a paused rail or rate-limit breach reverts instead of queueing. `NttManager._trimTransferAmount`
   **reverts** with `TransferAmountHasDust` rather than truncating, and trims to 8 decimals — so any
@@ -65,7 +67,7 @@ not reason about it.
   `contracts/src/utils/hydration/`, `contracts/src/*/interfaces/`, `contracts/test/`, and
   `contracts/dependencies/` for the pinned `wormhole-solidity-sdk` / OZ.
 
-**Design decisions — do not report these as findings:** consistency level 200; a permissionless
+**Design decisions — do not report these as findings:** consistency level 200 (and 201 for the Base `BasejumpEmitter`); a permissionless
 `OracleEmitter.send` (the caller triggers a read and cannot choose its result); permissionless
 relaying generally; renouncing receiver ownership as the prod end-state.
 

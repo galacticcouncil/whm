@@ -60,6 +60,10 @@ contract BasejumpEmitterTest is Test, MockWormhole {
 
     error PublishReached();
 
+    /// @dev The consistency argument of the most recent publishMessage call, and how many calls.
+    uint8 public lastConsistency;
+    uint256 public publishCount;
+
     function chainId() external pure returns (uint16) {
         return BASE_CHAIN_ID;
     }
@@ -68,8 +72,10 @@ contract BasejumpEmitterTest is Test, MockWormhole {
         return 0;
     }
 
-    function publishMessage(uint32, bytes memory, uint8) external payable returns (uint64 sequence) {
+    function publishMessage(uint32, bytes memory, uint8 consistency) external payable returns (uint64 sequence) {
         if (failOnPublish) revert PublishReached();
+        lastConsistency = consistency;
+        publishCount++;
         sequence = _nextSequence;
         _nextSequence++;
     }
@@ -81,6 +87,12 @@ contract BasejumpEmitterTest is Test, MockWormhole {
 
     uint256 constant TRANSFER_AMOUNT = 1_000e6;
     uint256 constant BASEJUMP_FEE = 1e5;
+
+    /// @dev The levels the migrations pass: basejump-base 001 (from FAST_PATH_CONSISTENCY_BASE)
+    ///      and basejump-ethereum 001 (hardcoded). Literals, not the contract's constants, so a
+    ///      changed constant cannot move the expectation with it.
+    uint8 constant BASE_CONSISTENCY = 201;
+    uint8 constant ETHEREUM_CONSISTENCY = 200;
 
     // ─── Fixtures ───────────────────────────────────────────────────
 
@@ -99,20 +111,25 @@ contract BasejumpEmitterTest is Test, MockWormhole {
         unroutedToken = new MockERC20();
         landing = BasejumpTestHelpers.addressToBytes32(landingAddr);
 
-        BasejumpEmitter impl = new BasejumpEmitter();
-        // tokenBridge = 0x0 — the NTT path must never touch it. Any read would revert here.
-        ERC1967Proxy proxy =
-            new ERC1967Proxy(address(impl), abi.encodeCall(BasejumpEmitter.initialize, (address(this))));
-        emitter = BasejumpEmitter(address(proxy));
-
         nttManager = new MockNttManager(address(eurc));
-
-        emitter.setLanding(landing);
-        emitter.setNttManager(address(eurc), address(nttManager));
-        emitter.setAssetFee(address(eurc), BASEJUMP_FEE);
+        // The Base EURC corridor's deployment: safe (201).
+        emitter = _deployArmed(BASE_CONSISTENCY);
 
         eurc.mint(user, TRANSFER_AMOUNT);
         unroutedToken.mint(user, TRANSFER_AMOUNT);
+    }
+
+    /// @dev Implementation built with `level`, behind a proxy, wired as the migrations wire it.
+    function _deployArmed(uint8 level) internal returns (BasejumpEmitter e) {
+        BasejumpEmitter impl = new BasejumpEmitter(level);
+        // tokenBridge = 0x0 — the NTT path must never touch it. Any read would revert here.
+        ERC1967Proxy proxy =
+            new ERC1967Proxy(address(impl), abi.encodeCall(BasejumpEmitter.initialize, (address(this))));
+        e = BasejumpEmitter(address(proxy));
+
+        e.setLanding(landing);
+        e.setNttManager(address(eurc), address(nttManager));
+        e.setAssetFee(address(eurc), BASEJUMP_FEE);
     }
 
     function _bridge(MockERC20 token, uint256 amount, uint256 value) internal {
@@ -221,5 +238,58 @@ contract BasejumpEmitterTest is Test, MockWormhole {
         _bridge(eurc, TRANSFER_AMOUNT, 0);
 
         assertEq(eurc.allowance(address(emitter), address(nttManager)), 0, "stale approval left");
+    }
+
+    // ─── Consistency level (per deployment) ─────────────────────────
+
+    /// @notice The Base deployment publishes its fast-path message at safe (201): the level
+    ///         reaches publishMessage, read from the mock core's received argument.
+    function testBaseDeploymentPublishesAtSafe() public {
+        assertEq(emitter.CONSISTENCY_LEVEL(), BASE_CONSISTENCY, "getter must report the level");
+
+        _bridge(eurc, TRANSFER_AMOUNT, 0);
+
+        assertEq(publishCount, 1, "exactly one fast-path message");
+        assertEq(lastConsistency, BASE_CONSISTENCY, "Base fast path must publish at safe (201)");
+    }
+
+    /// @notice An implementation built with the Ethereum migration's argument publishes at
+    ///         instant (200), so an Ethereum upgrade built from this source keeps 200.
+    function testEthereumConfigDeploymentPublishesAtInstant() public {
+        emitter = _deployArmed(ETHEREUM_CONSISTENCY);
+        assertEq(emitter.CONSISTENCY_LEVEL(), ETHEREUM_CONSISTENCY, "getter must report the level");
+
+        _bridge(eurc, TRANSFER_AMOUNT, 0);
+
+        assertEq(publishCount, 1, "exactly one fast-path message");
+        assertEq(lastConsistency, ETHEREUM_CONSISTENCY, "Ethereum fast path must publish at instant (200)");
+    }
+
+    /// @notice The level is the implementation's: a proxy upgraded to an implementation built
+    ///         with another level publishes at the new one, with storage untouched.
+    function testUpgradeTakesTheNewImplementationsLevel() public {
+        emitter.upgradeToAndCall(address(new BasejumpEmitter(ETHEREUM_CONSISTENCY)), "");
+        assertEq(emitter.landing(), landing, "storage must survive the upgrade");
+
+        _bridge(eurc, TRANSFER_AMOUNT, 0);
+        assertEq(lastConsistency, ETHEREUM_CONSISTENCY, "upgrade must carry the new level");
+    }
+
+    /// @notice Only 200 and 201 are accepted. The guardian watcher reads any other value as
+    ///         finalized (and 202 is the explicit finalized level), so each would silently turn
+    ///         the fast path into a ~20 min one.
+    function testConstructorRejectsOtherLevels() public {
+        uint8[4] memory bad = [uint8(0), 1, 202, 255];
+        for (uint256 i = 0; i < bad.length; i++) {
+            try new BasejumpEmitter(bad[i]) returns (BasejumpEmitter built) {
+                fail(string.concat("constructor accepted level ", vm.toString(built.CONSISTENCY_LEVEL())));
+            } catch (bytes memory err) {
+                assertEq(
+                    err,
+                    abi.encodeWithSelector(BasejumpEmitter.UnsupportedConsistencyLevel.selector, bad[i]),
+                    "wrong revert"
+                );
+            }
+        }
     }
 }

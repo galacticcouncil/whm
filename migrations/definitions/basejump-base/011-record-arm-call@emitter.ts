@@ -1,12 +1,14 @@
 import { encodeFunctionData, getAddress, pad, parseAbi } from "viem";
 
 import type { MigrationStep } from "./types";
+import { parseFastPathConsistency } from "../../actions/basejump-emitter/deploy";
 
 const EMITTER_ABI = parseAbi([
   "function owner() view returns (address)",
   "function landing() view returns (bytes32)",
   "function nttManagerFor(address) view returns (address)",
   "function assetFee(address) view returns (uint256)",
+  "function CONSISTENCY_LEVEL() view returns (uint8)",
   "function setLanding(bytes32)",
 ]);
 const ZERO32 = `0x${"00".repeat(32)}`;
@@ -18,6 +20,8 @@ const ZERO32 = `0x${"00".repeat(32)}`;
  *   - the landing holds the EURC float (the Treasury referendum),
  *   - the superseded Base senders 0x9c00…c4d2 and 0xf5b9…529b read landingDest() = 0,
  *   - the relayer's basejump route for Base is filled and deployed.
+ * It also refuses unless the emitter publishes at FAST_PATH_CONSISTENCY_BASE (201, safe): the
+ * level is the implementation's, so an upgrade between 001 and now could have changed it.
  * Before it, `bridgeViaWormhole` reverts `LandingNotSet` before pulling any token.
  */
 const step: MigrationStep = {
@@ -35,21 +39,27 @@ const step: MigrationStep = {
     const asset = getAddress(required("EURC_SOURCE_ASSET"));
     const manager = getAddress(required("EURC_NTT_MANAGER"));
     const fee = BigInt(required("EURC_FEE_AMOUNT"));
+    const consistency = parseFastPathConsistency("FAST_PATH_CONSISTENCY_BASE", ctx.env.FAST_PATH_CONSISTENCY_BASE);
     // Same env value step 007 gave the receiver: invariant 1 by construction.
     const landing = pad(getAddress(required("HYDRATION_LANDING")).toLowerCase() as `0x${string}`, { size: 32 });
 
-    const read = (functionName: "owner" | "landing" | "nttManagerFor" | "assetFee", args: readonly unknown[] = []) =>
+    const read = (
+      functionName: "owner" | "landing" | "nttManagerFor" | "assetFee" | "CONSISTENCY_LEVEL",
+      args: readonly unknown[] = [],
+    ) =>
       publicClient.readContract({ address: emitter, abi: EMITTER_ABI, functionName, args } as never) as Promise<unknown>;
 
     const owner = getAddress((await read("owner")) as string);
     const current = ((await read("landing")) as string).toLowerCase();
     const route = getAddress((await read("nttManagerFor", [asset])) as string);
     const assetFee = (await read("assetFee", [asset])) as bigint;
+    const level = Number(await read("CONSISTENCY_LEVEL"));
 
     if (owner !== safe) throw new Error(`emitter owner ${owner}, expected the Base TC Safe ${safe}`);
     if (current !== ZERO32) throw new Error(`emitter already armed (landing ${current})`);
     if (route !== manager) throw new Error(`emitter settles EURC via ${route}, expected ${manager}`);
     if (assetFee !== fee) throw new Error(`emitter EURC fee ${assetFee}, expected ${fee}`);
+    if (level !== consistency) throw new Error(`emitter publishes at consistency ${level}, expected ${consistency}`);
 
     const data = encodeFunctionData({ abi: EMITTER_ABI, functionName: "setLanding", args: [landing] });
 
@@ -61,7 +71,7 @@ const step: MigrationStep = {
     console.log(`  the landing, 0x9c00…c4d2 and 0xf5b9…529b read landingDest() = 0, and the relayer route is live.`);
     console.log(`  Disarm again at any time with setLanding(0x00…00).`);
 
-    return { safe, emitter, value: "0", armCalldata: data, landing };
+    return { safe, emitter, value: "0", armCalldata: data, landing, consistencyLevel: String(level) };
   },
 };
 

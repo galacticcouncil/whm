@@ -154,6 +154,13 @@ const MAX_FEE_PER_GAS = 10_000_000_000n;
 
 /** Stand-in Base emitter for a receiver deployed on the fork. With --receiver, the live one is read. */
 const FORK_BASE_EMITTER = "0x000000000000000000000000000000000000ba5e" as Hex;
+/**
+ * Consistency byte of the canary VAA: the level the Base emitter publishes at (FAST_PATH_CONSISTENCY_BASE
+ * in basejump-base.env, safe). The receiver does not check it; this keeps the canary the shape a real
+ * Base fast-path VAA has. This probe runs on a Hydration fork only, so it cannot read the Base emitter;
+ * step 011 of basejump-base checks the live emitter's CONSISTENCY_LEVEL before the arming call.
+ */
+const BASE_FAST_PATH_CONSISTENCY = 201;
 const GROSS = 100_000_000n; // 100 EURC
 const FEE = 100_000n; //   0.1 EURC — EURC_FEE_AMOUNT in basejump-base.env
 const NET = GROSS - FEE;
@@ -303,7 +310,7 @@ async function buildSignedVaa(opts: { emitterChain: number; emitter: Hex; sequen
     pad(numberToHex(opts.emitterChain), { size: 2 }),
     pad(opts.emitter, { size: 32 }),
     pad(numberToHex(opts.sequence), { size: 8 }),
-    pad(numberToHex(200), { size: 1 }),
+    pad(numberToHex(BASE_FAST_PATH_CONSISTENCY), { size: 1 }),
     opts.payload,
   ]);
   const { r, s, v } = await sign({ hash: keccak256(keccak256(body)), privateKey: GUARDIAN_PK });

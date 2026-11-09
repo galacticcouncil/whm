@@ -17,10 +17,16 @@ import {INttManager} from "../ntt/interfaces/INttManager.sol";
 /// @notice Funds move on two rails between exactly two chains:
 ///
 ///           SETTLEMENT  nttManagerFor[asset].transfer(gross, 73, landing)
-///           FAST PATH   wormhole.publishMessage(net, consistency 200)
+///           FAST PATH   wormhole.publishMessage(net, CONSISTENCY_LEVEL: 200 or 201)
 ///
 ///         The settlement replenishes the pool the fast path pays out of; the difference between
 ///         the two legs is `assetFee`, which accrues in the landing.
+///
+///         The fast path's Wormhole consistency level is fixed per deployment, in the
+///         implementation's constructor: 200 (instant, signed at observation) for Ethereum, 201
+///         (safe, signed once the block is under the chain's `safe` head) for Base. It is an
+///         immutable, so it lives in the implementation's code, not in proxy storage: every upgrade
+///         chooses it again through the new implementation's constructor argument.
 ///
 /// @dev Deliberately inherits NO receiver: this contract has no `receiveMessage`, no
 ///      `authorizedEmitters` and no `processedVaas`. Hydration finalizes in seconds, so nothing
@@ -32,8 +38,16 @@ contract BasejumpEmitter is Initializable, UUPSUpgradeable, IBasejumpEmitter, IB
     using SafeERC20 for IERC20;
 
     uint16 public constant DEST_CHAIN_ID = HydrationConsts.WORMHOLE_CHAIN_ID;
-    
+
+    /// @notice Wormhole "instant": the guardians sign at observation, from the unsafe head.
     uint8 public constant CONSISTENCY_INSTANT = 200;
+    /// @notice Wormhole "safe": the guardians sign once the block is at or below the `safe` head.
+    uint8 public constant CONSISTENCY_SAFE = 201;
+
+    /// @notice The consistency level every fast-path message of this implementation is published
+    ///         at. Set once in the constructor; only CONSISTENCY_INSTANT or CONSISTENCY_SAFE.
+    /// @dev Immutable, not storage: the proxy's layout is unchanged and no reinitializer is needed.
+    uint8 public immutable CONSISTENCY_LEVEL;
 
     IWormhole public wormhole;
     address public owner;
@@ -49,6 +63,7 @@ contract BasejumpEmitter is Initializable, UUPSUpgradeable, IBasejumpEmitter, IB
     mapping(address => address) public nttManagerFor;
 
     error NotOwner();
+    error UnsupportedConsistencyLevel(uint8 level);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -57,7 +72,14 @@ contract BasejumpEmitter is Initializable, UUPSUpgradeable, IBasejumpEmitter, IB
 
     // ─── Init ────────────────────────────────────────────────────
 
-    constructor() {
+    /// @param consistencyLevel_ CONSISTENCY_INSTANT (200) or CONSISTENCY_SAFE (201); any other
+    ///        value reverts. The guardian EVM watcher reads every value other than 200 and 201 as
+    ///        "finalized", so a typo would silently slow the fast path to finality.
+    constructor(uint8 consistencyLevel_) {
+        if (consistencyLevel_ != CONSISTENCY_INSTANT && consistencyLevel_ != CONSISTENCY_SAFE) {
+            revert UnsupportedConsistencyLevel(consistencyLevel_);
+        }
+        CONSISTENCY_LEVEL = consistencyLevel_;
         _disableInitializers();
     }
 
@@ -136,7 +158,7 @@ contract BasejumpEmitter is Initializable, UUPSUpgradeable, IBasejumpEmitter, IB
         );
 
         messageSequence =
-            wormhole.publishMessage{value: wormhole.messageFee()}(emitterNonce, payload, CONSISTENCY_INSTANT);
+            wormhole.publishMessage{value: wormhole.messageFee()}(emitterNonce, payload, CONSISTENCY_LEVEL);
         emitterNonce++;
 
         emit BridgeInitiated(

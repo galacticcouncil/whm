@@ -50,6 +50,7 @@ BasejumpEmitter
   │
   └─ FAST (net = gross − assetFee)                BasejumpReceiver
        wormhole.publishMessage(nonce, payload, 200)   │ landing
+         (CONSISTENCY_LEVEL; Base: 201)               │
        → guardians → relayer (basejump) ──────────────┤
                                                       ▼
                                             IBasejumpLanding.transfer
@@ -70,8 +71,20 @@ Returns `(transferSequence, messageSequence)`.
    it arrives as zero (`ZeroAmountReceived`).
 4. **Settle**: `quoteDeliveryPrice(DEST_CHAIN_ID, hex"00")`, `forceApprove`, then
    `INttManager.transfer{value: price}(actualAmount, DEST_CHAIN_ID, landing)` → `transferSequence`.
-5. **Fast-track**: `_fastTrack` publishes `abi.encode(TransferPayload)` at consistency level
-   **200** → `messageSequence`, and emits `BridgeInitiated`.
+5. **Fast-track**: `_fastTrack` publishes `abi.encode(TransferPayload)` at the implementation's
+   `CONSISTENCY_LEVEL` (**200** on Ethereum, **201** on Base) → `messageSequence`, and emits
+   `BridgeInitiated`.
+
+**Consistency level, per deployment.** `CONSISTENCY_LEVEL` is an `immutable` set by the
+implementation's constructor, which accepts only 200 (instant) or 201 (safe) and reverts on any
+other value. It lives in the implementation's code, not in proxy storage, so the storage layout is
+unchanged and every upgrade chooses the level again through the new implementation's constructor
+argument. In the guardian EVM watcher, 200 is signed at observation and 201 once the block is at or
+below the chain's `safe` head; every other value is treated as finalized. The `basejump-ethereum`
+migration passes 200 as a literal (the live corridor, unchanged); `basejump-base` passes
+`FAST_PATH_CONSISTENCY_BASE` = 201 from its env, the deploy action reads the level back from the new
+implementation, and step 011 refuses to record the arming call unless the emitter reports it. The
+receiver and landing do not read the level.
 
 Settlement precedes publication, and the 3-argument NTT `transfer` overload hardcodes
 `shouldQueue = false`. A rate-limit breach or paused rail therefore reverts the whole call before any
@@ -244,7 +257,7 @@ Split by what each layer can actually observe.
 
 | Layer | Covers | Notes |
 | --- | --- | --- |
-| [`BasejumpEmitterTest`](../../contracts/test/basejump/BasejumpEmitterTest.sol) | fail-closed settlement, `SettlementRouteNotSet`, disarm-before-pull, delivery-price forwarding, no stale approval | mutation-checked: publishing before settling breaks it |
+| [`BasejumpEmitterTest`](../../contracts/test/basejump/BasejumpEmitterTest.sol) | fail-closed settlement, `SettlementRouteNotSet`, disarm-before-pull, delivery-price forwarding, no stale approval, per-deployment consistency level (201 and 200 reach `publishMessage`, constructor rejects 0, 1, 202, 255) | mutation-checked: publishing before settling breaks it; a hardcoded 200 or a dropped range check breaks the consistency tests |
 | [`BasejumpLandingTest`](../../contracts/test/basejump/BasejumpLandingTest.sol) | pool accounting, queueing, `fulfillPending`, authorization | `0x0401` mocked |
 | [`BasejumpIntegrationTest`](../../contracts/test/integration/BasejumpIntegrationTest.sol) | emitter → receiver → landing, fee split, pool binding, atomicity, replay, queueing | `0x0401` is `vm.mockCall`'d, so **balances do not move here** |
 | [`_probeBasejumpDelivery`](../../chopsticks/probes/_probeBasejumpDelivery.ts) | real message core, real asset-44 precompile, real `0x0401` dispatch, real balance movement, replay, shortfall | Substrate fork |
@@ -306,7 +319,9 @@ does not: referendum #404 unmapped Base EURC and moved the EURC float to USDC, s
 motion and step 4 a Treasury referendum. Unlike the Ethereum corridor, the migration leaves the
 emitter **disarmed** (`landing` unset), and the Base TC Safe arms it with `setLanding` only after
 the motion, the float and the relayer route are in place, so no user can send into a corridor that
-cannot yet pay. Steps 010 and 011 record the motion's landing calls and the Safe's arming call;
+cannot yet pay. Its fast path publishes at **safe (201)**, not instant: the VAA is signed only once
+the Base block is in a batch posted to L1, which removes the unsafe-head orphan risk for about a
+minute of extra latency (see [base-eurc.md](base-eurc.md#fast-path-consistency)). Steps 010 and 011 record the motion's landing calls and the Safe's arming call;
 [`_probeBasejumpBaseGoLive`](../../chopsticks/probes/_probeBasejumpBaseGoLive.ts) builds both
 proposals and enacts them on a fork. Checklist and referendum draft: [base-eurc.md](base-eurc.md).
 

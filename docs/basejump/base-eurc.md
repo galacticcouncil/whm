@@ -1,6 +1,6 @@
 # Basejump Base → Hydration (EURC): switch-on
 
-A user sends EURC on Base and receives EURC (asset 44) on Hydration in about 2 minutes, less a
+A user sends EURC on Base and receives EURC (asset 44) on Hydration in about 2.5-3.5 minutes, less a
 0.1 EURC fee. The pool on Hydration pays at once; the transfer's own NTT settlement refills it
 later. Contracts and tooling are ready; the corridor is not live.
 
@@ -37,7 +37,8 @@ a moment when users can send EURC on Base while the Hydration end cannot pay the
    emitter and records the Safe's arming call. Commit `deployments/prod/basejump-base.json`. Safe to
    run at any time: nobody can send through the disarmed emitter.
 2. **Verify the deployment**: emitter `landing()` = 0 (disarmed), `nttManagerFor(Base EURC)` =
-   `0xD1dc…d89a`, `quoteFee(Base EURC)` = 100,000 (0.1 EURC), owner = the Base TC Safe; receiver
+   `0xD1dc…d89a`, `quoteFee(Base EURC)` = 100,000 (0.1 EURC), `CONSISTENCY_LEVEL()` = 201 (safe),
+   owner = the Base TC Safe; receiver
    `landing()` = the landing, `authorizedEmitters(30)` = the emitter, owner = the emergency admin.
 3. **Fill the relayer route**: in `agents/relayer/src/apps/basejump/routes.ts`, set the Base entry's
    `sourceEmitter` (001 `proxyAddress`) and `receiver` (005 `proxyAddress`). Merge, build, deploy the
@@ -76,6 +77,27 @@ Check outcomes by reading state, never by a proposal's result. `utility.batchAll
 swap route the batch completed, the purchase and the transfer both failed, and the Treasury was
 untouched.
 
+## Fast-path consistency
+
+The Base emitter publishes its fast-path message at Wormhole consistency level **201 (safe)**, set
+by `FAST_PATH_CONSISTENCY_BASE` in `basejump-base.env` and baked into the emitter implementation by
+step 001. The Ethereum emitter stays at **200 (instant)**.
+
+- **Why not 200.** At 200 the guardians sign from Base's unsafe head. A sequencer reorg or a batch
+  derivation divergence could orphan the source transaction after its VAA was signed: the pool would
+  pay a VAA whose NTT settlement (which waits for finality) never arrives. At 201 the guardians sign
+  only once the block is at or below Base's `safe` head, which means its batch is posted to L1; what
+  remains is an L1 reorg deep enough to drop that batch before L1 finality.
+- **Why not finalized.** Finalized takes about as long as the NTT settlement itself (15-21 min of
+  head lag measured), so the fast path would add nothing.
+- **Latency.** Base's `safe` head trailed `latest` by 14-91 s (15 samples, 2026-11-08, a sawtooth
+  from batch posting), against 908-1289 s for `finalized`. Expected time to payout is therefore
+  about 2.5-3.5 minutes instead of about 2: the instant path's time plus that lag. Guardian signing
+  time at 201 has not been measured; it adds to the head lag.
+- **Checks.** Step 001 reads `CONSISTENCY_LEVEL()` back from the new implementation; step 011 refuses
+  to record the arming call unless the emitter reports 201. The level is the implementation's, so
+  any later upgrade of the Base emitter must be built with 201 again.
+
 ## Treasury referendum (draft)
 
 The float is the one parameter. The EURC needed is the float minus the Treasury's EURC, rounded up
@@ -93,7 +115,7 @@ be re-measured before submitting.
 **Fund Basejump Base → Hydration EURC with a 10,000 EURC float** (or 20,000)
 
 - **What it does.** Basejump lets users move EURC from Base to Hydration and receive it in about
-  2 minutes. A pool on Hydration pays each user at once; the slower NTT settlement of the same
+  3 minutes. A pool on Hydration pays each user at once; the slower NTT settlement of the same
   transfer refills the pool within about half an hour. The pool needs working capital to start.
 - **Ask.** The float, from the Treasury to the Basejump landing pool. 10,000 EURC is the size of the
   first EURC float (#319) and of the Ethereum corridor's USDC float (#404).
