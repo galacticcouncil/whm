@@ -13,15 +13,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  CallExecutionError,
-  ContractFunctionExecutionError,
-  ContractFunctionRevertedError,
-  ExecutionRevertedError,
-} from "viem";
+import { createPublicClient, custom } from "viem";
 
 import logger from "../../logger";
-import { createPayoutKeeper, landingAbi } from "./payouts";
+import { ERC1967_IMPL_SLOT, createPayoutKeeper, landingAbi } from "./payouts";
 
 logger.silent = true;
 
@@ -30,7 +25,43 @@ const SRC = "0x0000000000000000000000000000000000000015" as const;
 const DEST = "0x0000000100000000000000000000000000000015" as const;
 const MIN = 60_000;
 
-type Rcpt = { transactionHash: string; status: "success" | "reverted" };
+type Rcpt = { transactionHash: string; status: "success" | "reverted"; blockNumber: bigint };
+
+/** Implementations behind the landing proxy, before and after the FIFO / park upgrade. */
+const IMPL_V1 = "0x00000000000000000000000000000000000000b1";
+const IMPL_V2 = "0x00000000000000000000000000000000000000b2";
+/** Stand-in bytecode: dispatch PUSH4s only (`fulfillPending`, a filler); V2 also `parkedTransfers(uint256)` (0x3abcdfc4). */
+const CODE = {
+  [IMPL_V1]: "0x6080604052" + "633404563d" + "63c5f9c6c8",
+  [IMPL_V2]: "0x6080604052" + "633404563d" + "63c5f9c6c8" + "633abcdfc4",
+} as Record<string, string>;
+
+/**
+ * The error viem itself builds from a node's JSON-RPC answer to `eth_call` (a real client over a
+ * `custom` transport), so the keeper sees exactly what production hands it.
+ *
+ * Forms measured on a public Hydration RPC 2026-11-09 (review-37-combined): a revert is
+ * `-32603 "VM Exception while processing transaction: revert"` with data 0x, and a node fault is
+ * `-32603 "failed to retrieve Runtime Api version"`: the same code.
+ */
+async function viemErr(err: { code: number; message: string; data?: string }, id: bigint): Promise<unknown> {
+  const c = createPublicClient({
+    transport: custom({
+      async request({ method }) {
+        if (method === "eth_call") throw Object.assign(new Error(err.message), err);
+        throw new Error("unexpected " + method);
+      },
+    }, { retryCount: 0 }),
+  });
+  try {
+    await c.readContract({ address: LANDING, abi: landingAbi, functionName: "parkedTransfers", args: [id] });
+  } catch (e) {
+    return e;
+  }
+  throw new Error("no error");
+}
+const LIVE_REVERT = { code: -32603, message: "VM Exception while processing transaction: revert", data: "0x" };
+const NODE_FAULT = { code: -32603, message: "failed to retrieve Runtime Api version" };
 
 function world() {
   const w = {
@@ -43,6 +74,9 @@ function world() {
     calls: [] as string[], // every simulate and write, as "simulate:fn" / "write:fn"
     parkable: false, // the landing has parkPending (the FIFO / park upgrade)
     parked: new Map<bigint, bigint>(),
+    block: 1n, // the chain's block number; each mined call is its own block
+    parkedReads: [] as { id: bigint; blockNumber: bigint | undefined }[],
+    codeFails: false, // the implementation's code read fails
     reads: 0,
     staleHead: undefined as bigint | undefined, // next pendingHead read returns this once
     dispatchFails: new Set<bigint>(),
@@ -72,7 +106,8 @@ function world() {
       return "success";
     },
     mine(hash: string, fn = "fulfillPending") {
-      w.receipts.set(hash, { transactionHash: hash, status: w.exec(fn) });
+      w.block++;
+      w.receipts.set(hash, { transactionHash: hash, status: w.exec(fn), blockNumber: w.block });
     },
   };
   let n = 0;
@@ -93,10 +128,9 @@ function world() {
         case "pendingTransfers":
           return [SRC, w.amounts.get(args[0]) ?? 0n, "0x" + "11".repeat(32)];
         case "parkedTransfers":
-          // A landing without the park upgrade has no such getter: the node executes and reverts.
-          if (!w.parkable) {
-            throw new ContractFunctionRevertedError({ abi: landingAbi, functionName: "parkedTransfers", data: "0x" });
-          }
+          w.parkedReads.push({ id: args[0], blockNumber: arguments[0].blockNumber });
+          // A landing without the park upgrade has no such getter: the node answers a revert.
+          if (!w.parkable) throw await viemErr(LIVE_REVERT, args[0]);
           return w.parked.has(args[0])
             ? [SRC, w.parked.get(args[0])!, "0x" + "11".repeat(32)]
             : ["0x0000000000000000000000000000000000000000", 0n, "0x" + "00".repeat(32)];
@@ -121,7 +155,15 @@ function world() {
       return {};
     },
     async getBlockNumber() {
-      return 1n;
+      return w.block;
+    },
+    async getStorageAt({ slot }: any) {
+      assert.equal(slot, ERC1967_IMPL_SLOT);
+      return "0x" + (w.parkable ? IMPL_V2 : IMPL_V1).slice(2).padStart(64, "0");
+    },
+    async getCode({ address }: any) {
+      if (w.codeFails) throw new Error("code read failed");
+      return CODE[address];
     },
     async getBlock() {
       return { baseFeePerGas: null };
@@ -273,7 +315,7 @@ test("S4 a replacement receipt (other hash, success) is not progress: round ends
   e.w.pool = 100_000_000n;
   const { k } = keeperFor(e, { t: 0 });
   e.w.onSend = () => {}; // ours never mines
-  e.w.replaceWith = () => ({ transactionHash: "0x" + "ee".repeat(32), status: "success" });
+  e.w.replaceWith = () => ({ transactionHash: "0x" + "ee".repeat(32), status: "success", blockNumber: 1n });
   await k.poke();
   assert.equal(e.w.sends.length, 1);
 });
@@ -772,7 +814,7 @@ test("P1 a funded head whose dispatch fails is parked once, the 4 behind it are 
       "11".repeat(32) +
       ", by this keeper's parkPending 0x" +
       "1".padStart(64, "0") +
-      " with the pool holding 100 USDC (asset 21). fulfillParked(0) pays it; this keeper never calls fulfillParked.",
+      " with the pool holding 100 USDC (asset 21).",
   ]);
   assert.ok(!e.w.calls.some((c) => c.includes("fulfillParked")));
 });
@@ -823,7 +865,7 @@ test("P3 parks by someone else are alerted once each from parkedTransfers; no 'p
   }
   const parks = parkWarns(posts);
   assert.equal(parks.length, 2);
-  assert.match(parks[0], /^WARN queued Basejump payout #0 of 2 USDC \(asset 21\) parked on landing .*parkedTransfers\(0\) holds it, recipient 0x(11){32}; head then 2\. fulfillParked\(0\) pays it/);
+  assert.match(parks[0], /^WARN queued Basejump payout #0 of 2 USDC \(asset 21\) parked on landing .*parkedTransfers\(0\) holds it, recipient 0x(11){32}; head then 2\.$/);
   assert.match(parks[1], /^WARN queued Basejump payout #1 .*parkedTransfers\(1\) holds it/);
   assert.ok(!posts.some((p) => p.startsWith("OK queued Basejump payout #0")));
   assert.equal(e.w.sends.length, 0);
@@ -872,24 +914,14 @@ test("P5 a head that left with an alert out, parkedTransfers unreadable: OK says
   assert.equal(parkWarns(posts).length, 0);
 });
 
-test("P6 a landing without parkedTransfers whose revert arrives as the node's 'execution reverted' (as on the fork): OK says paid", async () => {
-  const e = world(); // parkable false: no parkPending, no parkedTransfers
+test("P6 a landing whose code has no parkedTransfers: a head that left reads paid, and parkedTransfers is never read", async () => {
+  const e = world(); // parkable false: implementation V1, no parkPending, no parkedTransfers
   e.w.enqueue(2_000_000n);
   e.w.enqueue(2_000_000n);
   e.w.pool = 0n;
   const clock = { t: 0 };
   const { k, posts } = keeperFor(e, clock);
   for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
-  const real = e.clients.publicClient.readContract;
-  e.clients.publicClient.readContract = async (q: any) => {
-    if (q.functionName === "parkedTransfers") {
-      throw new ContractFunctionExecutionError(
-        new CallExecutionError(new ExecutionRevertedError({ message: "Execution reverted with reason: 0x." }), {}),
-        { abi: landingAbi, functionName: "parkedTransfers", args: [q.args[0]] },
-      );
-    }
-    return real(q);
-  };
   e.w.pool = 2_000_000n;
   clock.t += MIN;
   await k.poke();
@@ -897,4 +929,146 @@ test("P6 a landing without parkedTransfers whose revert arrives as the node's 'e
     posts.filter((p) => p.startsWith("OK queued Basejump payout #0")),
     ["OK queued Basejump payout #0 paid (head now 1)"],
   );
+  assert.deepEqual(e.w.parkedReads, []);
+});
+
+test("C1a upgraded landing, someone else parks #0, ONE parkedTransfers read fails with a node fault (-32603): 1 park alert, never 'paid'", async () => {
+  for (const fault of [NODE_FAULT, LIVE_REVERT, { code: -32603, message: "Internal error" }]) {
+    const e = world();
+    e.w.parkable = true;
+    e.w.enqueue(2_000_000n);
+    e.w.enqueue(2_000_000n);
+    e.w.pool = 0n;
+    const clock = { t: 0 };
+    const { k, posts } = keeperFor(e, clock);
+    for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke(); // waiting alert out on #0
+    e.w.pool = 100_000_000n;
+    e.w.dispatchFails.add(0n);
+    assert.equal(e.w.exec("parkPending"), "success");
+    e.w.pool = 0n;
+    const real = e.clients.publicClient.readContract;
+    let failures = 1;
+    e.clients.publicClient.readContract = async (q: any) => {
+      if (q.functionName === "parkedTransfers" && failures-- > 0) throw await viemErr(fault, q.args[0]);
+      return real(q);
+    };
+    for (let i = 0; i < 20; i++) {
+      clock.t += MIN;
+      await k.poke();
+    }
+    assert.equal(parkWarns(posts).length, 1, fault.message);
+    assert.ok(!posts.some((p) => p.startsWith("OK queued Basejump payout #0 paid")), fault.message);
+  }
+});
+
+test("C1b own park; its receipt-block read and the next scan read both fail (-32603): the park alert still comes", async () => {
+  const e = world();
+  e.w.parkable = true;
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  const real = e.clients.publicClient.readContract;
+  let failures = 2;
+  e.clients.publicClient.readContract = async (q: any) => {
+    if (q.functionName === "parkedTransfers" && failures-- > 0) throw await viemErr(NODE_FAULT, q.args[0]);
+    return real(q);
+  };
+  for (let i = 0; i < 10; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(parkWarns(posts).length, 1);
+});
+
+test("P7 the implementation's code cannot be read: a head that left with an alert out reads 'not read', not 'paid'", async () => {
+  const e = world(); // V1
+  e.w.enqueue(2_000_000n);
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 0n;
+  e.w.codeFails = true;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (clock.t = 0; clock.t <= 31 * MIN; clock.t += MIN) await k.poke();
+  e.w.pool = 2_000_000n;
+  clock.t += MIN;
+  await k.poke();
+  assert.deepEqual(
+    posts.filter((p) => p.startsWith("OK queued Basejump payout #0")),
+    ["OK queued Basejump payout #0 left the head (head now 1); parkedTransfers(0) not read"],
+  );
+});
+
+test("P8 an upgrade while running is decided afresh: after V1 -> V2, a park by someone else is alerted", async () => {
+  const e = world();
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 2_000_000n;
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  await k.poke(); // pays #0 on V1
+  await k.poke();
+  assert.equal(e.w.head, 1n);
+  e.w.parkable = true; // the TC upgrades the proxy to V2
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(1n);
+  assert.equal(e.w.exec("parkPending"), "success"); // someone else parks #1
+  e.w.pool = 0n;
+  for (let i = 0; i < 5; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(parkWarns(posts).length, 1);
+  assert.match(parkWarns(posts)[0], /payout #1 /);
+});
+
+test("R1 a restarted process alerts each still-parked entry once from its startup scan (id 0)", async () => {
+  const e = world();
+  e.w.parkable = true;
+  for (let i = 0; i < 3; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  const clock = { t: 0 };
+  const A = keeperFor(e, clock);
+  for (let i = 0; i < 5; i++) await A.k.poke();
+  assert.equal(parkWarns(A.posts).length, 1);
+  const B = keeperFor(e, clock); // restart
+  for (let i = 0; i < 20; i++) {
+    clock.t += MIN;
+    await B.k.poke();
+  }
+  assert.equal(parkWarns(B.posts).length, 1);
+  assert.match(parkWarns(B.posts)[0], /^WARN queued Basejump payout #0 .*parkedTransfers\(0\) holds it.*; head then 3\.$/);
+});
+
+test("R9 a parked entry later paid by fulfillParked posts nothing (the parked row is never cleared)", async () => {
+  const e = world();
+  e.w.parkable = true;
+  for (let i = 0; i < 2; i++) e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  const clock = { t: 0 };
+  const { k, posts } = keeperFor(e, clock);
+  for (let i = 0; i < 5; i++) await k.poke();
+  const n = posts.length;
+  assert.equal(parkWarns(posts).length, 1);
+  e.w.parked.delete(0n); // someone's fulfillParked(0) pays it
+  for (let i = 0; i < 20; i++) {
+    clock.t += MIN;
+    await k.poke();
+  }
+  assert.equal(posts.length, n);
+});
+
+test("R3 the keeper's own park is read back at its receipt's block", async () => {
+  const e = world();
+  e.w.parkable = true;
+  e.w.enqueue(2_000_000n);
+  e.w.pool = 100_000_000n;
+  e.w.dispatchFails.add(0n);
+  const { k } = keeperFor(e, { t: 0 });
+  await k.poke();
+  const rcptBlock = e.w.receipts.get(e.w.sends[0].hash)!.blockNumber;
+  e.w.block += 5n; // later blocks exist when the read is made
+  assert.deepEqual(e.w.parkedReads[0], { id: 0n, blockNumber: rcptBlock });
 });

@@ -7,6 +7,7 @@
  * Run: `pnpm test` in agents/scan (node:test through the root's tsx; no database).
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import type { LogEvent } from "../../../types";
@@ -81,4 +82,11 @@ test("queue-id legs find the row the queued leg tagged, else an orphan", async (
   assert.match(String(seen[1][0]), /pending_id = \$1 AND fulfilled IS NULL/);
   const empty = { async query() { return { rows: [], rowCount: 0 }; } };
   assert.equal(await legOf("TransferParked").key(args, ev("0xcc"), empty), "orphan-park-hydration-0xcc-0");
+});
+
+test("the transfers list's status SQL text maps a basejump row in state parked to held (text pin of db.ts)", () => {
+  const sql = readFileSync(new URL("../db.ts", import.meta.url), "utf8");
+  const m = /CASE WHEN b\.state IN \('completed', 'fulfilled'\) THEN 'completed'\s+WHEN b\.state IN \(([^)]*)\) THEN 'held' ELSE 'pending' END/.exec(sql);
+  assert.ok(m, "the basejump status CASE has its expected shape");
+  assert.deepEqual(m[1].split(",").map((x) => x.trim()), ["'queued'", "'parked'"]);
 });

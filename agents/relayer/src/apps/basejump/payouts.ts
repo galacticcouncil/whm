@@ -1,7 +1,4 @@
 import {
-  BaseError,
-  ContractFunctionRevertedError,
-  ExecutionRevertedError,
   formatUnits,
   parseAbi,
   zeroAddress,
@@ -41,21 +38,18 @@ export const landingAbi = parseAbi([
 /** The landing writes this keeper sends. */
 type Write = "fulfillPending" | "parkPending";
 
+/** ERC-1967 implementation slot of the landing's UUPS proxy. */
+export const ERC1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+
 /**
- * Whether the node executed the call and it reverted (as opposed to a transport or RPC failure):
- * viem's decoded `ContractFunctionRevertedError`, or its `ExecutionRevertedError`, which it builds
- * from the node's own "execution reverted" error (the form a revert with empty data takes on a
- * Hydration fork, measured with the queued-payouts probe).
- * `parkedTransfers` is a public mapping getter on a landing that has it, which cannot revert; a
- * landing from before the FIFO / park upgrade has no such function, so the call reverts there.
+ * `parkedTransfers(uint256)`. An implementation whose code does not contain these four bytes
+ * cannot dispatch the getter, so it predates parking (measured 2026-11-09: absent from the live
+ * pre-upgrade implementation, while `fulfillPending` and `pendingHead` are present).
  */
-function executedRevert(e: unknown): boolean {
-  return (
-    e instanceof BaseError &&
-    e.walk((x) => x instanceof ContractFunctionRevertedError || x instanceof ExecutionRevertedError) !==
-      null
-  );
-}
+export const PARKED_TRANSFERS_SELECTOR = "3abcdfc4";
+
+/** Most `parkedTransfers` reads one pass makes; a longer range continues on the next pass. */
+export const PARK_SCAN_MAX_PER_PASS = 100;
 
 const erc20Abi = parseAbi([
   "function balanceOf(address who) view returns (uint256)",
@@ -144,9 +138,9 @@ export const MAX_REVERT_PAUSE_MS = 6 * 60 * 60_000;
  * landing without it) blocks everything behind it until it is paid or the Technical Committee
  * acts (`withdraw` or an upgrade); the keeper sends nothing for it.
  *
- * Every entry that leaves the head while this process runs is read back from `parkedTransfers` at
- * one block whose `pendingHead` is past it; one found there is alerted once (the README's alert
- * table, "parked").
+ * Every entry below the head, from id 0 in each process, is read back from `parkedTransfers` at
+ * one block whose `pendingHead` is past it; one found there is alerted once per process (the
+ * README's alert table, "parked"). A failed read is never taken as paid.
  *
  * Within one process, an unobserved send is never repeated blindly: after a send for head `i`
  * (recorded in `Head.sent`, in process memory), nothing is sent again until either the head moves
@@ -181,10 +175,15 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
   let running: Promise<void> | undefined;
   let again = false;
   /**
-   * The lowest id not yet read back from `parkedTransfers` after leaving the head; undefined until
-   * the first head read (entries that left the head before this process started are not read).
+   * The lowest id not yet read back from `parkedTransfers`. Starts at 0 in every process, so a
+   * restarted process reads (and alerts) every entry still parked.
    */
-  let scanFrom: bigint | undefined;
+  let scanFrom = 0n;
+  /**
+   * Whether each implementation the landing proxy pointed at has `parkedTransfers`, from its code.
+   * Keyed by address, so an upgrade is decided afresh.
+   */
+  const parkingByImpl = new Map<Address, boolean>();
   /** Ids found parked (and alerted) by this process. */
   const parked = new Set<bigint>();
 
@@ -288,27 +287,43 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
     const msg =
       `WARN queued Basejump payout #${id} of ${what} parked on landing \`${landing}\`: ` +
       `parkedTransfers(${id}) holds it, recipient ${recipient}${detail}` +
-      `${headAt === undefined ? "" : `; head then ${headAt}`}. ` +
-      `fulfillParked(${id}) pays it; this keeper never calls fulfillParked.`;
+      `${headAt === undefined ? "" : `; head then ${headAt}`}.`;
     log.warn(msg);
     await notify(msg);
   }
 
   /**
-   * Reads back every entry that left the head since the last scan, at one block: ids below that
-   * block's `pendingHead` are past the head there, so an empty `parkedTransfers` slot means paid
-   * (`fulfillPending`, `parkPending` or, after a park, `fulfillParked`) and a full one means parked.
-   * A read the node executes and reverts means the landing has no `parkedTransfers` (it predates
-   * parking), and such a landing advances its head only by paying, so that entry counts as paid.
-   * Any other failed read stops the scan; it resumes at the same id on the next pass. Never throws.
+   * Whether the landing's current implementation has `parkedTransfers`, from a positive read: the
+   * ERC-1967 slot at `blockNumber`, then that implementation's code. Throws when either read fails
+   * or comes back empty; the caller then treats the entries as not read.
+   */
+  async function landingHasParking(blockNumber: bigint): Promise<boolean> {
+    const word = await publicClient.getStorageAt({ address: landing, slot: ERC1967_IMPL_SLOT, blockNumber });
+    const impl = (word ? `0x${word.slice(-40)}` : zeroAddress).toLowerCase() as Address;
+    if (impl === zeroAddress) throw new Error("landing implementation slot read empty");
+    let has = parkingByImpl.get(impl);
+    if (has === undefined) {
+      const code = await publicClient.getCode({ address: impl, blockNumber });
+      if (!code || code === "0x") throw new Error(`no code read at implementation ${impl}`);
+      has = code.toLowerCase().includes(PARKED_TRANSFERS_SELECTOR);
+      parkingByImpl.set(impl, has);
+      log.info(`landing implementation ${impl} ${has ? "has" : "has no"} parkedTransfers`);
+    }
+    return has;
+  }
+
+  /**
+   * Reads back every entry below the head, from id 0 in each process, at one block: ids below
+   * that block's `pendingHead` are past the head there, so an empty `parkedTransfers` slot means
+   * paid (`fulfillPending`, `parkPending` or, after a park, `fulfillParked`) and a full one means
+   * parked. When the implementation's code has no `parkedTransfers` (see `landingHasParking`), the
+   * landing cannot park, its head moves only by paying, and the ids are counted as paid unread.
+   * Any failed read (the implementation, its code, or an entry) stops the scan; it resumes at the
+   * same id on the next pass, and that id counts as not read. Never throws.
    *
    * @param h The `pendingHead` this pass read.
    */
   async function scanParked(h: bigint): Promise<void> {
-    if (scanFrom === undefined) {
-      scanFrom = h;
-      return;
-    }
     if (scanFrom >= h) return;
     try {
       const blockNumber = await publicClient.getBlockNumber();
@@ -318,20 +333,19 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
         functionName: "pendingHead",
         blockNumber,
       });
-      for (; scanFrom < headAt; scanFrom++) {
-        const entry = await publicClient
-          .readContract({
-            address: landing,
-            abi: landingAbi,
-            functionName: "parkedTransfers",
-            args: [scanFrom],
-            blockNumber,
-          })
-          .catch((e) => {
-            if (executedRevert(e)) return undefined; // no parking on this landing: paid
-            throw e;
-          });
-        if (entry && entry[0] !== zeroAddress) await alertParked(scanFrom, entry, headAt, "");
+      if (!(await landingHasParking(blockNumber))) {
+        if (scanFrom < headAt) scanFrom = headAt;
+        return;
+      }
+      for (let n = 0; scanFrom < headAt && n < PARK_SCAN_MAX_PER_PASS; scanFrom++, n++) {
+        const entry = await publicClient.readContract({
+          address: landing,
+          abi: landingAbi,
+          functionName: "parkedTransfers",
+          args: [scanFrom],
+          blockNumber,
+        });
+        if (entry[0] !== zeroAddress) await alertParked(scanFrom, entry, headAt, "");
       }
     } catch (e) {
       log.warn(`parked check from #${scanFrom} failed: ${(e as Error).message ?? String(e)}`);
@@ -366,7 +380,7 @@ export function createPayoutKeeper(deps: PayoutKeeperDeps) {
       const id = head.id;
       if (parked.has(id)) {
         log.info(`queued payout #${id} parked (head now ${h})`); // the park alert was posted
-      } else if (scanFrom !== undefined && scanFrom > id) {
+      } else if (scanFrom > id) {
         log.info(`queued payout #${id} paid (head now ${h})`);
         if (head.alerted.size > 0) await notify(`OK queued Basejump payout #${id} paid (head now ${h})`);
       } else {

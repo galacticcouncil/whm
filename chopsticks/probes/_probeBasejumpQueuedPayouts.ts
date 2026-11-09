@@ -13,7 +13,9 @@
  *   read-only: `eth_sendRawTransaction` becomes `pallet_ethereum::transact` in one new block,
  *   `eth_getTransactionReceipt` is answered from that block's events, `eth_getBalance` reads the
  *   WETH (asset 20) that pallet_evm charges gas from, and `eth_getTransactionCount` is tracked
- *   locally (the fork mis-decodes it), `eth_gasPrice` is quoted with headroom, and a revert's data
+ *   locally (the fork mis-decodes it), `eth_gasPrice` is quoted with headroom, `eth_getStorageAt`
+ *   reads pallet_evm's `AccountStorages` at the fork head (chopsticks answers zero; the keeper reads
+ *   the landing's ERC-1967 slot to learn whether it can park), and a revert's data
  *   is moved from the message into `error.data` where a live node puts it. Everything else is
  *   forwarded untouched. The shim also records every transaction the relayer sends, which is
  *   what the "sent nothing" checks count.
@@ -60,7 +62,7 @@ const cjs = <T>(m: T): T => ((m as { default?: T }).default ?? m) as T;
 const { restoreNativeFetch } = cjs(fetchModule);
 const { hydrationClients } = cjs(clientsModule);
 const { createQueue } = cjs(queueModule);
-const { createPayoutKeeper, discordNotifier, landingsOf } = cjs(payoutsModule);
+const { createPayoutKeeper, discordNotifier, landingsOf, ERC1967_IMPL_SLOT } = cjs(payoutsModule);
 
 restoreNativeFetch();
 
@@ -274,6 +276,13 @@ function startShim(net: Network, forkHttp: string) {
         // the probe tests the relayer and not the fork's fee drift (see the report).
         return numberToHex(BigInt((await forward("eth_gasPrice", [])) as string) * GAS_PRICE_HEADROOM);
       }
+      case "eth_getStorageAt": {
+        const raw = await retry("AccountStorages", () =>
+          api.query.EVM.AccountStorages.getValue(params[0] as Hex, params[1] as Hex),
+        );
+        const hex = typeof raw === "string" ? raw : (raw as { asHex?: () => string })?.asHex?.() ?? "0x";
+        return pad((hex === "0x" ? "0x00" : hex) as Hex, { size: 32 });
+      }
       case "eth_getTransactionCount":
         return numberToHex(nonces.get(String(params[0]).toLowerCase()) ?? 0);
       case "eth_getBalance": {
@@ -435,6 +444,16 @@ async function main(): Promise<void> {
     const head0 = await read("pendingHead");
     const tail0 = await read("pendingTail");
     record("live queue is empty at the fork block", head0 === tail0, `head ${head0}, tail ${tail0}`);
+    // The keeper counts a head that left as paid only when the landing's implementation code has no
+    // parkedTransfers selector (a landing that cannot park). Read the same two facts here.
+    const implWord = await clients.publicClient.getStorageAt({ address: LANDING, slot: ERC1967_IMPL_SLOT as Hex });
+    const impl = `0x${(implWord ?? "0x").slice(-40)}` as Hex;
+    const implCode = (await clients.publicClient.getCode({ address: impl })) ?? "0x";
+    record(
+      "the live landing's implementation code has no parkedTransfers selector (pre-upgrade: heads that leave count as paid)",
+      implCode.length > 2 && !implCode.toLowerCase().includes("3abcdfc4") && implCode.toLowerCase().includes("633404563d"), // positive control: PUSH4 fulfillPending()
+      `${impl}, ${(implCode.length - 2) / 2} bytes`,
+    );
 
     // Never build a block while the shim is sealing one: two concurrent newBlock calls deadlock.
     const queuePayout = async (amount: bigint, recipient: Hex) => {
@@ -517,7 +536,7 @@ async function main(): Promise<void> {
     record("queue empty", headB === head0 + 1n && headB === (await read("pendingTail")), `head ${headB}`);
     record("recipient +5 USDC", recipAfter - recipBefore === PAYOUT, `${recipBefore} → ${recipAfter}`);
     record("pool −5 USDC", poolAfter === FLOAT - PAYOUT, `${poolAfter}`);
-    record("one all-clear after the alert", hook.posts.length === 2 && hook.posts[1].startsWith(`OK queued Basejump payout #${head0} paid`), hook.posts[1] ?? "none");
+    record("one all-clear after the alert, 'paid' (the landing's code cannot park)", hook.posts.length === 2 && hook.posts[1].startsWith(`OK queued Basejump payout #${head0} paid`), hook.posts[1] ?? "none");
 
     // ── D. A payout that first waits on the pool, then keeps losing the float race ──
     // Constructs the race where a delivery this app sent just before spends the float: the shim
@@ -596,7 +615,7 @@ async function main(): Promise<void> {
     record("seven calls in total for this payout", sentD() === 7, `${sentD()} sent`);
     record(
       "one all-clear",
-      postsD().length === 3 && postsD()[2].startsWith(`OK queued Basejump payout #${headD} paid`),
+      postsD().length === 3 && postsD()[2].startsWith(`OK queued Basejump payout #${headD} paid`), // paid: the landing's code cannot park
       postsD()[2] ?? "none",
     );
 
