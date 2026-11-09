@@ -1,5 +1,5 @@
 import type { MigrationStep } from "./types";
-import { deploy, parseFastPathConsistency } from "../../actions/basejump-emitter/deploy";
+import { deploy } from "../../actions/basejump-emitter/deploy";
 
 const step: MigrationStep = {
   name: "001-deploy-emitter",
@@ -14,8 +14,10 @@ const step: MigrationStep = {
       ...ctx.wallet.base,
       wormholeId: Number(required("WORMHOLE_ID_BASE")),
       wormholeCore: required("WORMHOLE_CORE_BASE") as `0x${string}`,
-      // Safe (201): the fast path is signed once the block is under Base's `safe` head.
-      consistencyLevel: parseFastPathConsistency("FAST_PATH_CONSISTENCY_BASE", ctx.env.FAST_PATH_CONSISTENCY_BASE),
+      // Safe (201): the fast path is signed once the block is under Base's `safe` head. Owner
+      // decision; deliberately not an env value (as Ethereum's literal 200), so no shell or root
+      // .env value can deploy the Base emitter at another level. Step 011 checks the same literal.
+      consistencyLevel: 201,
     });
   },
 };

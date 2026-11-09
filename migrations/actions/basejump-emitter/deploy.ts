@@ -15,18 +15,12 @@ export type DeployParams = WalletContext & {
   /**
    * Constructor argument of the IMPLEMENTATION: the level every fast-path message is published
    * at. Required on the upgrade path too, because an upgrade installs a new implementation and so
-   * chooses the level again. basejump-ethereum passes 200, basejump-base passes 201.
+   * chooses the level again. basejump-ethereum passes a literal 200, basejump-base a literal 201;
+   * neither reads it from the env, so no shell or .env value can move either corridor.
    */
   consistencyLevel: FastPathConsistency;
   proxy?: `0x${string}`;
 };
-
-/** Parse an env value into a level the constructor accepts; anything else throws. */
-export function parseFastPathConsistency(name: string, value: string | undefined): FastPathConsistency {
-  if (value === "200") return 200;
-  if (value === "201") return 201;
-  throw new Error(`${name} must be 200 (instant) or 201 (safe), got ${JSON.stringify(value)}`);
-}
 
 export type DeployResult = {
   implAddress: string;

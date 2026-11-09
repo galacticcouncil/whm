@@ -72,9 +72,10 @@ contract BasejumpEmitter is Initializable, UUPSUpgradeable, IBasejumpEmitter, IB
 
     // ─── Init ────────────────────────────────────────────────────
 
-    /// @param consistencyLevel_ CONSISTENCY_INSTANT (200) or CONSISTENCY_SAFE (201); any other
-    ///        value reverts. The guardian EVM watcher reads every value other than 200 and 201 as
-    ///        "finalized", so a typo would silently slow the fast path to finality.
+    /// @param consistencyLevel_ CONSISTENCY_INSTANT (200) or CONSISTENCY_SAFE (201); the
+    ///        constructor accepts only these two and any other value reverts. In the guardian EVM
+    ///        watcher 202 and most other values mean "finalized" and 203 selects custom consistency,
+    ///        so a typo would silently slow the fast path or change its rule.
     constructor(uint8 consistencyLevel_) {
         if (consistencyLevel_ != CONSISTENCY_INSTANT && consistencyLevel_ != CONSISTENCY_SAFE) {
             revert UnsupportedConsistencyLevel(consistencyLevel_);

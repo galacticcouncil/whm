@@ -155,8 +155,8 @@ const MAX_FEE_PER_GAS = 10_000_000_000n;
 /** Stand-in Base emitter for a receiver deployed on the fork. With --receiver, the live one is read. */
 const FORK_BASE_EMITTER = "0x000000000000000000000000000000000000ba5e" as Hex;
 /**
- * Consistency byte of the canary VAA: the level the Base emitter publishes at (FAST_PATH_CONSISTENCY_BASE
- * in basejump-base.env, safe). The receiver does not check it; this keeps the canary the shape a real
+ * Consistency byte of the canary VAA: the level the Base emitter publishes at (201, safe; a literal in
+ * basejump-base steps 001 and 011). The receiver does not check it; this keeps the canary the shape a real
  * Base fast-path VAA has. This probe runs on a Hydration fork only, so it cannot read the Base emitter;
  * step 011 of basejump-base checks the live emitter's CONSISTENCY_LEVEL before the arming call.
  */

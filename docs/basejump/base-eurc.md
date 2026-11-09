@@ -1,6 +1,6 @@
 # Basejump Base → Hydration (EURC): switch-on
 
-A user sends EURC on Base and receives EURC (asset 44) on Hydration in about 2.5-3.5 minutes, less a
+A user sends EURC on Base and receives EURC (asset 44) on Hydration in about 2.2-3.5 minutes, less a
 0.1 EURC fee. The pool on Hydration pays at once; the transfer's own NTT settlement refills it
 later. Contracts and tooling are ready; the corridor is not live.
 
@@ -79,9 +79,9 @@ untouched.
 
 ## Fast-path consistency
 
-The Base emitter publishes its fast-path message at Wormhole consistency level **201 (safe)**, set
-by `FAST_PATH_CONSISTENCY_BASE` in `basejump-base.env` and baked into the emitter implementation by
-step 001. The Ethereum emitter stays at **200 (instant)**.
+The Base emitter publishes its fast-path message at Wormhole consistency level **201 (safe)**, a
+literal in steps 001 and 011 of `basejump-base` (not an env value, so no shell or `.env` override can
+move it), baked into the emitter implementation by step 001. The Ethereum emitter stays at **200 (instant)**.
 
 - **Why not 200.** At 200 the guardians sign from Base's unsafe head. A sequencer reorg or a batch
   derivation divergence could orphan the source transaction after its VAA was signed: the pool would
@@ -91,11 +91,11 @@ step 001. The Ethereum emitter stays at **200 (instant)**.
 - **Why not finalized.** Finalized takes about as long as the NTT settlement itself (15-21 min of
   head lag measured), so the fast path would add nothing.
 - **Latency.** Base's `safe` head trailed `latest` by 14-91 s (15 samples, 2026-11-08, a sawtooth
-  from batch posting), against 908-1289 s for `finalized`. Expected time to payout is therefore
-  about 2.5-3.5 minutes instead of about 2: the instant path's time plus that lag. Guardian signing
-  time at 201 has not been measured; it adds to the head lag.
+  from batch posting), against 908-1289 s for `finalized`. The instant path's "about 2 minutes" is
+  the spec's figure, not a measurement; adding the measured lag gives about 2.2-3.5 minutes to
+  payout. Guardian signing time at 201 has not been measured; it adds to the head lag.
 - **Checks.** Step 001 reads `CONSISTENCY_LEVEL()` back from the new implementation; step 011 refuses
-  to record the arming call unless the emitter reports 201. The level is the implementation's, so
+  to record the arming call unless the emitter reports the literal 201. The level is the implementation's, so
   any later upgrade of the Base emitter must be built with 201 again.
 
 ## Treasury referendum (draft)

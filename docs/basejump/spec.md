@@ -49,8 +49,8 @@ BasejumpEmitter
   │    → NttManager 0xeceab645…28fc (BURNING) ─────┘
   │
   └─ FAST (net = gross − assetFee)                BasejumpReceiver
-       wormhole.publishMessage(nonce, payload, 200)   │ landing
-         (CONSISTENCY_LEVEL; Base: 201)               │
+       wormhole.publishMessage(nonce, payload,        │ landing
+         CONSISTENCY_LEVEL)  (Ethereum 200, Base 201) │
        → guardians → relayer (basejump) ──────────────┤
                                                       ▼
                                             IBasejumpLanding.transfer
@@ -80,11 +80,14 @@ implementation's constructor, which accepts only 200 (instant) or 201 (safe) and
 other value. It lives in the implementation's code, not in proxy storage, so the storage layout is
 unchanged and every upgrade chooses the level again through the new implementation's constructor
 argument. In the guardian EVM watcher, 200 is signed at observation and 201 once the block is at or
-below the chain's `safe` head; every other value is treated as finalized. The `basejump-ethereum`
-migration passes 200 as a literal (the live corridor, unchanged); `basejump-base` passes
-`FAST_PATH_CONSISTENCY_BASE` = 201 from its env, the deploy action reads the level back from the new
-implementation, and step 011 refuses to record the arming call unless the emitter reports it. The
-receiver and landing do not read the level.
+below the chain's `safe` head; the constructor accepts no other value (202 would mean finalized, 203
+custom consistency). Both migrations pass the level as a literal, never from the env: `basejump-ethereum`
+passes 200 (the live corridor, unchanged) and `basejump-base` passes 201. The deploy action reads the
+level back from the new implementation, and step 011 refuses to record the arming call unless the
+emitter reports the literal 201. The receiver and landing do not read the level. The deploy action's
+upgrade path does not compare the old and new level, so a future upgrade step (for Ethereum a Safe
+transaction) must check the new implementation's `CONSISTENCY_LEVEL()` against its chain's literal
+(Ethereum 200, Base 201) before it is scheduled.
 
 Settlement precedes publication, and the 3-argument NTT `transfer` overload hardcodes
 `shouldQueue = false`. A rate-limit breach or paused rail therefore reverts the whole call before any

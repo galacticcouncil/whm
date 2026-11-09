@@ -88,8 +88,8 @@ contract BasejumpEmitterTest is Test, MockWormhole {
     uint256 constant TRANSFER_AMOUNT = 1_000e6;
     uint256 constant BASEJUMP_FEE = 1e5;
 
-    /// @dev The levels the migrations pass: basejump-base 001 (from FAST_PATH_CONSISTENCY_BASE)
-    ///      and basejump-ethereum 001 (hardcoded). Literals, not the contract's constants, so a
+    /// @dev The levels the migrations pass, both literals: basejump-base 001 (201) and
+    ///      basejump-ethereum 001 (200). Literals, not the contract's constants, so a
     ///      changed constant cannot move the expectation with it.
     uint8 constant BASE_CONSISTENCY = 201;
     uint8 constant ETHEREUM_CONSISTENCY = 200;
@@ -275,9 +275,9 @@ contract BasejumpEmitterTest is Test, MockWormhole {
         assertEq(lastConsistency, ETHEREUM_CONSISTENCY, "upgrade must carry the new level");
     }
 
-    /// @notice Only 200 and 201 are accepted. The guardian watcher reads any other value as
-    ///         finalized (and 202 is the explicit finalized level), so each would silently turn
-    ///         the fast path into a ~20 min one.
+    /// @notice Only 200 and 201 are accepted. In the guardian watcher 202 is the finalized level
+    ///         and most other values also mean finalized (203 selects custom consistency), so each
+    ///         would silently turn the fast path into a ~20 min one or change its rule.
     function testConstructorRejectsOtherLevels() public {
         uint8[4] memory bad = [uint8(0), 1, 202, 255];
         for (uint256 i = 0; i < bad.length; i++) {
