@@ -65,4 +65,73 @@ library NttPayload {
         (decimals, offset) = payload.asUint8Unchecked(offset);
         (amount, offset) = payload.asUint64Unchecked(offset);
     }
+
+    /// @notice A settlement's transfer in full — who sent it, where it goes, and its payload.
+    /// @param sequence The manager's sequence, as `settlementOf` reads it
+    /// @param message The manager message, the preimage NTT digests delivery on
+    /// @param sender Who called `transfer` on the source manager
+    /// @param decimals The precision `amount` carries
+    /// @param amount What the transfer releases, trimmed to `decimals`
+    /// @param to The recipient on the destination chain
+    /// @param toChain The destination chain
+    /// @param additionalPayload The transfer's payload; empty when it carries none
+    struct Transfer {
+        uint64 sequence;
+        bytes message;
+        bytes32 sender;
+        uint8 decimals;
+        uint64 amount;
+        bytes32 to;
+        uint16 toChain;
+        bytes additionalPayload;
+    }
+
+    /// @notice Read a settlement's transfer through its optional payload, as
+    ///         `TransceiverStructs.parseNativeTokenTransfer` does: the payload is encoded only when
+    ///         non-empty, and the manager message must end where the transfer does.
+    /// @dev Every read is checked: the bytes come from a VAA `parseVM` has not verified.
+    /// @param payload A Wormhole transceiver VAA's payload.
+    function transferOf(bytes memory payload) internal pure returns (Transfer memory t) {
+        uint256 offset = 0;
+
+        bytes4 prefix;
+        (prefix, offset) = payload.asBytes4(offset);
+        if (prefix != WH_TRANSCEIVER_PAYLOAD_PREFIX) revert InvalidPrefix(prefix);
+
+        (, offset) = payload.asBytes32(offset); // sourceNttManagerAddress
+        (, offset) = payload.asBytes32(offset); // recipientNttManagerAddress
+
+        uint16 length;
+        (length, offset) = payload.asUint16(offset);
+        (t.message,) = payload.slice(offset, length);
+
+        bytes memory m = t.message;
+        uint256 at = 0;
+
+        bytes32 id;
+        (id, at) = m.asBytes32(at);
+        t.sequence = uint64(uint256(id));
+        (t.sender, at) = m.asBytes32(at);
+
+        uint16 transferLength;
+        (transferLength, at) = m.asUint16(at);
+        m.checkLength(at + transferLength);
+
+        bytes4 transferPrefix;
+        (transferPrefix, at) = m.asBytes4(at);
+        if (transferPrefix != NTT_PREFIX) revert InvalidTransferPrefix(transferPrefix);
+
+        (t.decimals, at) = m.asUint8(at);
+        (t.amount, at) = m.asUint64(at);
+        (, at) = m.asBytes32(at); // sourceToken
+        (t.to, at) = m.asBytes32(at);
+        (t.toChain, at) = m.asUint16(at);
+
+        if (at < m.length) {
+            uint16 payloadLength;
+            (payloadLength, at) = m.asUint16(at);
+            (t.additionalPayload, at) = m.slice(at, payloadLength);
+        }
+        m.checkLength(at);
+    }
 }
