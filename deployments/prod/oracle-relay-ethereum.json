@@ -2,7 +2,7 @@
   "migration": "oracle-relay-ethereum",
   "environment": "prod",
   "startedAt": "2026-08-25T08:01:35.137Z",
-  "completedAt": "2026-09-22T02:50:34.217Z",
+  "completedAt": "2026-11-05T10:25:58.610Z",
   "steps": [
     {
       "name": "001-deploy-emitter",
@@ -138,6 +138,54 @@
       "error": null,
       "startedAt": "2026-09-22T02:50:25.150Z",
       "completedAt": "2026-09-22T02:50:34.215Z"
+    },
+    {
+      "name": "012-deploy-receiver-apyusd",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x760208eaf0d93be6414b53c6867286276102cad1",
+        "proxyAddress": "0x75f0bc5d807d13073e3f555f0aaf83b538d2b432",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
+      "error": null,
+      "startedAt": "2026-11-05T10:07:49.458Z",
+      "completedAt": "2026-11-05T10:07:58.374Z"
+    },
+    {
+      "name": "013-authorize-emitter@receiver-apyusd",
+      "status": "completed",
+      "output": {
+        "txHash": "0x649b492c56018b60af5f3222a091ded2421852e9d0535e240ea88f6bbb06772e",
+        "emitterBytes32": "0x000000000000000000000000fbf682642a6a28760e717b637f12d014bd5db4b9",
+        "sourceChain": "2"
+      },
+      "error": null,
+      "startedAt": "2026-11-05T10:07:58.376Z",
+      "completedAt": "2026-11-05T10:08:02.668Z"
+    },
+    {
+      "name": "014-set-apyusd-discount@receiver-apyusd",
+      "status": "completed",
+      "output": {
+        "txHash": "0x04e5726a8a879d8c7a144110e9e4c6d0a74d0dd3345c97e4bcf7ceb117e2b2fe",
+        "assetId": "0xde11c6e5fbb09ebf287fceb58deeb4a0e34ccb69e2deeb25dfe46ad04e35a5a8",
+        "oracle": "0x69E3409b0A1EEe647971650f594Bce5e8529a0BD"
+      },
+      "error": null,
+      "startedAt": "2026-11-05T10:25:49.806Z",
+      "completedAt": "2026-11-05T10:25:54.317Z"
+    },
+    {
+      "name": "015-renounce@receiver-apyusd",
+      "status": "completed",
+      "output": {
+        "txHash": "0xfb25a6a935e9ca976f73cf325f5117b595574c66e276ff16df8cd2e0f2164e80",
+        "contract": "0x75f0bc5d807d13073e3f555f0aaf83b538d2b432",
+        "newOwner": "0x0000000000000000000000000000000000000000"
+      },
+      "error": null,
+      "startedAt": "2026-11-05T10:25:54.318Z",
+      "completedAt": "2026-11-05T10:25:58.609Z"
     }
   ]
 }

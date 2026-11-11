@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
-import { ORACLE } from "../../deployments";
+import { ORACLE, ORACLE_ROUTES } from "../../deployments";
 
 import { deliveredUpTo, overview, RANGES, series, updatesOf } from "./db";
 import { feed, FEEDS } from "./feeds";
@@ -16,7 +16,7 @@ export function routes(app: FastifyInstance): void {
   const withRoute = async (feeds: typeof FEEDS) => {
     const [cards, upTo] = await Promise.all([overview(feeds), deliveredUpTo()]);
     return cards.map((c) => {
-      const receiver = ORACLE[c.source].receiver;
+      const receiver = c.route ? ORACLE_ROUTES[c.route].receiver : ORACLE[c.source].receiver;
       return { ...c, receiver: { ...receiver, indexedTo: upTo[receiver.chain] ?? null } };
     });
   };

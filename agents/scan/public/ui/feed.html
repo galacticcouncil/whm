@@ -29,6 +29,8 @@
         agoLong,
         at,
         chainBadge,
+        coefficientOf,
+        discounted,
         dl,
         esc,
         eventLink,
@@ -86,7 +88,13 @@
           </h1>
           <div class="stat-cards">
             <div class="stat-card"><span class="k">Latest value</span><span class="v">${esc(fmt(latest?.value ?? null, f))}${unit}</span>
-              <span class="s">${f.kind === "rate" ? `${esc(f.unit)} per ${esc(f.symbol)}` : "USD"}</span></div>
+              <span class="s">${
+                latest && f.coefficient
+                  ? `${esc(fmt(discounted(latest.value, f.coefficient), f))} discounted · ×${Number(f.coefficient) / 1e8}`
+                  : f.kind === "rate"
+                    ? `${esc(f.unit)} per ${esc(f.symbol)}`
+                    : "USD"
+              }</span></div>
             <div class="stat-card"><span class="k">Updated</span><span class="v">${latest ? esc(agoLong(latest.deliveredAt)) : "never"}</span>
               <span class="s">${latest ? esc(at(latest.deliveredAt)) : "nothing written to the oracle yet"}</span></div>
             <div class="stat-card"><span class="k">Updates</span><span class="v">${f.updates24h} · 24H</span>
@@ -170,6 +178,7 @@
           main.innerHTML = `<div class="crumbs"><a href="/feeds">Feeds</a></div><div class="panel"><div class="table-error">No feed ${esc(id)}.</div></div>`;
           return;
         }
+        if (f.discounted) f.coefficient = await coefficientOf(f.oracle);
         feed = f;
         frame(f);
         await Promise.all([drawChart(), drawUpdates()]);

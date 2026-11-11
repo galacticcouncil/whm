@@ -46,6 +46,8 @@
         agoLong,
         at,
         chainBadge,
+        coefficientOf,
+        discounted,
         esc,
         json,
         live,
@@ -85,6 +87,11 @@
           : "never updated";
         // Published but refused shows only where the receiver wrote fewer than the emitter sent.
         const refused = f.published24h > f.updates24h ? ` · ${f.published24h} published` : "";
+        // A discounted oracle holds the value × its coefficient: shown under the value it was relayed as.
+        const disc =
+          latest && f.coefficient
+            ? `<div class="fc-sub">${esc(fmt(discounted(latest.value, f.coefficient), f))}${f.kind === "rate" ? ` ${esc(f.unit)}` : ""} discounted · ×${Number(f.coefficient) / 1e8}</div>`
+            : "";
         return `<a class="feed-card${gone ? " dead" : ""}" href="/feed/${encodeURIComponent(f.id)}">
           <div class="fc-head">
             ${tokenIcon({ symbol: f.symbol, assetId: f.icon, home: f.source }, 22)}
@@ -92,6 +99,7 @@
             <span class="fc-route">${chainBadge(f.source)}<span class="dim">→</span>${chainBadge(f.receiver.chain)}</span>
           </div>
           <div class="fc-value">${esc(fmt(latest?.value ?? null, f))}${unit}</div>
+          ${disc}
           <div class="fc-sub">${f.kind} · ${when} · ${f.updates24h} in 24H${refused}</div>
           ${sparkline(f.spark)}
         </a>`;
@@ -110,6 +118,9 @@
             '<div class="panel"><div class="table-error"><strong>Could not load feeds.</strong></div></div>';
           return;
         }
+        await Promise.all(
+          feeds.filter((f) => f.discounted).map(async (f) => (f.coefficient = await coefficientOf(f.oracle))),
+        );
         const active = feeds.filter((f) => !dead(f));
         const gone = feeds.filter(dead);
         el("grid").innerHTML = active.length

@@ -12,6 +12,13 @@ const SPARK_POINTS = 60;
 /** How long an update is kept — Postgres has no TTL, so the app prunes. A month of history is enough. */
 export const RETENTION_S = 30 * 86_400;
 
+/**
+ * The `source_chain` a feed's rows sit under: its route's, else its source's.
+ *
+ * @param f The feed.
+ */
+const rowsOf = (f: Feed) => f.route ?? f.source;
+
 /** How far back a chart reaches, by the range a page asks for. Nothing is kept past the longest. */
 export const RANGES: Record<string, number | null> = {
   "24h": 86_400,
@@ -109,7 +116,7 @@ async function points(f: Feed, sinceMs: number | null): Promise<[number, string,
       WHERE asset_id = $1 AND source_chain = $2 AND state = 'delivered'
         AND ($3::bigint IS NULL OR ${WRITTEN} >= $3)
       ORDER BY ${WRITTEN}`,
-    [f.assetId, f.source, sinceMs],
+    [f.assetId, rowsOf(f), sinceMs],
   );
   return r.rows.map((x) => [Number(x.t), x.value, "delivered"]);
 }
@@ -143,14 +150,14 @@ export async function overview(feeds: Feed[]) {
           `SELECT *, 'delivered' AS status FROM oracle_updates
             WHERE asset_id = $1 AND source_chain = $2 AND state = 'delivered'
             ORDER BY ${WRITTEN} DESC LIMIT 1`,
-          [f.assetId, f.source],
+          [f.assetId, rowsOf(f)],
         ),
         pool.query(
           `SELECT COUNT(*) FILTER (WHERE state = 'delivered'
                                      AND ${WRITTEN} >= (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint - 86400000)::int AS written,
                   COUNT(*) FILTER (WHERE vaa_time >= EXTRACT(EPOCH FROM NOW())::bigint - 86400)::int AS published
              FROM oracle_updates WHERE asset_id = $1 AND source_chain = $2`,
-          [f.assetId, f.source],
+          [f.assetId, rowsOf(f)],
         ),
       ]);
       return {
@@ -189,11 +196,11 @@ export async function updatesOf(f: Feed, limit: number, offset: number) {
       `SELECT *, ${STATUS} AS status FROM oracle_updates
         WHERE asset_id = $1 AND source_chain = $2
         ORDER BY vaa_time DESC LIMIT $3 OFFSET $4`,
-      [f.assetId, f.source, limit, offset],
+      [f.assetId, rowsOf(f), limit, offset],
     ),
     pool.query(
       `SELECT COUNT(*)::int AS n FROM oracle_updates WHERE asset_id = $1 AND source_chain = $2`,
-      [f.assetId, f.source],
+      [f.assetId, rowsOf(f)],
     ),
   ]);
   return { items: rows.rows.map(view), total: total.rows[0].n };

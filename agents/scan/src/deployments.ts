@@ -269,3 +269,17 @@ export const ORACLE = {
     receiver: { chain: "robinhood", address: "0x060f1ef6bb1c7ab31d2bbc3d2ae47e590952b958" },
   },
 } as const;
+
+/**
+ * Receivers sharing a relay's emitter, each under a route of its own so its feed counts only what
+ * it wrote: the relay it rides, the assets it carries, and the receiver. A publish of one of those
+ * assets gets a row under the relay and another under each route.
+ */
+export const ORACLE_ROUTES = {
+  /** Discounted apyUSD */
+  "ethereum-apyusd": {
+    source: "ethereum",
+    assets: ["0xde11c6e5fbb09ebf287fceb58deeb4a0e34ccb69e2deeb25dfe46ad04e35a5a8"],
+    receiver: { chain: "hydration", address: "0x75f0bc5d807d13073e3f555f0aaf83b538d2b432" },
+  },
+} as const;

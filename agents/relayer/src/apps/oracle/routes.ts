@@ -25,6 +25,14 @@ export const ROUTES: OracleRoute[] = [
     sourceEmitter: "2knjvgqZKtU3nV1r9RaLshS9JYWMerZ1ysSFcDyTVsdn",
     receiver: "0x582e2fac5af62dc024396b5e7f549c72273a69c3",
   },
+  // Same emitter as "ethereum": handlers chain in order, so this one must come first. Only APYUSD
+  // lands here; wstETH reverts OracleNotSet and is dropped (see DEAD_REASONS).
+  {
+    source: "ethereum-apyusd",
+    sourceChain: WORMHOLE.ethereum,
+    sourceEmitter: "0xfbf682642a6a28760e717b637f12d014bd5db4b9",
+    receiver: "0x75f0bc5d807d13073e3f555f0aaf83b538d2b432",
+  },
   {
     source: "ethereum",
     sourceChain: WORMHOLE.ethereum,

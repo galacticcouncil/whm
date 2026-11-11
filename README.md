@@ -98,6 +98,8 @@ docs/           # Cross-cutting protocol docs
 pnpm fork:base          # anvil :8546
 pnpm fork:hydration     # anvil :8547
 pnpm fork:ethereum      # anvil :8550
+pnpm fork:robinhood     # anvil :8551
+pnpm fork:hyper-evm     # anvil :8552
 pnpm fork:solana        # solana-test-validator :8898 (Wormhole + Oracle clone)
 pnpm fork:all           # all evm forks in parallel
 
@@ -108,6 +110,16 @@ pnpm migrate:oracle-relay-solana:fork
 pnpm migrate:oracle-relay-solana            # prod
 pnpm migrate:oracle-relay-ethereum:fork
 pnpm migrate:oracle-relay-ethereum          # prod
+pnpm migrate:governance-hydration:fork
+pnpm migrate:governance-hydration           # prod; run before destination migrations
+pnpm migrate:governance-robinhood:fork
+pnpm migrate:governance-robinhood           # prod
+pnpm migrate:governance-ethereum:fork
+pnpm migrate:governance-ethereum            # prod
+pnpm migrate:governance-hyper-evm:fork
+pnpm migrate:governance-hyper-evm           # prod
+pnpm migrate:governance-base:fork
+pnpm migrate:governance-base                # prod
 pnpm migrate:near-ntt-zec                   # prod (NEAR side; Hydration side is hydration-ntt's)
 pnpm migrate:near-ntt-near                  # prod
 pnpm migrate:utxo-emitter-zec               # prod
