@@ -18,6 +18,8 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
 
     /// @notice One action's terms — a swap, or a whole DCA schedule. Hashed into the MPC derivation
     ///         path, so they fix the account `A` and every rule it can be spent under.
+    /// @param owner The Hydration account whose orders these are — its EVM address, which ICE calls
+    ///        `execute` as. The only caller an order of these terms is taken from.
     /// @param quoteId Random per action. Keeps one user's actions on disjoint accounts; reuse merges.
     /// @param maxSlippageBps How far below the order's oracle rate a fill may land.
     /// @param minOutPerIn The user's hard floor, destination units per 1e18 wei; 0 = none.
@@ -30,6 +32,7 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     /// @param destinationAsset Intents ledger id to buy, e.g. `nep141:zec.omft.near`.
     /// @param recipient Where the destination asset goes. The value the whole design protects.
     struct Quote {
+        address owner;
         bytes32 quoteId;
         uint16 maxSlippageBps;
         uint128 minOutPerIn;
@@ -43,7 +46,8 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
 
     /// @notice One execution, priced.
     /// @param seq The NTT message id of its transfer — the order's id.
-    /// @param amount ETH it bridged, wei: the WETH taken less the rail's costs, trimmed.
+    /// @param amount The least ETH `A` receives, wei: the WETH taken less the rail's costs, trimmed,
+    ///        less the relay ceiling.
     /// @param outPerIn Destination smallest units per 1e18 wei, from the oracle, before slippage.
     struct Order {
         uint64 seq;
@@ -69,7 +73,7 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     /// @param caller Who placed it: a direct caller, or the ICE intent's owner (the runtime calls
     ///        `execute` as the user)
     /// @param depositAddress POA's deposit address the ETH is forwarded to
-    /// @param amount ETH bridged
+    /// @param amount The least ETH `A` receives — bridged less the relay ceiling
     /// @param outPerIn The rate it was priced at
     /// @param messageSequence Wormhole core sequence of the order message
     /// @param terms The encoded terms, in full — what the bot passes to the router
@@ -100,10 +104,19 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     error SettlementRouteMismatch(address expected, address actual);
     /// @dev ICE pushed something other than WETH — only a trade into WETH can become an order.
     error NotWeth(address assetOut);
+    /// @dev Only the terms' owner places their orders — anyone else could spend `A`'s ETH at a
+    ///      moment of their choosing.
+    error NotTermsOwner(address caller, address owner);
+    /// @dev `execute` was called for more WETH than arrived since the last order — the rest is
+    ///      dust earlier orders left, not this caller's.
+    error UnbackedAmount(uint256 amountOut);
     /// @dev The WETH does not cover the rail's delivery price and the order message's fee.
     error AmountBelowCost(uint256 weth, uint256 cost);
     /// @dev What would bridge is below the floor: POA's minimum deposit plus the relay ceiling.
     error AmountBelowMinimum(uint256 amount, uint256 minimum);
+    /// @dev The relay ceiling is over half of what bridges — `A` could receive under half the
+    ///      order, more than one router fill.
+    error RelayFeeTooHigh(uint256 maxRelayFee, uint256 amount);
     error UnpricedAsset(string destinationAsset);
     error InvalidFeedAnswer(address feed, int256 answer);
     error StaleFeed(address feed, uint256 updatedAt);
@@ -116,7 +129,8 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     ///        computes it once per action; nothing on-chain binds the two.
     /// @param maxRelayFee Ceiling a redeemer may claim on Ethereum.
     /// @dev Not payable: the rail's costs come out of `amount`, as they do out of an ICE trade. What
-    ///      bridges must be at least POA's minimum deposit plus `maxRelayFee`, so the order credits.
+    ///      bridges must be at least POA's minimum deposit plus `maxRelayFee`, and `maxRelayFee` at
+    ///      most half of it, so the order credits and swaps in one fill.
     /// @return seq The order's NTT message id
     function dispatch(
         uint256 amount,

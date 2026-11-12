@@ -47,8 +47,8 @@ contract IntentCodecTest is Test {
     /// @dev `terms.rs` `sample()` in the router — encoded by its Rust codec and by
     ///      `scripts/intent-router/shared.ts` `encodeTerms`, both to these bytes.
     bytes constant GOLDEN_TERMS =
-        hex"011111111111111111111111111111111111111111111111111111111111111111006400000000000000000000000008f0d180000000000000000000000000000f4240000000006b49d200002222222222222222222222222222222222222222146e65703134313a7a65632e6f6d66742e6e6561722374314b50565352676e46485042574d4a4c433774614a696f4e366d3551366a56426d61";
-    bytes32 constant GOLDEN_PATH = 0xa2159833cf7701b9e372725c6e640f1e922752118b6e5087dedbbb89b7a6d193;
+        hex"0133333333333333333333333333333333333333331111111111111111111111111111111111111111111111111111111111111111006400000000000000000000000008f0d180000000000000000000000000000f4240000000006b49d200002222222222222222222222222222222222222222146e65703134313a7a65632e6f6d66742e6e6561722374314b50565352676e46485042574d4a4c433774614a696f4e366d3551366a56426d61";
+    bytes32 constant GOLDEN_PATH = 0x09650cc18201991ec766eaa964833b0f8074f86c700b1f5710c965950bcd1846;
 
     /// @dev `order.rs` `golden_vector()` in the router: path 0x07…07, seq 9, 0.001 ETH, 1.8 ZEC/ETH.
     bytes constant GOLDEN_ORDER =
@@ -62,6 +62,7 @@ contract IntentCodecTest is Test {
 
     function _terms() internal pure returns (IIntentDispatcher.Quote memory) {
         return IIntentDispatcher.Quote({
+            owner: address(0x3333333333333333333333333333333333333333),
             quoteId: bytes32(uint256(0x1111111111111111111111111111111111111111111111111111111111111111)),
             maxSlippageBps: 100,
             minOutPerIn: 150_000_000,
@@ -109,21 +110,22 @@ contract IntentCodecTest is Test {
     function testTermsWireFormat() public view {
         bytes memory p = codec.encode(_terms());
         assertEq(_uint(p, 0, 1), 1, "version");
-        assertEq(bytes32(_uint(p, 1, 32)), _terms().quoteId, "quoteId");
-        assertEq(_uint(p, 33, 2), 100, "maxSlippageBps");
-        assertEq(_uint(p, 35, 16), 150_000_000, "minOutPerIn");
-        assertEq(_uint(p, 51, 16), 1_000_000, "minDelivery");
-        assertEq(_uint(p, 67, 8), 1_800_000_000, "deadline");
-        assertEq(_uint(p, 75, 1), 0, "recipientKind");
-        assertEq(address(uint160(_uint(p, 76, 20))), address(0x2222222222222222222222222222222222222222), "refundTo");
+        assertEq(address(uint160(_uint(p, 1, 20))), address(0x3333333333333333333333333333333333333333), "owner");
+        assertEq(bytes32(_uint(p, 21, 32)), _terms().quoteId, "quoteId");
+        assertEq(_uint(p, 53, 2), 100, "maxSlippageBps");
+        assertEq(_uint(p, 55, 16), 150_000_000, "minOutPerIn");
+        assertEq(_uint(p, 71, 16), 1_000_000, "minDelivery");
+        assertEq(_uint(p, 87, 8), 1_800_000_000, "deadline");
+        assertEq(_uint(p, 95, 1), 0, "recipientKind");
+        assertEq(address(uint160(_uint(p, 96, 20))), address(0x2222222222222222222222222222222222222222), "refundTo");
 
-        uint256 assetLen = _uint(p, 96, 1);
-        assertEq(_str(p, 97, assetLen), ZEC, "destinationAsset");
-        uint256 recipientLen = _uint(p, 97 + assetLen, 1);
-        assertEq(_str(p, 98 + assetLen, recipientLen), T_ADDR, "recipient");
+        uint256 assetLen = _uint(p, 116, 1);
+        assertEq(_str(p, 117, assetLen), ZEC, "destinationAsset");
+        uint256 recipientLen = _uint(p, 117 + assetLen, 1);
+        assertEq(_str(p, 118 + assetLen, recipientLen), T_ADDR, "recipient");
         // Declared lengths account for the whole buffer — a payload the router could truncate
         // rather than reject would have a second reading.
-        assertEq(p.length, 98 + assetLen + recipientLen, "trailing bytes");
+        assertEq(p.length, 118 + assetLen + recipientLen, "trailing bytes");
     }
 
     function testTermsRoundTripThroughTheDecoder() public view {
@@ -136,6 +138,11 @@ contract IntentCodecTest is Test {
     function testEncoderRejectsWhatTheRouterRejects() public {
         IIntentDispatcher.Quote memory t = _terms();
 
+        t.owner = address(0);
+        vm.expectRevert(IntentCodec.InvalidOwner.selector);
+        codec.encode(t);
+
+        t = _terms();
         t.quoteId = bytes32(0);
         vm.expectRevert(IntentCodec.InvalidQuoteId.selector);
         codec.encode(t);
@@ -214,6 +221,8 @@ contract IntentCodecTest is Test {
         bytes32 base = codec.authPath(_terms());
         IIntentDispatcher.Quote memory t;
 
+        t = _terms(); t.owner = address(0x4444);
+        assertTrue(codec.authPath(t) != base, "owner");
         t = _terms(); t.maxSlippageBps = 99;
         assertTrue(codec.authPath(t) != base, "slippage");
         t = _terms(); t.minOutPerIn = 1;

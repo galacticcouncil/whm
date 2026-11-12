@@ -84,8 +84,9 @@ contract IntentDispatcherTest is Test {
 
     // ─── Helpers ────────────────────────────────────────────────────
 
-    function _terms() internal pure returns (IIntentDispatcher.Quote memory) {
+    function _terms() internal view returns (IIntentDispatcher.Quote memory) {
         return IIntentDispatcher.Quote({
+            owner: user,
             quoteId: keccak256("action-1"),
             maxSlippageBps: 100,
             minOutPerIn: 0,
@@ -181,6 +182,42 @@ contract IntentDispatcherTest is Test {
         assertEq(_orderAmount(), expected, "the order carries the exact amount");
     }
 
+    /// @notice A stranger cannot place an order on another user's terms, even paying for it — it would
+    ///         spend that user's `A` at a moment of the stranger's choosing.
+    function testDispatchRefusesAnotherOwnersTerms() public {
+        address stranger = makeAddr("stranger");
+        weth.mint(stranger, 1e15);
+        vm.prank(stranger);
+        weth.approve(address(dispatcher), 1e15);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.NotTermsOwner.selector, stranger, user));
+        dispatcher.dispatch(1e15, depositAddress, 0, _terms());
+    }
+
+    /// @notice The order carries what `A` receives at least — the bridged amount less the relay
+    ///         ceiling — so it credits whatever the relayer keeps.
+    function testOrderCarriesTheAmountNetOfTheRelayCeiling() public {
+        _fund(1e15);
+        vm.prank(user);
+        uint64 seq = dispatcher.dispatch(1e15, depositAddress, 5e10, _terms());
+        assertEq(nttManager.transfers(seq).amount, 1e15, "bridged in full");
+        assertEq(_orderAmount(), 1e15 - 5e10, "the order is net of the ceiling");
+    }
+
+    /// @notice The relayer may keep at most half: then `A` receives at least the order and at most
+    ///         twice it, one router fill.
+    function testRelayCeilingIsAtMostHalf() public {
+        _fund(1e15);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.RelayFeeTooHigh.selector, 5e14 + 1, 1e15));
+        dispatcher.dispatch(1e15, depositAddress, 5e14 + 1, _terms());
+
+        vm.prank(user);
+        dispatcher.dispatch(1e15, depositAddress, 5e14, _terms());
+        assertEq(_orderAmount(), 5e14, "half kept back");
+    }
+
     function testRelayCeilingTravelsInThePayload() public {
         _fund(1e15);
         vm.prank(user);
@@ -222,8 +259,8 @@ contract IntentDispatcherTest is Test {
         dispatcher.execute(user, 7, address(weth), 1e15, address(0x1234), 1e15, data);
     }
 
-    /// @notice A call with no push behind it has nothing to bridge: the dust left by earlier orders
-    ///         is far below POA's minimum.
+    /// @notice A call with no push behind it has nothing to bridge: the dust earlier orders left is
+    ///         not the caller's.
     function testExecuteWithoutAPushBridgesNothing() public {
         _fund(1e15 + 9);
         vm.prank(user);
@@ -232,9 +269,53 @@ contract IntentDispatcherTest is Test {
 
         bytes memory data = _data(0);
         vm.prank(user, user);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.UnbackedAmount.selector, 1e15));
         dispatcher.execute(user, 7, address(0x1234), 5e18, address(weth), 1e15, data);
         assertEq(nttManager.nextSequence(), 1, "nothing more bridged");
+    }
+
+    /// @notice A caller who pushes its own WETH cannot claim the dust on top: `execute` spends only
+    ///         what arrived since the last order.
+    function testExecuteCannotClaimRetainedDust() public {
+        _fund(1e15 + 9);
+        vm.prank(user);
+        dispatcher.dispatch(1e15 + 9, depositAddress, 0, _terms());
+
+        bytes memory data = _data(0);
+        _push(1e15);
+        vm.prank(user, user);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.UnbackedAmount.selector, 1e15 + 9));
+        dispatcher.execute(user, 7, address(0x1234), 5e18, address(weth), 1e15 + 9, data);
+
+        vm.prank(user, user);
+        dispatcher.execute(user, 7, address(0x1234), 5e18, address(weth), 1e15, data);
+        assertEq(nttManager.transfers(1).amount, 1e15, "only the push bridged");
+        assertEq(weth.balanceOf(address(dispatcher)), 9, "the dust stays");
+    }
+
+    /// @notice Sweeping the dust lowers what is retained, so the next push still spends in full.
+    function testSweepReleasesRetainedDust() public {
+        _fund(1e15 + 9);
+        vm.prank(user);
+        dispatcher.dispatch(1e15 + 9, depositAddress, 0, _terms());
+        dispatcher.sweep(address(weth), address(this), 9);
+
+        bytes memory data = _data(0);
+        _push(1e15);
+        vm.prank(user, user);
+        dispatcher.execute(user, 7, address(0x1234), 5e18, address(weth), 1e15, data);
+        assertEq(nttManager.transfers(1).amount, 1e15, "bridged");
+    }
+
+    /// @notice Only the terms' owner places their orders — ICE calls as the owner, so a stranger
+    ///         calling `execute` with someone else's terms is refused, even with its own WETH pushed.
+    function testExecuteRefusesAnotherOwnersTerms() public {
+        address stranger = makeAddr("stranger");
+        bytes memory data = _data(0);
+        _push(1e15);
+        vm.prank(stranger, stranger);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.NotTermsOwner.selector, stranger, user));
+        dispatcher.execute(stranger, 7, address(0x1234), 5e18, address(weth), 1e15, data);
     }
 
     /// @notice A stale price reverts the callback, so the runtime returns the WETH to the user.

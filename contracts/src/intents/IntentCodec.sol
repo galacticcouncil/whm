@@ -11,12 +11,13 @@ import {IIntentDispatcher} from "./interfaces/IIntentDispatcher.sol";
 ///
 ///         Terms:
 ///           offset  size  field              offset  size  field
-///                0     1  version                75     1  recipientKind
-///                1    32  quoteId                76    20  refundTo
-///               33     2  maxSlippageBps         96     1  destAssetLen (D)
-///               35    16  minOutPerIn            97     D  destinationAsset
-///               51    16  minDelivery          97+D     1  recipientLen (R)
-///               67     8  deadline             98+D     R  recipient       total 98 + D + R
+///                0     1  version                87     8  deadline
+///                1    20  owner                  95     1  recipientKind
+///               21    32  quoteId                96    20  refundTo
+///               53     2  maxSlippageBps        116     1  destAssetLen (D)
+///               55    16  minOutPerIn           117     D  destinationAsset
+///               71    16  minDelivery         117+D     1  recipientLen (R)
+///                                             118+D     R  recipient       total 118 + D + R
 ///
 ///         Order message: msgType 1 | authPath 32 | seq 8 | amount 16 | outPerIn 16 — 73 bytes.
 ///
@@ -40,7 +41,7 @@ library IntentCodec {
     uint8 internal constant MSG_ORDER = 1;
 
     /// @dev Fixed prefix through `destAssetLen`, i.e. everything before the first string.
-    uint256 internal constant TERMS_HEADER_SIZE = 97;
+    uint256 internal constant TERMS_HEADER_SIZE = 117;
 
     uint256 internal constant ORDER_SIZE = 73;
 
@@ -49,6 +50,7 @@ library IntentCodec {
 
     uint256 internal constant FORWARD_SIZE = 37;
 
+    error InvalidOwner();
     error InvalidQuoteId();
     error InvalidSlippage(uint16 bps);
     error InvalidDeadline();
@@ -79,6 +81,7 @@ library IntentCodec {
         bytes memory asset = bytes(t.destinationAsset);
         bytes memory recipient = bytes(t.recipient);
 
+        if (t.owner == address(0)) revert InvalidOwner();
         if (t.quoteId == bytes32(0)) revert InvalidQuoteId();
         if (t.maxSlippageBps >= BPS) revert InvalidSlippage(t.maxSlippageBps);
         if (t.deadline == 0) revert InvalidDeadline();
@@ -87,19 +90,20 @@ library IntentCodec {
         if (!_printable(asset)) revert InvalidDestinationAsset(asset.length);
         if (!_printable(recipient)) revert InvalidRecipient(recipient.length);
 
-        return abi.encodePacked(
-            VERSION,
-            t.quoteId,
-            t.maxSlippageBps,
-            t.minOutPerIn,
-            t.minDelivery,
-            t.deadline,
-            t.recipientKind,
-            t.refundTo,
-            uint8(asset.length),
-            asset,
-            uint8(recipient.length),
-            recipient
+        // Two halves, or the packing runs out of stack: the fixed fields, then the two strings.
+        return bytes.concat(
+            abi.encodePacked(
+                VERSION,
+                t.owner,
+                t.quoteId,
+                t.maxSlippageBps,
+                t.minOutPerIn,
+                t.minDelivery,
+                t.deadline,
+                t.recipientKind,
+                t.refundTo
+            ),
+            abi.encodePacked(uint8(asset.length), asset, uint8(recipient.length), recipient)
         );
     }
 
@@ -110,7 +114,7 @@ library IntentCodec {
         if (terms.length < TERMS_HEADER_SIZE) revert MalformedTerms(terms.length);
         if (uint8(terms[0]) != VERSION) revert InvalidVersion(uint8(terms[0]));
 
-        uint256 assetLen = uint8(terms[96]);
+        uint256 assetLen = uint8(terms[116]);
         uint256 recipientLenOffset = TERMS_HEADER_SIZE + assetLen;
         if (terms.length <= recipientLenOffset) revert MalformedTerms(terms.length);
 
@@ -119,17 +123,19 @@ library IntentCodec {
         if (terms.length != recipientLenOffset + 1 + recipientLen) revert MalformedTerms(terms.length);
 
         t = IIntentDispatcher.Quote({
-            quoteId: bytes32(_uint(terms, 1, 32)),
-            maxSlippageBps: uint16(_uint(terms, 33, 2)),
-            minOutPerIn: uint128(_uint(terms, 35, 16)),
-            minDelivery: uint128(_uint(terms, 51, 16)),
-            deadline: uint64(_uint(terms, 67, 8)),
-            recipientKind: uint8(terms[75]),
-            refundTo: address(uint160(_uint(terms, 76, 20))),
+            owner: address(uint160(_uint(terms, 1, 20))),
+            quoteId: bytes32(_uint(terms, 21, 32)),
+            maxSlippageBps: uint16(_uint(terms, 53, 2)),
+            minOutPerIn: uint128(_uint(terms, 55, 16)),
+            minDelivery: uint128(_uint(terms, 71, 16)),
+            deadline: uint64(_uint(terms, 87, 8)),
+            recipientKind: uint8(terms[95]),
+            refundTo: address(uint160(_uint(terms, 96, 20))),
             destinationAsset: string(_slice(terms, TERMS_HEADER_SIZE, assetLen)),
             recipient: string(_slice(terms, recipientLenOffset + 1, recipientLen))
         });
 
+        if (t.owner == address(0)) revert InvalidOwner();
         if (t.quoteId == bytes32(0)) revert InvalidQuoteId();
         if (t.maxSlippageBps >= BPS) revert InvalidSlippage(t.maxSlippageBps);
         if (t.deadline == 0) revert InvalidDeadline();

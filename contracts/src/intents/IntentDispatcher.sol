@@ -65,6 +65,10 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     /// @dev keccak256(destinationAsset) → how it is priced.
     mapping(bytes32 => PriceRoute) internal _priceRoutes;
 
+    /// @dev WETH held between calls — trim dust, never an order's. `execute` spends only what
+    ///      arrived above it.
+    uint256 internal _retained;
+
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
@@ -87,13 +91,14 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     ///         the action `data` describes.
     /// @dev `data = abi.encode(address depositAddress, uint256 maxRelayFee, bytes terms)`, the terms
     ///      packed as `IntentCodec` encodes them — the intent's forward data, at most 512 bytes. Called
-    ///      with no value and 2M gas. Anyone can call it: without a push there is no WETH here to
-    ///      bridge.
+    ///      with no value and 2M gas. Anyone can call it: it spends only WETH that arrived since the
+    ///      last order, so without a push there is nothing to bridge.
     function execute(address, uint256, address, uint256, address assetOut, uint256 amountOut, bytes calldata data)
         external
         returns (bytes4)
     {
-        if (assetOut != HydrationConsts.toErc20(HydrationConsts.WETH_ID)) revert NotWeth(assetOut);
+        if (assetOut != address(_weth())) revert NotWeth(assetOut);
+        if (_weth().balanceOf(address(this)) < _retained + amountOut) revert UnbackedAmount(amountOut);
         (address depositAddress, uint256 maxRelayFee, bytes memory terms) = abi.decode(data, (address, uint256, bytes));
 
         _placeOrder(amountOut, depositAddress, maxRelayFee, IntentCodec.decodeQuote(terms));
@@ -106,7 +111,7 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
         returns (uint64 seq)
     {
         if (amount == 0) revert ZeroAmount();
-        IERC20(HydrationConsts.toErc20(HydrationConsts.WETH_ID)).safeTransferFrom(msg.sender, address(this), amount);
+        _weth().safeTransferFrom(msg.sender, address(this), amount);
 
         return _placeOrder(amount, depositAddress, maxRelayFee, terms);
     }
@@ -135,6 +140,19 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
 
     // ─── Helpers ─────────────────────────────────────────────────
 
+    /// @dev Hydration WETH's ERC20 precompile — the only asset an order carries.
+    function _weth() internal pure returns (IERC20) {
+        return IERC20(HydrationConsts.toErc20(HydrationConsts.WETH_ID));
+    }
+
+    /// @dev A positive answer no older than `maxFeedAge`.
+    function _readFeed(address feed) internal view returns (uint256 answer, uint8 decimals) {
+        (, int256 value,, uint256 updatedAt,) = IAggregatorV3(feed).latestRoundData();
+        if (value <= 0) revert InvalidFeedAnswer(feed, value);
+        if (block.timestamp > updatedAt + maxFeedAge) revert StaleFeed(feed, updatedAt);
+        return (uint256(value), IAggregatorV3(feed).decimals());
+    }
+
     /// @dev Price, bridge and publish one order of `weth`. The price is read first, so a missing
     ///      route or a stale feed reverts before anything moves.
     function _placeOrder(uint256 weth, address depositAddress, uint256 maxRelayFee, Quote memory terms)
@@ -143,6 +161,7 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     {
         if (address(nttManager) == address(0) || forwarder == bytes32(0)) revert NotConfigured();
         if (depositAddress == address(0)) revert InvalidDepositAddress();
+        if (msg.sender != terms.owner) revert NotTermsOwner(msg.sender, terms.owner);
 
         Order memory order;
         order.outPerIn = _outPerIn(terms.destinationAsset);
@@ -155,6 +174,7 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
         uint64 messageSequence =
             wormhole.publishMessage{value: fee}(nonce, IntentCodec.encodeOrder(authPath, order), CONSISTENCY_FINALIZED);
         nonce++;
+        _retained = _weth().balanceOf(address(this));
 
         emit OrderPublished(
             authPath, order.seq, msg.sender, depositAddress, order.amount, order.outPerIn, messageSequence, encoded
@@ -164,9 +184,11 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
 
     /// @dev Bridge `weth` less the rail's delivery price and the order message's `fee`, trimmed, to
     ///      the forwarder, with the forwarding instruction as the transfer's payload. What bridges
-    ///      must be at least POA's minimum deposit plus the relay ceiling, so an order always credits.
+    ///      must be at least POA's minimum deposit plus the relay ceiling, and the ceiling at most
+    ///      half of it: whatever the relayer keeps, `A` receives at least the order's amount and at
+    ///      most twice it — one fill at the router's `max_fill_multiple` of 2.
     /// @return seq The transfer's NTT message id
-    /// @return amount What bridged
+    /// @return amount The least `A` receives: what bridged less the relay ceiling
     function _bridge(uint256 weth, uint256 fee, address depositAddress, uint256 maxRelayFee)
         internal
         returns (uint64 seq, uint128 amount)
@@ -180,22 +202,16 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
         // The remainder stays as dust rather than being refunded — cost more than the refund.
         uint256 bridgeAmount = weth - deliveryPrice - fee;
         bridgeAmount -= bridgeAmount % TRIM_UNIT;
-        if (bridgeAmount < minimum || bridgeAmount <= maxRelayFee) revert AmountBelowMinimum(bridgeAmount, minimum);
+        if (bridgeAmount < minimum) revert AmountBelowMinimum(bridgeAmount, minimum);
+        if (maxRelayFee * 2 > bridgeAmount) revert RelayFeeTooHigh(maxRelayFee, bridgeAmount);
 
-        IERC20(HydrationConsts.toErc20(HydrationConsts.WETH_ID)).forceApprove(address(nttManager), bridgeAmount);
+        _weth().forceApprove(address(nttManager), bridgeAmount);
 
         seq = nttManager.transferWithPayload{value: deliveryPrice}(
             bridgeAmount, ETHEREUM_WORMHOLE_ID, forwarder, IntentCodec.encodeForward(depositAddress, maxRelayFee)
         );
-        amount = uint128(bridgeAmount);
-    }
-
-    /// @dev A positive answer no older than `maxFeedAge`.
-    function _readFeed(address feed) internal view returns (uint256 answer, uint8 decimals) {
-        (, int256 value,, uint256 updatedAt,) = IAggregatorV3(feed).latestRoundData();
-        if (value <= 0) revert InvalidFeedAnswer(feed, value);
-        if (block.timestamp > updatedAt + maxFeedAge) revert StaleFeed(feed, updatedAt);
-        return (uint256(value), IAggregatorV3(feed).decimals());
+        // The relayer keeps up to the ceiling on Ethereum; the router credits on what is left.
+        amount = uint128(bridgeAmount - maxRelayFee);
     }
 
     function _outPerIn(string memory destinationAsset) internal view returns (uint128) {
@@ -240,7 +256,7 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     /// @inheritdoc IIntentDispatcher
     /// @dev Reverts unless the manager's token is Hydration WETH.
     function setNttManager(address manager) external onlyOwner {
-        address expected = HydrationConsts.toErc20(HydrationConsts.WETH_ID);
+        address expected = address(_weth());
         address actual = INttManagerWithPayload(manager).token();
         if (actual != expected) revert SettlementRouteMismatch(expected, actual);
         nttManager = INttManagerWithPayload(manager);
@@ -260,6 +276,7 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     /// @notice Recover quantization dust, or any asset sent here by mistake.
     function sweep(address asset, address to, uint256 amount) external onlyOwner {
         IERC20(asset).safeTransfer(to, amount);
+        if (asset == address(_weth())) _retained = _weth().balanceOf(address(this));
         emit Swept(asset, to, amount);
     }
 }
