@@ -27,8 +27,8 @@ starts above the expected clearing price and walks down.
 
 ## 1. Quote terms
 
-Five fields describe the auction. They join the terms `IntentQuoteEmitter.publishQuote` already
-publishes, and like the rest they are hashed into `authPath` — the account derives from the whole
+Five fields describe the auction. They join the terms every order already
+carries, and like the rest they are hashed into `authPath` — the account derives from the whole
 quote, so publishing someone else's terms still derives _their_ account and can only pay _them_.
 
 ```solidity
@@ -168,7 +168,7 @@ ladder the terms already determined.
 
 ```
 register(vaa)
-  1. verify VAA             guardian set, emitter == IntentQuoteEmitter on chain 73
+  1. verify VAA             guardian set, emitter == IntentDispatcher on chain 73
   2. decode terms           IntentCodec v2 layout
   3. path := keccak(terms)  already registered → return it, do nothing
   4. store Path { terms }   caller attaches the storage deposit
@@ -244,7 +244,7 @@ price — compromising it delays a trade, never moves one.
 
 ```
  ON QUOTE BROADCAST
-   spy subscription on IntentQuoteEmitter's emitter address (chain 73)
+   spy subscription on IntentDispatcher's emitter address (chain 73)
      └─ register(vaa) straight away
      └─ derive authPath → NEAR account A → deposit address 0xN, store the path
 

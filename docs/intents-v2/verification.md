@@ -1,7 +1,6 @@
 # VERIFICATION — Intents v2
 
-What has been checked live for the v2 design ([spec.md](spec.md)), and what is still open. Facts
-about the deployed rail it reuses: [../intents/verification.md](../intents/verification.md).
+What has been checked live for the v2 design ([spec.md](spec.md)), and what is still open.
 
 ## Open — blocking the router
 
@@ -10,8 +9,8 @@ post-deadline refund has been run.
 
 ## Open — before a canary
 
-Price feeds live on Hydration (source undecided) · ICE `Forward` in the targeted runtime within 2M
-gas · control of `intents-router.hydration-whm.near` and its DAO handoff · monitoring. Full list:
+DIA price routes set on Hydration · ICE `Forward` in the targeted runtime, `execute` within 2M
+gas · the WETH NTT managers carrying the transfer payload · control of `intents-router.hydration-whm.near` and its DAO handoff · monitoring. Full list:
 [plan.md §5](plan.md#5-gates).
 
 ## Verified

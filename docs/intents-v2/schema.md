@@ -1,27 +1,27 @@
 # SCHEMA — Intents v2
 
-Companion to [spec.md](spec.md). Wire formats, interfaces and calls. The value rail's own messages —
-settlement and forwarding instruction — are unchanged: [../intents/schema.md](../intents/schema.md).
+Companion to [spec.md](spec.md). Wire formats, interfaces and calls.
 
 ---
 
 ## Message topology
 
 ```
-                      HYDRATION                               ETHEREUM              NEAR
-                      ─────────                               ────────              ────
-  IntentDispatcher.execute (ICE callback)
+                      HYDRATION                                   ETHEREUM                     NEAR
+                      ─────────                                   ────────                     ────
+  IntentDispatcher.execute (ICE) / .dispatch
     │
-    ├─ IntentEmitter.placeOrder ─► [B] settlement + [C] instruction ─► IntentReceiver ─► ETH → 0xN
-    │                                                                                    POA credits A
-    └─ IntentQuoteEmitter.publishOrder ─► [O] order VAA ──────────────────────────────► IntentRouter
-                                              emitter: IntentQuoteEmitter                 .swap(terms, O, quote)
-                                              payload: (authPath, seq, amount, outPerIn)
+    ├─ NttManagerWithPayload.transferWithPayload ─► [S] NTT transfer ─► IntentForwarder ─► ETH → 0xN
+    │      payload: version | depositAddress | maxRelayFee                                  POA credits A
+    │
+    └─ wormhole.publishMessage ─► [O] order VAA ───────────────────────────────────────► IntentRouter
+           emitter: IntentDispatcher                                                      .swap(terms, O, quote)
+           payload: (authPath, seq, amount, outPerIn)
 ```
 
-[B] and [C] are the existing rail. [O] is new: one per execution, consistency 202, from a separate
-emitter address — `IntentReceiver` rejects it as `UnauthorizedEmitter`, and the router accepts
-nothing else. [O] and [B]/[C] share the NTT manager sequence `seq`.
+[S] is the WETH manager's transfer, from the dispatcher to the forwarder, with the forward payload
+attested inside it. [O] is the order: one per execution, consistency 202, from the dispatcher's own
+emitter — the router accepts nothing else. Both carry the transfer's NTT sequence `seq`.
 
 ---
 
@@ -30,7 +30,9 @@ nothing else. [O] and [B]/[C] share the NTT manager sequence `seq`.
 ```
 Hydration Wormhole chain id  73
 Hydration core bridge        0x3792a6d63c31941B2805181771795D9176fA82A1   messageFee 0
-IntentQuoteEmitter           <to deploy>                     ← router pins chain 73 + this address
+IntentDispatcher             <to deploy>                     ← router pins chain 73 + this address;
+                                                               ICE intents call it; the forwarder pins it
+IntentForwarder (Ethereum)   <to deploy>                     ← the transfer's recipient, chain 2
 IntentRouter (NEAR)          intents-router.hydration-whm.near   ← MPC derivation predecessor
 
 Wormhole core (NEAR)         contract.wormhole_crypto.near   verify_vaa: signatures + guardian set only
@@ -91,14 +93,16 @@ golden vectors pin terms, path and derived account across languages.
 
 ```solidity
 struct Order {
-    uint64  seq;        // NTT manager sequence from placeOrder; the order's id
-    uint128 amount;     // WETH this order sent (upper bound on what lands in A)
+    uint64  seq;        // the NTT transfer's sequence; the order's id
+    uint128 amount;     // the least ETH A receives: bridged less the relay ceiling
     uint128 outPerIn;   // destination smallest-units per 1e18 wei, oracle, before slippage
 }
 
-function publishOrder(Quote calldata terms, Order calldata order) external payable;   // authorized dispatchers
-event OrderPublished(bytes32 indexed authPath, uint64 indexed seq, address dispatcher,
-                     uint128 amount, uint128 outPerIn, uint64 wormholeSequence, bytes terms);
+function dispatch(uint256 amount, address depositAddress, uint256 maxRelayFee, Quote calldata terms)
+    external returns (uint64 seq);                                     // msg.sender == terms.owner
+event OrderPublished(bytes32 indexed authPath, uint64 indexed seq, address indexed caller,
+                     address depositAddress, uint128 amount, uint128 outPerIn,
+                     uint64 messageSequence, bytes terms);
 ```
 
 Order VAA payload:
@@ -107,7 +111,7 @@ Order VAA payload:
 msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        total 73, consistency 202
 ```
 
-- `authPath` is computed by the emitter from the terms; it binds the price to `terms.destinationAsset`.
+- `authPath` is computed by the dispatcher from the terms; it binds the price to `terms.destinationAsset`.
 - `amount` is the least ETH `A` receives: what bridged less the relay ceiling, which the dispatcher
   caps at half of it. The router credits on it and fills at most `max_fill_multiple` (≥ 2) times it,
   so one fill takes whatever landed. It is not ICE's `amountIn` (the user's source asset).
@@ -115,6 +119,23 @@ msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        total 7
   `mulDiv(ethUsd × 10^destFeedDec, 10^destTokenDec, destUsd × 10^ethFeedDec)`, non-zero, ≤ `uint128`.
 - The VAA body timestamp (Hydration block time) is the price's age. Message identity is the VAA
   **body digest**, never the raw envelope.
+
+### Settlement — the NTT transfer and its forward payload
+
+`NttManagerWithPayload.transferWithPayload(amount, 2, forwarder, payload)` puts the payload in the
+`NativeTokenTransfer`'s `additionalPayload` (≤ 256 bytes; never queued — an outbound rate-limit
+breach reverts). The manager message digest covers it.
+
+```
+payload = version 1 | depositAddress 20 | maxRelayFee 16                  total 37
+```
+
+`IntentForwarder.processOrder(nttVaa, feeRequested)` accepts a transfer only from chain 73, sent by
+the pinned dispatcher, to the forwarder itself, trimmed to 8 decimals, with exactly this payload;
+`feeRequested ≤ maxRelayFee`; once per NTT message digest. It delivers the VAA unless already
+consumed, requires the transfer released (executed and not queued inbound), then pays
+`amount × 1e10 − feeRequested` to `depositAddress` and `feeRequested` to the caller, in native ETH.
+Events: `OrderForwarded(seq, depositAddress, amount)`, `RelayFeePaid(seq, relayer, fee)`.
 
 ---
 
@@ -259,7 +280,7 @@ pub struct IntentRouter {
     intents:        AccountId,          // intents.near
     core:           AccountId,          // contract.wormhole_crypto.near
     emitter_chain:  u16,                // 73
-    emitter:        [u8; 32],           // IntentQuoteEmitter
+    emitter:        [u8; 32],           // IntentDispatcher
     eth_token:      String,             // nep141:eth.omft.near
     quote_keys:     Vec<[u8; 32]>,      // 1Click's quote-signing keys
     params:         Params,             // price_validity, max_quote_age, transfer_validity (s),
@@ -301,7 +322,7 @@ Event, so the bot needs no view on the happy path:
 **Order VAA** — from `OrderPublished` (scan) by sequence:
 
 ```
-GET https://api.wormholescan.io/api/v1/vaas/73/<IntentQuoteEmitter emitter hex>/<wormholeSequence>
+GET https://api.wormholescan.io/api/v1/vaas/73/<IntentDispatcher emitter hex>/<messageSequence>
 ```
 
 **Balances** — `intents.near.mt_batch_balance_of({ account_id: A, token_ids: [eth, destination] })`.
