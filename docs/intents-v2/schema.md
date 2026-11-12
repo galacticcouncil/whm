@@ -45,12 +45,13 @@ POA min deposit (eth:1)      1e11 wei
 
 ---
 
-## 2. Terms — `IIntentQuoteEmitter.Quote`, `IntentCodec` v2
+## 2. Terms — `IIntentDispatcher.Quote`, `IntentCodec`
 
 One set per action. `authPath = keccak256(encodeQuote(terms))`; any change → new `A` → new `0xN`.
 
 | Field | Type | Validation |
 | --- | --- | --- |
+| `owner` | address | the Hydration account's EVM address — what ICE calls `execute` as; non-zero. The dispatcher takes an order of these terms only from it |
 | `quoteId` | bytes32 | random per action; non-zero |
 | `maxSlippageBps` | u16 | `< 10_000` |
 | `minOutPerIn` | u128 | hard floor, destination units per 1e18 wei; 0 = none |
@@ -70,9 +71,9 @@ delivery, never at parse, so terms that fail it still refund) — and never ETH 
 Packed big-endian:
 
 ```
-version 1 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8 | recipientKind 1
-| refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
-fixed prefix 96, total 98 + D + R; wire value of version = 1
+version 1 | owner 20 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8
+| recipientKind 1 | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
+fixed prefix 116, total 118 + D + R; wire value of version = 1
 ```
 
 The version byte selects the strategy: 1 = limit swap, the only one the router accepts in the MVP. A
@@ -86,7 +87,7 @@ golden vectors pin terms, path and derived account across languages.
 
 ---
 
-## 3. Order — `IIntentQuoteEmitter.Order`
+## 3. Order — `IIntentDispatcher.Order`
 
 ```solidity
 struct Order {
@@ -107,8 +108,9 @@ msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        total 7
 ```
 
 - `authPath` is computed by the emitter from the terms; it binds the price to `terms.destinationAsset`.
-- `amount` is informational in v1 (scan; a future `maxFillMultiple`). It is not the router's
-  `amount_in` (= `balance(A)`), nor ICE's `amountIn` (the user's source asset).
+- `amount` is the least ETH `A` receives: what bridged less the relay ceiling, which the dispatcher
+  caps at half of it. The router credits on it and fills at most `max_fill_multiple` (≥ 2) times it,
+  so one fill takes whatever landed. It is not ICE's `amountIn` (the user's source asset).
 - `outPerIn` uses the same unit as `minOutPerIn`:
   `mulDiv(ethUsd × 10^destFeedDec, 10^destTokenDec, destUsd × 10^ethFeedDec)`, non-zero, ≤ `uint128`.
 - The VAA body timestamp (Hydration block time) is the price's age. Message identity is the VAA
@@ -120,7 +122,7 @@ msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        total 7
 
 ```
 OnResolved::Forward { contract: IntentDispatcher, data }
-data = abi.encode(address depositAddress, uint256 maxRelayFee, bytes terms)     ≤ 512 bytes ⇔ D + R ≤ 286
+data = abi.encode(address depositAddress, uint256 maxRelayFee, bytes terms)     ≤ 512 bytes ⇔ D + R ≤ 266
 
 IIntentResolutionReceiver.execute(user, intentId, assetIn, amountIn, assetOut, amountOut, data)
   → bytes4  (must return execute.selector)
