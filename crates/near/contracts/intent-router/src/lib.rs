@@ -107,10 +107,12 @@ pub struct Params {
     /// Seconds a signed transfer stays executable.
     pub transfer_validity: u64,
     /// One fill per order, of at most this many times the order's own amount — the catch-up rate,
-    /// and what a bad quote can move at once.
+    /// and what a bad quote can move at once. At least 2: the dispatcher caps the relay fee at half
+    /// what bridges, so `A` receives up to twice the order's amount, and that must fit one fill.
     pub max_fill_multiple: u32,
-    /// How far below the order's own amount `A`'s ETH may be and still count as credited, bps: the
-    /// relay fee and trimming between Hydration's WETH and the ETH POA credits.
+    /// How far below the order's own amount `A`'s ETH may be and still count as credited, bps. The
+    /// amount is already net of the relay fee and trimming, so this covers only POA's credit
+    /// falling short of the deposit — a hedge, small or 0.
     pub max_order_shortfall_bps: u16,
     /// The smallest ETH refund, wei — above POA's withdrawal fee. At most `MAX_MIN_REFUND`.
     pub min_refund: U128,

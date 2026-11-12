@@ -200,6 +200,7 @@ impl Env {
 
     fn terms(&self, deadline: u64, kind: RecipientKind, recipient: &str) -> Vec<u8> {
         Terms {
+            owner: [0x33; 20],
             quote_id: [0x5a; 32],
             max_slippage_bps: 100,
             min_out_per_in: 0,

@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! field byte widths; the version byte's value is 1 (`LIMIT_SWAP`)
-//! version 1 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8
+//! version 1 | owner 20 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8
 //! | recipientKind 1 | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
 //! ```
 //!
@@ -32,6 +32,9 @@ pub enum RecipientKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Terms {
+    /// The Hydration account whose orders these are — the only caller the dispatcher takes an order
+    /// of them from, so no one else can spend `A`'s ETH. Its EVM address, as ICE calls with.
+    pub owner: [u8; 20],
     /// Random per action — keeps one user's actions on separate accounts.
     pub quote_id: [u8; 32],
     /// The floor below the order's oracle rate.
@@ -59,6 +62,7 @@ impl Terms {
         if r.u8()? != LIMIT_SWAP {
             return Err("UnknownStrategy");
         }
+        let owner = r.bytes20()?;
         let quote_id = r.bytes32()?;
         let max_slippage_bps = r.u16()?;
         let min_out_per_in = r.u128()?;
@@ -75,6 +79,7 @@ impl Terms {
         r.finish()?;
 
         let terms = Self {
+            owner,
             quote_id,
             max_slippage_bps,
             min_out_per_in,
@@ -91,8 +96,9 @@ impl Terms {
 
     pub fn encode(&self) -> Result<Vec<u8>, &'static str> {
         self.validate()?;
-        let mut out = Vec::with_capacity(98 + self.destination_asset.len() + self.recipient.len());
+        let mut out = Vec::with_capacity(118 + self.destination_asset.len() + self.recipient.len());
         out.push(LIMIT_SWAP);
+        out.extend_from_slice(&self.owner);
         out.extend_from_slice(&self.quote_id);
         out.extend_from_slice(&self.max_slippage_bps.to_be_bytes());
         out.extend_from_slice(&self.min_out_per_in.to_be_bytes());
@@ -126,6 +132,9 @@ impl Terms {
     }
 
     fn validate(&self) -> Result<(), &'static str> {
+        if self.owner == [0; 20] {
+            return Err("ZeroOwner");
+        }
         if self.quote_id == [0; 32] {
             return Err("ZeroQuoteId");
         }
@@ -177,6 +186,7 @@ pub(crate) mod tests {
 
     pub(crate) fn sample() -> Terms {
         Terms {
+            owner: [0x33; 20],
             quote_id: [0x11; 32],
             max_slippage_bps: 100,
             min_out_per_in: 150_000_000,
@@ -193,7 +203,7 @@ pub(crate) mod tests {
     fn round_trips() {
         let t = sample();
         let bytes = t.encode().unwrap();
-        assert_eq!(bytes.len(), 98 + ZEC.len() + T_ADDR.len());
+        assert_eq!(bytes.len(), 118 + ZEC.len() + T_ADDR.len());
         assert_eq!(Terms::parse(&bytes).unwrap(), t);
     }
 
@@ -202,16 +212,17 @@ pub(crate) mod tests {
     fn layout() {
         let bytes = sample().encode().unwrap();
         assert_eq!(bytes[0], LIMIT_SWAP);
-        assert_eq!(&bytes[1..33], &[0x11; 32]);
-        assert_eq!(&bytes[33..35], &100u16.to_be_bytes());
-        assert_eq!(&bytes[35..51], &150_000_000u128.to_be_bytes());
-        assert_eq!(&bytes[51..67], &1_000_000u128.to_be_bytes());
-        assert_eq!(&bytes[67..75], &1_800_000_000u64.to_be_bytes());
-        assert_eq!(bytes[75], 0);
-        assert_eq!(&bytes[76..96], &[0x22; 20]);
-        assert_eq!(bytes[96] as usize, ZEC.len());
-        assert_eq!(&bytes[97..97 + ZEC.len()], ZEC.as_bytes());
-        assert_eq!(bytes[97 + ZEC.len()] as usize, T_ADDR.len());
+        assert_eq!(&bytes[1..21], &[0x33; 20]);
+        assert_eq!(&bytes[21..53], &[0x11; 32]);
+        assert_eq!(&bytes[53..55], &100u16.to_be_bytes());
+        assert_eq!(&bytes[55..71], &150_000_000u128.to_be_bytes());
+        assert_eq!(&bytes[71..87], &1_000_000u128.to_be_bytes());
+        assert_eq!(&bytes[87..95], &1_800_000_000u64.to_be_bytes());
+        assert_eq!(bytes[95], 0);
+        assert_eq!(&bytes[96..116], &[0x22; 20]);
+        assert_eq!(bytes[116] as usize, ZEC.len());
+        assert_eq!(&bytes[117..117 + ZEC.len()], ZEC.as_bytes());
+        assert_eq!(bytes[117 + ZEC.len()] as usize, T_ADDR.len());
     }
 
     /// The same terms from `scripts/intent-router/shared.ts`'s `encodeTerms`, and their keccak.
@@ -220,14 +231,14 @@ pub(crate) mod tests {
         let bytes = sample().encode().unwrap();
         assert_eq!(
             hex::encode(&bytes),
-            "011111111111111111111111111111111111111111111111111111111111111111006400000000000000000000000008f0d1\
-             80000000000000000000000000000f4240000000006b49d200002222222222222222222222222222222222222222146e6570\
-             3134313a7a65632e6f6d66742e6e6561722374314b50565352676e46485042574d4a4c433774614a696f4e366d3551366a56\
-             426d61"
+            "0133333333333333333333333333333333333333331111111111111111111111111111111111111111111111111111111111\
+             111111006400000000000000000000000008f0d180000000000000000000000000000f4240000000006b49d2000022222222\
+             22222222222222222222222222222222146e65703134313a7a65632e6f6d66742e6e6561722374314b50565352676e464850\
+             42574d4a4c433774614a696f4e366d3551366a56426d61"
         );
         assert_eq!(
             path_string(&auth_path(&bytes)),
-            "0xa2159833cf7701b9e372725c6e640f1e922752118b6e5087dedbbb89b7a6d193"
+            "0x09650cc18201991ec766eaa964833b0f8074f86c700b1f5710c965950bcd1846"
         );
     }
 
@@ -254,7 +265,7 @@ pub(crate) mod tests {
         assert_eq!(Terms::parse(&bytes[..bytes.len() - 1]), Err("Truncated"));
 
         let mut kind = bytes.clone();
-        kind[75] = 2;
+        kind[95] = 2;
         assert_eq!(Terms::parse(&kind), Err("InvalidRecipientKind"));
     }
 
@@ -265,6 +276,7 @@ pub(crate) mod tests {
             f(&mut t);
             assert_eq!(t.encode(), Err(err));
         };
+        check(|t| t.owner = [0; 20], "ZeroOwner");
         check(|t| t.quote_id = [0; 32], "ZeroQuoteId");
         check(|t| t.max_slippage_bps = BPS, "InvalidSlippage");
         check(|t| t.deadline = 0, "InvalidDeadline");
@@ -291,6 +303,9 @@ pub(crate) mod tests {
         assert_ne!(auth_path(&t.encode().unwrap()), base);
         let mut t = sample();
         t.refund_to[19] ^= 1;
+        assert_ne!(auth_path(&t.encode().unwrap()), base);
+        let mut t = sample();
+        t.owner[19] ^= 1;
         assert_ne!(auth_path(&t.encode().unwrap()), base);
     }
 }
