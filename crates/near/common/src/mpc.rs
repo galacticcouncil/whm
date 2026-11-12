@@ -1,5 +1,6 @@
-//! NEAR's MPC signer, `v1.signer`. Keys are derived from `(predecessor, path)` — this contract's
-//! account and a path built from the terms — so only this account can get a signature for them.
+//! NEAR's MPC signer, `v1.signer`. Keys are derived from `(predecessor, path)` — the calling
+//! contract's account and a path built from its terms — so only that account can get a signature
+//! for them.
 //!
 //! `sign` needs 1 yocto and at least 15 TGas (live config); an Ed25519 payload is raw bytes, hex,
 //! and the signature is over those bytes as given.
@@ -78,7 +79,7 @@ mod tests {
 
     /// Golden vector, live `v1.signer` 2026-10-16: `derived_public_key({ path:
     /// "zcash:v1:t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ua", predecessor: "withdraw-zec.hydration-whm.near",
-    /// domain_id: 1 })`. The app and the bot must reproduce this `A`.
+    /// domain_id: 1 })` — utxo-withdraw's. The app and the bot must reproduce this `A`.
     #[test]
     fn live_derivation() {
         let key = parse_ed25519("ed25519:FhYNkYjdaYj6tAymcRFyRgH8jQNbW5VARJHtvGdEvD3N");

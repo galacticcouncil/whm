@@ -926,6 +926,7 @@ version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
+ "pkcs8",
  "signature",
 ]
 
@@ -938,8 +939,10 @@ dependencies = [
  "curve25519-dalek",
  "ed25519",
  "rand_core 0.6.4",
+ "serde",
  "sha2 0.10.9",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -1598,6 +1601,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "intent-router"
+version = "0.1.0"
+dependencies = [
+ "bs58 0.5.1",
+ "hex",
+ "near-common",
+ "near-sdk",
+ "uint",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1924,6 +1938,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-mpc"
+version = "0.1.0"
+dependencies = [
+ "bs58 0.5.1",
+ "ed25519-dalek",
+ "hex",
+ "near-common",
+ "near-sdk",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2025,6 +2050,15 @@ dependencies = [
  "smart-default",
  "time",
  "tracing",
+]
+
+[[package]]
+name = "near-common"
+version = "0.1.0"
+dependencies = [
+ "bs58 0.5.1",
+ "hex",
+ "near-sdk",
 ]
 
 [[package]]
@@ -2667,6 +2701,7 @@ name = "ntt-manager"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "near-common",
  "near-sdk",
 ]
 
@@ -2676,7 +2711,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "borsh",
+ "bs58 0.5.1",
+ "ed25519-dalek",
  "hex",
+ "intent-router",
  "k256",
  "near-crypto 0.36.0",
  "near-primitives 0.36.0",
@@ -4448,6 +4486,7 @@ version = "0.1.0"
 dependencies = [
  "bs58 0.5.1",
  "hex",
+ "near-common",
  "near-sdk",
 ]
 

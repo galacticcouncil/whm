@@ -74,7 +74,7 @@ pnpm install                              # workspace deps
 pnpm --filter @whm/contracts install      # forge soldeer install
 pnpm --filter @whm/contracts build        # forge build
 pnpm --filter @whm/crates-solana build    # anchor build -p oracle-emitter
-pnpm --filter @whm/crates-near build      # cargo near build (ntt-manager, utxo-withdraw)
+pnpm --filter @whm/crates-near build      # cargo near build (ntt-manager, utxo-withdraw, intent-router)
 pnpm --filter @whm/crates-near test       # unit tests; test:sandbox for end-to-end
 ```
 

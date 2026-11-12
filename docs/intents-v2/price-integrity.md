@@ -70,8 +70,8 @@ Same mechanism as 2.2, with the number derived from a feed instead of picked by 
 Pyth is the candidate because it already broadcasts over Wormhole — Pythnet is chain 26, and its
 accumulator VAAs are guardian-signed like any other, which is the rail this repo already operates for
 oracles. A Pythnet VAA lands in an `OracleReceiver`-shaped contract on Hydration's EVM and writes
-ZEC/USD and NEAR/USD the same way Kamino and wstETH rates already arrive. `IntentQuoteEmitter` then
-reads the oracle at `publishQuote` time and commits `price × (1 − slippageBps)` into the path.
+ZEC/USD and NEAR/USD the same way Kamino and wstETH rates already arrive. `IntentDispatcher` then
+reads the oracle when it places the order and commits `price × (1 − slippageBps)` into the path.
 
 **This makes the number defensible, not live.** The floor is still fixed for the life of the schedule
 — the oracle makes it right at publication, not right forever. Tracking the market means republishing,

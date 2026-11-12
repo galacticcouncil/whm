@@ -1,0 +1,16 @@
+[package]
+name = "near-common"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Code the WHM NEAR contracts share — wire reading, VAAs, the MPC signer, time. A library, never
+# deployed on its own.
+
+[dependencies]
+near-sdk = { workspace = true }
+hex = { workspace = true }
+bs58 = { workspace = true }
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }

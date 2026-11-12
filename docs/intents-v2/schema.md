@@ -1,27 +1,27 @@
 # SCHEMA — Intents v2
 
-Companion to [spec.md](spec.md). Wire formats, interfaces and calls. The value rail's own messages —
-settlement and forwarding instruction — are unchanged: [../intents/schema.md](../intents/schema.md).
+Companion to [spec.md](spec.md). Wire formats, interfaces and calls.
 
 ---
 
 ## Message topology
 
 ```
-                      HYDRATION                               ETHEREUM              NEAR
-                      ─────────                               ────────              ────
-  IntentDispatcher.execute (ICE callback)
+                      HYDRATION                                   ETHEREUM                     NEAR
+                      ─────────                                   ────────                     ────
+  IntentDispatcher.execute (ICE) / .dispatch
     │
-    ├─ IntentEmitter.placeOrder ─► [B] settlement + [C] instruction ─► IntentReceiver ─► ETH → 0xN
-    │                                                                                    POA credits A
-    └─ IntentQuoteEmitter.publishOrder ─► [O] order VAA ──────────────────────────────► IntentRouter
-                                              emitter: IntentQuoteEmitter                 .finalize(terms, O)
-                                              payload: (authPath, seq, amount, outPerIn)
+    ├─ NttManagerWithPayload.transferWithPayload ─► [S] NTT transfer ─► IntentForwarder ─► ETH → 0xN
+    │      payload: version | depositAddress | maxRelayFee                                  POA credits A
+    │
+    └─ wormhole.publishMessage ─► [O] order VAA ───────────────────────────────────────► IntentRouter
+           emitter: IntentDispatcher                                                      .swap(terms, O, quote)
+           payload: (authPath, seq, amount, outPerIn)
 ```
 
-[B] and [C] are the existing rail. [O] is new: one per execution, consistency 202, from a separate
-emitter address — `IntentReceiver` rejects it as `UnauthorizedEmitter`, and the router accepts
-nothing else. [O] and [B]/[C] share the NTT manager sequence `seq`.
+[S] is the WETH manager's transfer, from the dispatcher to the forwarder, with the forward payload
+attested inside it. [O] is the order: one per execution, consistency 202, from the dispatcher's own
+emitter — the router accepts nothing else. Both carry the transfer's NTT sequence `seq`.
 
 ---
 
@@ -30,7 +30,9 @@ nothing else. [O] and [B]/[C] share the NTT manager sequence `seq`.
 ```
 Hydration Wormhole chain id  73
 Hydration core bridge        0x3792a6d63c31941B2805181771795D9176fA82A1   messageFee 0
-IntentQuoteEmitter           <to deploy>                     ← router pins chain 73 + this address
+IntentDispatcher             <to deploy>                     ← router pins chain 73 + this address;
+                                                               ICE intents call it; the forwarder pins it
+IntentForwarder (Ethereum)   <to deploy>                     ← the transfer's recipient, chain 2
 IntentRouter (NEAR)          intents-router.hydration-whm.near   ← MPC derivation predecessor
 
 Wormhole core (NEAR)         contract.wormhole_crypto.near   verify_vaa: signatures + guardian set only
@@ -45,30 +47,38 @@ POA min deposit (eth:1)      1e11 wei
 
 ---
 
-## 2. Terms — `IIntentQuoteEmitter.Quote`, `IntentCodec` v2
+## 2. Terms — `IIntentDispatcher.Quote`, `IntentCodec`
 
 One set per action. `authPath = keccak256(encodeQuote(terms))`; any change → new `A` → new `0xN`.
 
 | Field | Type | Validation |
 | --- | --- | --- |
+| `owner` | address | the Hydration account's EVM address — what ICE calls `execute` as; non-zero. The dispatcher takes an order of these terms only from it |
 | `quoteId` | bytes32 | random per action; non-zero |
 | `maxSlippageBps` | u16 | `< 10_000` |
 | `minOutPerIn` | u128 | hard floor, destination units per 1e18 wei; 0 = none |
+| `minDelivery` | u128 | before the deadline, deliver only once `A` holds this much; the SDK sets it ≥ POA's `min_withdrawal_amount` for the token (`supported_tokens`), above it a batch size |
 | `deadline` | u64 | unix seconds |
-| `recipientKind` | u8 | 0 = withdraw off NEAR; 1 = intents-account transfer |
+| `recipientKind` | u8 | 0 = withdraw off NEAR through POA; 1 = intents-account transfer |
 | `refundTo` | address | Ethereum H160, non-zero |
-| `destinationAsset` | string | supported route ledger id (bare form, not `1cs_v1:`), 1..255 bytes UTF-8 |
-| `recipient` | string | 1..255 bytes UTF-8, valid for the route |
+| `destinationAsset` | string | intents ledger id (bare form, not `1cs_v1:`), 1..255 bytes of visible ASCII |
+| `recipient` | string | 1..255 bytes of visible ASCII; an account id for `recipientKind 1` |
+
+There is no on-chain asset list. Whether an asset can be bought is 1Click's: no quote, no swap — the ETH
+waits in `A` and refunds after the deadline. Whether a delivery works is the terms', built by the SDK:
+`recipientKind 0` only for tokens POA withdraws with a `WITHDRAW_TO:` memo, `minDelivery` from POA's
+minimums. The router checks only what is structural — a withdrawal needs a `nep141:` asset (at swap and
+delivery, never at parse, so terms that fail it still refund) — and never ETH → ETH.
 
 Packed big-endian:
 
 ```
-version 1 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | deadline 8 | recipientKind 1 | refundTo 20
-| destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
-fixed prefix 80, total 82 + D + R; wire value of version = 2
+version 1 | owner 20 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8
+| recipientKind 1 | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
+fixed prefix 116, total 118 + D + R; wire value of version = 1
 ```
 
-The version byte selects the strategy: 2 = limit swap, the only one the router accepts in the MVP. A
+The version byte selects the strategy: 1 = limit swap, the only one the router accepts in the MVP. A
 new strategy takes the next version, with its own layout; it hashes to a different path, so its
 accounts never overlap this one's.
 
@@ -79,18 +89,20 @@ golden vectors pin terms, path and derived account across languages.
 
 ---
 
-## 3. Order — `IIntentQuoteEmitter.Order`
+## 3. Order — `IIntentDispatcher.Order`
 
 ```solidity
 struct Order {
-    uint64  seq;        // NTT manager sequence from placeOrder; the order's id
-    uint128 amount;     // WETH this order sent (upper bound on what lands in A)
+    uint64  seq;        // the NTT transfer's sequence; the order's id
+    uint128 amount;     // the least ETH A receives: bridged less the relay ceiling
     uint128 outPerIn;   // destination smallest-units per 1e18 wei, oracle, before slippage
 }
 
-function publishOrder(Quote calldata terms, Order calldata order) external payable;   // authorized dispatchers
-event OrderPublished(bytes32 indexed authPath, uint64 indexed seq, address dispatcher,
-                     uint128 amount, uint128 outPerIn, uint64 wormholeSequence, bytes terms);
+function dispatch(uint256 amount, address depositAddress, uint256 maxRelayFee, Quote calldata terms)
+    external returns (uint64 seq);                                     // msg.sender == terms.owner
+event OrderPublished(bytes32 indexed authPath, uint64 indexed seq, address indexed caller,
+                     address depositAddress, uint128 amount, uint128 outPerIn,
+                     uint64 messageSequence, bytes terms);
 ```
 
 Order VAA payload:
@@ -99,13 +111,31 @@ Order VAA payload:
 msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        total 73, consistency 202
 ```
 
-- `authPath` is computed by the emitter from the terms; it binds the price to `terms.destinationAsset`.
-- `amount` is informational in v1 (scan; a future `maxFillMultiple`). It is not the router's
-  `amount_in` (= `balance(A)`), nor ICE's `amountIn` (the user's source asset).
+- `authPath` is computed by the dispatcher from the terms; it binds the price to `terms.destinationAsset`.
+- `amount` is the least ETH `A` receives: what bridged less the relay ceiling, which the dispatcher
+  caps at half of it. The router credits on it and fills at most `max_fill_multiple` (≥ 2) times it,
+  so one fill takes whatever landed. It is not ICE's `amountIn` (the user's source asset).
 - `outPerIn` uses the same unit as `minOutPerIn`:
   `mulDiv(ethUsd × 10^destFeedDec, 10^destTokenDec, destUsd × 10^ethFeedDec)`, non-zero, ≤ `uint128`.
 - The VAA body timestamp (Hydration block time) is the price's age. Message identity is the VAA
   **body digest**, never the raw envelope.
+
+### Settlement — the NTT transfer and its forward payload
+
+`NttManagerWithPayload.transferWithPayload(amount, 2, forwarder, payload)` puts the payload in the
+`NativeTokenTransfer`'s `additionalPayload` (≤ 256 bytes; never queued — an outbound rate-limit
+breach reverts). The manager message digest covers it.
+
+```
+payload = version 1 | depositAddress 20 | maxRelayFee 16                  total 37
+```
+
+`IntentForwarder.processOrder(nttVaa, feeRequested)` accepts a transfer only from chain 73, sent by
+the pinned dispatcher, to the forwarder itself, trimmed to 8 decimals, with exactly this payload;
+`feeRequested ≤ maxRelayFee`; once per NTT message digest. It delivers the VAA unless already
+consumed, requires the transfer released (executed and not queued inbound), then pays
+`amount × 1e10 − feeRequested` to `depositAddress` and `feeRequested` to the caller, in native ETH.
+Events: `OrderForwarded(seq, depositAddress, amount)`, `RelayFeePaid(seq, relayer, fee)`.
 
 ---
 
@@ -113,7 +143,7 @@ msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        total 7
 
 ```
 OnResolved::Forward { contract: IntentDispatcher, data }
-data = abi.encode(address depositAddress, uint256 maxRelayFee, bytes terms)     ≤ 512 bytes ⇔ D + R ≤ 302
+data = abi.encode(address depositAddress, uint256 maxRelayFee, bytes terms)     ≤ 512 bytes ⇔ D + R ≤ 266
 
 IIntentResolutionReceiver.execute(user, intentId, assetIn, amountIn, assetOut, amountOut, data)
   → bytes4  (must return execute.selector)
@@ -152,28 +182,23 @@ is a different account.
 
 ### The message (`nep413`)
 
-`nonce` and `recipient` are siblings of `message`, not inside it.
+`nonce` and `recipient` are siblings of `message`, not inside it. Every message carries one intent.
 
 ```json
-{
-  "signer_id": "<A>",
-  "deadline": "<order expiry>",
-  "intents": [
-    { "intent": "token_diff",
-      "diff": { "nep141:eth.omft.near": "-<amount_in>", "<destinationAsset>": "<amount_out>" } },
-    { "intent": "ft_withdraw", "token": "<route token contract>", "receiver_id": "<route token contract>",
-      "amount": "<amount_out>", "memo": "WITHDRAW_TO:<recipient>" }
-  ]
-}
+{ "signer_id": "<A>", "deadline": "<RFC 3339, ms>", "intents": [ <one of the three below> ] }
 ```
 
-- Negative = given up, positive = received; deltas are **i128**.
-- `recipientKind: 1` replaces `ft_withdraw` with `transfer` to the intents account `recipient`.
-- `ft_withdraw.token` is a contract account id (`zec.omft.near`), not the ledger id; POA routes take
-  the token contract as receiver and the external address in the memo. Exact rules per route live in
-  the router's route registry.
-- **Refund:** a single `ft_withdraw` of `eth.omft.near` to `refundTo` (`WITHDRAW_TO:` memo).
-  **Delivery:** a single withdrawal of the destination token to `recipient`.
+| Action | Intent |
+| --- | --- |
+| **swap** | `{ "intent": "transfer", "receiver_id": "<quote.depositAddress>", "tokens": { "nep141:eth.omft.near": "<quote.amountIn>" } }` |
+| **deliver**, `recipientKind 0` | `{ "intent": "ft_withdraw", "token": "<contract>", "receiver_id": "<contract>", "amount": "<balance>", "memo": "WITHDRAW_TO:<recipient>" }` |
+| **deliver**, `recipientKind 1` | `{ "intent": "transfer", "receiver_id": "<recipient>", "tokens": { "<destinationAsset>": "<balance>" } }` |
+| **refund** | `{ "intent": "ft_withdraw", "token": "eth.omft.near", "receiver_id": "eth.omft.near", "amount": "<balance>", "memo": "WITHDRAW_TO:<refundTo, EIP-55>" }` |
+
+- The swap is a transfer into 1Click's deposit account, not a `token_diff`: 1Click has the solvers
+  trade and pays the output back to `A` in the same transaction ([poc.md](poc.md#g1--a-counterparty)).
+- `<contract>` is the ledger id without `nep141:`. Deliveries and refunds move `A`'s whole balance —
+  a delivery before the deadline from `minDelivery`, after it any balance.
 
 ### What is signed
 
@@ -184,22 +209,50 @@ NEP-413: the Ed25519 signature is over `sha256( LE_u32(2^31 + 413) ‖ borsh({me
 v1.signer.sign({ request: { payload_v2: { Eddsa: "<hex of the 32-byte digest>" }, path, domain_id: 1 } })
 ```
 
-Deposit, gas and response shape are pinned against the deployed signer before release.
+1 yocto, 30 TGas attached; the router checks the returned signature against `A` before emitting it.
 
-### Nonces
+### Nonces and deadlines
 
-The verifier's versioned nonce: `magic 4 ‖ version 1 ‖ salt 4 ‖ expiry_ns 8 (i64) ‖ entropy 15`.
+The verifier's versioned nonce: `magic 4 ‖ version 1 ‖ salt 4 ‖ expiry_ns 8 (i64) ‖ entropy 15`;
+salt from `intents.near.current_salt()`; a payload's deadline must be ≤ its nonce's expiry.
 
 ```
-order expiry = min(terms.deadline, vaa.timestamp + price_validity)      payload deadline AND nonce expiry
-swap         entropy = H(domain ‖ "swap"   ‖ path ‖ seq)[..15]
-refund       entropy = H(domain ‖ "refund" ‖ path ‖ block_height ‖ amount)[..15]
-delivery     entropy = H(domain ‖ "deliver"‖ path ‖ block_height ‖ amount)[..15]
+order expiry      = min(terms.deadline, vaa.timestamp + price_validity)            the order's price
+swap      nonce   = (salt, min(terms.deadline, vaa.timestamp + MAX_PRICE_VALIDITY), H(domain ‖ "swap" ‖ path ‖ seq)[..15])
+          deadline= min(now + transfer_validity, order expiry)
+deliver / refund  = (salt, now + transfer_validity, H(domain ‖ action ‖ path ‖ block_height ‖ amount)[..15])
+domain            = "whm-intent-router/v1",  H = sha256
 ```
 
-A fixed expiry means re-signing an order reproduces its whole nonce, so one order fills at most once.
+The swap nonce depends on the order alone — not on the quote, the caller or a mutable param: every
+quote for one order re-signs the same nonce, so at most one transfer per order executes. The short
+deadline keeps a signed transfer from landing after its quote. One residual: the salt is the verifier's
+live one, and `intents.near` keeps a rotated-out salt valid, so after a salt rotation an order can be
+signed once more — a fill of what `A` still holds, sized and floored like any other (the catch-up).
 
-### `MultiPayload` — what the bot publishes
+### The quote — what 1Click signs
+
+Ed25519 under 1Click's manager key, over the UTF-8 of `base58(sha256(stable JSON))` — keys sorted, no
+whitespace — of a fixed field set: the request's `dry`, `swapType`, `slippageTolerance`, assets,
+`depositType`, `amount`, `refundTo`/`refundType`, `recipient`/`recipientType`, `deadline` and its
+optional fields when set; the quote's amounts; non-dry, its `depositAddress`, `deadline`,
+`timeWhenInactive`, `timeEstimate`, fees; and `timestamp`. The bot passes exactly that set
+(`signedFields` in `crates/near/scripts/intent-router/oneclick.ts`); the router reads every value it
+checks from it.
+
+| Check | Rule |
+| --- | --- |
+| signature | by a key in the router's set (DAO-managed) |
+| shape | `dry` false, `swapType` `EXACT_INPUT`, `depositType` `INTENTS`, `amount` = `amountIn` > 0 |
+| assets | `originAsset` = ETH, `destinationAsset` = the terms' |
+| payee | `recipient` = `refundTo` = `A`, both `INTENTS` |
+| fields | only the fields 1Click signs for a plain swap (an allowlist); `virtualChain*`, `customRecipientMsg`, `depositMemo` or any unknown field is refused |
+| age | `now ≤ timestamp + max_quote_age`; the quote's `deadline` ≥ the transfer's |
+| size | `amountIn` within 1% below `min(A's ETH, max_fill_multiple × order.amount)` — never the caller's choice, so a dust quote cannot spend an order |
+| credited | `A's ETH ≥ order.amount × (1 − max_order_shortfall_bps)` — the order's own ETH has arrived; dust a stranger credits first does not count |
+| floor | `minAmountOut × 1e18 × 10⁴ ≥ amountIn × outPerIn × (10⁴ − maxSlippageBps)`, and ≥ `amountIn × minOutPerIn / 1e18` |
+
+### `MultiPayload` — what the bot submits
 
 ```json
 {
@@ -216,36 +269,50 @@ A fixed expiry means re-signing an order reproduces its whole nonce, so one orde
 
 ## 7. `IntentRouter` interface
 
+`crates/near/contracts/intent-router`.
+
 ```rust
 #[near(contract_state)]
 pub struct IntentRouter {
-    wormhole_core:    AccountId,      // contract.wormhole_crypto.near
-    mpc_signer:       AccountId,      // v1.signer
-    intents_contract: AccountId,      // intents.near
-    emitter_chain:    u16,            // 73
-    emitter_address:  [u8; 32],       // IntentQuoteEmitter
-    price_validity:   u64,            // seconds
-    eth_token:        String,         // nep141:eth.omft.near
-    routes:           LookupMap<String, Route>,   // ledger id → token contract, decimals, memo rule, minimum
-    owner:            AccountId,
-    pending_owner:    Option<AccountId>,
+    owner:          AccountId,
+    pending_owner:  Option<AccountId>,
+    mpc_signer:     AccountId,          // v1.signer
+    intents:        AccountId,          // intents.near
+    core:           AccountId,          // contract.wormhole_crypto.near
+    emitter_chain:  u16,                // 73
+    emitter:        [u8; 32],           // IntentDispatcher
+    eth_token:      String,             // nep141:eth.omft.near
+    quote_keys:     Vec<[u8; 32]>,      // 1Click's quote-signing keys
+    params:         Params,             // price_validity, max_quote_age, transfer_validity (s),
+                                        // max_fill_multiple, max_order_shortfall_bps,
+                                        // min_refund (wei, ≤ MAX_MIN_REFUND = 0.01 ETH)
 }
 
 #[near]
 impl IntentRouter {
-    /// Swap, deliver or refund for the account the terms derive. Permissionless.
-    pub fn finalize(&mut self, terms: Base64VecU8, order_vaa: Base64VecU8) -> Promise;
-    // private callbacks only; owner: routes, price_validity, upgrade, two-step ownership
+    /// The swap: a transfer of the quote's amountIn ETH from A to 1Click's deposit account.
+    /// Reads A's ETH balance after deriving A; the fill must be all of it, up to the cap.
+    pub fn swap(&mut self, terms: Base64VecU8, order_vaa: Base64VecU8, quote: Quote) -> Promise;
+    /// A's whole destination balance to the recipient — from the terms' minDelivery before the
+    /// deadline, any balance after it.
+    pub fn deliver(&mut self, terms: Base64VecU8) -> Promise;
+    /// After the deadline, A's whole ETH balance to refundTo.
+    pub fn refund(&mut self, terms: Base64VecU8) -> Promise;
+    // all three: anyone, 1 yocto (the signer's deposit), 300 TGas
+    // owner: set_params, set_quote_keys, upgrade, two-step ownership
+    // views: get_config, path_of(terms)
 }
+
+pub struct Quote { signed: Map<String, Value>, signature: String }   // "ed25519:<bs58>"
 ```
 
 Event, so the bot needs no view on the happy path:
 
 ```json
-{ "standard": "intent_router", "version": "1.0.0", "event": "intent_signed",
-  "data": [{ "auth_path": "0x…", "action": "swap | refund | deliver", "seq": 7,
-             "account": "<A>", "amount_in": "…", "amount_out": "…",
-             "recipient": "…", "signed_data": { "...MultiPayload..." } }] }
+{ "standard": "whm-intent-router", "version": "1.0.0", "event": "intent_signed",
+  "data": [{ "action": "swap | deliver | refund", "account": "<A>", "auth_path": "0x…", "seq": 7,
+             "token": "…", "amount": "…", "min_amount_out": "…", "receiver": "…",
+             "signed_data": { "...MultiPayload..." } }] }
 ```
 
 ---
@@ -255,20 +322,34 @@ Event, so the bot needs no view on the happy path:
 **Order VAA** — from `OrderPublished` (scan) by sequence:
 
 ```
-GET https://api.wormholescan.io/api/v1/vaas/73/<IntentQuoteEmitter emitter hex>/<wormholeSequence>
+GET https://api.wormholescan.io/api/v1/vaas/73/<IntentDispatcher emitter hex>/<messageSequence>
 ```
 
 **Balances** — `intents.near.mt_batch_balance_of({ account_id: A, token_ids: [eth, destination] })`.
 
-**Publish** — `publish_intent({ quote_hashes: [], signed_data })` → `{ status: "OK", intent_hash }`.
+**Swap** — per order, once POA has credited the order's ETH to `A` (`crates/near/scripts/intent-router/swap.ts`):
 
-**Status** — `get_status({ intent_hash })`:
+```
+amount = min(A's ETH, max_fill_multiple × order.amount)       the router accepts nothing else
+POST 1click /v0/quote   { dry: false, swapType: EXACT_INPUT, depositType / recipientType / refundType: INTENTS,
+                          originAsset: eth, destinationAsset, amount, recipient = refundTo = A, deadline }
+router.swap(terms, orderVaa, { signed: signedFields(quote), signature })   1 yocto, 300 TGas
+POST 1click /v0/submit-intent { type: "swap_transfer", signedData }
+GET  1click /v0/status?depositAddress=…   until SUCCESS | REFUNDED | FAILED
+```
+
+`REFUNDED` returns the ETH to `A`; the next order buys it. A transfer that never executes expires
+with its deadline; a new quote for the same order re-signs the same nonce.
+
+**Deliver, refund** — `router.deliver(terms)` / `router.refund(terms)`, then on the relay
+(`payout.ts`): `publish_intent({ quote_hashes: [], signed_data })` → `{ status: "OK", intent_hash }`,
+and `get_status({ intent_hash })`:
 
 | Status | Bot action |
 | --- | --- |
 | `PENDING`, `TX_BROADCASTED` | keep polling |
 | `SETTLED` | record; reconcile balances |
-| `NOT_FOUND_OR_NOT_VALID` | nonce unused and VAA valid → re-sign; else wait for the next order or the deadline |
+| `NOT_FOUND_OR_NOT_VALID` | call again — a new block height gives a new nonce |
 
 The bot keeps nothing whose loss strands funds: everything rebuilds from balances, router events and
 verifier nonces.

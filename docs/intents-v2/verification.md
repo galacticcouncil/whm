@@ -1,31 +1,42 @@
 # VERIFICATION — Intents v2
 
-What has been checked live for the v2 design ([spec.md](spec.md)), and what is still open. Facts
-about the deployed rail it reuses: [../intents/verification.md](../intents/verification.md).
+What has been checked live for the v2 design ([spec.md](spec.md)), and what is still open.
 
 ## Open — blocking the router
 
-**Solvers fill an unmatched intent.** v2 posts a limit order with `quote_hashes: []`. The empty array is
-accepted; whether solvers take it — including a catch-up-sized order — is untested. A negative result
-invalidates the design.
-
-**The exact bytes `intents.near` verifies.** NEP-413 digest, the versioned nonce layout (salt, i64
-nanosecond expiry, 15-byte entropy), deadline semantics (including `== now`), swap plus withdrawal,
-failed withdrawal. Pin against the deployed WASM — a wrong guess is a silent total failure.
-
-**POA credits ETH forwarded by a contract.** `IntentReceiver` forwards from inside a contract call;
-confirm POA's watcher credits internal transfers, and measure the minimum and the crediting delay.
-
-**The live `v1.signer` request.** `payload_v2: { Eddsa: hex }` under `request` in the inspected source;
-confirm against the deployed signer, with deposit, gas, latency and rejection behaviour.
+**Refunds through 1Click.** Neither 1Click refunding `A` (a swap that does not fill) nor the router's
+post-deadline refund has been run.
 
 ## Open — before a canary
 
-Price feeds live on Hydration (source undecided) · ICE `Forward` in the targeted runtime within 2M
-gas · control of `intents-router.hydration-whm.near` and its DAO handoff · monitoring. Full list:
+DIA price routes set on Hydration · ICE `Forward` in the targeted runtime, `execute` within 2M
+gas · the WETH NTT managers carrying the transfer payload · control of `intents-router.hydration-whm.near` and its DAO handoff · monitoring. Full list:
 [plan.md §5](plan.md#5-gates).
 
 ## Verified
+
+Gates G1–G3 were run on mainnet on 2026-10-21 — one full round, every transaction listed:
+[poc.md](poc.md).
+
+**A counterparty exists only through a quote (G1).** `publish_intent` with `quote_hashes: []`
+refuses a lone `token_diff` at publish time (`token deltas have positive balance`); it accepts only
+bundles that balance on their own. The relay's `quote` needs a relay partner key; **1Click's** works
+with ours. Its quote is signed — Ed25519 under its manager key, over a fixed field whitelist that
+includes `recipient`, `refundTo` and the deposit account — and the router can verify it. With the
+quote verified, a router-built transfer of exactly `amountIn` to the deposit account filled in 7 s,
+above the floor, and the ZEC came back to `A` in the same atomic transaction.
+
+**The bytes `intents.near` verifies (G2).** v0.4.5: NEP-413 digest signed once; versioned nonce
+`5628f6c6 ‖ 0 ‖ salt ‖ expiry ns ‖ 15 bytes`; payload deadline must be **≤ the nonce expiry**; an
+implicit account's own key is valid without registration. 12/12 cases through `simulate_intents`.
+
+**POA credits ETH forwarded by a contract (G3).** An internal transfer from Disperse was credited in
+1 min 16 s, in full. ETH minimum 1e11 wei. ZEC withdrawals below POA's listed 0.01 ZEC minimum pay
+out; a delivery costs 0.00072 ZEC (the listed 0.00047 fee plus 0.00025 taken on chain).
+
+**The live `v1.signer` request.** Proven by `utxo-withdraw` in production:
+`sign({ request: { path, payload_v2: { Eddsa: hex }, domain_id: 1 } })`, 1 yocto, ≥ 15 TGas, answering
+`{ scheme: "Ed25519", signature }`; ~21 TGas per sign, settled within about a minute.
 
 **MPC derivation.** `v1.signer` is live on NEAR mainnet. `derived_public_key({path, predecessor,
 domain_id: 1})` returns an Ed25519 key; derivation is keyed on `(predecessor, path)`, so the same path

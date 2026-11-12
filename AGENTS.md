@@ -30,7 +30,7 @@ Cross-chain messaging infrastructure connecting EVM chains, Solana, NEAR, Sui an
 
 - **Intents** — Hydration users get any NEAR-Intents-supported asset (BTC, ZEC, NEAR, …). `IntentEmitter.placeOrder` (Hydration) sells the user's asset for WETH and settles it to Ethereum over **NTT**, publishing a forwarding instruction beside each settlement; `IntentReceiver.processOrder` (Ethereum) pairs the two, delivers, pays the relayer, and forwards the rest to a 1Click quote's `depositAddress`. Deployed. See [docs/intents/spec.md](docs/intents/spec.md), [docs/intents/schema.md](docs/intents/schema.md), [docs/intents/relay-fee.md](docs/intents/relay-fee.md), [docs/intents/verification.md](docs/intents/verification.md).
 
-- **Intents v2** (in design, branch `feat/intent-v2`) — replaces 1Click with unattended swaps and DCA. Each action derives one NEAR account `A` (MPC, from `keccak256(terms)`) and one reusable POA deposit address `0xN`. An ICE `OnResolved::Forward` callback calls `IntentDispatcher`, which reads Hydration price feeds, calls `IntentEmitter.placeOrder` on the unchanged rail and `IntentQuoteEmitter.publishOrder(terms, order)` for a per-order price VAA; the NEAR `IntentRouter.finalize(terms, orderVaa)` signs the swap, delivery or post-deadline refund for `A`. See [docs/intents-v2/spec.md](docs/intents-v2/spec.md), [docs/intents-v2/schema.md](docs/intents-v2/schema.md), [docs/intents-v2/plan.md](docs/intents-v2/plan.md).
+- **Intents v2** (in design, branch `feat/intent-v2`) — replaces 1Click with unattended swaps and DCA. Each action derives one NEAR account `A` (MPC, from `keccak256(terms)`) and one reusable POA deposit address `0xN`. An ICE `OnResolved::Forward` callback calls `IntentDispatcher` (Hydration), which prices the order from Hydration feeds, bridges the WETH over NTT with a forwarding payload to `IntentForwarder` (Ethereum) and publishes a per-order price VAA; the forwarder pays `0xN`, POA credits `A`, and the NEAR `IntentRouter` signs the swap, delivery or post-deadline refund for `A` (`swap` / `deliver` / `refund`). Contracts in `contracts/src/intents-v2/`. See [docs/intents-v2/spec.md](docs/intents-v2/spec.md), [docs/intents-v2/schema.md](docs/intents-v2/schema.md), [docs/intents-v2/plan.md](docs/intents-v2/plan.md).
 
 - **NEAR NTT** — NEAR tokens move NEAR ↔ Hydration in one hop over native NTT. `ntt-manager` on NEAR is manager + transceiver in one, LOCKING, one deployment per token; Hydration runs a stock EVM NttManager. Owner: `hydration.sputnik-dao.near`. See [docs/near-ntt/spec.md](docs/near-ntt/spec.md).
 
@@ -57,7 +57,7 @@ pnpm --filter @whm/crates-solana logs:local
 
 # NEAR (cargo-near)
 pnpm --filter @whm/crates-near build          # cargo near build
-pnpm --filter @whm/crates-near test           # unit tests: ntt-manager, utxo-withdraw
+pnpm --filter @whm/crates-near test           # unit tests: ntt-manager, utxo-withdraw, intent-router
 pnpm --filter @whm/crates-near test:sandbox   # end-to-end on a NEAR sandbox
 
 # Agents (esbuild)
@@ -116,7 +116,8 @@ crates/                   # Rust umbrella (each subdir = its own Cargo workspace
     programs/             # Anchor programs (currently: oracle-emitter)
     scripts/              # Solana ops helpers
   near/                   # @whm/crates-near — Cargo workspace (near-sdk 5)
-    contracts/            # ntt-manager, utxo-withdraw
+    common/               # code the contracts share (wire reader, VAA, v1.signer, time)
+    contracts/            # ntt-manager, utxo-withdraw, intent-router
     sandbox/              # end-to-end tests on a NEAR sandbox
     scripts/              # NEAR ops helpers (e.g. ntt-manager/limits.sh — DAO limit proposals)
 
@@ -308,7 +309,7 @@ Common scopes: `oracle`, `basejump`, `intents`, `scan`, `contracts`, `crates`, `
 
 - **Intents path:** `IntentEmitter.placeOrder(assetIn, amountIn, minEthOut, depositAddress, maxRelayFee)` (Hydration) sells the asset for WETH via the router, then in one call settles it over NTT to `IntentReceiver` **and** publishes `abi.encode(sequence, depositAddress, maxRelayFee)` as its own Wormhole message — NTT carries no payload, so the destination travels separately. Both legs key on the NTT **manager's** sequence. On Ethereum, `agents/relayer` (intent feature) reads the settlement, finds the instruction in the source tx's `LogMessagePublished` logs, sizes a fee by estimating the real call, and calls `IntentReceiver.processOrder(nttVaa, instructionVaa, feeRequested)` → deliver → pay caller → forward the rest; emits `OrderProcessed`, which `intent`'s relayer app uses to nudge 1Click. `processOrder` also asserts the settlement actually released — a VAA the inbound rate limiter queued is delivered but credits nothing — via `NttManager.isMessageExecuted` + `getInboundQueuedTransfer`. See [docs/intents/spec.md](docs/intents/spec.md).
 
-- **Intents v2 path (in design):** ICE intent resolves → lazy executor pushes WETH and calls `IntentDispatcher.execute` → price from Hydration feeds (stale reverts, nothing bridged) → `IntentEmitter.placeOrder` (rail above, unchanged) → `IntentQuoteEmitter.publishOrder(terms, Order{seq, amount, outPerIn})` publishes the order VAA from its own emitter address (so `IntentReceiver` rejects it as `UnauthorizedEmitter`) → POA credits `A` → a NEAR-only bot calls the stateless `IntentRouter.finalize(terms, orderVaa)`, which signs via `v1.signer` a swap of `balance(A)` at the floor, a delivery of held destination tokens, or a refund after `terms.deadline`. `docs/intents/` documents only the deployed v1; v2 lives in `docs/intents-v2/` and may link to v1, never the reverse. See [docs/intents-v2/spec.md](docs/intents-v2/spec.md).
+- **Intents v2 path (in design):** ICE intent resolves → lazy executor pushes WETH and calls `IntentDispatcher.execute` as the user (`dispatch` is the direct entry; both only for `terms.owner`) → price from Hydration feeds (stale reverts, nothing bridged) → `NttManagerWithPayload.transferWithPayload` bridges the WETH to `IntentForwarder` with `depositAddress | maxRelayFee` as the transfer's payload, and the dispatcher publishes the order VAA `authPath | seq | amount | outPerIn` (amount net of the relay ceiling) → a relayer calls `IntentForwarder.processOrder(nttVaa, feeRequested)` on Ethereum: deliver, pay the fee, forward the rest to `0xN` → POA credits `A` → a NEAR-only bot calls the stateless `IntentRouter.swap(terms, orderVaa, quote)`, `deliver(terms)` or `refund(terms)`, which sign via `v1.signer` a swap of `A`'s ETH at the floor, a delivery of held destination tokens, or a refund after `terms.deadline`. `docs/intents/` documents only the deployed v1; v2 lives in `docs/intents-v2/` and may link to v1, never the reverse. See [docs/intents-v2/spec.md](docs/intents-v2/spec.md).
 
 - **Off-chain:** `broadcaster` reads Solana oracle state and signs `send_price` / `send_rate` instructions. `scan` splits indexing from serving: one `ingest` container is the sole writer, filling a shared event store plus the two tables no feature owns (`wh_messages`, `ntt_transfers`), and a container per domain reads those and serves its own API and pages. See [agents/scan/README.md](agents/scan/README.md). `relayer` polls Wormhole for VAAs and submits them to receiver contracts.
 

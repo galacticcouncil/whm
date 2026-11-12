@@ -1,11 +1,22 @@
-//! VAA body parsing. The core's `verify_vaa` checks signatures and the guardian set but returns only
+//! Wormhole VAAs. The core's `verify_vaa` checks signatures and the guardian set but returns only
 //! the set index — the body is ours to read, after that call has succeeded.
 
-use crate::messages::{CodecError, Reader};
+use near_sdk::ext_contract;
+
+use crate::codec::{CodecError, Reader};
+
+#[ext_contract(ext_wormhole)]
+pub trait WormholeCore {
+    /// The core requires ≥ 10 TGas prepaid.
+    fn publish_message(&mut self, data: String, nonce: u32) -> u64;
+    /// Verifies signatures and the guardian set; returns the set index. Does not parse the body.
+    fn verify_vaa(&self, vaa: String) -> u32;
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vaa {
     pub guardian_set_index: u32,
+    /// Seconds — the source block's time.
     pub timestamp: u32,
     pub nonce: u32,
     pub emitter_chain: u16,
@@ -53,21 +64,32 @@ impl Vaa {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use near_sdk::serde_json::{self, Value};
 
-    const FIXTURES: &str = include_str!("../tests/fixtures/vaas.json");
+    /// A VAA envelope with no signatures — enough for parsing; only the core verifies.
+    fn envelope(version: u8) -> Vec<u8> {
+        let mut out = vec![version];
+        out.extend_from_slice(&5u32.to_be_bytes());
+        out.push(0);
+        out.extend_from_slice(&1_700_000_000u32.to_be_bytes());
+        out.extend_from_slice(&0u32.to_be_bytes());
+        out.extend_from_slice(&73u16.to_be_bytes());
+        out.extend_from_slice(&[9; 32]);
+        out.extend_from_slice(&42u64.to_be_bytes());
+        out.push(202);
+        out.extend_from_slice(&[1, 2, 3]);
+        out
+    }
 
     #[test]
-    fn parses_the_hydration_header() {
-        let all: Value = serde_json::from_str(FIXTURES).unwrap();
-        let bytes = hex::decode(all["hydration-prime-to-solana"]["vaa"].as_str().unwrap()).unwrap();
-        let vaa = Vaa::parse(&bytes).unwrap();
-
-        // Fixture id: 73/0000…4e7b1e55d2354d4dc6abd876096dc201de0541d1/113
-        assert_eq!(vaa.guardian_set_index, 7);
+    fn parses_the_envelope() {
+        let vaa = Vaa::parse(&envelope(1)).unwrap();
+        assert_eq!(vaa.guardian_set_index, 5);
+        assert_eq!(vaa.timestamp, 1_700_000_000);
         assert_eq!(vaa.emitter_chain, 73);
-        assert_eq!(hex::encode(&vaa.emitter_address[12..]), "4e7b1e55d2354d4dc6abd876096dc201de0541d1");
-        assert_eq!(vaa.sequence, 113);
+        assert_eq!(vaa.emitter_address, [9; 32]);
+        assert_eq!(vaa.sequence, 42);
+        assert_eq!(vaa.consistency_level, 202);
+        assert_eq!(vaa.payload, vec![1, 2, 3]);
     }
 
     #[test]
@@ -75,5 +97,10 @@ mod tests {
         let mut bytes = vec![1, 0, 0, 0, 7, 13];
         bytes.extend_from_slice(&[0u8; 65]);
         assert_eq!(Vaa::parse(&bytes), Err(CodecError::Truncated));
+    }
+
+    #[test]
+    fn rejects_another_version() {
+        assert_eq!(Vaa::parse(&envelope(2)), Err(CodecError::InvalidPrefix([2, 0, 0, 0])));
     }
 }
