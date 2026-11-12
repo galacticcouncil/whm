@@ -15,8 +15,8 @@ const { optionalArg, requiredArg, requiredEnv } = args;
  * what `A` holds. Takes encoded terms, or builds new ones (random `quoteId`) from their fields.
  *
  * Usage: tsx derive.ts --contract <router> --terms <hex|base64>
- *        tsx derive.ts --contract <router> --asset <ledger id> --recipient <address> --refund-to <0x…>
- *          --deadline <unix s> --min-delivery <destination units> [--slippage <bps>]
+ *        tsx derive.ts --contract <router> --owner <0x…> --asset <ledger id> --recipient <address>
+ *          --refund-to <0x…> --deadline <unix s> --min-delivery <destination units> [--slippage <bps>]
  *          [--min-rate <units per 1e18 wei>] [--intents]
  */
 async function main(): Promise<void> {
@@ -26,6 +26,7 @@ async function main(): Promise<void> {
   const terms = given
     ? bytesArg(given)
     : encodeTerms({
+        owner: requiredArg("--owner"),
         quoteId: newQuoteId(),
         maxSlippageBps: Number(optionalArg("--slippage") ?? "100"),
         minOutPerIn: BigInt(optionalArg("--min-rate") ?? "0"),
@@ -45,7 +46,7 @@ async function main(): Promise<void> {
   console.log("account A  ", d.account);
   console.log("deposit 0xN", d.depositAddress);
 
-  const destination = terms.subarray(97, 97 + terms[96]).toString("utf8");
+  const destination = terms.subarray(117, 117 + terms[116]).toString("utf8");
   const held = await balances(provider, config.intents, d.account, [config.eth_token, destination]);
   console.log("balances   ", Object.entries(held).map(([t, v]) => `${v} ${t}`).join(", "));
 }

@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   const d = await derive(provider, contract, terms);
   const order = parseOrderVaa(vaa);
   if (order.authPath !== d.path) throw new Error(`the order is for ${order.authPath}, the terms for ${d.path}`);
-  const destination = terms.subarray(97, 97 + terms[96]).toString("utf8");
+  const destination = terms.subarray(117, 117 + terms[116]).toString("utf8");
 
   const held = (await balances(provider, config.intents, d.account, [config.eth_token]))[config.eth_token];
   const cap = order.amount * BigInt(config.params.max_fill_multiple);

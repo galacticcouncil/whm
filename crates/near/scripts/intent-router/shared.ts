@@ -36,6 +36,8 @@ export interface Config {
 
 /** The terms, as the router's `terms.rs` reads them. */
 export interface Terms {
+  /** The owner's Hydration EVM address — the only caller the dispatcher places its orders for. */
+  owner: string;
   quoteId: Buffer;
   maxSlippageBps: number;
   /** Destination units per 1e18 wei; 0 = no hard floor. */
@@ -68,16 +70,22 @@ export function encodeTerms(t: Terms): Buffer {
     if (b.length < 1 || b.length > 255) throw new Error(`string of ${b.length} bytes`);
     return Buffer.concat([Buffer.from([b.length]), b]);
   };
+  const address = (a: string) => {
+    const b = Buffer.from(a.replace(/^0x/, ""), "hex");
+    if (b.length !== 20) throw new Error(`address of ${b.length} bytes`);
+    return b;
+  };
   if (t.quoteId.length !== 32) throw new Error("quoteId must be 32 bytes");
   return Buffer.concat([
     Buffer.from([1]),
+    address(t.owner),
     t.quoteId,
     u(BigInt(t.maxSlippageBps), 2),
     u(t.minOutPerIn, 16),
     u(t.minDelivery, 16),
     u(t.deadline, 8),
     Buffer.from([t.recipientKind]),
-    Buffer.from(t.refundTo.replace(/^0x/, ""), "hex"),
+    address(t.refundTo),
     str(t.destinationAsset),
     str(t.recipient),
   ]);
