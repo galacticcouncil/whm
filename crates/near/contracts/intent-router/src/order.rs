@@ -1,4 +1,4 @@
-//! The order message — one per execution, published by `IntentQuoteEmitter` on Hydration with the
+//! The order message — one per execution, published by `IntentDispatcher` on Hydration with the
 //! oracle rate the swap must clear.
 //!
 //! ```text

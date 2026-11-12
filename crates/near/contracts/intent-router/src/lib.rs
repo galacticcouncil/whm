@@ -164,7 +164,7 @@ pub struct IntentRouter {
     intents: AccountId,
     /// `contract.wormhole_crypto.near`.
     core: AccountId,
-    /// Hydration's Wormhole chain id, 73, and `IntentQuoteEmitter`.
+    /// Hydration's Wormhole chain id, 73, and `IntentDispatcher`.
     emitter_chain: u16,
     emitter: [u8; 32],
     /// What `A` is credited and sells: `nep141:eth.omft.near`.
