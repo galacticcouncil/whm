@@ -39,8 +39,6 @@
     "migrate:oracle-relay-hydration:fork": "bash sh/migrate-oracle-relay-hydration.sh fork",
     "migrate:intent": "bash sh/migrate-intent.sh prod",
     "migrate:intent:fork": "bash sh/migrate-intent.sh fork",
-    "migrate:intent-mpc": "bash sh/migrate-intent-mpc.sh prod",
-    "migrate:intent-mpc:fork": "bash sh/migrate-intent-mpc.sh fork",
     "migrate:near-ntt-zec": "bash sh/migrate-near-ntt-zec.sh prod",
     "migrate:near-ntt-near": "bash sh/migrate-near-ntt-near.sh prod",
     "migrate:near-ntt-near:fork": "bash sh/migrate-near-ntt-near.sh fork",
