@@ -3,8 +3,8 @@ pragma solidity ^0.8.22;
 
 import {Test} from "forge-std/Test.sol";
 
-import {IntentCodec} from "../../src/intents/IntentCodec.sol";
-import {IIntentDispatcher} from "../../src/intents/interfaces/IIntentDispatcher.sol";
+import {IntentCodec} from "../../src/intents-v2/IntentCodec.sol";
+import {IIntentDispatcher} from "../../src/intents-v2/interfaces/IIntentDispatcher.sol";
 
 /// @dev The codec is a library, so its reverts are inlined into the caller rather than raised in a
 ///      subcall — `expectRevert` needs a real call frame to catch. This is that frame.

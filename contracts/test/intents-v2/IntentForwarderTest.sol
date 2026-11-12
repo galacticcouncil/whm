@@ -5,11 +5,11 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {NttPayload} from "../../src/ntt/NttPayload.sol";
-import {IntentCodec} from "../../src/intents/IntentCodec.sol";
-import {IntentForwarder} from "../../src/intents/IntentForwarder.sol";
-import {IIntentForwarder} from "../../src/intents/interfaces/IIntentForwarder.sol";
+import {IntentCodec} from "../../src/intents-v2/IntentCodec.sol";
+import {IntentForwarder} from "../../src/intents-v2/IntentForwarder.sol";
+import {IIntentForwarder} from "../../src/intents-v2/interfaces/IIntentForwarder.sol";
 
-import {MockWormhole, MockTransceiver, RejectsEth} from "./IntentReceiverTest.sol";
+import {MockWormhole, MockTransceiver, RejectsEth} from "../intents/IntentReceiverTest.sol";
 
 /// @dev `transferOf` is a library: its reverts need a call frame for `expectRevert` to catch.
 contract NttPayloadHarness {

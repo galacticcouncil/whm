@@ -4,14 +4,14 @@ pragma solidity ^0.8.22;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {IntentDispatcher} from "../../src/intents/IntentDispatcher.sol";
-import {IntentCodec} from "../../src/intents/IntentCodec.sol";
-import {IIntentDispatcher} from "../../src/intents/interfaces/IIntentDispatcher.sol";
+import {IntentDispatcher} from "../../src/intents-v2/IntentDispatcher.sol";
+import {IntentCodec} from "../../src/intents-v2/IntentCodec.sol";
+import {IIntentDispatcher} from "../../src/intents-v2/interfaces/IIntentDispatcher.sol";
 import {HydrationConsts} from "../../src/utils/hydration/HydrationConsts.sol";
 
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockNttManagerWithPayload} from "../mocks/MockNttManagerWithPayload.sol";
-import {MockCoreBridge} from "./IntentEmitterTest.sol";
+import {MockCoreBridge} from "../intents/IntentEmitterTest.sol";
 
 contract MockFeed {
     uint8 public decimals;

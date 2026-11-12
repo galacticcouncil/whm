@@ -64,7 +64,7 @@ than a tolerance around a reference the router cannot see.
 ### Wire format
 
 A second router strategy beside the limit swap ([spec.md](spec.md#the-strategy)): append to
-[`IntentCodec`](../../contracts/src/intents/IntentCodec.sol) as the next terms version after the limit
+[`IntentCodec`](../../contracts/src/intents-v2/IntentCodec.sol) as the next terms version after the limit
 swap's `2`. The version byte selects the strategy, and a new layout derives disjoint accounts, so
 nothing has to migrate.
 
