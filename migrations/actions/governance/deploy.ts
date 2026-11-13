@@ -8,10 +8,12 @@ import {
 } from "viem";
 
 import type { ifs, wallet } from "@whm/common/evm";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
 
 import dispatcherJson from "../../../contracts/out/GovernanceDispatcher.sol/GovernanceDispatcher.json";
 import executorJson from "../../../contracts/out/GovernanceExecutor.sol/GovernanceExecutor.json";
-import proxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
+
+const proxyJson = forgeArtifact("ERC1967Proxy");
 
 const IMPLEMENTATION_SLOT: Hex =
   "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
@@ -212,7 +214,7 @@ async function deployProxy(
   const { publicClient, walletClient } = wallet;
   await requireCode(publicClient, implementation, "Implementation");
 
-  const artifact = proxyJson as ifs.ContractArtifact;
+  const artifact = proxyJson;
   const hash = await walletClient.deployContract({
     abi: artifact.abi,
     bytecode: artifact.bytecode.object,

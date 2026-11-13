@@ -28,11 +28,9 @@ export interface PsmRoute {
 /**
  * Both PSM corridor directions, as data.
  *
- * Mainnet addresses, from deployments/prod/psm-base.json once the migration runs. Both PSM
- * contracts (HollarBaseVault on Base, HollarBaseFacilitator on Hydration — contracts/src/psm/) are
- * unknown until then, so this ships blank, following the intents precedent in ../intent/routes.ts:
- * the app refuses to start while any address here is blank or malformed, rather than silently
- * no-op-ing or accepting a placeholder.
+ * Mainnet addresses, from deployments/prod/psm-base.json (001 and 004 `proxyAddress`). The app
+ * refuses to start while any address here is blank or malformed, rather than silently no-op-ing or
+ * accepting a placeholder.
  *
  * Each contract plays both roles on its own chain: HollarBaseVault is the source emitter for
  * "mint" AND the destination contract for "redeem"; HollarBaseFacilitator is the destination
@@ -65,16 +63,16 @@ const ROUTE_TABLE: PsmRoute[] = [
   {
     name: "mint",
     sourceChain: WORMHOLE.base,
-    sourceEmitter: "" as Address, // HollarBaseVault on Base — filled at deploy
+    sourceEmitter: "0xd5FD74F570343245AFcE4a4C0B24b59179cfdfA7", // HollarBaseVault on Base
     destinationChain: WORMHOLE.hydration,
-    destinationContract: "" as Address, // HollarBaseFacilitator on Hydration — filled at deploy
+    destinationContract: "0xdA30CfDf3647C291Cb3b0EeD6Ac5f0fEa7f393c4", // HollarBaseFacilitator on Hydration
   },
   {
     name: "redeem",
     sourceChain: WORMHOLE.hydration,
-    sourceEmitter: "" as Address, // HollarBaseFacilitator on Hydration — filled at deploy
+    sourceEmitter: "0xdA30CfDf3647C291Cb3b0EeD6Ac5f0fEa7f393c4", // HollarBaseFacilitator on Hydration
     destinationChain: WORMHOLE.base,
-    destinationContract: "" as Address, // HollarBaseVault on Base — filled at deploy
+    destinationContract: "0xd5FD74F570343245AFcE4a4C0B24b59179cfdfA7", // HollarBaseVault on Base
   },
 ];
 
