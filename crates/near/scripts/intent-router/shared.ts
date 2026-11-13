@@ -27,6 +27,7 @@ export interface Config {
   params: {
     price_validity: number;
     max_quote_age: number;
+    min_quote_slippage_bps: number;
     transfer_validity: number;
     max_fill_multiple: number;
     max_order_shortfall_bps: number;
