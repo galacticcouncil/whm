@@ -1,10 +1,12 @@
 import { encodeFunctionData } from "viem";
 
 import type { ifs } from "@whm/common/evm";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
 import type { WalletContext } from "../types";
 
 import zecUtxoEmitterJson from "../../../contracts/out/ZecUtxoEmitter.sol/ZecUtxoEmitter.json";
-import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
+
+const erc1967ProxyJson = forgeArtifact("ERC1967Proxy");
 
 export type DeployParams = WalletContext & {
   proxy?: `0x${string}`; // when set, upgrade this existing proxy instead of deploying a new one
@@ -56,7 +58,7 @@ export async function deploy(params: DeployParams): Promise<DeployResult> {
     args: [],
   });
 
-  const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson as ifs.ContractArtifact;
+  const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson;
 
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,

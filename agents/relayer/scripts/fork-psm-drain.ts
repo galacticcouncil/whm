@@ -1,15 +1,8 @@
 /**
- * The drain keeper and the vault watcher against the deployed vault, on an anvil fork of Base.
+ * The drain keeper and vault watcher against the deployed vault on an anvil fork of Base.
  *
- * Real contracts throughout: the vault, Circle's USDC with its blacklist, Aave v3 and the Wormhole
- * core. On the fork only: the core's guardian set is one key we hold, a stand-in Hydration emitter
- * is bound if none is yet, and deposits are unpaused by impersonating the vault's guardian. Credits
- * are booked by delivering signed KIND_REDEEM messages through the real `receiveMessage`.
- *
- *   pnpm fork:base                                        # anvil on :8546
- *   pnpm --filter @whm/relayer verify:psm-drain-fork      # RPC=<url> to point elsewhere
- *
- * Exits 1 rather than skipping when the fork is not there.
+ *   pnpm fork:base                                   # anvil on :8546
+ *   node --import tsx scripts/fork-psm-drain.ts      # RPC=<url> to point elsewhere
  */
 import {
   concatHex,
@@ -46,7 +39,7 @@ const DEPLOYER = getAddress("0x20b588a194d9a3D788985c0C86A1160836a0Aaaa");
 const HYDRATION_CHAIN = 73;
 const STAND_IN_EMITTER = pad("0xfac1000000000000000000000000000000000001", { size: 32 });
 
-// anvil keys 0 and 1: the keeper/relayer and the depositor. Key 2 signs as the only guardian.
+// anvil's public dev keys 0, 1 and 2.
 const KEEPER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 const DEPOSITOR_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" as const;
 const GUARDIAN_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a" as const;
@@ -96,7 +89,6 @@ function record(ok: boolean, label: string, detail?: unknown) {
 const pub = createPublicClient({ chain: base, transport: http(RPC), cacheTime: 0 });
 const anvil = (method: string, params: unknown[]) => pub.request({ method: method as never, params: params as never });
 
-/** Send as any address: impersonated on the fork, with gas money. */
 async function as(from: Address, to: Address, abi: readonly unknown[], functionName: string, args: unknown[]) {
   await anvil("anvil_impersonateAccount", [from]);
   await anvil("anvil_setBalance", [from, numberToHex(10n ** 18n)]);
@@ -116,7 +108,6 @@ async function swapGuardians(core: Address, index: number, guardian: Address) {
   await anvil("anvil_setStorageAt", [core, slot(BigInt(keccak256(slot(baseSlot)))), pad(guardian, { size: 32 })]);
 }
 
-/** The 100-byte PSM body: version | kind | recipient | amount | origin | maxFeeBps. */
 const psmPayload = (kind: number, recipient: Address, amount: bigint, origin: Address, maxFeeBps = 0xffff): Hex =>
   concatHex([
     "0x01",
@@ -199,7 +190,6 @@ async function main() {
   const queue = createQueue({ publicClient: clients.publicClient, account: clients.account, warnMultiplier: 1n });
   await queue.init();
 
-  // Credits arrive the way the psm-base app delivers them: queued receiveMessage, gas margin on.
   let seq = BigInt(Date.now());
   const credit = async (recipient: Address, amount: bigint) => {
     const vaa = await signedVaa(setIndex, emitter, seq++, psmPayload(2, recipient, amount, ORIGIN));
@@ -266,7 +256,6 @@ async function main() {
     late,
   );
 
-  // A blacklisted head: claim() from it names the reason, and drain retires it.
   const before = raised.length;
   const blocked = await drainTick(ctx, VAULT, state);
   record(
@@ -275,7 +264,6 @@ async function main() {
     { blocked, keys: raised.slice(before).map((r) => r.key) },
   );
 
-  // A head above the payout capacity can never be paid: alerted, nothing sent.
   const admin = (await read<boolean>(vaultAbi, VAULT, "hasRole", [ADMIN_ROLE, DEPLOYER])) ? DEPLOYER : SAFE;
   await as(admin, VAULT, vaultAbi, "setPayoutLimit", [50_000_000n, 86_400n]);
   await credit(R1, 100_000_000n);
@@ -288,9 +276,8 @@ async function main() {
   );
   record(queue.nonce === nonce, "drain: holding spends no nonce");
 
-  // The watcher on the same vault: a non-zero Wormhole message fee (core slot 7). Its log check reads
-  // pre-fork blocks from the fork's upstream, which may refuse eth_getLogs; the loop logs that, and
-  // the other checks still run.
+  // Core slot 7 is the message fee. The log check reads pre-fork blocks from the fork's upstream,
+  // which may refuse eth_getLogs, so only "logs" may fail.
   const watch = baseWatch(VAULT);
   await baseWatchTick(ctx, watch).catch(() => {});
   await anvil("anvil_setStorageAt", [core, slot(7n), slot(1n)]);

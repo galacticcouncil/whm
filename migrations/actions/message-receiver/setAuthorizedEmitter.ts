@@ -1,9 +1,9 @@
 import { isAddress, pad } from "viem";
 
-import type { ifs } from "@whm/common/evm";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
 import type { WalletContext } from "../types";
 
-import messageReceiverJson from "../../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
+const messageReceiverJson = forgeArtifact("MessageReceiver");
 
 export type SetAuthorizedEmitterParams = WalletContext & {
   receiverAddress: `0x${string}`;
@@ -21,7 +21,7 @@ export async function setAuthorizedEmitter(
   params: SetAuthorizedEmitterParams,
 ): Promise<SetAuthorizedEmitterResult> {
   const { publicClient, walletClient, receiverAddress, emitter, sourceChain } = params;
-  const { abi } = messageReceiverJson as ifs.ContractArtifact;
+  const { abi } = messageReceiverJson;
 
   // Normalize to bytes32 (pad if it's a 20-byte address)
   const isBytes32 = emitter.length === 66;

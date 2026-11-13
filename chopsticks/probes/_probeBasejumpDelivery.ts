@@ -41,6 +41,7 @@ import {
 } from "viem";
 import { privateKeyToAccount, sign } from "viem/accounts";
 import { AccountId } from "polkadot-api";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
 
 import { configs } from "../lib/configs";
 import { spawnForks, teardownForks, type Network } from "../lib/network";
@@ -97,7 +98,7 @@ const artifact = (path: string): Artifact =>
 
 const RECEIVER = artifact("BasejumpReceiver.sol/BasejumpReceiver.json");
 const LANDING = artifact("BasejumpLanding.sol/BasejumpLanding.json");
-const PROXY = artifact("ERC1967Proxy.sol/ERC1967Proxy.json");
+const PROXY = forgeArtifact("ERC1967Proxy");
 
 // ─── Helpers ─────────────────────────────────────────────────────
 

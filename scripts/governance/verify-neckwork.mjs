@@ -24,6 +24,20 @@ export function targets(state) {
   });
 }
 
+// One artifact per compiler profile, at paths forge picks by build history; the cache maps them.
+export function defaultArtifact(contract) {
+  const cache = JSON.parse(readFileSync(resolve(root, "contracts/cache/solidity-files-cache.json"), "utf8"));
+  const paths = new Set();
+  for (const { artifacts } of Object.values(cache.files)) {
+    for (const built of Object.values(artifacts?.[contract] ?? {})) {
+      const path = typeof built === "string" ? built : built.default?.path;
+      if (path) paths.add(path);
+    }
+  }
+  if (paths.size !== 1) throw new Error(`${contract}: ${paths.size} default-profile artifacts in contracts/cache — run forge build`);
+  return JSON.parse(readFileSync(resolve(root, "contracts/out", [...paths][0]), "utf8"));
+}
+
 export function requireMatch(record, address) {
   if (String(record.chainId) !== "222222" || record.address?.toLowerCase() !== address.toLowerCase()
     || !["match", "exact_match"].includes(record.runtimeMatch)) {
@@ -36,7 +50,7 @@ export async function verify() {
   const state = JSON.parse(readFileSync(resolve(root, "deployments/prod/governance-hydration.json"), "utf8"));
   const evidence = [];
   for (const { address, tx, contract } of targets(state)) {
-    const artifact = JSON.parse(readFileSync(resolve(root, `contracts/out/${contract}.sol/${contract}.json`), "utf8"));
+    const artifact = defaultArtifact(contract);
     const metadata = typeof artifact.metadata === "string" ? JSON.parse(artifact.metadata) : artifact.metadata;
     const compilationTarget = Object.entries(metadata.settings.compilationTarget);
     if (compilationTarget.length !== 1 || compilationTarget[0][1] !== contract) {
@@ -44,7 +58,7 @@ export async function verify() {
     }
     execFileSync("forge", [
       "verify-contract", address, `${compilationTarget[0][0]}:${contract}`,
-      "--compiler-version", metadata.compiler.version,
+      "--compiler-version", metadata.compiler.version, "--compilation-profile", "default",
       "--chain", "222222", "--verifier", "sourcify", "--verifier-url", api,
       "--creation-transaction-hash", tx, "--watch",
     ], { cwd: resolve(root, "contracts"), stdio: "inherit", timeout: 300_000 });

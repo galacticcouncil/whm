@@ -5,6 +5,7 @@
   "exports": {
     ".": "./index.ts",
     "./evm": "./evm/index.ts",
+    "./evm/artifacts": "./evm/artifacts.ts",
     "./migration": "./migration/index.ts",
     "./near": "./near/index.ts",
     "./wormhole": "./wormhole/index.ts"

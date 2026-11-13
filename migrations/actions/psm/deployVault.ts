@@ -1,12 +1,14 @@
 import { encodeFunctionData } from "viem";
 
 import type { ifs } from "@whm/common/evm";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
 import type { WalletContext } from "../types";
 
 import vaultJson from "../../../contracts/out/HollarBaseVault.sol/HollarBaseVault.json";
-import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.psm.json";
 
-/** See deployFacilitator for why the proxy artifact is ERC1967Proxy.psm.json. */
+const erc1967ProxyJson = forgeArtifact("ERC1967Proxy", "psm");
+
+/** The proxy is the `psm` profile's build, like the vault. */
 export type DeployVaultParams = WalletContext & {
   wormholeCore: `0x${string}`;
   usdc: `0x${string}`;
@@ -68,7 +70,7 @@ export async function deployVault(params: DeployVaultParams): Promise<DeployResu
     ],
   });
 
-  const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson as ifs.ContractArtifact;
+  const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson;
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,
     bytecode: proxyBytecode.object,

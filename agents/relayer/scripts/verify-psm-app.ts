@@ -1,26 +1,7 @@
 /**
- * Verification harness for the PSM relayer scaffold, no network.
+ * The PSM relayer's route table, route wiring and boot guards, with only fetch mocked.
  *
- * Scope: this is the app-shape and route-table scaffold only, not a chain-mechanics check —
- * `verify-hydration-fees.ts` and `verify-base-clients.ts` already exhaustively cover per-chain
- * fee-shape correctness and key isolation. Every `ChainClients` object below is built with the real
- * `hydrationClients()` against a mocked transport — even where it stands in for "the other side" of
- * a route — because the property under test in most sections is that `apps/psm/app.ts` never
- * branches on which physical chain a route's `destinationChain` happens to be: it only ever reads
- * that field off the route.
- *
- * It also covers: distinct `APP_NAME` env vars per process (checked by spawning real
- * subprocesses — module-level `opt()` calls cannot be re-probed in-process); chain-id
- * validation, including the destination-chain-typo silent-drop case, reproduced against a
- * reimplementation without the chain-id check so the failure it prevents is evidence, not assertion;
- * the corridor closure invariant and the duplicate-source guard; an adaptive shipped-table check
- * that stays green across the address fill (plus a synthetic filled table exercised today); Base's
- * key isolation (composition check on the entry files, plus a functional proof that `makeApp`
- * forwards whatever key it is given rather than resolving one itself); and an EVM-only second-route
- * fixture (a Solana source with an H160 emitter cannot exist, so the second route uses an EVM one).
- *
- * Run with: pnpm --filter @whm/relayer verify:psm-app
- * (or `npx tsx agents/relayer/scripts/verify-psm-app.ts` from the repo root).
+ * Run: node --import tsx scripts/verify-psm-app.ts
  */
 import { execFile, type ChildProcess } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
@@ -53,14 +34,6 @@ import type { Next, RelayerApp, RelayerCtx } from "../src/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Safety net for `runInSubprocess`'s temp files: a `finally` around a BLOCKING child-process call
-// cannot run mid-interruption — constructed proof in `runInSubprocess`'s own doc comment — so this
-// tracks every probe file (and its still-running child, if any) from the moment each is created,
-// and a SIGINT/SIGTERM handler kills the child and removes the file explicitly before exiting.
-// This only works BECAUSE `runInSubprocess` uses the async `execFile`: the event loop stays live
-// while a probe runs, so these handlers get a chance to run in the first place. `process.on("exit",
-// ...)` additionally covers normal and thrown-exception exits (already handled by `runInSubprocess`
-// itself, but harmless and cheap to repeat here).
 const activeProbeFiles = new Set<string>();
 const activeProbeChildren = new Set<ChildProcess>();
 function cleanupProbeFiles(): void {
@@ -79,16 +52,12 @@ process.on("SIGTERM", () => {
   process.exit(143);
 });
 
-// Anvil/Hardhat's well-known default account #0 key. Public, funds-free — see
-// verify-hydration-fees.ts, which uses the same key the same way.
+// Anvil's public default account #0; signs only mocked transactions.
 const TEST_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 const HYDRATION_CHAIN_ID = 222222;
 const BASE_CHAIN_ID = 8453;
 
-// VAULT and FACILITATOR are the two real corridor contracts — the same address plays both an
-// emitter role and a destination-contract role, on its own chain, across the two routes. Fixtures
-// that are meant to represent a healthy corridor reuse these two consistently; fixtures that are
-// meant to violate closure deliberately do not.
+// Each corridor address is one route's emitter and the other's destination.
 const VAULT = "0x1111111111111111111111111111111111111111" as Address;
 const FACILITATOR = "0x2222222222222222222222222222222222222222" as Address;
 const ADDR_C = "0x3333333333333333333333333333333333333333" as Address;
@@ -124,26 +93,17 @@ function redeemRoute(): PsmRoute {
 }
 
 // ─── Fetch mock (no network) ─────────────────────────────────────────────────────
-// Same technique as verify-hydration-fees.ts: only globalThis.fetch is intercepted, so
-// hydrationClients()/receiveMessage() run for real — real ABI encoding, real signing.
 
 type JsonRpcRequest = { jsonrpc: "2.0"; id: number; method: string; params?: unknown[] };
 
-/** What the mock answers. A scenario changes it between calls; `requests` records what was asked. */
 interface MockState {
-  /** Answer to `eth_chainId`. */
   chainId: number;
-  /**
-   * What `eth_getTransactionReceipt` serves: a mined success, a mined revert, nothing yet, or a
-   * success for another transaction (what viem hands back once it sees the delivery replaced; a
-   * node never answers the original hash with another transaction's receipt).
-   */
+  /** "replaced": another transaction's success receipt, as viem returns for a replaced delivery. */
   receipt: "success" | "reverted" | "replaced" | "absent";
   /** When set, `eth_call` reverts with this data instead of succeeding. */
   callRevert: Hex | undefined;
   /** Lowercased addresses that `eth_getCode` reports as having no code. */
   noCode: Set<string>;
-  /** Every method requested, in order. */
   requests: string[];
 }
 
@@ -241,9 +201,6 @@ async function buildClients(): Promise<ChainClients> {
 }
 
 // ─── Fixtures shaped like the producer ───────────────────────────────────────────
-// One process = one persistent `app` + one persistent `queue` + one client set for the process
-// lifetime, exactly as `makeApp` builds them once and `wireRoutes` is called against them —
-// never a fresh app/queue/clients per route or per scenario.
 
 function fakeApp(): { app: RelayerApp; routers: Map<number, Record<string, unknown>> } {
   const routers = new Map<number, Record<string, unknown>>();
@@ -299,11 +256,7 @@ async function invoke(
   await handler(fakeCtx(sequence), () => {});
 }
 
-/**
- * A `routesFor` without the chain-id check: it filters and validates addresses on the SERVED subset
- * only. Used once, below, to reproduce — not assert — that a typo'd `destinationChain` then vanishes
- * silently instead of refusing to start.
- */
+/** `routesFor` without the chain-id check: validates addresses on the served subset only. */
 function routesForWithoutChainCheck(destinationChain: number, table: PsmRoute[]): PsmRoute[] {
   return table
     .filter((r) => r.destinationChain === destinationChain)
@@ -316,23 +269,8 @@ function routesForWithoutChainCheck(destinationChain: number, table: PsmRoute[])
 }
 
 /**
- * Run a short snippet against the real relayer source, in a fresh process with `env` applied —
- * needed for the APP_NAME check, since `config.ts`'s `opt()` calls run once at module load and
- * cannot be re-probed by re-importing within this same process.
- *
- * The probe file is written INSIDE `scripts/`, not a system tmpdir, so its own `../src/...`
- * relative imports resolve exactly the way this script's do — a tmpdir sibling would need a
- * different relative path (or a node_modules symlink) to reach the same source. Removed again
- * immediately after, success or failure.
- *
- * Uses the ASYNC `execFile`, not `execFileSync`, and that is load-bearing, not a style choice:
- * `execFileSync` blocks the whole JS thread, including its own event loop's signal watcher, until
- * the child exits — constructed proof (a throwaway script: a `process.on("SIGINT")` handler next
- * to an `execFileSync("sleep", ["5"])`) showed the handler simply never runs while blocked, no
- * matter how the call is wrapped in `try`/`finally`. `execFile`'s promise keeps the event loop
- * live, so `activeProbeFiles`'s SIGINT/SIGTERM handlers (above) can actually run DURING a probe's
- * execution, kill the still-running child, and remove the file — not just after it would have
- * exited on its own.
+ * Runs `code` in a fresh process with `env`. The probe sits in scripts/ so its ../src imports
+ * resolve; async execFile, not execFileSync, so the signal handlers above can run mid-probe.
  */
 function runInSubprocess(code: string, env: Record<string, string>): Promise<string> {
   const file = join(__dirname, `.probe-${process.pid}-${Math.random().toString(36).slice(2)}.ts`);
@@ -351,26 +289,17 @@ function runInSubprocess(code: string, env: Record<string, string>): Promise<str
           reject(err);
           return;
         }
-        // Native-binding warnings (secp256k1/bigint fallbacks) land on stdout, ahead of the
-        // probe's own JSON line — the same noise this script's own runs print. The probe always
-        // logs exactly one JSON object as its last line, so take that rather than the whole
-        // stream.
+        // Native-binding warnings can precede the probe's JSON on stdout; it is always the last line.
         const lines = stdout.trim().split("\n");
         resolve(lines[lines.length - 1]!);
       },
     );
-    // Tracked so a SIGINT/SIGTERM mid-probe can kill this specific child rather than leaving it
-    // (and the file it's reading) orphaned when the handler calls process.exit().
     activeProbeChildren.add(child);
     child.once("exit", () => activeProbeChildren.delete(child));
   });
 }
 
-/**
- * What `run` is refused with, or why it was not: a `makeApp` whose boot checks are gone does not
- * reject, it goes on to the engine and hangs there, so the wait is bounded and a start that was not
- * refused reads as a failed check rather than as a stuck script.
- */
+/** What `run` is refused with; bounded, as a makeApp without its boot checks hangs in the engine. */
 async function startupError(run: () => Promise<void>): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const limit = new Promise<string>((resolve) => {
@@ -384,41 +313,18 @@ async function startupError(run: () => Promise<void>): Promise<string> {
 }
 
 async function main() {
-  // One mock, installed for the whole run: `hydrationClients()` itself calls `getChainId()` over
-  // the transport, so the mock has to be live before the very first client is built, not just
-  // around each `submit()` call. `rawTxs` accumulates across every submission below; each check
-  // reads the entry it just caused, by index, rather than resetting the mock per section.
+  // One mock for the whole run, as hydrationClients() calls getChainId() at build. rawTxs
+  // accumulates; each check reads the entry it just caused.
   const mock = installMock();
 
   // ─── 1. Refuse-to-start ─────────────────────────────────────────────────────
 
-  // 1a. The shipped table is blank on purpose — both PSM addresses are unknown until the
-  // migration runs. `routesFor` validates the WHOLE table before filtering (see its own doc
-  // comment), so every process reports the SAME first invalid row in table order regardless of
-  // which destination it asks for — the corridor is one shared unit and both processes refuse
-  // together while any row of it is bad. This check is written to stay meaningful across the
-  // address fill: it asks "which state is the table actually in" and asserts the right thing for
-  // that state, rather than hardcoding "it must be blank" (see section 1b below for the dedicated
-  // blank-vs-filled coverage).
-  //
-  // The branch predicate (`isBlank(mint) || isBlank(redeem)`) is table-wide, so asserting `"mint"`
-  // inside the blank branch would be correct only by coincidence: mint happens to be first in
-  // table order, and the shipped table is either fully blank or (eventually) fully filled.
-  // Half-filled (mint filled, redeem still blank) is a real intermediate deploy state — nothing
-  // stops an operator filling one contract's address before the other's migration step runs — and
-  // under it `routesFor` correctly names "redeem" as the blank one, which a hardcoded `"mint"`
-  // would contradict. So the check asserts against the actual FIRST blank route in table order,
-  // whatever its name is.
+  // 1a. routesFor validates the whole table before filtering, so every destination refuses on the
+  // same first blank row, whatever state the table is in.
   function isBlank(r: PsmRoute): boolean {
     return (r.sourceEmitter as string) === "" || (r.destinationContract as string) === "";
   }
 
-  /**
-   * The adaptive shipped-table check: asserts the right thing for whichever state `table` is
-   * actually in. Exercised against the real `ROUTE_TABLE` below, and against four synthetic states
-   * covering both half-filled orientations plus the fully-blank and fully-filled ends, none of which
-   * depend on `ROUTE_TABLE`'s real (currently fully-blank) state.
-   */
   function checkAdaptiveTableState(table: PsmRoute[], label: string): void {
     const mint = table.find((r) => r.name === "mint")!;
     const redeem = table.find((r) => r.name === "redeem")!;
@@ -463,8 +369,6 @@ async function main() {
   checkAdaptiveTableState(ROUTE_TABLE, "shipped ROUTE_TABLE");
   record(ROUTE_TABLE.length === 2, "shipped ROUTE_TABLE carries exactly the two launch routes");
 
-  // The four states, independent of ROUTE_TABLE's real state: the check holds for each of them, not
-  // only for the live table's current (fully-blank) case.
   const blankMint = { ...mintRoute(), sourceEmitter: "" as Address, destinationContract: "" as Address };
   const blankRedeem = { ...redeemRoute(), sourceEmitter: "" as Address, destinationContract: "" as Address };
   checkAdaptiveTableState([blankMint, blankRedeem], "synthetic table, fully blank");
@@ -472,9 +376,7 @@ async function main() {
   checkAdaptiveTableState([blankMint, redeemRoute()], "synthetic table, redeem filled / mint blank");
   checkAdaptiveTableState([mintRoute(), redeemRoute()], "synthetic table, fully filled");
 
-  // 1b. Dedicated synthetic filled table, in the shipped shape (same names, same chains),
-  // exercised today regardless of ROUTE_TABLE's real state — required so this logic path is
-  // proven working now, not just "ready" for whenever the address fill lands.
+  // 1b. A filled table in the shipped shape.
   {
     const filledShippedShape = [mintRoute(), redeemRoute()];
     const hyd = routesFor(WORMHOLE.hydration, filledShippedShape);
@@ -489,9 +391,7 @@ async function main() {
     );
   }
 
-  // 1c. Field isolation + mutation: a fully valid synthetic route passes; blanking or
-  // malforming exactly one field fails, naming exactly that field (and distinguishing "blank" from
-  // "malformed" in the message — they have different fixes); restoring it passes again.
+  // 1c. One field at a time; blank and malformed are worded apart, as they have different fixes.
   function validRoute(): PsmRoute {
     return {
       name: "synthetic",
@@ -573,7 +473,7 @@ async function main() {
 
   // ─── 2. Chain-id validation ─────────────────────────────────────────────────
 
-  // 2a. A typo'd sourceChain on a route that IS served: caught, named, with the bad value.
+  // 2a. A typo'd sourceChain on a served route.
   {
     const table = [validRoute()];
 
@@ -608,30 +508,24 @@ async function main() {
     record(restoredOk, "chain-id: restoring sourceChain to a real chain starts clean again");
   }
 
-  // 2b. Without the chain-id check, a typo'd destinationChain silently drops the route and lets the
-  // survivor start. Reproduce that against a reimplementation without the check, then show the real
-  // routesFor refuses instead.
+  // 2b. Without the chain-id check, a typo'd destinationChain silently drops its route and the
+  // survivor starts.
   {
     const healthy = [mintRoute(), redeemRoute()];
     const corrupted = [mintRoute(), { ...redeemRoute(), destinationChain: 424_242 }];
 
-    // Sanity: the healthy pair (real closure, real chain ids) starts clean on both destinations.
     record(
       routesFor(WORMHOLE.hydration, healthy).length === 1 && routesFor(WORMHOLE.base, healthy).length === 1,
       "chain-id baseline: the healthy mint/redeem pair serves both destinations cleanly",
     );
 
-    // Reproduce the failure the check prevents: a routesFor with no chain-id pre-pass never even
-    // looks at "redeem"'s destinationChain unless something asks for chain 424242 — which nothing
-    // ever does — so the route vanishes from both processes' filters, and the survivor (mint) looks
-    // like a complete, healthy 1-route table.
+    // Nothing asks for chain 424242, so redeem vanishes from both processes' filters.
     const servedWithoutCheck = routesForWithoutChainCheck(WORMHOLE.hydration, corrupted);
     record(
       servedWithoutCheck.length === 1 && servedWithoutCheck[0]!.name === "mint",
       "mutation sanity: a routesFor without the chain-id check silently drops the corrupted route and starts on the survivor",
     );
 
-    // The real routesFor refuses instead, naming the corrupted route and field.
     let msg = "";
     try {
       routesFor(WORMHOLE.hydration, corrupted);
@@ -644,8 +538,6 @@ async function main() {
       () => console.log(`  message: ${msg || "(did not throw)"}`),
     );
 
-    // And critically, the OTHER process (base) also refuses — not just the one whose filter would
-    // have matched the corrupted row — because the whole table is validated up front.
     let baseMsg = "";
     try {
       routesFor(WORMHOLE.base, corrupted);
@@ -659,10 +551,8 @@ async function main() {
     );
   }
 
-  // 2c. A route from a chain to itself. A destinationChain that typo'd into another KNOWN id is
-  // valid by the check above, has no mirror to close against, and serves the wrong route from the
-  // wrong process (psm-base would deliver the vault's mint messages to the facilitator's address on
-  // Base). Refused for both destinations, because the whole table is validated up front.
+  // 2c. A destinationChain typo'd into its own sourceChain passes the id check: psm-base would
+  // deliver the vault's mint messages to the facilitator's address on Base.
   {
     const typo = [{ ...mintRoute(), destinationChain: WORMHOLE.base }, redeemRoute()];
     for (const [chainLabel, chain] of [
@@ -685,9 +575,7 @@ async function main() {
 
   // ─── 3. Corridor closure + duplicate-source guard ──────────────────────────
 
-  // 3a. Closure: the healthy pair passes; swapping mint's emitter/contract (a plausible real
-  // mistake — pasting the two addresses into each other's column) breaks it, named; restoring
-  // passes again.
+  // 3a. Closure, broken by pasting mint's two addresses into each other's column.
   {
     const table = [mintRoute(), redeemRoute()];
     let baselineOk = true;
@@ -700,8 +588,8 @@ async function main() {
 
     const originalMintEmitter = table[0]!.sourceEmitter;
     const originalMintContract = table[0]!.destinationContract;
-    table[0]!.sourceEmitter = originalMintContract; // swapped
-    table[0]!.destinationContract = originalMintEmitter; // swapped
+    table[0]!.sourceEmitter = originalMintContract;
+    table[0]!.destinationContract = originalMintEmitter;
 
     let msg = "";
     try {
@@ -726,10 +614,7 @@ async function main() {
     record(restoredOk, "closure: restoring mint's fields closes cleanly again");
   }
 
-  // 3b. Documented residual: a full swap of the corridor's two real addresses across BOTH routes
-  // still closes under this rule (it is a relative check, not an on-chain one — see routes.ts's
-  // own doc comment on assertCorridorClosure). Constructed here, not just asserted, so the
-  // limitation is evidence.
+  // 3b. Known limit: closure is relative, so a consistent swap across both routes still closes.
   {
     const fullySwapped: PsmRoute[] = [
       { ...mintRoute(), sourceEmitter: FACILITATOR, destinationContract: VAULT },
@@ -747,8 +632,7 @@ async function main() {
     );
   }
 
-  // 3c. Duplicate-source guard: two routes sharing (sourceChain, sourceEmitter) on the same
-  // destination — onEmitter would silently keep only the last one registered.
+  // 3c. Two routes sharing (sourceChain, sourceEmitter): onEmitter would keep only the last one.
   {
     const distinct: PsmRoute[] = [
       { name: "dup-a", sourceChain: WORMHOLE.base, sourceEmitter: VAULT, destinationChain: WORMHOLE.hydration, destinationContract: ADDR_C },
@@ -786,9 +670,8 @@ async function main() {
     record(restoredOk, "duplicate-source: distinct sourceEmitters (no mutation applied) still serve cleanly");
   }
 
-  // 3d. Return routes. A chain id that typo'd into a THIRD known chain leaves a route that nothing
-  // mirrors: `routesFor` lets it through (a table built for one direction is legitimate for the
-  // checks that drive it), `servedRoutes`, which every process uses, refuses it.
+  // 3d. A chain id typo'd into a third known chain leaves a route nothing mirrors: routesFor lets it
+  // through, servedRoutes, which every process uses, refuses it.
   {
     const healthy = [mintRoute(), redeemRoute()];
     record(
@@ -840,7 +723,6 @@ async function main() {
     "routesFor(base) returns exactly the redeem route",
   );
 
-  // Drive each direction shape through the real wireRoutes + onEmitter + receiveMessage path.
   const hydDest = fakeApp();
   const hydQueue = fakeQueue();
   const hydClients = await buildClients();
@@ -848,7 +730,7 @@ async function main() {
 
   const baseDest = fakeApp();
   const baseQueue = fakeQueue();
-  const baseClientsStandIn = await buildClients(); // stand-in ChainClients — see file header
+  const baseClientsStandIn = await buildClients(); // app.ts never branches on the physical chain
   wireRoutes(baseDest.app, routesFor(WORMHOLE.base, bothDirections), baseClientsStandIn, baseQueue.queue as never);
 
   record(
@@ -888,8 +770,6 @@ async function main() {
     );
   }
 
-  // Mutation: a wireRoutes that subscribes every route under one hardcoded chain instead of reading
-  // route.sourceChain, the defect this section guards against.
   function brokenWireRoutesHardcodesHydrationAsSource(
     app: RelayerApp,
     routes: PsmRoute[],
@@ -928,10 +808,7 @@ async function main() {
   );
 
   // ─── 5. Second-route demonstration ─────────────────────────────────────────
-  // Uses an EVM source chain (Ethereum) for the added route — a Solana source with an H160
-  // emitter cannot exist (Solana emitters are program-derived addresses, not 20-byte EVM
-  // addresses); see routes.ts's doc comment on PsmRoute.sourceEmitter for why that is a type
-  // change, not a table entry.
+  // An EVM source (Ethereum): a Solana emitter is not an H160.
 
   const routeFirst = mintRoute();
   const routeSecond: PsmRoute = {
@@ -944,7 +821,7 @@ async function main() {
 
   const process_ = fakeApp();
   const processQueue = fakeQueue();
-  const processClients = await buildClients(); // one wallet, built once, for the process lifetime
+  const processClients = await buildClients();
 
   wireRoutes(process_.app, routesFor(WORMHOLE.hydration, [routeFirst]), processClients, processQueue.queue as never);
   const afterFirst = Object.keys(process_.routers.get(WORMHOLE.base) ?? {}).length;
@@ -981,8 +858,6 @@ async function main() {
     record(to?.toLowerCase() === ADDR_C.toLowerCase(), "second route submits to its own destinationContract (C)");
   }
 
-  // Mutation: a wireRoutes that only ever wires the first route in the list, so a second-route
-  // addition would silently do nothing.
   function brokenWireRoutesFirstOnly(
     app: RelayerApp,
     routes: PsmRoute[],
@@ -1020,21 +895,14 @@ async function main() {
 
   // ─── 6. makeApp: guards and key plumbing ───────────────────────────────────
 
-  // With the shipped table (blank), routesFor's whole-table validation throws on "mint"'s blank
-  // sourceEmitter before makeApp's own "no routes for this destination" guard is ever reached for
-  // ANY destinationChain argument — that guard clause is effectively unreachable through the real
-  // ROUTE_TABLE while it ships blank. Both checks below need a validly-filled table to exercise
-  // the code past that point, so both temporarily fill the real (shipped-blank) table in place,
-  // then restore it immediately after — on either success or failure — so it is never left
-  // mutated for any later check (in particular, section 1's shipped-table assertions above have
-  // already run by this point, but nothing after this block may assume the table is still blank).
+  // makeApp reads ROUTE_TABLE itself, so it is set to the fixtures in place and restored after.
   {
     const originalMint = { ...ROUTE_TABLE[0]! };
     const originalRedeem = { ...ROUTE_TABLE[1]! };
     Object.assign(ROUTE_TABLE[0]!, mintRoute());
     Object.assign(ROUTE_TABLE[1]!, redeemRoute());
     try {
-      // 6a. No route configured for a destination that simply isn't in the (now valid) table.
+      // 6a. A destination with no route.
       let threw = false;
       let msg = "";
       try {
@@ -1049,9 +917,7 @@ async function main() {
         () => console.log(`  message: ${msg || "(did not throw)"}`),
       );
 
-      // 6b. makeApp forwards ITS OWN key argument to clientFactory, unchanged — it never resolves
-      // a key itself. `spyFactory` throws immediately after capturing, so this never reaches
-      // queue.init()/app.listen() (no network beyond the capture).
+      // 6b. Key forwarding; the spy throws right after capturing, before queue.init().
       let capturedKey: string | undefined;
       let capturedRpc: string | undefined;
       const spyFactory: ClientFactory = async (rpcUrl, key) => {
@@ -1084,9 +950,8 @@ async function main() {
         () => console.log(`  message: ${noCodeMsg || "(did not throw)"}`),
       );
 
-      // 6d. Swapped entry wiring: a client factory for one chain paired with the other chain's
-      // destination, in either direction, builds clients cleanly (each factory asserts only that its
-      // own RPC is its own chain) and would serve routes through the wrong wallet.
+      // 6d. One chain's client factory with the other's destination builds cleanly (each factory
+      // checks only its own RPC) and would serve through the wrong wallet.
       mock.state.chainId = BASE_CHAIN_ID;
       const swapMsg = await startupError(() =>
         makeApp("psm-verify-swapped", WORMHOLE.hydration, baseClients, "http://mock-rpc.invalid", TEST_KEY),
@@ -1106,8 +971,7 @@ async function main() {
         () => console.log(`  message: ${swapReverseMsg || "(did not throw)"}`),
       );
 
-      // 6h. makeApp itself serves routes through the stricter lookup: with redeem's sourceChain
-      // typo'd into a third known chain, no route mirrors mint, and the process refuses to start.
+      // 6h. makeApp uses servedRoutes: redeem typo'd into a third chain leaves mint unmirrored.
       Object.assign(ROUTE_TABLE[1]!, { ...redeemRoute(), sourceChain: WORMHOLE.ethereum });
       const noReturnMsg = await startupError(() =>
         makeApp("psm-verify-no-return", WORMHOLE.hydration, hydrationClients, "http://mock-rpc.invalid", TEST_KEY),
@@ -1136,9 +1000,7 @@ async function main() {
     }
     record(passes, "assertDestination passes for matching clients and a destination contract with code");
 
-    // A hand-built bundle whose wallet is on another chain than its public client, each way round:
-    // the wallet signs for one chain and the public client simulates against the other, and either
-    // half alone is enough to refuse.
+    // Wallet and public client on different chains, each way round: either half alone refuses.
     const mixed = {
       ...pair,
       wallet: createWalletClient({ account: pair.account, chain: baseChain, transport: http("http://mock-rpc.invalid") }),
@@ -1171,7 +1033,6 @@ async function main() {
       () => console.log(`  message: ${mixedPublicMsg || "(did not throw)"}`),
     );
 
-    // A destination with no EVM chain id this app knows.
     let unknownMsg = "";
     try {
       await assertDestination(WORMHOLE.ethereum, [mintRoute()], pair);
@@ -1185,16 +1046,10 @@ async function main() {
     );
   }
 
-  // Composition check (not a behavioral proof — see note): hydration.ts and base.ts each boot()
-  // immediately on import (a real network/Redis/spy connection), so they cannot be imported here
-  // to observe their behavior directly. This reads their source to confirm each calls the key
-  // getter it is supposed to; the functional proof that the getters themselves are isolated lives
-  // in verify-base-clients.ts's "key isolation" section, and the proof that makeApp plumbs
-  // whatever key it is given lives in the check just above.
+  // Composition: hydration.ts and base.ts boot on import, so their source is read instead.
   {
     const fs = await import("node:fs");
-    // Comments (this very file's included) freely say "NOT privateKey()" in prose — strip them
-    // first so the check reads only real code, not a doc comment quoting the name it warns against.
+    // Comments may quote the names the checks forbid.
     const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     const hydrationSrc = stripComments(
       fs.readFileSync(join(__dirname, "..", "src", "apps", "psm", "hydration.ts"), "utf8"),
@@ -1233,9 +1088,8 @@ async function main() {
       "composition: hydration.ts imports hydrationClients from ../../clients/hydration under its own name",
     );
 
-    // The wiring itself. makeApp is driven above with arguments chosen here, so an entry point that
-    // hands it the wrong namespace, destination, client factory or floors passes every functional
-    // check; only the entry's own text can show it.
+    // makeApp is driven above with arguments chosen here, so only the entry's own text shows what it
+    // hands makeApp.
     record(
       squash(baseSrc).includes(
         "makeApp(APP_NAME_BASE, WORMHOLE.base, baseClients, rpcBase(), key, FROM_SEQUENCE_FROM_HYDRATION)",
@@ -1249,7 +1103,6 @@ async function main() {
       "composition: hydration.ts hands makeApp Hydration's own namespace, destination, client factory, RPC and floors",
     );
 
-    // The route table is checked first, through the lookup that also requires return routes.
     const checksRoutesFirst = (src: string, chain: string, getter: string) => {
       const at = src.indexOf(`servedRoutes(WORMHOLE.${chain})`);
       return at !== -1 && at < src.indexOf(`${getter}()`);
@@ -1265,8 +1118,7 @@ async function main() {
   }
 
   // ─── 7. APP_NAME: distinct env vars, no collapse ───────────────────────────
-  // config.ts's `opt()` calls run once at module load, so this needs a fresh process per env
-  // combination rather than re-importing the module in this one.
+  // config.ts's opt() calls run at module load: one fresh process per env combination.
 
   {
     const probe = `
@@ -1299,9 +1151,6 @@ async function main() {
       () => console.log("  got:", bothSet),
     );
 
-    // Mutation sanity: both processes reading the literal "APP_NAME" through the real `opt()` helper
-    // really do collapse onto one namespace, which shows this check can tell the per-process shape
-    // from a shared one.
     const sharedNameProbe = `
       import { opt } from "../src/config";
       console.log(JSON.stringify({
@@ -1318,10 +1167,8 @@ async function main() {
   }
 
   // ─── 8. Receipts: a delivery that reverts on chain is handed back ───────────
-  // The queue resolves a task as soon as its transaction is broadcast, so it cannot tell a
-  // delivery that landed from one that mined and reverted — a pause or a spent limit landing first
-  // in the same block, or a gas limit estimated on the other path. The handler reads the receipt
-  // itself. This drives the real handler through the real queue over the mocked transport.
+  // The queue resolves once a transaction is broadcast, so only the handler's receipt read sees a
+  // mined revert.
   {
     logger.silent = true;
     const clients = await buildClients();
@@ -1354,7 +1201,6 @@ async function main() {
       return { error, nexted, sent: mock.rawTxs.length - sentBefore, reads: receiptReads() - readsBefore };
     }
 
-    // Control: a delivery that lands resolves the handler, after its receipt was read.
     mock.state.receipt = "success";
     const landed = await run(10n);
     record(
@@ -1363,8 +1209,6 @@ async function main() {
       () => console.log("  ", landed),
     );
 
-    // The case this section exists for: broadcast, mined, reverted. The queue has already resolved
-    // the task, so only the handler's own receipt read can reject it for the engine to retry.
     mock.state.receipt = "reverted";
     const reverted = await run(11n);
     const revertedMsg = reverted.error instanceof Error ? reverted.error.message : "";
@@ -1377,11 +1221,8 @@ async function main() {
       () => console.log("  ", { ...reverted, message: revertedMsg || "(did not throw)" }),
     );
 
-    // Replaced: another transaction from the same key took the delivery's nonce and mined. viem
-    // follows the replacement and returns that transaction's receipt, which says success, so the
-    // handler has to check whose receipt it holds. It rejects for a retry, which simulates again.
-    // The mock hands that receipt back for the original hash, which a node never does, so this
-    // exercises the comparison and not viem's replacement detection.
+    // viem returns a replacement's success receipt, so the handler checks whose it is. The mock serves
+    // it for the original hash, which tests that comparison, not viem's replacement detection.
     mock.state.receipt = "replaced";
     const replaced = await run(13n);
     const replacedMsg = replaced.error instanceof Error ? replaced.error.message : "";
@@ -1395,7 +1236,6 @@ async function main() {
       () => console.log("  ", { ...replaced, message: replacedMsg || "(did not throw)" }),
     );
 
-    // Already done: nothing is sent, so there is no receipt to read, and the job resolves.
     mock.state.receipt = "success";
     mock.state.callRevert = encodeErrorResult({
       abi: receiverAbi,
@@ -1410,7 +1250,6 @@ async function main() {
     );
     mock.state.callRevert = undefined;
 
-    // The retry the engine would make for the reverted job simulates again and lands.
     const retried = await run(11n);
     record(
       retried.error === undefined && retried.nexted === 1 && retried.sent === 1,

@@ -1,15 +1,8 @@
 /**
- * Verification harness for the PSM keepers and watchers, no network.
+ * The PSM keepers, watchers, alerter, middleware and queue against an RPC mock that answers
+ * `eth_call` by (contract, selector), so real clients, `submit` and the shared queue run.
  *
- * Every RPC call goes to a mock that answers `eth_call` by (contract, selector) from a scripted
- * chain state, so the keepers run for real: real viem clients, real ABI encoding and decoding,
- * real `submit` (simulate, then sign and send) and the real shared queue with its nonce.
- *
- * Covers: the drain keeper's head classification, its drain(1) fallback and retirement alerts, the
- * flush keeper's budget, revert handling and pointers, the watchers' alerts, the alerter's dedup,
- * the parked-delivery middleware, the loop helper, and the queue's crash paths.
- *
- * Run with: pnpm --filter @whm/relayer verify:psm-keepers
+ * Run: node --import tsx scripts/verify-psm-keepers.ts
  */
 import {
   createPublicClient,

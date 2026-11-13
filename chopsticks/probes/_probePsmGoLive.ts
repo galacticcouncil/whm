@@ -38,7 +38,9 @@ import { getAccountCode } from "../lib/queries";
 import { toJson } from "../lib/utils";
 
 import facilitatorJson from "../../contracts/out/HollarBaseFacilitator.sol/HollarBaseFacilitator.json";
-import proxyJson from "../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.psm.json";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
+
+const proxyJson = forgeArtifact("ERC1967Proxy", "psm");
 
 // ─── Config ──────────────────────────────────────────────────────
 

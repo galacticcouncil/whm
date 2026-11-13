@@ -1,39 +1,8 @@
 /**
- * Verification for how the PSM app reads a revert, no network.
+ * receiverAbi names exactly the custom errors a PSM delivery can raise, per forge's own AST and ABI,
+ * and the queue resolves or retries each by name. Needs Foundry and the contracts' dependencies.
  *
- * The queue acts on a revert's NAME (`engine/queue.ts`): "done" resolves the job, anything else is
- * handed back to the engine to retry. A name only exists if the ABI the call was simulated with
- * declares the error, and a custom error is matched by its 4-byte selector, so a signature that is
- * wrong by one type decodes to nothing and the failure is retried as if it were unknown. This
- * script checks that chain end to end against the PSM contracts as the compiler sees them, not
- * against a copy of them written here:
- *
- *   1. It compiles the contracts with forge and reads the compiler's own output, the AST and the
- *      ABI of each receiver. The errors a delivery can raise are found by walking the call graph
- *      from `receiveMessage`: every function, modifier and library call the AST resolves is
- *      followed (a call to a virtual function is followed into the receiver's own override and
- *      into the body it names, so an error behind `super` is found too), and every custom error
- *      those bodies name is collected. Every error in `receiverAbi` is declared by the compiled
- *      ABI with the same name and parameter types, and the set is exactly what the walk finds, so
- *      a new error anywhere on that path fails here, in a helper or a library.
- *   2. Given the real revert data for each error, built from the compiled declarations rather than
- *      from `receiverAbi`, the real `receiveMessage()` and the real `createQueue()` resolve
- *      `MessageAlreadyProcessed` as done and hand every other named error back for retry, on both
- *      chains' clients, without ever spending a nonce.
- *   3. The failure this prevents is constructed: the same revert, simulated with an ABI that has no
- *      error entries, is not recognised.
- *   4. What `revert.ts` already classified is unchanged.
- *   5. The retry budget in `apps/psm/config.ts` is what its comment says it is.
- *
- * Needs the PSM contracts, which this repo only has once they are merged, and Foundry with the
- * contracts' dependencies installed (`pnpm --filter @whm/contracts install`). Until the contracts
- * are merged pass the path to a checkout's `contracts` directory, or set `PSM_CONTRACTS_DIR`:
- *
- *   pnpm --filter @whm/relayer verify:psm-reverts /path/to/checkout/contracts
- *
- * It builds into a temporary directory and leaves the checkout as it found it. With the contracts
- * or forge absent it exits 1 rather than skip: a check that cannot see the contracts has checked
- * nothing.
+ *   node --import tsx scripts/verify-psm-reverts.ts <contracts dir>    # or PSM_CONTRACTS_DIR
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -62,8 +31,7 @@ import logger from "../src/logger";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Anvil/Hardhat's well-known default account #0 key: public and funds-free, used only to sign
-// throwaway transactions that are never broadcast (see verify-hydration-fees.ts, same use).
+// Anvil's public default account #0; signs only mocked transactions.
 const KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 const MOCK_RPC_URL = "http://mock-rpc.invalid";
 const TO = getAddress("0x00000000000000000000000000000000000000bb");
@@ -104,8 +72,8 @@ if (!existsSync(join(contractsDir, "foundry.toml")) || !existsSync(join(contract
 const scratch = mkdtempSync(join(tmpdir(), "verify-psm-reverts-"));
 process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
 
-// Only src/psm and what it imports is compiled: the test and script directories are pointed at
-// places that do not exist, so an unrelated test that stops compiling cannot fail this script.
+// Only src/psm is compiled: the test and script dirs point nowhere, so an unrelated test that stops
+// compiling cannot fail this script.
 const build = spawnSync(
   process.env.FORGE ?? "forge",
   [
@@ -189,7 +157,6 @@ function contractNode(path: string, name: string): AstNode {
   return found;
 }
 
-/** Every function id that `fn` overrides, directly or through a chain of overrides. */
 const overrideCache = new Map<number, Set<number>>();
 function overridesOf(fn: AstNode): Set<number> {
   const cached = overrideCache.get(fn.id);
@@ -218,19 +185,14 @@ function implementationIn(receiver: AstNode, fn: AstNode): AstNode {
 }
 
 interface Reach {
-  /** Custom errors named by any body on the path. */
   errors: Set<string>;
   /** `Contract.function` for everything the walk visited, to show it looked at the right code. */
   functions: Set<string>;
 }
 
 /**
- * The call graph from `receiveMessage` on `receiver`. Any AST node that refers to a function or
- * modifier with a body is followed, wherever it appears (a call, a modifier invocation, a library
- * function bound with `using`), and any node that refers to an error definition is an error the
- * path can raise. Calls through an interface have no body here and are other contracts' reverts.
- * A reference is followed into the receiver's override of it and into the body it names, which is
- * what makes a `super` call read the base body.
+ * The call graph from `receiveMessage`: every reference to a function or modifier with a body is
+ * followed, every reference to an error is collected. Interface calls have no body here.
  */
 function reach(receiver: AstNode): Reach {
   const entry = (receiver.linearizedBaseContracts as number[])
@@ -257,12 +219,8 @@ function reach(receiver: AstNode): Reach {
         (target?.nodeType === "FunctionDefinition" || target?.nodeType === "ModifierDefinition") &&
         target.body
       ) {
-        // A reference can run two different bodies. A virtual call lands on the receiver's most
-        // derived override, but `super.f()` and `Base.f()` run the body they name, and the AST gives
-        // them that body's own id: mapped to the override alone, they would point back at a body
-        // already visited and the base body would never be read. Both are followed. The cost is
-        // that a base body which a full override replaces is read too, so an error only that body
-        // names is reported as reachable and has to be declared or listed in UNREACHABLE.
+        // Both bodies: `super.f()` carries the base body's id, which the override alone would lose. A
+        // base body a full override replaces is read too, so its errors need receiverAbi or UNREACHABLE.
         todo.push(implementationIn(receiver, target), target);
       }
     }
@@ -297,11 +255,8 @@ const vault = analyse("HollarBaseVault", "src/psm/HollarBaseVault.sol");
 const facilitator = analyse("HollarBaseFacilitator", "src/psm/HollarBaseFacilitator.sol");
 const receivers = [vault, facilitator];
 
-/**
- * Statically reachable, never raised: `_publish` refunds the excess of `msg.value` over the Wormhole
- * fee, and `receiveMessage` is non-payable, so `msg.value` is zero and there is no excess. Anything
- * else the walk finds that `receiverAbi` lacks fails the check below.
- */
+// Statically reachable, never raised: `_publish` refunds `msg.value` over the Wormhole fee, and
+// `receiveMessage` is non-payable.
 const UNREACHABLE = new Set(["RefundFailed"]);
 
 type AbiErrorItem = Extract<(typeof receiverAbi)[number], { type: "error" }>;
@@ -309,7 +264,6 @@ const abiErrors = receiverAbi.filter((item): item is AbiErrorItem => item.type =
 const abiNames = new Set<string>(abiErrors.map((e) => e.name));
 const abiSignature = (e: AbiErrorItem) => `${e.name}(${e.inputs.map((i) => i.type).join(",")})`;
 
-/** Every signature the two receivers' compiled ABIs give a name. */
 const declared = new Map<string, Set<string>>();
 for (const r of receivers) {
   for (const [name, signature] of r.compiled) {
@@ -333,12 +287,8 @@ record(
   () => receivers.forEach((r) => console.log(`  ${r.name}: ${[...r.functions].sort().join(", ")}`)),
 );
 
-// Neither receiver calls `super._processMessage`: each overrides it completely. The base body is
-// therefore on the walk only because a reference's own body is followed as well as its override,
-// which is the property that lets an error behind a `super` call be seen. A walk that followed the
-// override alone would lose the base body whether or not a receiver calls super, because the
-// compiler resolves a `super` call to the base body's id and the override mapping sends that back
-// to the override. So this check goes red for that walk in both cases.
+// Neither receiver calls `super._processMessage`, so the base body is on the walk only because a
+// reference's own body is followed; a walk following overrides alone goes red here.
 record(
   receivers.every((r) => r.functions.has("MessageReceiver._processMessage")),
   "the walk also reads the body a reference names, not only the receiver's override, so an error behind a super call is seen",
@@ -383,8 +333,7 @@ record(
   "every receiverAbi error has the selector the compiled declaration gives it",
 );
 
-// The one reachability fact stated outright, not left to the walk: a returned redemption is the
-// vault's alone.
+// Stated outright, not left to the walk: a returned redemption is the vault's alone.
 record(
   vault.errors.has("ClaimsPaused") && !facilitator.errors.has("ClaimsPaused"),
   "ClaimsPaused is raised by the vault's delivery and not the facilitator's",
@@ -395,11 +344,7 @@ record(
 type JsonRpcRequest = { jsonrpc: "2.0"; id: number; method: string; params?: unknown[] };
 type Outcome = { kind: "ok" } | { kind: "revert"; data: Hex };
 
-/**
- * Answers what a submission or a queue balance check asks for, for one chain id. `outcome` is read
- * on every `eth_call`, so a scenario changes it between submissions. Every raw transaction that
- * reaches `eth_sendRawTransaction` is kept: a revert must never get that far.
- */
+/** `outcome` is read per `eth_call`; every raw transaction is kept, as a revert must never get that far. */
 function installMock(chainId: number, outcome: () => Outcome) {
   const original = globalThis.fetch;
   const sent: Hex[] = [];
@@ -447,7 +392,7 @@ function installMock(chainId: number, outcome: () => Outcome) {
   return { restore: () => void (globalThis.fetch = original), sent };
 }
 
-/** Revert data for `name`, built from the contracts' declaration and nothing in this repo. */
+/** Revert data built from the compiled declaration, not from receiverAbi. */
 function revertData(signature: string): Hex {
   const selector = toFunctionSelector(signature);
   const types = signature.slice(signature.indexOf("(") + 1, -1).split(",").filter(Boolean);
@@ -488,10 +433,6 @@ interface Run {
   sent: number;
 }
 
-/**
- * One delivery through the real stack: `receiveMessage()` simulates the call with `abi`, and the
- * real queue classifies whatever it throws.
- */
 async function deliver(
   clients: ChainClients,
   queue: ReturnType<typeof createQueue>,
@@ -514,9 +455,7 @@ async function deliver(
 async function main() {
   const account = privateKeyToAccount(KEY);
 
-  // `PayoutFailed` is the vault's, raised when a payout's transfer fails (`_settle`, under `claim` and
-  // `drain`) — not by a delivery. receiverAbi leaves it out on that ground; stated as a check so the
-  // ground is the compiler's, not this comment's.
+  // PayoutFailed comes from claim/drain payouts, never a delivery, so receiverAbi omits it.
   const payoutFailed = vault.compiled.get("PayoutFailed");
   record(
     payoutFailed !== undefined && !raised.has("PayoutFailed") && !abiNames.has("PayoutFailed"),
@@ -524,7 +463,7 @@ async function main() {
   );
   if (!payoutFailed) throw new Error("PayoutFailed is not in the vault's compiled ABI");
 
-  // ─── 2 and 3. Real revert data through the real stack ──────────────────────────
+  // ─── Real revert data through the real stack ───────────────────────────────────
 
   const DONE = new Set(["MessageAlreadyProcessed"]);
   const chains = [
@@ -541,8 +480,7 @@ async function main() {
       await queue.init();
       const sentSoFar = () => mock.sent.length;
 
-      // Control: with nothing reverting, the same path does send a transaction, so "sent: 0"
-      // below means something.
+      // Control: without a revert the path does send, so "sent: 0" below means something.
       outcome = { kind: "ok" };
       const ok = await deliver(clients, queue, receiverAbi, sentSoFar);
       record(
@@ -579,8 +517,6 @@ async function main() {
         }
       }
 
-      // A vault error the delivery never raises (a payout one): declared by the contracts, absent
-      // from receiverAbi, so it decodes to no name and is retried like any unknown revert.
       outcome = { kind: "revert", data: revertData(payoutFailed) };
       const unnamed = await deliver(clients, queue, receiverAbi, sentSoFar);
       record(
@@ -591,8 +527,6 @@ async function main() {
         () => console.log("  ", unnamed),
       );
 
-      // Construct the failure the declarations prevent: the same revert data, simulated with an ABI
-      // that has no error entries, is not recognised as a refused copy.
       const bare = parseAbi(["function receiveMessage(bytes vaa) external"]);
       const sig = [...declared.get("MessageAlreadyProcessed")!][0]!;
       outcome = { kind: "revert", data: revertData(sig) };
@@ -607,7 +541,7 @@ async function main() {
     }
   }
 
-  // ─── 4. What was classified before still is ────────────────────────────────────
+  // ─── revert.ts classification ──────────────────────────────────────────────────
 
   record(
     isDone("AlreadyRedeemed") &&
@@ -627,12 +561,9 @@ async function main() {
     "revert.ts: MessageAlreadyProcessed is done, not dead",
   );
 
-  // ─── 5. The retry budget ───────────────────────────────────────────────────────
+  // ─── The retry budget ──────────────────────────────────────────────────────────
 
-  /**
-   * Total wait the engine's backoff adds across a job's retries: `min(2^attempt * base, max)` after
-   * each failed attempt, counting from 1 (relayer-engine's `redis-storage.ts` `backOffFunction`).
-   */
+  /** Total wait relayer-engine's backoff adds across a job's retries. */
   function budgetDays(retries: number, baseMs: number, maxMs: number): number {
     let ms = 0;
     for (let attempt = 1; attempt < retries; attempt++) ms += Math.min(2 ** attempt * baseMs, maxMs);

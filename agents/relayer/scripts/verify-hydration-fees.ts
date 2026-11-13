@@ -2,13 +2,7 @@
  * Runs the real `hydrationClients()` / `submit()` / `receiveMessage()` against real viem clients
  * with only `fetch` mocked, so ABI encoding, serialization and signing all execute.
  *
- *   A. Each Hydration fee scenario signs its pinned transaction.
- *   C. One long-lived client prices each submission off its own block across a base-fee flip.
- *   D. The same flip with no explicit fee fields: viem reuses its first transaction-type guess.
- *   E. Non-Hydration chains take viem's estimate: a plain chain signs its pinned EIP-1559 tx (E), a
- *      fee hook returning `{ gasPrice }` signs legacy (E2), a hook returning neither throws (E3).
- *
- * Run: pnpm --filter @whm/relayer verify:hydration-fees
+ * Run: node --import tsx scripts/verify-hydration-fees.ts
  */
 import {
   createPublicClient,
@@ -158,7 +152,6 @@ async function actualRawTx(scenario: Scenario): Promise<Hex> {
   }
 }
 
-/** A `ChainClients` for any chain, built the way `hydrationClients` builds Hydration's. */
 async function genericClients(chain: Chain): Promise<ChainClients> {
   const account = privateKeyToAccount(TEST_KEY);
   const publicClient = createPublicClient({ chain, transport: http("http://mock-rpc.invalid") });
@@ -313,7 +306,7 @@ async function main() {
     }
   };
 
-  // A: pinned bytes, fresh client per scenario.
+  // Pinned bytes, fresh client per scenario.
   for (const scenario of SCENARIOS) {
     const actual = await actualRawTx(scenario);
     const label =
@@ -327,7 +320,7 @@ async function main() {
     });
   }
 
-  // C: one long-lived client across a base-fee flip, both directions.
+  // One long-lived client across a base-fee flip, both directions.
   {
     const legacyScenario = SCENARIOS[0]!;
     const eipScenario = SCENARIOS[1]!;
@@ -351,7 +344,7 @@ async function main() {
     );
   }
 
-  // D: the same flip, writing with no fee fields.
+  // The same flip with no fee fields: viem reuses its first transaction-type guess.
   {
     const legacyScenario = SCENARIOS[0]!;
     const eipScenario = SCENARIOS[1]!;
@@ -376,7 +369,7 @@ async function main() {
     );
   }
 
-  // E: a plain non-Hydration chain signs its pinned EIP-1559 tx via viem's estimate.
+  // A plain non-Hydration chain signs its pinned EIP-1559 tx via viem's estimate.
   {
     const actual = await actualBaseRawTx();
     const parsed = parseTransaction(actual);
@@ -392,7 +385,7 @@ async function main() {
     );
   }
 
-  // E2: a fee hook returning { gasPrice } signs legacy with that gasPrice.
+  // A fee hook returning { gasPrice } signs legacy with that gasPrice.
   {
     const { raw, error } = await submitViaChain(
       HOOK_GAS_PRICE_CHAIN,
@@ -411,7 +404,7 @@ async function main() {
     );
   }
 
-  // E3: a fee hook returning neither shape makes submit() throw chainFees's named error.
+  // A fee hook returning neither shape makes submit() throw chainFees's named error.
   {
     const { raw, error } = await submitViaChain(
       HOOK_INVALID_CHAIN,
