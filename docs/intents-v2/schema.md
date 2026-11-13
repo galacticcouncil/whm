@@ -248,6 +248,7 @@ checks from it.
 | payee | `recipient` = `refundTo` = `A`, both `INTENTS` |
 | fields | only the fields 1Click signs for a plain swap (an allowlist); `virtualChain*`, `customRecipientMsg`, `depositMemo` or any unknown field is refused |
 | age | `now ≤ timestamp + max_quote_age`; the quote's `deadline` ≥ the transfer's |
+| room | `slippageTolerance ≥ min_quote_slippage_bps` (absent = 0) — a quote too tight to fill would spend the order's one fill on a refund |
 | size | `amountIn` within 1% below `min(A's ETH, max_fill_multiple × order.amount)` — never the caller's choice, so a dust quote cannot spend an order |
 | credited | `A's ETH ≥ order.amount × (1 − max_order_shortfall_bps)` — the order's own ETH has arrived; dust a stranger credits first does not count |
 | floor | `minAmountOut × 1e18 × 10⁴ ≥ amountIn × outPerIn × (10⁴ − maxSlippageBps)`, and ≥ `amountIn × minOutPerIn / 1e18` |
@@ -284,6 +285,7 @@ pub struct IntentRouter {
     eth_token:      String,             // nep141:eth.omft.near
     quote_keys:     Vec<[u8; 32]>,      // 1Click's quote-signing keys
     params:         Params,             // price_validity, max_quote_age, transfer_validity (s),
+                                        // min_quote_slippage_bps (≤ 1_000),
                                         // max_fill_multiple, max_order_shortfall_bps,
                                         // min_refund (wei, ≤ MAX_MIN_REFUND = 0.01 ETH)
 }

@@ -99,7 +99,9 @@ Deploy the proxies first, then wire them — each pins the others' addresses.
 - **Ethereum:** deploy `IntentForwarder` (wormhole, WETH transceiver) · `setDispatcher` · relayer
   allowlist · owner handoff.
 - **NEAR `intent-router`:** deploy + init (emitter = the dispatcher on chain 73, quote keys, params:
-  `max_fill_multiple ≥ 2`, `max_order_shortfall_bps` ≈ 100 until a canary shows POA credits exactly)
+  `max_fill_multiple ≥ 2`, `max_order_shortfall_bps` ≈ 100 until a canary shows POA credits exactly,
+  `max_quote_age` 30 s — under the DCA period, so a quote cannot serve the next order — and
+  `min_quote_slippage_bps` 100, 1Click's default)
   · propose owner · delete keys · accept by `hydration.sputnik-dao.near`. `cargo near build`, never
   plain `cargo build`.
 - **NTT:** upgrade Hydration's WETH manager to `NttManagerWithPayload` (governance proposal); confirm
@@ -120,8 +122,9 @@ real call and bounded by the payload's ceiling. Authorized relayers get a 5-minu
 ### Scan / SDK
 
 Scan: `OrderPublished`, ICE forward failures, `OrderForwarded`, router `intent_signed`, 1Click
-status. SDK: terms builder (owner = the ICE caller address, random `quoteId`, `maxRelayFee` ≤ half
-the smallest order, ICE schedule ending a grace period before `terms.deadline`) → derivation →
+status. SDK: terms builder (owner = the ICE caller address, random `quoteId`, `maxSlippageBps` above the
+quote's 1% plus 1Click's fees and the oracle–market gap — 2–3%, `maxRelayFee` ≤ half the smallest order,
+a DCA period of at least 2 min, ICE schedule ending a grace period before `terms.deadline`) → derivation →
 confirmation check → ICE submit or `dispatch`.
 
 ---
