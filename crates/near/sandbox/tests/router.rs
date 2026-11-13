@@ -175,6 +175,7 @@ async fn setup() -> anyhow::Result<Env> {
             "params": {
                 "price_validity": 900,
                 "max_quote_age": 120,
+                "min_quote_slippage_bps": 100,
                 "transfer_validity": 180,
                 "max_fill_multiple": 2,
                 "max_order_shortfall_bps": 2000,

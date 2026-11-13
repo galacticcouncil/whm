@@ -66,6 +66,8 @@ pub struct Accepted {
     pub issued_ms: u64,
     /// Until when the deposit account takes funds, unix ms.
     pub deadline_ms: u64,
+    /// The slippage tolerance the quote was requested with, bps; absent is zero.
+    pub slippage_bps: u64,
 }
 
 /// What a quote must say, from the terms and the derived account.
@@ -165,6 +167,7 @@ pub fn accept(signed: &Map<String, Value>, expect: &Expect) -> Result<Accepted, 
         min_amount_out: amount("minAmountOut")?,
         issued_ms: text("timestamp").and_then(time::parse).ok_or("InvalidQuoteTime")?,
         deadline_ms: text("deadline").and_then(time::parse).ok_or("InvalidQuoteTime")?,
+        slippage_bps: signed.get("slippageTolerance").and_then(Value::as_u64).unwrap_or(0),
     })
 }
 
@@ -298,6 +301,7 @@ pub(crate) mod tests {
         assert_eq!(a.min_amount_out, 189_133);
         assert_eq!(a.issued_ms, time::parse("2026-10-21T12:18:01.239Z").unwrap());
         assert_eq!(a.deadline_ms, time::parse("2026-10-24T12:28:00.467Z").unwrap());
+        assert_eq!(a.slippage_bps, 100);
     }
 
     #[test]

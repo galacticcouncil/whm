@@ -49,6 +49,7 @@ fn params() -> Params {
     Params {
         price_validity: 900,
         max_quote_age: 120,
+        min_quote_slippage_bps: 100,
         transfer_validity: 180,
         max_fill_multiple: 2,
         max_order_shortfall_bps: 2_000,
@@ -196,6 +197,8 @@ fn swap_refusals() {
         *vaa = order_vaa(&terms_bytes(&sample()), *now, 60, 10u128.pow(15), 180_000_000);
     });
     refused("InvalidQuoteSignature", |c, _, _, _, _| c.quote_keys = vec![[7; 32]]);
+    // The fixture was requested with 100 bps.
+    refused("QuoteSlippageTooTight", |c, _, _, _, _| c.params.min_quote_slippage_bps = 101);
 
     // Price and size.
     // 2.0 ZEC/ETH less the terms' 1% = 198000, above the quote's 189133.
@@ -474,6 +477,7 @@ fn param_bounds() {
     };
     bad(Params { price_validity: 0, ..params() }, "InvalidPriceValidity");
     bad(Params { max_quote_age: MAX_QUOTE_AGE + 1, ..params() }, "InvalidQuoteAge");
+    bad(Params { min_quote_slippage_bps: MAX_MIN_QUOTE_SLIPPAGE_BPS + 1, ..params() }, "InvalidQuoteSlippage");
     bad(Params { transfer_validity: 0, ..params() }, "InvalidTransferValidity");
     bad(Params { max_fill_multiple: 0, ..params() }, "InvalidFillMultiple");
     bad(Params { min_refund: U128(0), ..params() }, "InvalidMinRefund");

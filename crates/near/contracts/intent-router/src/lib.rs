@@ -73,6 +73,9 @@ pub const MAX_PRICE_VALIDITY: u64 = 86_400;
 pub const MAX_QUOTE_AGE: u64 = 600;
 pub const MAX_TRANSFER_VALIDITY: u64 = 600;
 pub const MAX_FILL_MULTIPLE: u32 = 100;
+/// Upper bound on `min_quote_slippage_bps` — above it a quote's guaranteed output sits too far below
+/// its price for a sane floor to accept.
+pub const MAX_MIN_QUOTE_SLIPPAGE_BPS: u16 = 1_000;
 /// Upper bound on `min_refund`, wei — 0.01 ETH, well above POA's withdrawal fee; a refund
 /// threshold above it would let config hold users' ETH.
 pub const MAX_MIN_REFUND: u128 = 10_000_000_000_000_000;
@@ -104,6 +107,10 @@ pub struct Params {
     pub price_validity: u64,
     /// Seconds after 1Click signed a quote it may still be acted on.
     pub max_quote_age: u64,
+    /// The least slippage tolerance a quote may have been requested with, bps. A quote with no room
+    /// to fill is one 1Click refunds, and it would spend the order's one fill for nothing; the floor,
+    /// not this, bounds the price.
+    pub min_quote_slippage_bps: u16,
     /// Seconds a signed transfer stays executable.
     pub transfer_validity: u64,
     /// One fill per order, of at most this many times the order's own amount — the catch-up rate,
@@ -528,6 +535,7 @@ impl IntentRouter {
 
         let p = &self.params;
         require!(now_ms <= q.issued_ms.saturating_add(p.max_quote_age * 1_000), "QuoteTooOld");
+        require!(q.slippage_bps >= u64::from(p.min_quote_slippage_bps), "QuoteSlippageTooTight");
         // The fill is A's whole ETH up to the cap, not the caller's choice: a dust quote cannot
         // spend the order's one nonce. And the order's own ETH must have arrived, so dust a stranger
         // credits to A before POA does cannot qualify either.
@@ -658,6 +666,7 @@ impl IntentRouter {
         let p = &self.params;
         require!(p.price_validity > 0 && p.price_validity <= MAX_PRICE_VALIDITY, "InvalidPriceValidity");
         require!(p.max_quote_age > 0 && p.max_quote_age <= MAX_QUOTE_AGE, "InvalidQuoteAge");
+        require!(p.min_quote_slippage_bps <= MAX_MIN_QUOTE_SLIPPAGE_BPS, "InvalidQuoteSlippage");
         require!(p.transfer_validity > 0 && p.transfer_validity <= MAX_TRANSFER_VALIDITY, "InvalidTransferValidity");
         require!(p.max_fill_multiple > 0 && p.max_fill_multiple <= MAX_FILL_MULTIPLE, "InvalidFillMultiple");
         require!(p.max_order_shortfall_bps < 10_000, "InvalidOrderShortfall");
