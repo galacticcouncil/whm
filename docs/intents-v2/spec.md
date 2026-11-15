@@ -107,6 +107,7 @@ One set per action, all hashed into the account:
 | `owner` | the user's Hydration EVM address — what ICE calls the dispatcher as; the only caller its orders are taken from |
 | `quoteId` | random 32 bytes — keeps the user's actions on separate accounts |
 | `maxSlippageBps` | floor = order rate × (1 − slippage) |
+| `maxFillMultiplier` | one fill sells at most this many times its order's amount (2..100): the backlog one order clears |
 | `minOutPerIn` | user's hard floor (destination units per 1e18 wei); below it funds wait. 0 = none |
 | `minDelivery` | before the deadline, deliver once `A` holds this much — at least POA's minimum withdrawal |
 | `deadline` | swaps end by it; after it, remaining ETH is refunded |
@@ -231,7 +232,7 @@ swap(terms, orderVaa, quote)                               anyone, 1 yocto
   order: emitter IntentDispatcher on chain 73, authPath == path,
          priced until min(terms.deadline, VAA time + price_validity)
   quote: signed by 1Click, ETH → the terms' destination, pays and refunds A, fresh
-  fill  = min(A's ETH, max_fill_multiple × order.amount); amountIn within 1% below it
+  fill  = min(A's ETH, maxFillMultiplier × order.amount); amountIn within 1% below it
   A's ETH ≥ order.amount × (1 − max_order_shortfall_bps)  the order's own ETH has landed
   minAmountOut ≥ amountIn × outPerIn × (1 − maxSlippageBps), and ≥ the hard floor
   → sign: transfer amountIn ETH from A to the quote's deposit account
@@ -246,8 +247,10 @@ can do its job.
 
 - **Stateless.** The router stores configuration only — 1Click's quote keys and its params, both
   DAO-managed.
-- **One fill per order.** The swap nonce comes from the order's `seq` and a fixed expiry; any quote
-  for the same order re-signs the same nonce, and no order outlives its price.
+- **One fill per order — per verifier salt.** The swap nonce comes from the order's `seq` and a fixed
+  expiry; any quote for the same order re-signs the same nonce, and no order outlives its price. The
+  nonce also carries `intents.near`'s live salt: while it accepts both an old and a new salt, an order
+  can be signed once under each — at most two fills, each within the cap and the floor.
 - **The fill is never the caller's choice.** It is `A`'s whole ETH up to the cap, so a dust quote
   cannot spend an order.
 - **Refunds never race swaps.** Every swap expires by the deadline; refunds start after it.
@@ -260,9 +263,14 @@ can do its job.
 ## 7. Catch-up, retries and refunds
 
 **Every fill spends what landed.** `order.amount` is the least ETH an order brings, the relay fee
-is capped at half of what bridged, and `max_fill_multiple` is at least 2 — so one fill takes all of
-it. If a tranche does not fill, its ETH stays in `A` and the next order buys it at that order's price,
-up to its own cap: the next order *is* the retry, never below the user's hard floor.
+is capped at half of what bridged, and the terms' `maxFillMultiplier` is at least 2 — so one fill
+takes all of it. If a tranche does not fill, its ETH stays in `A` and the next order buys it at that
+order's price, up to its own cap: the next order *is* the retry, never below the user's hard floor.
+One order can sell `maxFillMultiplier × order.amount`: its own ETH takes 1× to 2× of that (2× when
+the relayer keeps nothing of a half-order ceiling), the rest clears backlog — about
+`maxFillMultiplier − 1` missed tranches with the SDK's small ceiling. It is also how much one order's
+price may sell at once; the SDK picks it per action (2 for a single swap, about the number of
+tranches for a short DCA).
 
 **No next order** — a single swap, or a DCA's last tranche: while its order is priced, the bot may
 quote again and re-sign the same nonce; after that the funds wait for the deadline and are refunded.

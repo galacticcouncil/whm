@@ -55,7 +55,8 @@ One set per action. `authPath = keccak256(encodeQuote(terms))`; any change → n
 | --- | --- | --- |
 | `owner` | address | the Hydration account's EVM address — what ICE calls `execute` as; non-zero. The dispatcher takes an order of these terms only from it |
 | `quoteId` | bytes32 | random per action; non-zero |
-| `maxSlippageBps` | u16 | `< 10_000` |
+| `maxSlippageBps` | u16 | `< 10_000`. Must exceed the router's `min_quote_slippage_bps` plus 1Click's fees and the oracle–market gap — the floor is checked on `minAmountOut`, which the quote's slippage already lowered; at or below it no quote passes and the ETH waits for the refund. The SDK uses 2–3%; a DAO raise of the minimum applies to accounts already funded |
+| `maxFillMultiplier` | u8 | `2..=100` — one fill sells at most this many times its order's amount: 2 takes an order's own ETH whatever the relayer keeps, more catches up missed orders. The SDK picks it per action |
 | `minOutPerIn` | u128 | hard floor, destination units per 1e18 wei; 0 = none |
 | `minDelivery` | u128 | before the deadline, deliver only once `A` holds this much; the SDK sets it ≥ POA's `min_withdrawal_amount` for the token (`supported_tokens`), above it a batch size |
 | `deadline` | u64 | unix seconds |
@@ -73,9 +74,10 @@ delivery, never at parse, so terms that fail it still refund) — and never ETH 
 Packed big-endian:
 
 ```
-version 1 | owner 20 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8
-| recipientKind 1 | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
-fixed prefix 116, total 118 + D + R; wire value of version = 1
+version 1 | owner 20 | quoteId 32 | maxSlippageBps 2 | maxFillMultiplier 1 | minOutPerIn 16
+| minDelivery 16 | deadline 8 | recipientKind 1 | refundTo 20 | destAssetLen 1 | destinationAsset D
+| recipientLen 1 | recipient R
+fixed prefix 117, total 119 + D + R; wire value of version = 1
 ```
 
 The version byte selects the strategy: 1 = limit swap, the only one the router accepts in the MVP. A
@@ -113,7 +115,7 @@ msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        total 7
 
 - `authPath` is computed by the dispatcher from the terms; it binds the price to `terms.destinationAsset`.
 - `amount` is the least ETH `A` receives: what bridged less the relay ceiling, which the dispatcher
-  caps at half of it. The router credits on it and fills at most `max_fill_multiple` (≥ 2) times it,
+  caps at half of it. The router credits on it and fills at most the terms' `maxFillMultiplier` (≥ 2) times it,
   so one fill takes whatever landed. It is not ICE's `amountIn` (the user's source asset).
 - `outPerIn` uses the same unit as `minOutPerIn`:
   `mulDiv(ethUsd × 10^destFeedDec, 10^destTokenDec, destUsd × 10^ethFeedDec)`, non-zero, ≤ `uint128`.
@@ -143,7 +145,7 @@ Events: `OrderForwarded(seq, depositAddress, amount)`, `RelayFeePaid(seq, relaye
 
 ```
 OnResolved::Forward { contract: IntentDispatcher, data }
-data = abi.encode(address depositAddress, uint256 maxRelayFee, bytes terms)     ≤ 512 bytes ⇔ D + R ≤ 266
+data = abi.encode(address depositAddress, uint256 maxRelayFee, bytes terms)     ≤ 512 bytes ⇔ D + R ≤ 265
 
 IIntentResolutionReceiver.execute(user, intentId, assetIn, amountIn, assetOut, amountOut, data)
   → bytes4  (must return execute.selector)
@@ -228,7 +230,8 @@ The swap nonce depends on the order alone — not on the quote, the caller or a 
 quote for one order re-signs the same nonce, so at most one transfer per order executes. The short
 deadline keeps a signed transfer from landing after its quote. One residual: the salt is the verifier's
 live one, and `intents.near` keeps a rotated-out salt valid, so after a salt rotation an order can be
-signed once more — a fill of what `A` still holds, sized and floored like any other (the catch-up).
+signed once more — a second fill, capped again at `maxFillMultiplier × order.amount` (not sharing the
+first one's cap) and floored like any other. The cap is per salt.
 
 ### The quote — what 1Click signs
 
@@ -249,7 +252,7 @@ checks from it.
 | fields | only the fields 1Click signs for a plain swap (an allowlist); `virtualChain*`, `customRecipientMsg`, `depositMemo` or any unknown field is refused |
 | age | `now ≤ timestamp + max_quote_age`; the quote's `deadline` ≥ the transfer's |
 | room | `slippageTolerance ≥ min_quote_slippage_bps` (absent = 0) — a quote too tight to fill would spend the order's one fill on a refund |
-| size | `amountIn` within 1% below `min(A's ETH, max_fill_multiple × order.amount)` — never the caller's choice, so a dust quote cannot spend an order |
+| size | `amountIn` within 1% below `min(A's ETH, maxFillMultiplier × order.amount)` — never the caller's choice, so a dust quote cannot spend an order |
 | credited | `A's ETH ≥ order.amount × (1 − max_order_shortfall_bps)` — the order's own ETH has arrived; dust a stranger credits first does not count |
 | floor | `minAmountOut × 1e18 × 10⁴ ≥ amountIn × outPerIn × (10⁴ − maxSlippageBps)`, and ≥ `amountIn × minOutPerIn / 1e18` |
 
@@ -286,7 +289,7 @@ pub struct IntentRouter {
     quote_keys:     Vec<[u8; 32]>,      // 1Click's quote-signing keys
     params:         Params,             // price_validity, max_quote_age, transfer_validity (s),
                                         // min_quote_slippage_bps (≤ 1_000),
-                                        // max_fill_multiple, max_order_shortfall_bps,
+                                        // max_order_shortfall_bps (≤ 500),
                                         // min_refund (wei, ≤ MAX_MIN_REFUND = 0.01 ETH)
 }
 
@@ -301,7 +304,8 @@ impl IntentRouter {
     /// After the deadline, A's whole ETH balance to refundTo.
     pub fn refund(&mut self, terms: Base64VecU8) -> Promise;
     // all three: anyone, 1 yocto (the signer's deposit), 300 TGas
-    // owner: set_params, set_quote_keys, upgrade, two-step ownership
+    // owner: set_params, set_quote_keys, upgrade (deploy + migrate(code_sha256) in one batch;
+    //        migrate re-checks params and logs `upgrade`), two-step ownership
     // views: get_config, path_of(terms)
 }
 
@@ -332,7 +336,7 @@ GET https://api.wormholescan.io/api/v1/vaas/73/<IntentDispatcher emitter hex>/<m
 **Swap** — per order, once POA has credited the order's ETH to `A` (`crates/near/scripts/intent-router/swap.ts`):
 
 ```
-amount = min(A's ETH, max_fill_multiple × order.amount)       the router accepts nothing else
+amount = min(A's ETH, maxFillMultiplier × order.amount)       the router accepts nothing else
 POST 1click /v0/quote   { dry: false, swapType: EXACT_INPUT, depositType / recipientType / refundType: INTENTS,
                           originAsset: eth, destinationAsset, amount, recipient = refundTo = A, deadline }
 router.swap(terms, orderVaa, { signed: signedFields(quote), signature })   1 yocto, 300 TGas
