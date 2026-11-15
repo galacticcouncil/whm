@@ -47,8 +47,8 @@ contract IntentCodecTest is Test {
     /// @dev `terms.rs` `sample()` in the router — encoded by its Rust codec and by
     ///      `scripts/intent-router/shared.ts` `encodeTerms`, both to these bytes.
     bytes constant GOLDEN_TERMS =
-        hex"0133333333333333333333333333333333333333331111111111111111111111111111111111111111111111111111111111111111006400000000000000000000000008f0d180000000000000000000000000000f4240000000006b49d200002222222222222222222222222222222222222222146e65703134313a7a65632e6f6d66742e6e6561722374314b50565352676e46485042574d4a4c433774614a696f4e366d3551366a56426d61";
-    bytes32 constant GOLDEN_PATH = 0x09650cc18201991ec766eaa964833b0f8074f86c700b1f5710c965950bcd1846;
+        hex"013333333333333333333333333333333333333333111111111111111111111111111111111111111111111111111111111111111100640200000000000000000000000008f0d180000000000000000000000000000f4240000000006b49d200002222222222222222222222222222222222222222146e65703134313a7a65632e6f6d66742e6e6561722374314b50565352676e46485042574d4a4c433774614a696f4e366d3551366a56426d61";
+    bytes32 constant GOLDEN_PATH = 0x64b69a6b6f4b4524764724f9c8621e8be960a08dc31ea121037f634bc06208be;
 
     /// @dev `order.rs` `golden_vector()` in the router: path 0x07…07, seq 9, 0.001 ETH, 1.8 ZEC/ETH.
     bytes constant GOLDEN_ORDER =
@@ -65,6 +65,7 @@ contract IntentCodecTest is Test {
             owner: address(0x3333333333333333333333333333333333333333),
             quoteId: bytes32(uint256(0x1111111111111111111111111111111111111111111111111111111111111111)),
             maxSlippageBps: 100,
+            maxFillMultiplier: 2,
             minOutPerIn: 150_000_000,
             minDelivery: 1_000_000,
             deadline: 1_800_000_000,
@@ -113,19 +114,20 @@ contract IntentCodecTest is Test {
         assertEq(address(uint160(_uint(p, 1, 20))), address(0x3333333333333333333333333333333333333333), "owner");
         assertEq(bytes32(_uint(p, 21, 32)), _terms().quoteId, "quoteId");
         assertEq(_uint(p, 53, 2), 100, "maxSlippageBps");
-        assertEq(_uint(p, 55, 16), 150_000_000, "minOutPerIn");
-        assertEq(_uint(p, 71, 16), 1_000_000, "minDelivery");
-        assertEq(_uint(p, 87, 8), 1_800_000_000, "deadline");
-        assertEq(_uint(p, 95, 1), 0, "recipientKind");
-        assertEq(address(uint160(_uint(p, 96, 20))), address(0x2222222222222222222222222222222222222222), "refundTo");
+        assertEq(_uint(p, 55, 1), 2, "maxFillMultiplier");
+        assertEq(_uint(p, 56, 16), 150_000_000, "minOutPerIn");
+        assertEq(_uint(p, 72, 16), 1_000_000, "minDelivery");
+        assertEq(_uint(p, 88, 8), 1_800_000_000, "deadline");
+        assertEq(_uint(p, 96, 1), 0, "recipientKind");
+        assertEq(address(uint160(_uint(p, 97, 20))), address(0x2222222222222222222222222222222222222222), "refundTo");
 
-        uint256 assetLen = _uint(p, 116, 1);
-        assertEq(_str(p, 117, assetLen), ZEC, "destinationAsset");
-        uint256 recipientLen = _uint(p, 117 + assetLen, 1);
-        assertEq(_str(p, 118 + assetLen, recipientLen), T_ADDR, "recipient");
+        uint256 assetLen = _uint(p, 117, 1);
+        assertEq(_str(p, 118, assetLen), ZEC, "destinationAsset");
+        uint256 recipientLen = _uint(p, 118 + assetLen, 1);
+        assertEq(_str(p, 119 + assetLen, recipientLen), T_ADDR, "recipient");
         // Declared lengths account for the whole buffer — a payload the router could truncate
         // rather than reject would have a second reading.
-        assertEq(p.length, 118 + assetLen + recipientLen, "trailing bytes");
+        assertEq(p.length, 119 + assetLen + recipientLen, "trailing bytes");
     }
 
     function testTermsRoundTripThroughTheDecoder() public view {
@@ -150,6 +152,16 @@ contract IntentCodecTest is Test {
         t = _terms();
         t.maxSlippageBps = 10_000;
         vm.expectRevert(abi.encodeWithSelector(IntentCodec.InvalidSlippage.selector, 10_000));
+        codec.encode(t);
+
+        t = _terms();
+        t.maxFillMultiplier = 1;
+        vm.expectRevert(abi.encodeWithSelector(IntentCodec.InvalidFillMultiplier.selector, 1));
+        codec.encode(t);
+
+        t = _terms();
+        t.maxFillMultiplier = 101;
+        vm.expectRevert(abi.encodeWithSelector(IntentCodec.InvalidFillMultiplier.selector, 101));
         codec.encode(t);
 
         t = _terms();
@@ -223,6 +235,8 @@ contract IntentCodecTest is Test {
 
         t = _terms(); t.owner = address(0x4444);
         assertTrue(codec.authPath(t) != base, "owner");
+        t = _terms(); t.maxFillMultiplier = 3;
+        assertTrue(codec.authPath(t) != base, "maxFillMultiplier");
         t = _terms(); t.maxSlippageBps = 99;
         assertTrue(codec.authPath(t) != base, "slippage");
         t = _terms(); t.minOutPerIn = 1;

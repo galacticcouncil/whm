@@ -22,6 +22,8 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     ///        `execute` as. The only caller an order of these terms is taken from.
     /// @param quoteId Random per action. Keeps one user's actions on disjoint accounts; reuse merges.
     /// @param maxSlippageBps How far below the order's oracle rate a fill may land.
+    /// @param maxFillMultiplier One fill sells at most this many times its order's amount, 2..100 —
+    ///        what catches up missed orders, and what one order's price may move at once.
     /// @param minOutPerIn The user's hard floor, destination units per 1e18 wei; 0 = none.
     /// @param minDelivery Before the deadline, deliver only once `A` holds this much of the
     ///        destination — at least the bridge's minimum withdrawal.
@@ -35,6 +37,7 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
         address owner;
         bytes32 quoteId;
         uint16 maxSlippageBps;
+        uint8 maxFillMultiplier;
         uint128 minOutPerIn;
         uint128 minDelivery;
         uint64 deadline;
@@ -120,6 +123,8 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     error UnpricedAsset(string destinationAsset);
     error InvalidFeedAnswer(address feed, int256 answer);
     error StaleFeed(address feed, uint256 updatedAt);
+    /// @dev The feed reports an update after the current block — its age could never expire.
+    error FutureFeedAnswer(address feed, uint256 updatedAt);
     error InvalidRate(uint256 outPerIn);
 
     // ─── Dispatch ────────────────────────────────────────────────

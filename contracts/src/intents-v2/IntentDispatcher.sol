@@ -149,6 +149,8 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     function _readFeed(address feed) internal view returns (uint256 answer, uint8 decimals) {
         (, int256 value,, uint256 updatedAt,) = IAggregatorV3(feed).latestRoundData();
         if (value <= 0) revert InvalidFeedAnswer(feed, value);
+        // A future time would keep the age check below passing forever.
+        if (updatedAt > block.timestamp) revert FutureFeedAnswer(feed, updatedAt);
         if (block.timestamp > updatedAt + maxFeedAge) revert StaleFeed(feed, updatedAt);
         return (uint256(value), IAggregatorV3(feed).decimals());
     }
@@ -186,7 +188,7 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     ///      the forwarder, with the forwarding instruction as the transfer's payload. What bridges
     ///      must be at least POA's minimum deposit plus the relay ceiling, and the ceiling at most
     ///      half of it: whatever the relayer keeps, `A` receives at least the order's amount and at
-    ///      most twice it — one fill at the router's `max_fill_multiple` of 2.
+    ///      most twice it — one fill, since the terms' `maxFillMultiplier` is at least 2.
     /// @return seq The transfer's NTT message id
     /// @return amount The least `A` receives: what bridged less the relay ceiling
     function _bridge(uint256 weth, uint256 fee, address depositAddress, uint256 maxRelayFee)
@@ -273,7 +275,9 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
         owner = newOwner;
     }
 
-    /// @notice Recover quantization dust, or any asset sent here by mistake.
+    /// @notice Recover quantization dust, or any asset sent here by mistake. WETH that arrives
+    ///         outside an order can be claimed by any `execute` caller until the next order records
+    ///         it — a push and a transfer look the same here.
     function sweep(address asset, address to, uint256 amount) external onlyOwner {
         IERC20(asset).safeTransfer(to, amount);
         if (asset == address(_weth())) _retained = _weth().balanceOf(address(this));

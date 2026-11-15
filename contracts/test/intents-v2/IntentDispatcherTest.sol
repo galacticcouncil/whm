@@ -89,6 +89,7 @@ contract IntentDispatcherTest is Test {
             owner: user,
             quoteId: keccak256("action-1"),
             maxSlippageBps: 100,
+            maxFillMultiplier: 2,
             minOutPerIn: 0,
             minDelivery: 1_000_000,
             deadline: 1_800_000_000,
@@ -358,6 +359,19 @@ contract IntentDispatcherTest is Test {
         vm.prank(user);
         vm.expectRevert(
             abi.encodeWithSelector(IIntentDispatcher.StaleFeed.selector, address(ethUsd), block.timestamp - MAX_FEED_AGE - 1)
+        );
+        dispatcher.dispatch(1e15, depositAddress, 0, _terms());
+        assertEq(nttManager.nextSequence(), 0, "nothing bridged");
+    }
+
+    /// @notice An update time after the current block is refused: it would keep the age check
+    ///         passing forever, so a frozen feed never went stale.
+    function testFutureFeedTimeIsRefused() public {
+        zecUsd.set(50e8, block.timestamp + 1);
+        _fund(1e15);
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(IIntentDispatcher.FutureFeedAnswer.selector, address(zecUsd), block.timestamp + 1)
         );
         dispatcher.dispatch(1e15, depositAddress, 0, _terms());
         assertEq(nttManager.nextSequence(), 0, "nothing bridged");

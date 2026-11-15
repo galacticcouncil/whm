@@ -11,13 +11,13 @@ import {IIntentDispatcher} from "./interfaces/IIntentDispatcher.sol";
 ///
 ///         Terms:
 ///           offset  size  field              offset  size  field
-///                0     1  version                87     8  deadline
-///                1    20  owner                  95     1  recipientKind
-///               21    32  quoteId                96    20  refundTo
-///               53     2  maxSlippageBps        116     1  destAssetLen (D)
-///               55    16  minOutPerIn           117     D  destinationAsset
-///               71    16  minDelivery         117+D     1  recipientLen (R)
-///                                             118+D     R  recipient       total 118 + D + R
+///                0     1  version                88     8  deadline
+///                1    20  owner                  96     1  recipientKind
+///               21    32  quoteId                97    20  refundTo
+///               53     2  maxSlippageBps        117     1  destAssetLen (D)
+///               55     1  maxFillMultiplier     118     D  destinationAsset
+///               56    16  minOutPerIn         118+D     1  recipientLen (R)
+///               72    16  minDelivery         119+D     R  recipient       total 119 + D + R
 ///
 ///         Order message: msgType 1 | authPath 32 | seq 8 | amount 16 | outPerIn 16 — 73 bytes.
 ///
@@ -37,11 +37,17 @@ library IntentCodec {
     /// @notice Basis points in 1.
     uint16 internal constant BPS = 10_000;
 
+    /// @notice The fill-multiplier bounds — the router's `MIN_FILL_MULTIPLIER` / `MAX_FILL_MULTIPLIER`. At
+    ///         least 2: an order's own ETH reaches up to twice its amount, which is net of a relay
+    ///         ceiling of at most half.
+    uint8 internal constant MIN_FILL_MULTIPLIER = 2;
+    uint8 internal constant MAX_FILL_MULTIPLIER = 100;
+
     /// @notice The order message's type byte.
     uint8 internal constant MSG_ORDER = 1;
 
     /// @dev Fixed prefix through `destAssetLen`, i.e. everything before the first string.
-    uint256 internal constant TERMS_HEADER_SIZE = 117;
+    uint256 internal constant TERMS_HEADER_SIZE = 118;
 
     uint256 internal constant ORDER_SIZE = 73;
 
@@ -53,6 +59,7 @@ library IntentCodec {
     error InvalidOwner();
     error InvalidQuoteId();
     error InvalidSlippage(uint16 bps);
+    error InvalidFillMultiplier(uint8 multiplier);
     error InvalidDeadline();
     error InvalidRecipientKind(uint8 kind);
     error InvalidRefundTo();
@@ -84,6 +91,9 @@ library IntentCodec {
         if (t.owner == address(0)) revert InvalidOwner();
         if (t.quoteId == bytes32(0)) revert InvalidQuoteId();
         if (t.maxSlippageBps >= BPS) revert InvalidSlippage(t.maxSlippageBps);
+        if (t.maxFillMultiplier < MIN_FILL_MULTIPLIER || t.maxFillMultiplier > MAX_FILL_MULTIPLIER) {
+            revert InvalidFillMultiplier(t.maxFillMultiplier);
+        }
         if (t.deadline == 0) revert InvalidDeadline();
         if (t.recipientKind > KIND_INTENTS_ACCOUNT) revert InvalidRecipientKind(t.recipientKind);
         if (t.refundTo == address(0)) revert InvalidRefundTo();
@@ -97,6 +107,7 @@ library IntentCodec {
                 t.owner,
                 t.quoteId,
                 t.maxSlippageBps,
+                t.maxFillMultiplier,
                 t.minOutPerIn,
                 t.minDelivery,
                 t.deadline,
@@ -114,7 +125,7 @@ library IntentCodec {
         if (terms.length < TERMS_HEADER_SIZE) revert MalformedTerms(terms.length);
         if (uint8(terms[0]) != VERSION) revert InvalidVersion(uint8(terms[0]));
 
-        uint256 assetLen = uint8(terms[116]);
+        uint256 assetLen = uint8(terms[117]);
         uint256 recipientLenOffset = TERMS_HEADER_SIZE + assetLen;
         if (terms.length <= recipientLenOffset) revert MalformedTerms(terms.length);
 
@@ -126,11 +137,12 @@ library IntentCodec {
             owner: address(uint160(_uint(terms, 1, 20))),
             quoteId: bytes32(_uint(terms, 21, 32)),
             maxSlippageBps: uint16(_uint(terms, 53, 2)),
-            minOutPerIn: uint128(_uint(terms, 55, 16)),
-            minDelivery: uint128(_uint(terms, 71, 16)),
-            deadline: uint64(_uint(terms, 87, 8)),
-            recipientKind: uint8(terms[95]),
-            refundTo: address(uint160(_uint(terms, 96, 20))),
+            maxFillMultiplier: uint8(terms[55]),
+            minOutPerIn: uint128(_uint(terms, 56, 16)),
+            minDelivery: uint128(_uint(terms, 72, 16)),
+            deadline: uint64(_uint(terms, 88, 8)),
+            recipientKind: uint8(terms[96]),
+            refundTo: address(uint160(_uint(terms, 97, 20))),
             destinationAsset: string(_slice(terms, TERMS_HEADER_SIZE, assetLen)),
             recipient: string(_slice(terms, recipientLenOffset + 1, recipientLen))
         });
@@ -138,6 +150,9 @@ library IntentCodec {
         if (t.owner == address(0)) revert InvalidOwner();
         if (t.quoteId == bytes32(0)) revert InvalidQuoteId();
         if (t.maxSlippageBps >= BPS) revert InvalidSlippage(t.maxSlippageBps);
+        if (t.maxFillMultiplier < MIN_FILL_MULTIPLIER || t.maxFillMultiplier > MAX_FILL_MULTIPLIER) {
+            revert InvalidFillMultiplier(t.maxFillMultiplier);
+        }
         if (t.deadline == 0) revert InvalidDeadline();
         if (t.recipientKind > KIND_INTENTS_ACCOUNT) revert InvalidRecipientKind(t.recipientKind);
         if (t.refundTo == address(0)) revert InvalidRefundTo();
