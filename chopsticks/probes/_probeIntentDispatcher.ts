@@ -59,7 +59,8 @@ const ETH_USD = getAddress("0x1AF549Fe19A9B73D094173C41e18BF7F357F594b");
 const ZEC_USD = getAddress("0xd76f6e296e34ad163439d16731800c3e2c081c6e");
 
 const ICE_GAS = 2_000_000n;
-const DEPLOY_GAS = 8_000_000n;
+/** Hydration charges ~366 gas per stored byte: ~8M for the 21.8 KB impl alone. */
+const DEPLOY_GAS = 12_000_000n;
 const DEPLOYER_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as Hex;
 
 const ZEC = "nep141:zec.omft.near";
@@ -170,7 +171,9 @@ async function main(): Promise<void> {
     const deployed = await eventsAt(hydration, (await client.sendBatch([impl.rawTx, proxy.rawTx])).blockHash);
     const dispatcher = proxy.address;
     console.log(`\n── Deploy ──`);
-    record("impl + proxy deployed", checkIfEthereumExecuted(deployed), dispatcher);
+    const created = deployed.filter(({ event }) => event.type === "Ethereum" && event.value.type === "Executed" && event.value.value.exit_reason.type === "Succeed");
+    record("impl + proxy deployed", created.length === 2, `${created.length}/2, ${dispatcher}`);
+    if (created.length !== 2) logEvents(deployed);
 
     const setup: [string, unknown[]][] = [
       ["setNttManager", [MANAGER]],
@@ -194,6 +197,7 @@ async function main(): Promise<void> {
       owner: account.address,
       quoteId: pad("0x01", { size: 32 }),
       maxSlippageBps: 100,
+      maxFillMultiplier: 2,
       minOutPerIn: 0n,
       minDelivery: 1_000_000n,
       deadline: now + 30n * 86_400n,
