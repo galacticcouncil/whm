@@ -29,7 +29,6 @@ export interface Config {
     max_quote_age: number;
     min_quote_slippage_bps: number;
     transfer_validity: number;
-    max_fill_multiple: number;
     max_order_shortfall_bps: number;
     min_refund: string;
   };
@@ -41,6 +40,8 @@ export interface Terms {
   owner: string;
   quoteId: Buffer;
   maxSlippageBps: number;
+  /** One fill sells at most this many times its order's amount; 2..100. */
+  maxFillMultiplier: number;
   /** Destination units per 1e18 wei; 0 = no hard floor. */
   minOutPerIn: bigint;
   /**
@@ -65,7 +66,16 @@ export interface Terms {
  * @returns The encoded terms
  */
 export function encodeTerms(t: Terms): Buffer {
-  const u = (n: bigint, bytes: number) => Buffer.from(n.toString(16).padStart(bytes * 2, "0"), "hex");
+  // Every bound the router's parser checks, checked here first — a value it would wrap or truncate
+  // derives an account for other terms.
+  const u = (n: bigint, bytes: number) => {
+    if (n < 0n || n >= 1n << BigInt(bytes * 8)) throw new Error(`${n} does not fit ${bytes} bytes`);
+    return Buffer.from(n.toString(16).padStart(bytes * 2, "0"), "hex");
+  };
+  const int = (n: number, lo: number, hi: number, name: string) => {
+    if (!Number.isInteger(n) || n < lo || n > hi) throw new Error(`${name} ${n} outside ${lo}..${hi}`);
+    return n;
+  };
   const str = (s: string) => {
     const b = Buffer.from(s, "utf8");
     if (b.length < 1 || b.length > 255) throw new Error(`string of ${b.length} bytes`);
@@ -81,11 +91,12 @@ export function encodeTerms(t: Terms): Buffer {
     Buffer.from([1]),
     address(t.owner),
     t.quoteId,
-    u(BigInt(t.maxSlippageBps), 2),
+    u(BigInt(int(t.maxSlippageBps, 0, 9_999, "maxSlippageBps")), 2),
+    Buffer.from([int(t.maxFillMultiplier, 2, 100, "maxFillMultiplier")]),
     u(t.minOutPerIn, 16),
     u(t.minDelivery, 16),
     u(t.deadline, 8),
-    Buffer.from([t.recipientKind]),
+    Buffer.from([int(t.recipientKind, 0, 1, "recipientKind")]),
     address(t.refundTo),
     str(t.destinationAsset),
     str(t.recipient),

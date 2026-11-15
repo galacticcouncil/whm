@@ -13,8 +13,8 @@ import { run, signer } from "../ntt-manager/shared";
 const { optionalArg, requiredArg } = args;
 
 /**
- * One swap round, as the bot runs it: size the fill (`A`'s whole ETH, capped at `max_fill_multiple` ×
- * the order's amount — the router accepts no other size, within 1%), get a 1Click quote paying and refunding `A`, have the router check and sign the
+ * One swap round, as the bot runs it: size the fill (`A`'s whole ETH, capped at the terms'
+ * `maxFillMultiplier` × the order's amount — the router accepts no other size, within 1%), get a 1Click quote paying and refunding `A`, have the router check and sign the
  * transfer to its deposit account, submit through 1Click, follow the status. Needs ONECLICK_KEY.
  *
  * Usage: ONECLICK_KEY=… tsx swap.ts --contract <router> --terms <hex|base64> --vaa <hex|base64>
@@ -30,10 +30,10 @@ async function main(): Promise<void> {
   const d = await derive(provider, contract, terms);
   const order = parseOrderVaa(vaa);
   if (order.authPath !== d.path) throw new Error(`the order is for ${order.authPath}, the terms for ${d.path}`);
-  const destination = terms.subarray(117, 117 + terms[116]).toString("utf8");
+  const destination = terms.subarray(118, 118 + terms[117]).toString("utf8");
 
   const held = (await balances(provider, config.intents, d.account, [config.eth_token]))[config.eth_token];
-  const cap = order.amount * BigInt(config.params.max_fill_multiple);
+  const cap = order.amount * BigInt(terms[55]); // the terms' maxFillMultiplier
   const amount = held < cap ? held : cap;
   console.log(`account ${d.account}: ${held} wei; order ${order.seq} sent ${order.amount}, filling ${amount}`);
   if (amount === 0n) throw new Error("nothing to swap yet — POA has not credited A");
