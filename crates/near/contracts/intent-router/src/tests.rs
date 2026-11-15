@@ -51,8 +51,7 @@ fn params() -> Params {
         max_quote_age: 120,
         min_quote_slippage_bps: 100,
         transfer_validity: 180,
-        max_fill_multiple: 2,
-        max_order_shortfall_bps: 2_000,
+        max_order_shortfall_bps: 100,
         min_refund: U128(100_000_000_000_000),
     }
 }
@@ -147,6 +146,19 @@ fn one_fill_per_order() {
 
     assert_ne!(message(&first)["intents"][0]["receiver_id"], message(&second)["intents"][0]["receiver_id"]);
     assert_eq!(first.nonce, second.nonce);
+}
+
+/// The accepted residual, pinned: the nonce carries the verifier's live salt, so across a salt
+/// rotation the same order signs a second, distinct nonce — one fill per order per salt.
+#[test]
+fn one_fill_per_order_per_salt() {
+    let c = contract();
+    let terms = terms_bytes(&sample());
+    let vaa = order_vaa(&terms, ISSUED_0, 30, 10u128.pow(15), 180_000_000);
+    set_ctx(accounts(1).as_str(), 1, ISSUED_0 + 10_000);
+    let old = c.build_swap(&terms, &vaa, &fixture(0), key(), SALT, BALANCE, ISSUED_0 + 10_000);
+    let rotated = c.build_swap(&terms, &vaa, &fixture(0), key(), [0xee; 4], BALANCE, ISSUED_0 + 10_000);
+    assert_ne!(old.nonce, rotated.nonce);
 }
 
 #[test]
@@ -287,12 +299,33 @@ fn the_fill_is_a_s_whole_balance_up_to_the_cap() {
     assert!(panic_text(swap_with(BALANCE + BALANCE / 50, BALANCE)).contains("WrongFillAmount"));
 }
 
+/// The cap is the terms' own multiplier: an order of 0.0004 ETH with A holding 0.001.
+#[test]
+fn the_terms_multiplier_sets_the_cap() {
+    let fill = |multiplier: u8| {
+        let c = contract();
+        let mut t = sample();
+        t.max_fill_multiplier = multiplier;
+        let terms = terms_bytes(&t);
+        let now = ISSUED_0 + 30_000;
+        set_ctx(accounts(1).as_str(), 1, now);
+        let vaa = order_vaa(&terms, now, 60, 4 * 10u128.pow(14), 180_000_000);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.build_swap(&terms, &vaa, &fixture(0), key(), SALT, BALANCE, now)))
+    };
+    // 2 × 0.0004 = 0.0008, below the fixture's 0.001.
+    assert!(panic_text(fill(2)).contains("WrongFillAmount"));
+    // 3 × 0.0004 = 0.0012: the fill is A's whole 0.001.
+    assert!(fill(3).is_ok());
+}
+
 #[test]
 fn the_orders_own_eth_must_have_arrived() {
-    // The order sent 0.002 ETH; A holds 0.001 (below 80%) — e.g. dust someone credited before POA.
+    // The order sent 0.002 ETH; A holds 0.001 — e.g. dust someone credited before POA.
     assert!(panic_text(swap_with(BALANCE, 2 * BALANCE)).contains("OrderNotCredited"));
-    // 0.00125 sent, 0.001 held: exactly the 20% shortfall allowed.
-    assert!(swap_with(BALANCE, BALANCE * 5 / 4).is_ok());
+    // 2% short of the order: refused at a 1% shortfall.
+    assert!(panic_text(swap_with(BALANCE, BALANCE * 100 / 98)).contains("OrderNotCredited"));
+    // 1% short: exactly the shortfall allowed.
+    assert!(swap_with(BALANCE, BALANCE * 100 / 99).is_ok());
 }
 
 /// Finding 2 of the 2026-10-26 audit: a param change does not re-sign an order.
@@ -469,6 +502,23 @@ fn only_the_owner_sets_params() {
 }
 
 #[test]
+fn migrate_keeps_valid_state() {
+    let c = contract();
+    env::state_write(&c);
+    assert_eq!(IntentRouter::migrate("00".into()).params, params());
+}
+
+/// A release that tightens a bound refuses state that no longer meets it.
+#[test]
+#[should_panic(expected = "InvalidOrderShortfall")]
+fn migrate_rechecks_the_params() {
+    let mut c = contract();
+    c.params.max_order_shortfall_bps = MAX_ORDER_SHORTFALL_BPS + 1;
+    env::state_write(&c);
+    IntentRouter::migrate("00".into());
+}
+
+#[test]
 fn param_bounds() {
     let bad = |p: Params, err: &str| {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| contract().set_params(p)));
@@ -479,10 +529,9 @@ fn param_bounds() {
     bad(Params { max_quote_age: MAX_QUOTE_AGE + 1, ..params() }, "InvalidQuoteAge");
     bad(Params { min_quote_slippage_bps: MAX_MIN_QUOTE_SLIPPAGE_BPS + 1, ..params() }, "InvalidQuoteSlippage");
     bad(Params { transfer_validity: 0, ..params() }, "InvalidTransferValidity");
-    bad(Params { max_fill_multiple: 0, ..params() }, "InvalidFillMultiple");
     bad(Params { min_refund: U128(0), ..params() }, "InvalidMinRefund");
     bad(Params { min_refund: U128(MAX_MIN_REFUND + 1), ..params() }, "InvalidMinRefund");
-    bad(Params { max_order_shortfall_bps: 10_000, ..params() }, "InvalidOrderShortfall");
+    bad(Params { max_order_shortfall_bps: MAX_ORDER_SHORTFALL_BPS + 1, ..params() }, "InvalidOrderShortfall");
 }
 
 #[test]

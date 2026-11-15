@@ -3,7 +3,8 @@
 //!
 //! ```text
 //! field byte widths; the version byte's value is 1 (`LIMIT_SWAP`)
-//! version 1 | owner 20 | quoteId 32 | maxSlippageBps 2 | minOutPerIn 16 | minDelivery 16 | deadline 8
+//! version 1 | owner 20 | quoteId 32 | maxSlippageBps 2 | maxFillMultiplier 1 | minOutPerIn 16
+//! | minDelivery 16 | deadline 8
 //! | recipientKind 1 | refundTo 20 | destAssetLen 1 | destinationAsset D | recipientLen 1 | recipient R
 //! ```
 //!
@@ -19,6 +20,12 @@ pub const LIMIT_SWAP: u8 = 1;
 
 /// Basis points in 1.
 pub const BPS: u16 = 10_000;
+
+/// The fill-multiplier bounds. At least 2: an order's own ETH can reach twice its amount — the
+/// amount is net of the relay ceiling, at most half of what bridged. At most 100, already a
+/// catch-up of anything.
+pub const MIN_FILL_MULTIPLIER: u8 = 2;
+pub const MAX_FILL_MULTIPLIER: u8 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecipientKind {
@@ -39,6 +46,9 @@ pub struct Terms {
     pub quote_id: [u8; 32],
     /// The floor below the order's oracle rate.
     pub max_slippage_bps: u16,
+    /// One fill sells at most this many times its order's amount — what catches up missed orders,
+    /// and what one order's price may move at once.
+    pub max_fill_multiplier: u8,
     /// The user's hard floor, destination units per 1e18 wei. 0 = none.
     pub min_out_per_in: u128,
     /// Before the deadline, deliveries wait until `A` holds this much of the destination asset —
@@ -65,6 +75,7 @@ impl Terms {
         let owner = r.bytes20()?;
         let quote_id = r.bytes32()?;
         let max_slippage_bps = r.u16()?;
+        let max_fill_multiplier = r.u8()?;
         let min_out_per_in = r.u128()?;
         let min_delivery = r.u128()?;
         let deadline = r.u64()?;
@@ -82,6 +93,7 @@ impl Terms {
             owner,
             quote_id,
             max_slippage_bps,
+            max_fill_multiplier,
             min_out_per_in,
             min_delivery,
             deadline,
@@ -96,11 +108,12 @@ impl Terms {
 
     pub fn encode(&self) -> Result<Vec<u8>, &'static str> {
         self.validate()?;
-        let mut out = Vec::with_capacity(118 + self.destination_asset.len() + self.recipient.len());
+        let mut out = Vec::with_capacity(119 + self.destination_asset.len() + self.recipient.len());
         out.push(LIMIT_SWAP);
         out.extend_from_slice(&self.owner);
         out.extend_from_slice(&self.quote_id);
         out.extend_from_slice(&self.max_slippage_bps.to_be_bytes());
+        out.push(self.max_fill_multiplier);
         out.extend_from_slice(&self.min_out_per_in.to_be_bytes());
         out.extend_from_slice(&self.min_delivery.to_be_bytes());
         out.extend_from_slice(&self.deadline.to_be_bytes());
@@ -140,6 +153,9 @@ impl Terms {
         }
         if self.max_slippage_bps >= BPS {
             return Err("InvalidSlippage");
+        }
+        if !(MIN_FILL_MULTIPLIER..=MAX_FILL_MULTIPLIER).contains(&self.max_fill_multiplier) {
+            return Err("InvalidFillMultiplier");
         }
         if self.deadline == 0 {
             return Err("InvalidDeadline");
@@ -189,6 +205,7 @@ pub(crate) mod tests {
             owner: [0x33; 20],
             quote_id: [0x11; 32],
             max_slippage_bps: 100,
+            max_fill_multiplier: 2,
             min_out_per_in: 150_000_000,
             min_delivery: 1_000_000,
             deadline: 1_800_000_000,
@@ -203,7 +220,7 @@ pub(crate) mod tests {
     fn round_trips() {
         let t = sample();
         let bytes = t.encode().unwrap();
-        assert_eq!(bytes.len(), 118 + ZEC.len() + T_ADDR.len());
+        assert_eq!(bytes.len(), 119 + ZEC.len() + T_ADDR.len());
         assert_eq!(Terms::parse(&bytes).unwrap(), t);
     }
 
@@ -215,14 +232,15 @@ pub(crate) mod tests {
         assert_eq!(&bytes[1..21], &[0x33; 20]);
         assert_eq!(&bytes[21..53], &[0x11; 32]);
         assert_eq!(&bytes[53..55], &100u16.to_be_bytes());
-        assert_eq!(&bytes[55..71], &150_000_000u128.to_be_bytes());
-        assert_eq!(&bytes[71..87], &1_000_000u128.to_be_bytes());
-        assert_eq!(&bytes[87..95], &1_800_000_000u64.to_be_bytes());
-        assert_eq!(bytes[95], 0);
-        assert_eq!(&bytes[96..116], &[0x22; 20]);
-        assert_eq!(bytes[116] as usize, ZEC.len());
-        assert_eq!(&bytes[117..117 + ZEC.len()], ZEC.as_bytes());
-        assert_eq!(bytes[117 + ZEC.len()] as usize, T_ADDR.len());
+        assert_eq!(bytes[55], 2);
+        assert_eq!(&bytes[56..72], &150_000_000u128.to_be_bytes());
+        assert_eq!(&bytes[72..88], &1_000_000u128.to_be_bytes());
+        assert_eq!(&bytes[88..96], &1_800_000_000u64.to_be_bytes());
+        assert_eq!(bytes[96], 0);
+        assert_eq!(&bytes[97..117], &[0x22; 20]);
+        assert_eq!(bytes[117] as usize, ZEC.len());
+        assert_eq!(&bytes[118..118 + ZEC.len()], ZEC.as_bytes());
+        assert_eq!(bytes[118 + ZEC.len()] as usize, T_ADDR.len());
     }
 
     /// The same terms from `scripts/intent-router/shared.ts`'s `encodeTerms`, and their keccak.
@@ -232,13 +250,13 @@ pub(crate) mod tests {
         assert_eq!(
             hex::encode(&bytes),
             "0133333333333333333333333333333333333333331111111111111111111111111111111111111111111111111111111111\
-             111111006400000000000000000000000008f0d180000000000000000000000000000f4240000000006b49d2000022222222\
-             22222222222222222222222222222222146e65703134313a7a65632e6f6d66742e6e6561722374314b50565352676e464850\
-             42574d4a4c433774614a696f4e366d3551366a56426d61"
+             11111100640200000000000000000000000008f0d180000000000000000000000000000f4240000000006b49d20000222222\
+             2222222222222222222222222222222222146e65703134313a7a65632e6f6d66742e6e6561722374314b50565352676e4648\
+             5042574d4a4c433774614a696f4e366d3551366a56426d61"
         );
         assert_eq!(
             path_string(&auth_path(&bytes)),
-            "0x09650cc18201991ec766eaa964833b0f8074f86c700b1f5710c965950bcd1846"
+            "0x64b69a6b6f4b4524764724f9c8621e8be960a08dc31ea121037f634bc06208be"
         );
     }
 
@@ -265,7 +283,7 @@ pub(crate) mod tests {
         assert_eq!(Terms::parse(&bytes[..bytes.len() - 1]), Err("Truncated"));
 
         let mut kind = bytes.clone();
-        kind[95] = 2;
+        kind[96] = 2;
         assert_eq!(Terms::parse(&kind), Err("InvalidRecipientKind"));
     }
 
@@ -279,6 +297,8 @@ pub(crate) mod tests {
         check(|t| t.owner = [0; 20], "ZeroOwner");
         check(|t| t.quote_id = [0; 32], "ZeroQuoteId");
         check(|t| t.max_slippage_bps = BPS, "InvalidSlippage");
+        check(|t| t.max_fill_multiplier = MIN_FILL_MULTIPLIER - 1, "InvalidFillMultiplier");
+        check(|t| t.max_fill_multiplier = MAX_FILL_MULTIPLIER + 1, "InvalidFillMultiplier");
         check(|t| t.deadline = 0, "InvalidDeadline");
         check(|t| t.refund_to = [0; 20], "ZeroRefundTo");
         check(|t| t.destination_asset = String::new(), "InvalidDestinationAsset");
@@ -306,6 +326,9 @@ pub(crate) mod tests {
         assert_ne!(auth_path(&t.encode().unwrap()), base);
         let mut t = sample();
         t.owner[19] ^= 1;
+        assert_ne!(auth_path(&t.encode().unwrap()), base);
+        let mut t = sample();
+        t.max_fill_multiplier = 3;
         assert_ne!(auth_path(&t.encode().unwrap()), base);
     }
 }

@@ -72,10 +72,12 @@ pub const GAS_FOR_MIGRATE: Gas = Gas::from_tgas(50);
 pub const MAX_PRICE_VALIDITY: u64 = 86_400;
 pub const MAX_QUOTE_AGE: u64 = 600;
 pub const MAX_TRANSFER_VALIDITY: u64 = 600;
-pub const MAX_FILL_MULTIPLE: u32 = 100;
 /// Upper bound on `min_quote_slippage_bps` — above it a quote's guaranteed output sits too far below
 /// its price for a sane floor to accept.
 pub const MAX_MIN_QUOTE_SLIPPAGE_BPS: u16 = 1_000;
+/// Upper bound on `max_order_shortfall_bps` — a hedge for POA's credit, never so loose that a
+/// stranger's dust passes for an order's arrival.
+pub const MAX_ORDER_SHORTFALL_BPS: u16 = 500;
 /// Upper bound on `min_refund`, wei — 0.01 ETH, well above POA's withdrawal fee; a refund
 /// threshold above it would let config hold users' ETH.
 pub const MAX_MIN_REFUND: u128 = 10_000_000_000_000_000;
@@ -113,13 +115,9 @@ pub struct Params {
     pub min_quote_slippage_bps: u16,
     /// Seconds a signed transfer stays executable.
     pub transfer_validity: u64,
-    /// One fill per order, of at most this many times the order's own amount — the catch-up rate,
-    /// and what a bad quote can move at once. At least 2: the dispatcher caps the relay fee at half
-    /// what bridges, so `A` receives up to twice the order's amount, and that must fit one fill.
-    pub max_fill_multiple: u32,
     /// How far below the order's own amount `A`'s ETH may be and still count as credited, bps. The
     /// amount is already net of the relay fee and trimming, so this covers only POA's credit
-    /// falling short of the deposit — a hedge, small or 0.
+    /// falling short of the deposit — a hedge, small or 0, at most `MAX_ORDER_SHORTFALL_BPS`.
     pub max_order_shortfall_bps: u16,
     /// The smallest ETH refund, wei — above POA's withdrawal fee. At most `MAX_MIN_REFUND`.
     pub min_refund: U128,
@@ -416,20 +414,25 @@ impl IntentRouter {
         self.assert_owner();
         let code = env::input().unwrap_or_else(|| env::panic_str("NoCode"));
         require!(!code.is_empty(), "NoCode");
-        emit("upgrade", json!({ "code_sha256": hex::encode(env::sha256_array(&code)) }));
+        let code_sha256 = hex::encode(env::sha256_array(&code));
         Promise::new(env::current_account_id()).deploy_contract(code).function_call(
             "migrate".to_string(),
-            Vec::new(),
+            json!({ "code_sha256": code_sha256 }).to_string().into_bytes(),
             NearToken::from_yoctonear(0),
             GAS_FOR_MIGRATE,
         )
     }
 
-    /// Run by `upgrade` on the new code. Every release keeps the method.
+    /// Run by `upgrade` on the new code. Every release keeps the method and its argument. The
+    /// upgrade is logged here, in the deploy's own receipt, so a refused migrate logs nothing.
     #[private]
     #[init(ignore_state)]
-    pub fn migrate() -> Self {
-        env::state_read().unwrap_or_else(|| env::panic_str("NoState"))
+    pub fn migrate(code_sha256: String) -> Self {
+        let this: Self = env::state_read().unwrap_or_else(|| env::panic_str("NoState"));
+        // A release that changes the bounds re-checks the stored params against them.
+        this.assert_params();
+        emit("upgrade", json!({ "code_sha256": code_sha256 }));
+        this
     }
 
     // =============== Views ==================================================================
@@ -537,9 +540,10 @@ impl IntentRouter {
         require!(now_ms <= q.issued_ms.saturating_add(p.max_quote_age * 1_000), "QuoteTooOld");
         require!(q.slippage_bps >= u64::from(p.min_quote_slippage_bps), "QuoteSlippageTooTight");
         // The fill is A's whole ETH up to the cap, not the caller's choice: a dust quote cannot
-        // spend the order's one nonce. And the order's own ETH must have arrived, so dust a stranger
-        // credits to A before POA does cannot qualify either.
-        let fill = balance.min(order.amount.saturating_mul(u128::from(p.max_fill_multiple)));
+        // spend the order's one nonce. And A must hold about the order's amount, so dust a stranger
+        // credits before POA does cannot qualify — though ETH A already held counts as well as this
+        // order's own: the check cannot tell them apart.
+        let fill = balance.min(order.amount.saturating_mul(u128::from(t.max_fill_multiplier)));
         require!(
             q.amount_in <= fill && q.amount_in * 10_000 >= fill * (10_000 - FILL_TOLERANCE_BPS),
             "WrongFillAmount"
@@ -557,8 +561,8 @@ impl IntentRouter {
 
         // From the order alone: any quote for the same order re-signs the same nonce, so at most one
         // transfer per order executes. The salt is the verifier's live one: after a salt rotation,
-        // while the old salt is still accepted, an order can be signed once more — a fill of what A
-        // still holds, sized and floored as above: the catch-up, earlier.
+        // while the old salt is still accepted, an order can be signed once more — a second fill of
+        // what A still holds, sized and floored as above, under its own cap: the cap is per salt.
         let nonce = versioned_nonce(salt, nonce_expiry, entropy(&[b"swap", &path, &order.seq.to_be_bytes()]));
         let message = intent::message(&account, deadline, vec![transfer(q.deposit.as_str(), &self.eth_token, q.amount_in)]);
         let info = Signed {
@@ -668,8 +672,7 @@ impl IntentRouter {
         require!(p.max_quote_age > 0 && p.max_quote_age <= MAX_QUOTE_AGE, "InvalidQuoteAge");
         require!(p.min_quote_slippage_bps <= MAX_MIN_QUOTE_SLIPPAGE_BPS, "InvalidQuoteSlippage");
         require!(p.transfer_validity > 0 && p.transfer_validity <= MAX_TRANSFER_VALIDITY, "InvalidTransferValidity");
-        require!(p.max_fill_multiple > 0 && p.max_fill_multiple <= MAX_FILL_MULTIPLE, "InvalidFillMultiple");
-        require!(p.max_order_shortfall_bps < 10_000, "InvalidOrderShortfall");
+        require!(p.max_order_shortfall_bps <= MAX_ORDER_SHORTFALL_BPS, "InvalidOrderShortfall");
         require!(p.min_refund.0 > 0 && p.min_refund.0 <= MAX_MIN_REFUND, "InvalidMinRefund");
     }
 }

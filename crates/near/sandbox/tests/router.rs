@@ -177,8 +177,7 @@ async fn setup() -> anyhow::Result<Env> {
                 "max_quote_age": 120,
                 "min_quote_slippage_bps": 100,
                 "transfer_validity": 180,
-                "max_fill_multiple": 2,
-                "max_order_shortfall_bps": 2000,
+                "max_order_shortfall_bps": 100,
                 "min_refund": "1000",
             },
         }))
@@ -204,6 +203,7 @@ impl Env {
             owner: [0x33; 20],
             quote_id: [0x5a; 32],
             max_slippage_bps: 100,
+            max_fill_multiplier: 2,
             min_out_per_in: 0,
             // The batch threshold the deliver tests run against.
             min_delivery: 1_000_000,
@@ -509,6 +509,51 @@ async fn refund_only_after_the_deadline() -> anyhow::Result<()> {
     assert!(executed.is_success(), "{:?}", failures(&executed));
     assert!(executed.logs().iter().any(|l| l.contains("WITHDRAW_TO:0x2222222222222222222222222222222222222222")));
     assert_eq!(env.held(&a, &env.eth).await?, 0);
+    Ok(())
+}
+
+/// The DAO's only lever once the keys are gone: deploy and `migrate` in one batch, state kept, the
+/// upgrade logged by the new code itself.
+#[tokio::test]
+async fn upgrade_redeploys_and_migrates() -> anyhow::Result<()> {
+    let env = setup().await?;
+    let before: Value = env.router.view("get_config").await?.json()?;
+    let code = wasm("ROUTER_WASM", "../contracts/intent-router").await?;
+    let outcome = env
+        .router
+        .as_account()
+        .call(env.router.id(), "upgrade")
+        .args(code.clone())
+        .deposit(ONE_YOCTO)
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(outcome.is_success(), "{:?}", failures(&outcome));
+    let hash = hex::encode(sha2::Sha256::digest(&code));
+    assert!(outcome.logs().iter().any(|l| l.contains("\"upgrade\"") && l.contains(&hash)), "{:?}", outcome.logs());
+    let after: Value = env.router.view("get_config").await?.json()?;
+    assert_eq!(after, before);
+    Ok(())
+}
+
+/// A deploy that fails reverts the whole batch: the old code keeps serving, nothing is logged.
+#[tokio::test]
+async fn a_failed_upgrade_changes_nothing() -> anyhow::Result<()> {
+    let env = setup().await?;
+    let before: Value = env.router.view("get_config").await?.json()?;
+    let outcome = env
+        .router
+        .as_account()
+        .call(env.router.id(), "upgrade")
+        .args(b"not wasm".to_vec())
+        .deposit(ONE_YOCTO)
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(!failures(&outcome).is_empty());
+    assert!(!outcome.logs().iter().any(|l| l.contains("\"upgrade\"")));
+    let after: Value = env.router.view("get_config").await?.json()?;
+    assert_eq!(after, before);
     Ok(())
 }
 
