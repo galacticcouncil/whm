@@ -25,7 +25,7 @@ export function routes(chains: Record<string, ChainQuoter>) {
         return reply.code(400).send({ error: `unknown chain '${chain}'` });
       }
 
-      // The relay fee is paid out of what IntentReceiver delivers, and that is always native — so
+      // The relay fee is paid out of what the receiver delivers, and that is always native — so
       // refuse rather than answer in wei and let the caller believe it got its own asset.
       if (!quoter.isNative(feeAsset)) {
         return reply

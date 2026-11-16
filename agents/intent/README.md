@@ -8,8 +8,8 @@ app, the command names the entry point.
 | `app-quoter`  | Prices the destination relay fee, so the SDK can size `maxRelayFee`    |
 | `app-relayer` | Tells 1Click a deposit landed, so an order resolves instead of sitting |
 
-> The VAA relaying itself lives in [`agents/relayer`](../relayer/) (`intent` app) — it submits
-> `processOrder`. `app-relayer` here is the 1Click leg, which touches no chain state.
+> The VAA relaying itself lives in [`agents/relayer`](../relayer/) (`intent` and `intent-v2` apps)
+> — they submit `processOrder`. `app-relayer` here is the 1Click leg, which touches no chain state.
 
 ## quoter
 
@@ -20,7 +20,7 @@ GET /health          → { ok: true }
 GET /api/status      → the modelled envelope, so a stale constant is visible without a quote
 ```
 
-Amounts are decimal strings in wei. Native only: the fee is paid out of what `IntentReceiver`
+Amounts are decimal strings in wei. Native only: the fee is paid out of what the Ethereum receiver
 delivers, and that is always native ETH — a `feeAsset` naming anything but `native` or WETH is
 refused rather than answered in the wrong asset.
 
@@ -41,10 +41,16 @@ fee = gas × maxFeePerGas × (1 + marginBps)
 Priced at `maxFeePerGas`, not the base fee — that is what the relayer bills, and quoting the base
 fee instead leaves the caller's margin with nothing to cover.
 
-Both VAAs have fixed-length payloads and fixed framing, so the envelope is computable before either
+One envelope serves every intents version, because it models the heavier call. v1's
+`IntentReceiver.processOrder` carries two VAAs (the settlement and the instruction) and verifies two
+signature sets; v2's `IntentForwarder.processOrder` carries one VAA, the instruction riding in its
+transfer payload, and verifies one. So the quote is exact for v1 and an upper bound for v2 — a
+slightly generous ceiling, while the relayer still claims what the real call costs.
+
+Every VAA has a fixed-length payload and fixed framing, so the envelope is computable before any
 exists — only the guardian quorum is read live. Execution is pinned because it isn't derivable;
-**re-pin it after an `IntentReceiver` or NTT upgrade**. Full reasoning, and what the measurements
-were: [docs/intents/relay-fee.md](../../docs/intents/relay-fee.md).
+**measure it again after an upgrade of either receiver or of NTT**. Full reasoning, and what the
+measurements were: [docs/intents/relay-fee.md](../../docs/intents/relay-fee.md).
 
 `gasLimit` on the request replaces the model outright (and drops `gas` from the response, since the
 breakdown would no longer describe what was priced). `ETH_GAS_LIMIT` does the same permanently.
