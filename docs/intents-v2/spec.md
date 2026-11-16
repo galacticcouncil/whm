@@ -208,7 +208,7 @@ market by up to the feed's deviation threshold. Alert on stale feeds.
 ## 5. Ethereum — the forwarder
 
 ```
-IntentForwarder.processOrder(nttVaa, feeRequested)      anyone; authorized relayers get 5 min first
+IntentForwarder.processOrder(nttVaa, feeRequested)      anyone; authorized relayers get a head start
   1. the transfer: from chain 73, sender == IntentDispatcher, to == the forwarder, 8 decimals
   2. its payload → depositAddress, maxRelayFee; feeRequested ≤ maxRelayFee
   3. once per NTT message digest
@@ -221,6 +221,11 @@ Hydration. The destination comes from the transfer's payload, attested with the 
 transfer the pinned dispatcher sent is an order. NTT delivery is permissionless, so a settlement may
 already be here — that skips step 4's delivery, not the check that its ETH was released (the inbound
 rate limiter can queue a delivered transfer).
+
+**The head start** is `exclusiveWindow` from the VAA's timestamp — an hour at deploy, owner-set up to
+a day. It is there for the fee: an authorized relayer claims the measured cost, anyone else the whole
+ceiling, so the window has to outlast a gas spike the honest relayer waits out. Past it, anyone can
+process, so delivery never depends on one relayer for longer.
 
 ---
 

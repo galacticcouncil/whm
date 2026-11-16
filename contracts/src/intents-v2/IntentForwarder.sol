@@ -33,8 +33,9 @@ import {IIntentForwarder} from "./interfaces/IIntentForwarder.sol";
 contract IntentForwarder is Initializable, UUPSUpgradeable, IIntentForwarder {
     using NttPayload for bytes;
 
-    /// @notice Head start for authorized relayers, from the settlement VAA's timestamp.
-    uint256 internal constant EXCLUSIVE_WINDOW = 5 minutes;
+    /// @notice The longest head start the owner can give authorized relayers — past it, anyone can
+    ///         process, so liveness never waits on them for longer.
+    uint256 internal constant MAX_EXCLUSIVE_WINDOW = 1 days;
 
     /// @notice What NTT trims WETH to — `min(8, srcDp, dstDp)` with 18 decimals on both sides.
     uint8 internal constant NTT_DECIMALS = 8;
@@ -53,9 +54,14 @@ contract IntentForwarder is Initializable, UUPSUpgradeable, IIntentForwarder {
     /// @notice Settlements already forwarded, by NTT message digest.
     mapping(bytes32 => bool) public processed;
 
-    /// @notice Relayers that may process inside EXCLUSIVE_WINDOW. Empty means permissionless always.
+    /// @notice Relayers that may process inside `exclusiveWindow`. Empty means permissionless always.
     mapping(address => bool) public authorizedRelayer;
     uint256 public authorizedRelayerCount;
+
+    /// @notice Head start for authorized relayers, in seconds from the settlement VAA's timestamp.
+    ///         Long enough to outlast a gas spike: past it, anyone can process and claim the whole
+    ///         ceiling, where an authorized relayer claims the measured cost.
+    uint256 public exclusiveWindow;
 
     modifier onlyOwner() {
         _onlyOwner();
@@ -74,6 +80,7 @@ contract IntentForwarder is Initializable, UUPSUpgradeable, IIntentForwarder {
         owner = msg.sender;
         wormhole = IWormhole(_wormhole);
         transceiver = IWormholeTransceiver(_transceiver);
+        exclusiveWindow = 1 hours;
     }
 
     /// @notice Accept settlements.
@@ -144,7 +151,7 @@ contract IntentForwarder is Initializable, UUPSUpgradeable, IIntentForwarder {
     ///        parsed unverified.
     function _requireCallerMayProcess(uint32 timestamp) private view {
         if (authorizedRelayerCount == 0 || authorizedRelayer[msg.sender]) return;
-        if (block.timestamp < uint256(timestamp) + EXCLUSIVE_WINDOW) revert Unauthorized();
+        if (block.timestamp < uint256(timestamp) + exclusiveWindow) revert Unauthorized();
     }
 
     /// @dev Assert the settlement's funds landed here, rather than inferring it from delivery: the
@@ -186,6 +193,13 @@ contract IntentForwarder is Initializable, UUPSUpgradeable, IIntentForwarder {
         authorizedRelayer[relayer] = enabled;
         enabled ? authorizedRelayerCount++ : authorizedRelayerCount--;
         emit RelayerAuthorized(relayer, enabled);
+    }
+
+    /// @notice Set the authorized relayers' head start, at most MAX_EXCLUSIVE_WINDOW.
+    function setExclusiveWindow(uint256 window) external onlyOwner {
+        if (window > MAX_EXCLUSIVE_WINDOW) revert InvalidExclusiveWindow(window);
+        exclusiveWindow = window;
+        emit ExclusiveWindowSet(window);
     }
 
     /// @notice Emergency withdrawal.

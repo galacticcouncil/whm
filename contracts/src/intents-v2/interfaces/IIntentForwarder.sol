@@ -25,6 +25,7 @@ interface IIntentForwarder {
     event Swept(address indexed to, uint256 amount);
     event DispatcherUpdated(bytes32 indexed dispatcher);
     event RelayerAuthorized(address indexed relayer, bool enabled);
+    event ExclusiveWindowSet(uint256 window);
 
     // ─── Errors ──────────────────────────────────────────────────
 
@@ -49,6 +50,8 @@ interface IIntentForwarder {
     /// @dev Caller is not authorized and the order is still inside its exclusive window. Expires, so
     ///      liveness never depends on any one relayer.
     error Unauthorized();
+    /// @dev Over MAX_EXCLUSIVE_WINDOW — a longer head start would hold orders hostage to one relayer.
+    error InvalidExclusiveWindow(uint256 window);
 
     // ─── Core ────────────────────────────────────────────────────
 
@@ -68,8 +71,10 @@ interface IIntentForwarder {
     function processed(bytes32 digest) external view returns (bool);
     function authorizedRelayer(address relayer) external view returns (bool);
     function authorizedRelayerCount() external view returns (uint256);
+    function exclusiveWindow() external view returns (uint256);
     function setOwner(address newOwner) external;
     function setDispatcher(bytes32 dispatcher) external;
     function setAuthorizedRelayer(address relayer, bool enabled) external;
+    function setExclusiveWindow(uint256 window) external;
     function sweep(address to, uint256 amount) external;
 }

@@ -244,13 +244,42 @@ contract IntentForwarderTest is Test {
         forwarder.setAuthorizedRelayer(relayer, true);
         bytes memory vaa = _vaa(_order());
 
+        assertEq(forwarder.exclusiveWindow(), 1 hours, "an hour by default");
+        vm.warp(block.timestamp + 1 hours - 1);
         vm.prank(makeAddr("stranger"));
         vm.expectRevert(IIntentForwarder.Unauthorized.selector);
         forwarder.processOrder(vaa, 0);
 
-        vm.warp(block.timestamp + 5 minutes);
+        vm.warp(block.timestamp + 1);
         vm.prank(makeAddr("stranger"));
         forwarder.processOrder(vaa, 0);
+        assertEq(depositAddress.balance, AMOUNT);
+    }
+
+    function testAuthorizedRelayerProcessesInsideTheWindow() public {
+        forwarder.setAuthorizedRelayer(relayer, true);
+        bytes memory vaa = _vaa(_order());
+
+        vm.prank(relayer);
+        forwarder.processOrder(vaa, MAX_RELAY_FEE);
+        assertEq(relayer.balance, MAX_RELAY_FEE);
+    }
+
+    function testExclusiveWindowIsTheOwnersUpToADay() public {
+        forwarder.setAuthorizedRelayer(relayer, true);
+
+        vm.expectEmit(address(forwarder));
+        emit IIntentForwarder.ExclusiveWindowSet(1 days);
+        forwarder.setExclusiveWindow(1 days);
+        assertEq(forwarder.exclusiveWindow(), 1 days);
+
+        vm.expectRevert(abi.encodeWithSelector(IIntentForwarder.InvalidExclusiveWindow.selector, 1 days + 1));
+        forwarder.setExclusiveWindow(1 days + 1);
+
+        // Zero opens every order at once, as an empty allowlist does.
+        forwarder.setExclusiveWindow(0);
+        vm.prank(makeAddr("stranger"));
+        forwarder.processOrder(_vaa(_order()), 0);
         assertEq(depositAddress.balance, AMOUNT);
     }
 
@@ -302,6 +331,8 @@ contract IntentForwarderTest is Test {
         forwarder.setDispatcher(bytes32(uint256(1)));
         vm.expectRevert(IIntentForwarder.NotOwner.selector);
         forwarder.setAuthorizedRelayer(relayer, true);
+        vm.expectRevert(IIntentForwarder.NotOwner.selector);
+        forwarder.setExclusiveWindow(0);
         vm.expectRevert(IIntentForwarder.NotOwner.selector);
         forwarder.sweep(relayer, 1);
         vm.stopPrank();
