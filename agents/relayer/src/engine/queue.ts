@@ -1,6 +1,7 @@
 import { formatEther, formatGwei, type Account, type Hash, type PublicClient } from "viem";
 
 import logger from "../logger";
+import { notifyDiscord as postDiscord } from "./notify";
 import { isDead, isDone, revertName } from "./revert";
 
 /** Enough gas for one submission; below this the process is out of runway and exits. */
@@ -68,17 +69,8 @@ export function createQueue(deps: QueueDeps) {
     return chainLabel;
   }
 
-  async function notifyDiscord(message: string): Promise<void> {
-    if (!deps.discordWebhook) return;
-    try {
-      await fetch(deps.discordWebhook, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: message }),
-      });
-    } catch (e) {
-      logger.error(`Failed to send Discord notification: ${(e as Error).message}`);
-    }
+  function notifyDiscord(message: string): Promise<boolean> {
+    return postDiscord(deps.discordWebhook, message);
   }
 
   /** Exit rather than submit into a wallet that cannot pay — a half-sent queue is worse. */
@@ -112,8 +104,8 @@ export function createQueue(deps: QueueDeps) {
       if (!lowBalanceWarned) {
         const msg = `WARN low gas | ${summary}`;
         logger.warn(msg);
-        await notifyDiscord(msg);
-        lowBalanceWarned = true;
+        // Warned once Discord took it; a refused post is tried again at the next check.
+        lowBalanceWarned = await notifyDiscord(msg);
       }
     } else {
       lowBalanceWarned = false;
@@ -149,8 +141,14 @@ export function createQueue(deps: QueueDeps) {
         task.resolve();
       } else if (message.includes("nonce too low")) {
         task.logger.info("nonce too low, reloading");
-        nonce = await publicClient.getTransactionCount({ address: account.address });
-        pending.unshift(task);
+        try {
+          nonce = await publicClient.getTransactionCount({ address: account.address });
+          pending.unshift(task);
+        } catch (reload) {
+          // Escaping here would reject `drain()`, whose callers discard it, and end the process.
+          task.logger.warn(`${task.label} nonce reload failed: ${(reload as Error).message}`);
+          task.reject(e);
+        }
       } else {
         // Not proven finished — a queued settlement, a failing forward, an RPC blip. Hand it
         // back so the engine retries with backoff rather than acking a failure as a success.
@@ -159,7 +157,12 @@ export function createQueue(deps: QueueDeps) {
       }
     } finally {
       processing = false;
-      await checkBalance();
+      try {
+        await checkBalance();
+      } catch (e) {
+        // An RPC blip on the balance read; the next task checks again.
+        logger.warn(`Balance check failed: ${(e as Error).message}`);
+      }
       void drain();
     }
   }

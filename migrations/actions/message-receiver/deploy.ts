@@ -1,10 +1,10 @@
 import { encodeFunctionData } from "viem";
 
-import type { ifs } from "@whm/common/evm";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
 import type { WalletContext } from "../types";
 
-import messageReceiverJson from "../../../contracts/out/MessageReceiver.sol/MessageReceiver.json";
-import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
+const messageReceiverJson = forgeArtifact("MessageReceiver");
+const erc1967ProxyJson = forgeArtifact("ERC1967Proxy");
 
 export type DeployReceiverParams = WalletContext & {
   wormholeCore: `0x${string}`;
@@ -19,7 +19,7 @@ export type DeployReceiverResult = {
 
 export async function deployReceiver(params: DeployReceiverParams): Promise<DeployReceiverResult> {
   const { publicClient, walletClient, account, wormholeCore, proxy } = params;
-  const { abi, bytecode } = messageReceiverJson as ifs.ContractArtifact;
+  const { abi, bytecode } = messageReceiverJson;
 
   // Deploy implementation
   const implHash = await walletClient.deployContract({
@@ -52,7 +52,7 @@ export async function deployReceiver(params: DeployReceiverParams): Promise<Depl
     functionName: "initialize",
     args: [wormholeCore],
   });
-  const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson as ifs.ContractArtifact;
+  const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson;
 
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,

@@ -20,6 +20,7 @@ set -uo pipefail # no -e: one dead RPC must not kill the whole report
 RPC_HYDRATION="https://rpc.kril.hydration.cloud"
 RPC_ETHEREUM="https://ethereum-rpc.publicnode.com"
 RPC_ROBINHOOD="https://rpc.mainnet.chain.robinhood.com"
+RPC_BASE="https://base-rpc.publicnode.com" # serves eth_getLogs; mainnet.base.org refuses it
 RPC_SOLANA="https://api.mainnet-beta.solana.com"
 
 SAMPLE=10                   # direct calls sampled per agent (sender share + cost per tx); ≤5× txs examined
@@ -58,7 +59,8 @@ ORACLE_RECEIVERS=(
 
 join() { local IFS=,; echo "$*"; }
 
-# service/app|chain|targets — the contracts each agent calls directly.
+# service/app|chain|targets[|selectors] — the contracts each agent calls directly, and, for a
+# contract users call too, the function selectors that are the agent's own calls.
 AGENTS=(
   "broadcaster/oracle-ethereum|ethereum|0xfbf682642a6a28760e717b637f12d014bd5db4b9"   # OracleEmitter
   "broadcaster/oracle-robinhood|robinhood|0x9fbd9f16ce7fa17097e91cc36dc1b7b47adca9de" # OracleEmitter
@@ -68,6 +70,10 @@ AGENTS=(
   "relayer/oracle-robinhood|robinhood|0x060f1ef6bb1c7ab31d2bbc3d2ae47e590952b958" # OracleReceiver
   "relayer/intent|ethereum|0x2173f6ece25768e7efc5199f70f8783d88ba63c8"            # IntentReceiver
   "relayer/basejump|hydration|0x35bf3a1b9ac564c8f66c97cea1ee410cd3f97c8a"         # BasejumpReceiver
+  # Users call the PSM contracts directly too, so only the relayer's own calls count as its bot's:
+  # receiveMessage 0xf953cec7, flushPendingMint 0x3038f9d9, drain 0xf6b19c74.
+  "relayer/psm-hydration|hydration|0xda30cfdf3647c291cb3b0eed6ac5f0fea7f393c4|0xf953cec7,0x3038f9d9" # HollarBaseFacilitator
+  "relayer/psm-base|base|0xd5fd74f570343245afce4a4c0b24b59179cfdfa7|0xf953cec7,0xf6b19c74"           # HollarBaseVault
 )
 SOLANA_AGENT="broadcaster/oracle-solana"
 SOLANA_PROGRAM="2knjvgqZKtU3nV1r9RaLshS9JYWMerZ1ysSFcDyTVsdn" # oracle-emitter
@@ -81,6 +87,7 @@ chain_rpc() {
     hydration) echo "$RPC_HYDRATION" ;;
     ethereum) echo "$RPC_ETHEREUM" ;;
     robinhood) echo "$RPC_ROBINHOOD" ;;
+    base) echo "$RPC_BASE" ;;
   esac
 }
 
@@ -205,7 +212,7 @@ scan_chain() {
 # All 24h txs to the targets; samples the newest SAMPLE for the dominant direct caller and its cost.
 # Writes "agent|chain|bot|share|tx24h|costPerTx|burn24h|lastTs".
 evm_agent() {
-  local agent=$1 chain=$2 targets=$3 logs=$4 out=$5 rpc
+  local agent=$1 chain=$2 targets=$3 logs=$4 out=$5 selectors=${6:-} rpc
   rpc=$(chain_rpc "$chain")
   local targets_lc refs total
   targets_lc=$(echo "$targets" | tr ',' '\n')
@@ -218,11 +225,15 @@ evm_agent() {
     # SAMPLE direct calls, but look past users' indirect traffic on shared contracts (bounded)
     ((n >= SAMPLE || seen >= SAMPLE * 5)) && break
     seen=$((seen + 1))
-    local tx txfrom txto hash cost
+    local tx txfrom txto hash cost input
     tx=$(cast rpc eth_getTransactionByBlockNumberAndIndex "$(printf '0x%x' "$b")" "$i" --rpc-url "$rpc" 2>/dev/null) || continue
     txfrom=$(echo "$tx" | jq -r '.from' | tr 'A-F' 'a-f')
     txto=$(echo "$tx" | jq -r '.to // ""' | tr 'A-F' 'a-f')
     grep -qx "$txto" <<<"$targets_lc" || continue # direct calls only
+    if [ -n "$selectors" ]; then # and only the agent's own, where users call the target too
+      input=$(echo "$tx" | jq -r '.input // ""' | cut -c1-10 | tr 'A-F' 'a-f')
+      [[ ",$selectors," == *",$input,"* ]] || continue
+    fi
     hash=$(echo "$tx" | jq -r '.hash')
     # the hash as this RPC reports it (Hydration nodes disagree on hashes)
     cost=$(cast rpc eth_getTransactionReceipt "$hash" --rpc-url "$rpc" 2>/dev/null |
@@ -294,7 +305,7 @@ discover() {
   echo "=== Discovering agent bots (dominant direct caller, last 24h) ==="
 
   # one log scan per chain, all chains at once
-  for chain in hydration ethereum robinhood; do
+  for chain in hydration ethereum robinhood base; do
     : >"$tmp/$chain.logs"
     scan_chain "$chain" "$tmp/$chain.logs" &
   done
@@ -304,8 +315,8 @@ discover() {
   # per-agent sampling, all agents at once
   local k=0
   for row in "${AGENTS[@]}"; do
-    IFS='|' read -r agent chain targets <<<"$row"
-    evm_agent "$agent" "$chain" "$targets" "$tmp/$chain.logs" "$tmp/agent.$k" &
+    IFS='|' read -r agent chain targets selectors <<<"$row"
+    evm_agent "$agent" "$chain" "$targets" "$tmp/$chain.logs" "$tmp/agent.$k" "$selectors" &
     k=$((k + 1))
   done
   wait

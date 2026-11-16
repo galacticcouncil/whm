@@ -37,9 +37,8 @@ export const BASE_EVM_CHAIN_ID = viemBase.id;
  * `undefined` here is what turns that into viem's own `UrlRequiredError`, the same mechanism
  * `hydrationClients("")` already fails by.
  *
- * That protects the factory, not the app: `apps/psm/config.ts` resolves an unset or empty `RPC_BASE`
- * to `https://mainnet.base.org` itself, as it does `RPC_HYDRATION` to a public endpoint, so psm-base
- * started without one still signs against that endpoint.
+ * The app requires `RPC_BASE` on top of that (`rpcBase` in `apps/psm/config.ts`): psm-base started
+ * without one stops, rather than signing against a public endpoint that refuses `eth_getLogs`.
  */
 export const base = defineChain({
   ...viemBase,
