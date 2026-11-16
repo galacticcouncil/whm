@@ -8,6 +8,7 @@ export const entryPoints = {
   "oracle/app": "src/apps/oracle/app.ts",
   "oracle-robinhood/app": "src/apps/oracle-robinhood/app.ts",
   "intent/app": "src/apps/intent/app.ts",
+  "intent-v2/app": "src/apps/intent-v2/app.ts",
   "basejump/app": "src/apps/basejump/app.ts",
   // PSM has two destination chains, so it is the first app with two entry points — see
   // src/apps/psm/hydration.ts's doc comment for why.

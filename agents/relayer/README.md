@@ -59,6 +59,26 @@ demand, so there is no pairing state to lose across restarts.
 Its three addresses live in [routes.ts](src/apps/intent/routes.ts); the app validates them at
 startup and refuses to run on a blank or malformed one.
 
+### `intent-v2`
+
+Relays intents v2 orders **from Hydration to Ethereum** ([spec](../../docs/intents-v2/spec.md)).
+The `IntentDispatcher` bridges WETH to the `IntentForwarder` over NTT with the forwarding instruction
+in the transfer's own payload, so one VAA carries everything: this calls
+`IntentForwarder.processOrder(nttVaa, feeRequested)`, which delivers the settlement, pays the fee and
+forwards the rest to POA's deposit address for the order's NEAR account.
+
+It subscribes to the same WETH transceiver as `intent` and picks out orders by the transfer itself —
+sent by the dispatcher, to the forwarder — so the two apps never act on each other's settlements.
+Nothing is paired and the source transaction is never read, so an order goes out the moment the spy
+delivers it: the router prices an order for minutes, not hours. The fee is measured as in `intent`.
+
+There is no age cap: the ETH has to reach the NEAR account even after its order's price expired, as
+the next order or the refund spends it from there. Retries run about eight hours. Its addresses live
+in [routes.ts](src/apps/intent-v2/routes.ts) — the dispatcher and forwarder ship blank until the
+`intents-v2` migration deploys them; at startup it refuses a blank route and a forwarder pinning
+another dispatcher, and warns when its key is not an authorized relayer. Set `FROM_SEQ_HYDRATION` to
+the transceiver's sequence at the dispatcher's deploy before the first run.
+
 ### `basejump`
 
 Relays Basejump fast-path VAAs **into Hydration**. A source `BasejumpEmitter` publishes a net payout
@@ -102,7 +122,7 @@ caps are constants in each app's `config.ts` and `routes.ts`.
 | --------------------- | ------------------------------------------------- | ------------------------------------- |
 | `PRIVKEY`             | Signing key. Same name everywhere — **see below** | Required                              |
 | `RPC_HYDRATION`       | Hydration EVM RPC (chain `222222`)                | `https://hydration-rpc.n.dwellir.com` |
-| `RPC_ETHEREUM`        | Ethereum RPC (`intent` only)                      | `https://eth.llamarpc.com`            |
+| `RPC_ETHEREUM`        | Ethereum RPC (`intent`, `intent-v2` only)         | `https://eth.llamarpc.com`            |
 | `RPC_ROBINHOOD`       | Robinhood Chain RPC (`oracle-robinhood` only)     | `https://rpc.mainnet.chain.robinhood.com` |
 | `RPC_BASE`            | Base RPC (`psm-base` only)                        | `https://mainnet.base.org`            |
 | `PRIVKEY_BASE`        | Base signing key (`psm-base` only)                | Required                              |
