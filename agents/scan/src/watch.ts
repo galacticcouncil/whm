@@ -7,6 +7,7 @@ import { PUBLISH } from "./chains/events";
 import {
   BASEJUMP,
   INTENT,
+  INTENT_V2,
   NTT,
   nttLegs,
   ORACLE,
@@ -68,12 +69,16 @@ const FROM = {
     oracles: FROM_CHAIN_ORA.hydration,
     /** ZecUtxoEmitter's deploy. */
     utxoZec: 15_901_846n,
+    /** IntentDispatcher's deploy — set with its address. */
+    intentsV2: 0n,
   },
   ethereum: {
     ntt: FROM_CHAIN.ethereum,
     intents: FROM_CHAIN.ethereum,
     basejump: FROM_CHAIN.ethereum,
     oracles: FROM_CHAIN_ORA.ethereum,
+    /** IntentForwarder's deploy — set with its address. */
+    intentsV2: 0n,
   },
   base: { ntt: FROM_CHAIN.base },
   robinhood: { ntt: FROM_CHAIN.robinhood, oracles: FROM_CHAIN_ORA.robinhood },
@@ -195,6 +200,28 @@ const INTENTS: Watch[] = [
   },
 ];
 
+/**
+ * A watch entry for an intents v2 contract, empty until it is deployed. An address without its
+ * deploy block is refused: a cursor at block 0 would pull Hydration's shared scan back to genesis.
+ *
+ * @param chain Where it is deployed.
+ * @param role The role its flow legs name.
+ * @param address The contract, blank until deployed.
+ * @param from Its deploy block.
+ * @returns The entry, or none.
+ */
+function intentV2(chain: string, role: string, address: string, from: bigint): Watch[] {
+  if (!address) return [];
+  if (from === 0n) throw new Error(`${role}: ${address} has no deploy block in FROM.${chain}`);
+  return [{ chain, role, from, at: [address] }];
+}
+
+/** Intents v2: published on Hydration, forwarded on Ethereum. */
+const INTENTS_V2: Watch[] = [
+  ...intentV2("hydration", "intent-dispatcher", INTENT_V2.dispatcher, FROM.hydration.intentsV2),
+  ...intentV2("ethereum", "intent-forwarder", INTENT_V2.forwarder, FROM.ethereum.intentsV2),
+];
+
 /** Basejump: the Ethereum source, paid out of the Hydration landing pool. */
 const BASEJUMPS: Watch[] = [
   {
@@ -285,6 +312,7 @@ export const WATCH: Watch[] = [
   ...WORMHOLE,
   ...NTT_LEGS,
   ...INTENTS,
+  ...INTENTS_V2,
   ...BASEJUMPS,
   ...UTXO_ZEC,
   ...ORACLES,

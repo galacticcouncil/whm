@@ -14,6 +14,7 @@ app-intents      intent_orders + 1Click                             :8080
 app-transfers    every transfer: NTT, UTXO coins via Omni, Basejump :8081
 app-feeds        oracle relay updates, each feed's value over time  :8082
 ui               Hydration scan: Transfers · Orders · Feeds         :8083
+app-intents-v2   intent_v2_orders, and the terms still in play      :8084
 ```
 
 The UI holds no state and touches no database. It serves every page, and passes `/api/<section>/…`
@@ -124,7 +125,7 @@ node admin.js rebuild <reader>                    # empty a reader's tables, rep
 
 - **Rewind** re-reads a chain. Events already stored are skipped, so it is free to overshoot; events
   found for the first time reach every reader as new.
-- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `transfers`, `feeds`) — for a new leg
+- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `intents-v2`, `transfers`, `feeds`) — for a new leg
   or changed flow logic over events already stored. Its tables are emptied and refilled; anything a
   poller wrote is re-fetched as the rows come back.
 
@@ -232,6 +233,27 @@ status — and `/api/transfers/:id` returns that view beside the rail's own row.
 
 Stages: NTT `published → received → redeemed | queued`; a deposit `deposited → published →
 redeemed`; a withdrawal `requested → received → signed → withdrawn → confirmed`.
+
+## Intents v2 (the intents-v2 app)
+
+Orders the `IntentDispatcher` publishes on Hydration, and the `IntentForwarder` deposits to POA on
+Ethereum (`INTENT_V2` in `deployments.ts`, blank until deployed — a blank address is not watched).
+`intent_v2_orders` is keyed on the order's `seq`, the NTT message id of its transfer, which is the
+`transferSequence` the forwarder names. Stages: `published → forwarded`; what follows is on NEAR.
+
+`OrderPublished` carries the terms in full, so each row keeps them as emitted beside the fields
+worth a column — owner, deadline, destination asset, recipient, refund address — and the order
+message's VAA id. Every order of one set of terms shares their `auth_path`.
+
+```
+GET /api/orders?state=&authPath=&publishedAfter=&address=&limit=&offset=
+GET /api/orders/:seq
+GET /api/terms?deadlineAfter=<unix s>   # one row per auth_path: terms, deadline, newest order
+```
+
+`/api/terms` is the NEAR router bot's work list: it reads it at startup and follows `/api/events`
+after. Whether a set of terms still has work is `A`'s balances on NEAR, which scan does not read, so
+the caller picks how far past their deadline terms stay listed.
 
 ## Oracles (the feeds app)
 

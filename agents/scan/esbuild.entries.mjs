@@ -5,6 +5,7 @@
 export const entryPoints = {
   "ingest/app": "src/ingest/app.ts",
   "intents/app": "src/apps/intents/app.ts",
+  "intents-v2/app": "src/apps/intents-v2/app.ts",
   "transfers/app": "src/apps/transfers/app.ts",
   "feeds/app": "src/apps/feeds/app.ts",
   "ui/app": "src/ui/app.ts",

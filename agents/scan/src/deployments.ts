@@ -218,6 +218,15 @@ export const INTENT = {
 } as const;
 
 /**
+ * Intents v2: the dispatcher on Hydration publishes each order and bridges its ETH; the forwarder on
+ * Ethereum deposits it to POA. A blank address is not watched.
+ */
+export const INTENT_V2 = {
+  dispatcher: "",
+  forwarder: "",
+} as const;
+
+/**
  * Basejump: the emitter on Ethereum (deployments/prod/basejump-ethereum.json), paid out of the
  * landing pool on Hydration. Several independent landings merge into one view, so both are lists.
  */
