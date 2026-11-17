@@ -8,9 +8,9 @@ const ADDRESSES = {
   /** WormholeTransceiver (WETH) on Hydration — publishes the settlement we subscribe to. */
   transceiver: "0x8acce9CA511d5D7213F8C3f813B8916087cd00ae",
   /** IntentDispatcher proxy on Hydration — the only sender whose transfers are orders. */
-  dispatcher: "",
+  dispatcher: "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
   /** IntentForwarder proxy on Ethereum — the orders' recipient, and what this calls. */
-  forwarder: "",
+  forwarder: "0x31ab66509a8a0b5a0fdf33ff4a4297481863035c",
 };
 
 export interface IntentV2Route {
