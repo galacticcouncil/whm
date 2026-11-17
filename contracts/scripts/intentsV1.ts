@@ -18,28 +18,27 @@ const DESTINATION_ASSET = "nep141:wrap.near";
 const SLIPPAGE_BPS = 100;
 
 /**
- * NIR (Near Intent Routing) leg-2 driver — NTT path, source side.
+ * Intents v1 — one order through `IntentEmitter` on Hydration, swapped by 1Click.
  *
- * No TokenBridge payload and no intentId: `IntentEmitter.placeOrder` sells the asset for WETH,
- * settles it over NTT to IntentReceiver on Ethereum, and publishes `depositAddress` beside it as
- * its own Wormhole message. This script only places the order — the relayer's `intent` app pairs
- * the two VAAs and calls processOrder (deliver → pay caller → forward to the depositAddress), and
- * the intent agent's relayer app (agents/intent) watches the resulting `OrderProcessed` and
- * notifies 1Click.
+ * `IntentEmitter.placeOrder` sells the asset for WETH, settles it over NTT to `IntentReceiver` on
+ * Ethereum, and publishes `depositAddress` beside it as its own Wormhole message. This script only
+ * places the order: the relayer's `intent` app pairs the two VAAs and calls `processOrder` (deliver →
+ * pay the relayer → forward to `depositAddress`), and the intent agent's `relayer` app watches the
+ * resulting `OrderProcessed` and tells 1Click the deposit landed.
  *
  *   0. Quote the relay fee (maxRelayFee, +20% headroom) — gas-based, independent of the swap.
  *   1. 1Click quote for (--ethOut − maxRelayFee): the relay fee is skimmed on Ethereum, so the swap
  *      is sized to what actually lands at the depositAddress (--ethOut is the full WETH settled).
  *   2. approve(assetIn) + placeOrder(assetIn, amountIn, minEthOut, depositAddress, maxRelayFee).
  *
- * Returns once the order is committed; the relayer forwards and the intent agent notifies 1Click
- * out-of-band.
+ * Returns once the order is committed on Hydration.
  *
  * --ethOut is an estimate, and has to be: depositAddress is an argument to placeOrder, so the quote
  * must exist before the swap that decides how much WETH there is. FLEX_INPUT absorbs the gap.
  *
- * NOTE: needs a real network and the relayer running. It quotes marginBps=0 at processOrder time;
- * if that exceeds the order's maxRelayFee it skips as unprofitable and the deposit never lands.
+ * Needs mainnet and both relayer apps running. The `intent` app prices `processOrder` at its real
+ * cost; while that is above the order's maxRelayFee it re-quotes with backoff, and drops the order
+ * once its VAA is an hour old.
  *
  * Env: RPC, CHAIN_ID (Hydration); QUOTER_URL?, MAX_FEE_MARGIN_BPS?
  * Args: --pk --address(IntentEmitter) --assetIn(Hydration asset id) --amountIn

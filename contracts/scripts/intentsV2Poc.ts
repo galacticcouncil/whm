@@ -22,32 +22,33 @@ const POA_MIN_DEPOSIT = 100_000_000_000n; // 1e11 wei — below this POA credits
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 /**
- * NIR v2 PoC — account derivation and the deposit leg, with nothing deployed.
+ * Intents v2 PoC — account derivation and the deposit leg, with nothing of v2 deployed.
  *
- * Probes the paths in docs/intents/spec.md that do not need IntentEmitter or IntentRouter to
- * exist. The trick is that MPC derivation is keyed on the *caller*, so any NEAR account you hold a
- * full-access key for stands in for the router: `derived_public_key` takes `predecessor` as an
- * argument (so anyone can compute anyone's account), and `sign` takes it from the runtime caller (so
- * only that account can sign for it). Substituting your own account therefore reproduces the
- * production derivation exactly, minus the VAA gate.
+ * The probe docs/intents-v2/poc.md started from. MPC derivation is keyed on the *caller*, so any
+ * NEAR account you hold a full-access key for stands in for the router: `derived_public_key` takes
+ * `predecessor` as an argument (so anyone can compute anyone's account), and `sign` takes it from the
+ * runtime caller (so only that account can sign for it). Substituting your own account reproduces the
+ * router's derivation exactly, minus the VAA gate. `--path` defaults to `dca-1`; the router's own
+ * path is `0x` + keccak256 of the terms.
  *
  *   1. derive   — v1.signer.derived_public_key({predecessor, path, domain_id:1}) → A. Twice, plus a
  *                 second predecessor, to show determinism and that a different caller is disjoint.
- *   2. deposit  — POA deposit_address({account_id:A, chain}) → 0xN. Queried on eth:1 and eth:8453 to
- *                 measure the same-H160-different-token caveat rather than assume it.
+ *   2. deposit  — POA deposit_address({account_id:A, chain}) → 0xN, on --chain and eth:8453, to show
+ *                 the same H160 credits a different token per chain. POA refuses anonymous calls with
+ *                 HTTP 403; point POA_RPC at an endpoint that takes yours.
  *   3. balance  — intents.near mt_batch_balance_of(A, [nep141:eth.omft.near]).
- *   4. quote    — solver relay ETH→--destAsset at --amount. THE gate: if no solver answers, stop.
+ *   4. quote    — the solver relay's `quote`, ETH → --destAsset, with SOLVER_RELAY_KEY. The router
+ *                 takes a 1Click quote instead (poc.md, G1); this only shows a solver answers.
  *   5. fund     — send native ETH to 0xN and poll until POA credits A. Real mainnet funds.
+ *   6. sign     — printed, not run: a token_diff + ft_withdraw message and the `near` CLI call to
+ *                 sign it by hand. The router signs a transfer to a 1Click deposit account instead;
+ *                 crates/near/scripts/intent-router runs that round end to end.
  *
  * Steps 1–4 are read-only. Step 5 runs only with --amount and moves real value.
  *
- * The signing leg (v1.signer.sign → MultiPayload → publish_intent) is NOT executed: it needs a NEAR
- * transaction signer, and `SignRequest`'s field names are the UNVERIFIED item in spec §7 — so this
- * prints the exact intent message and the `near` CLI command to run by hand, which is also how you
- * pin the nep413-vs-raw_ed25519 question against the real verifier.
- *
- * Env: RPC_ETHEREUM, SOLVER_RELAY_KEY?  (Partner Portal JWT — the 1Click JWT is NOT this)
- * Args: --nearAccount --path? --destAsset? --recipient? --amount? --pk? --wait?
+ * Env: RPC_ETHEREUM; NEAR_RPC?, POA_RPC?, SOLVER_RELAY_KEY? (Partner Portal JWT — the 1Click JWT is
+ *      NOT this)
+ * Args: --nearAccount --path? --destAsset? --recipient? --amount? --pk? --chain? --wait?
  */
 
 /** base58-decode. Local so the PoC carries no new dependency for fifteen lines. */
@@ -107,7 +108,7 @@ async function nearView<T>(accountId: string, methodName: string, callArgs: unkn
 /**
  * The intents account a (predecessor, path) pair derives.
  * @param predecessor Account the MPC keys derivation on — the router in production
- * @param path Derivation path; the router will pass `hex::encode(authPath)`, lowercase and unprefixed
+ * @param path Derivation path; the router passes its terms' `authPath` as `0x` + lowercase hex
  * @returns The Ed25519 public key and the 64-hex implicit account id it *is*
  */
 async function deriveAccount(
