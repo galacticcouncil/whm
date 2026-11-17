@@ -16,6 +16,7 @@ const NAME = "ui";
 const UPSTREAMS: Record<string, string> = {
   transfers: process.env.TRANSFERS_API || "http://localhost:8081",
   orders: process.env.ORDERS_API || "http://localhost:8080",
+  "orders-v2": process.env.ORDERS_V2_API || "http://localhost:8084",
   feeds: process.env.FEEDS_API || "http://localhost:8082",
 };
 
@@ -23,7 +24,7 @@ const UPSTREAMS: Record<string, string> = {
 const PASS = ["content-type", "cache-control", "x-accel-buffering"];
 
 /**
- * One UI over the three apps: Transfers, Orders and Feeds, each section's pages calling its own
+ * One UI over the apps: Transfers, Orders (v1 and v2) and Feeds, each section's pages calling its own
  * app through `/api/<section>/…`. Holds no state and touches no database — every byte it serves
  * is a page, or an app's answer passed through, the live streams included.
  */

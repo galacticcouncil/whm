@@ -1,9 +1,34 @@
 import { pool } from "../../db";
+import { NTT } from "../../deployments";
 import { validLegs } from "../../flow";
 
 import { orders } from "./flows";
 
 const VALID = validLegs(orders, "o");
+
+/**
+ * The rail an order rides, joined on: its `seq` is the WETH manager's sequence, so scoping to that
+ * manager is what stops another corridor's transfer from matching. `ingest` owns these tables; this
+ * only reads them.
+ */
+const RAIL = `
+  LEFT JOIN ntt_transfers n
+    ON n.source_chain = 'hydration'
+   AND n.source_manager = '${NTT.weth.hydration.manager.toLowerCase()}'
+   AND n.manager_sequence = o.seq
+`;
+
+/**
+ * Every column, the rail's, and where the order sits among its terms' orders: `tranches` counts
+ * them, `tranche` is this one's place. One order is a swap, or a DCA's first tranche until the next.
+ */
+const COLUMNS = `
+  o.*,
+  n.vaa_id, n.digest, n.state AS rail_state, n.published AS rail_published,
+  n.settled AS rail_settled,
+  (SELECT COUNT(*)::int FROM intent_v2_orders x WHERE x.auth_path = o.auth_path) AS tranches,
+  (SELECT COUNT(*)::int FROM intent_v2_orders x WHERE x.auth_path = o.auth_path AND x.seq <= o.seq) AS tranche
+`;
 
 /**
  * Newest first by when the order was published, not by when the row was written — a backfill writes
@@ -62,7 +87,7 @@ export async function listOrders(filter: {
   const total = await pool.query(`SELECT COUNT(*)::int AS n FROM intent_v2_orders o ${where}`, params);
   params.push(filter.limit, filter.offset);
   const items = await pool.query(
-    `SELECT o.* FROM intent_v2_orders o ${where}
+    `SELECT ${COLUMNS} FROM intent_v2_orders o ${RAIL} ${where}
      ORDER BY ${NEWEST} LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
@@ -76,7 +101,7 @@ export async function listOrders(filter: {
  * @returns The row, or null.
  */
 export async function getOrder(seq: string): Promise<OrderRow | null> {
-  const r = await pool.query(`SELECT o.* FROM intent_v2_orders o WHERE o.seq = $1`, [seq]);
+  const r = await pool.query(`SELECT ${COLUMNS} FROM intent_v2_orders o ${RAIL} WHERE o.seq = $1`, [seq]);
   return r.rows[0] ?? null;
 }
 

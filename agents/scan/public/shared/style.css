@@ -258,6 +258,44 @@ a.hash:hover {
   background: var(--accent-soft);
 }
 
+/* A link carrying a version tag: the tag sits on its top-right corner, over the pill's edge. */
+.nav a.tagged,
+.list-title.tagged,
+.page-title.tagged {
+  position: relative;
+}
+
+.ver-tag {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: var(--accent-on);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* In the drawer the link spans the row, so the tag follows the label instead of the row's corner. */
+.drawer-sec > a .ver-tag {
+  position: static;
+  margin-left: -2px;
+  align-self: flex-start;
+}
+
+/* On a title the tag rides the last word rather than the block's far edge. */
+.list-title.tagged,
+.page-title.tagged {
+  padding-right: 16px;
+  width: fit-content;
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
@@ -879,6 +917,7 @@ a.addr-pill:hover .ext-site {
 }
 
 .badge.processed,
+.badge.forwarded,
 .badge.received,
 .badge.signed,
 .badge.withdrawn {

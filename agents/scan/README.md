@@ -13,14 +13,16 @@ ingest           chains → events → wh_messages + ntt_transfers      (no UI)
 app-intents      intent_orders + 1Click                             :8080
 app-transfers    every transfer: NTT, UTXO coins via Omni, Basejump :8081
 app-feeds        oracle relay updates, each feed's value over time  :8082
-ui               Hydration scan: Transfers · Orders · Feeds         :8083
+ui               Hydration scan: Transfers · Orders · Orders v2 · Feeds :8083
 app-intents-v2   intent_v2_orders, and the terms still in play      :8084
 ```
 
 The UI holds no state and touches no database. It serves every page, and passes `/api/<section>/…`
-through to that section's app — `transfers`, `orders`, `feeds` — live streams included, so the pages
-are one origin while the apps stay public on their own ports. `TRANSFERS_API`, `ORDERS_API` and
-`FEEDS_API` name the apps; they default to the ports above on this host.
+through to that section's app — `transfers`, `orders`, `orders-v2`, `feeds` — live streams included,
+so the pages are one origin while the apps stay public on their own ports. `TRANSFERS_API`,
+`ORDERS_API`, `ORDERS_V2_API` and `FEEDS_API` name the apps; they default to the ports above on this
+host. Intents v2 is its own section, also called Orders, with a `v2` tag on its nav link and titles:
+`/v2/orders` and `/v2/order/<seq>`, from `public/ui/v2/` — a folder of pages is served under its name.
 
 Chains are indexed **in parallel and at wildly different speeds**, so events arrive in no
 particular order. Every flow is built to come out ordered anyway: state advances by rank and never
@@ -47,6 +49,7 @@ src/
 public/
   shared/          styling and helpers every page uses
   ui/              the pages — transfers, orders, feeds, and a detail page for each
+    v2/            intents v2's orders, served under /v2
 ```
 
 ## Configuration
@@ -188,8 +191,8 @@ pnpm dev ingest             # or: intents, transfers, feeds, ui
 
 `pnpm dev <domain>` rebuilds and runs one container's worth — they are separate processes, so run
 ingest alongside whichever domain you are working on, and `ui` to see its pages. Locally the apps
-run on ports of your choosing, so point the UI at them with `TRANSFERS_API`, `ORDERS_API` and
-`FEEDS_API` in `.env`.
+run on ports of your choosing, so point the UI at them with `TRANSFERS_API`, `ORDERS_API`,
+`ORDERS_V2_API` and `FEEDS_API` in `.env`.
 
 ## Notes on the NTT rail
 

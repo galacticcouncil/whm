@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, resolve } from "node:path";
 
 import type { FastifyInstance } from "fastify";
@@ -23,7 +23,9 @@ const BINARY = /^(image|font)\//;
  *
  * Pages live in `public/<name>/`, and the styling and helpers they share in `public/shared/`.
  * `index.html` is the root; every other page answers both a list path and a detail path, and
- * decides between them client-side.
+ * decides between them client-side. A folder one level down is a version of its pages, served under
+ * its own name — `v2/orders.html` at `/v2/orders` — so a version's pages keep the names of the ones
+ * they succeed.
  *
  * @param app Fastify instance.
  * @param name The site — cwd-relative, beside the bundle.
@@ -38,22 +40,36 @@ export function pages(app: FastifyInstance, name: string): void {
     return;
   }
 
+  servePages(app, dir, "");
+  for (const sub of readdirSync(dir)) {
+    if (statSync(resolve(dir, sub)).isDirectory()) servePages(app, resolve(dir, sub), `/${sub}`);
+  }
+}
+
+/**
+ * Serve a directory's pages, and any other file in it, under a prefix.
+ *
+ * @param app Fastify instance.
+ * @param dir The directory.
+ * @param prefix `""` for the site's root, `/<folder>` for a folder of it.
+ */
+function servePages(app: FastifyInstance, dir: string, prefix: string): void {
   for (const file of readdirSync(dir)) {
     const send = asset(dir, file);
     if (!send) continue;
     if (!file.endsWith(".html")) {
-      app.get(`/${file}`, send);
+      app.get(`${prefix}/${file}`, send);
       continue;
     }
     const page = file.slice(0, -5);
     if (page === "index") {
-      app.get("/", send);
-      log.info("[ui] /");
+      app.get(prefix || "/", send);
+      log.info(`[ui] ${prefix || "/"}`);
       continue;
     }
-    app.get(`/${page}`, send);
-    app.get(`/${page}/:id`, send);
-    log.info(`[ui] /${page}, /${page}/:id`);
+    app.get(`${prefix}/${page}`, send);
+    app.get(`${prefix}/${page}/:id`, send);
+    log.info(`[ui] ${prefix}/${page}, ${prefix}/${page}/:id`);
   }
 }
 
