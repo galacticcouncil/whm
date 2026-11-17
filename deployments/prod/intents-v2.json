@@ -1,0 +1,171 @@
+{
+  "migration": "intents-v2",
+  "environment": "prod",
+  "startedAt": "2026-11-17T10:58:35.086Z",
+  "completedAt": null,
+  "steps": [
+    {
+      "name": "001-deploy-dispatcher",
+      "status": "completed",
+      "output": {
+        "implAddress": "0xd7ae9753c1cfb3146022bebace530c3af6d25fb6",
+        "proxyAddress": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:58:35.088Z",
+      "completedAt": "2026-11-17T10:58:41.289Z"
+    },
+    {
+      "name": "002-deploy-forwarder",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x0852e805dda4fa6eb89da4dcff5c9d748cc95735",
+        "proxyAddress": "0x31ab66509a8a0b5a0fdf33ff4a4297481863035c",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:58:41.294Z",
+      "completedAt": "2026-11-17T10:59:16.176Z"
+    },
+    {
+      "name": "003-deploy-router",
+      "status": "completed",
+      "output": {
+        "txHash": "2k776wTiiA1p9bcK4sTFUyXNo2fn8w7CaCxNDZb9TvSb",
+        "routerAccount": "intents-router.hydration-whm.near",
+        "owner": "hydration-whm.near",
+        "codeSha256": "90821a273543e9757b0b01c7ad4d606085674e5ea303e38634d15c14c0fa060f",
+        "emitter": "0x0000000000000000000000002c967d7e00a18c1c926fd77de733a27c3fdb3f2b"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:16.177Z",
+      "completedAt": "2026-11-17T10:59:30.131Z"
+    },
+    {
+      "name": "004-authorize-relayer-1@forwarder",
+      "status": "completed",
+      "output": {
+        "txHash": "0xdf5219ebbd6e45c74e11756aa9c432159a52f061045ce1614f3a84fead97cf73",
+        "contract": "0x31ab66509a8a0b5a0fdf33ff4a4297481863035c",
+        "relayer": "0x43A8A728e2514EDEAe8e0C9FAb8B79fb5E4ecD5F"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:30.134Z",
+      "completedAt": "2026-11-17T10:59:39.308Z"
+    },
+    {
+      "name": "005-set-ntt-manager@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x72d944389151fa90381bfbdf35c7dfb0c2b9eea094337d3ddbe7916548a3b9bf",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "manager": "0xB5cEf790D52A57fa619eD96eDd64c5328F3DCFb7"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:39.310Z",
+      "completedAt": "2026-11-17T10:59:44.523Z"
+    },
+    {
+      "name": "006-set-forwarder@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0xd007b81242a9ace98e42a6018b69e3629de20be6aa525dc1ab0e260d1f1d92c0",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "forwarder": "0x00000000000000000000000031ab66509a8a0b5a0fdf33ff4a4297481863035c"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:44.524Z",
+      "completedAt": "2026-11-17T10:59:49.353Z"
+    },
+    {
+      "name": "007-set-dispatcher@forwarder",
+      "status": "completed",
+      "output": {
+        "txHash": "0x373ff9ddbfffeee4f020e0ad80ec21e39ae6c0ccfbbb3b5adf2263f6a88f6798",
+        "contract": "0x31ab66509a8a0b5a0fdf33ff4a4297481863035c",
+        "dispatcher": "0x0000000000000000000000002c967d7e00a18c1c926fd77de733a27c3fdb3f2b"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:49.354Z",
+      "completedAt": "2026-11-17T11:00:02.597Z"
+    },
+    {
+      "name": "008-set-max-feed-age@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x554eaf5f79add7e18fa6edf9d44b76ec9f2522d0b357cdccfc79e53f0785d641",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "maxFeedAge": "21600"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T11:00:02.599Z",
+      "completedAt": "2026-11-17T11:00:07.886Z"
+    },
+    {
+      "name": "009-set-min-order-amount@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x1a9c94b60915f25b9b085c4f574ce1e525a0be49e2abe46f3ca182743a39d574",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "minOrderAmount": "100000000000"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T11:00:07.888Z",
+      "completedAt": "2026-11-17T11:00:12.722Z"
+    },
+    {
+      "name": "010-set-zec-price-route@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0xd8cab03643dd7f38674f0dc56ed534a73c3e966e0e9f074f330e668fce38ab9e",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "asset": "nep141:zec.omft.near",
+        "outPerIn": "195500629"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T11:00:12.724Z",
+      "completedAt": "2026-11-17T11:00:17.879Z"
+    },
+    {
+      "name": "011-transfer-ownership@forwarder",
+      "status": "failed",
+      "output": null,
+      "error": "Missing or invalid ETHEREUM_TC_SAFE: ",
+      "startedAt": "2026-11-17T11:00:17.881Z",
+      "completedAt": null
+    },
+    {
+      "name": "012-transfer-ownership@dispatcher",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "013-transfer-ownership@router",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "014-delete-keys@router",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "015-accept-ownership@router",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    }
+  ]
+}
