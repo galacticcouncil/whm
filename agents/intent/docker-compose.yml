@@ -37,6 +37,32 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
 
+  # Intents v2 on NEAR: has the router sign each set of terms' swap, delivery or refund, and
+  # publishes it. Stores nothing — A's balances say what is left to do.
+  app-router:
+    image: galacticcouncil/intent:latest
+    command: [node, router/app.js]
+    environment:
+      # The scan intents-v2 app — the terms in play and their orders.
+      - SCAN_API=
+      - RPC_NEAR=https://free.rpc.fastnear.com
+      - ROUTER=intents-router.hydration-whm.near
+      # The bot's account and a FULL-ACCESS key: every router call attaches 1 yocto, which a
+      # function-call key cannot. Hold only gas money on it.
+      - NEAR_ACCOUNT=
+      - NEAR_PRIVKEY=
+      # 1Click partner key; its quotes must be signed by a key in the router's quote_keys.
+      - ONECLICK_KEY=
+    ports:
+      - "8082:8080"
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: "true"
+
 networks:
   default:
     driver: overlay
