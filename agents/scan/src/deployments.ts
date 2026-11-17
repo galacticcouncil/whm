@@ -222,8 +222,8 @@ export const INTENT = {
  * Ethereum deposits it to POA. A blank address is not watched.
  */
 export const INTENT_V2 = {
-  dispatcher: "",
-  forwarder: "",
+  dispatcher: "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+  forwarder: "0x31ab66509a8a0b5a0fdf33ff4a4297481863035c",
 } as const;
 
 /**

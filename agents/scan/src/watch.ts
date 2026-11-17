@@ -69,16 +69,16 @@ const FROM = {
     oracles: FROM_CHAIN_ORA.hydration,
     /** ZecUtxoEmitter's deploy. */
     utxoZec: 15_901_846n,
-    /** IntentDispatcher's deploy — set with its address. */
-    intentsV2: 0n,
+    /** IntentDispatcher's deploy. */
+    intentsV2: 17_111_592n,
   },
   ethereum: {
     ntt: FROM_CHAIN.ethereum,
     intents: FROM_CHAIN.ethereum,
     basejump: FROM_CHAIN.ethereum,
     oracles: FROM_CHAIN_ORA.ethereum,
-    /** IntentForwarder's deploy — set with its address. */
-    intentsV2: 0n,
+    /** IntentForwarder's deploy. */
+    intentsV2: 26_434_322n,
   },
   base: { ntt: FROM_CHAIN.base },
   robinhood: { ntt: FROM_CHAIN.robinhood, oracles: FROM_CHAIN_ORA.robinhood },
