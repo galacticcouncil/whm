@@ -7,6 +7,7 @@ app, the command names the entry point.
 | ------------- | ---------------------------------------------------------------------- |
 | `app-quoter`  | Prices the destination relay fee, so the SDK can size `maxRelayFee`    |
 | `app-relayer` | Tells 1Click a deposit landed, so an order resolves instead of sitting |
+| `app-router`  | Intents v2 on NEAR: has the router sign swaps, deliveries and refunds  |
 
 > The VAA relaying itself lives in [`agents/relayer`](../relayer/) (`intent` and `intent-v2` apps)
 > — they submit `processOrder`. `app-relayer` here is the 1Click leg, which touches no chain state.
@@ -70,18 +71,55 @@ POST /api/submit { depositAddress, txHash }   # manual retry, bypasses the dedup
 GET  /api/status                              # socket target and how many deposits were submitted
 ```
 
+## router
+
+The NEAR side of intents v2 ([docs/intents-v2/spec.md](../../docs/intents-v2/spec.md) §6–7). Every
+`TICK_MS` it walks the terms scan's `intents-v2` app lists (`/api/terms`), reads `A`'s ETH and
+destination balances on `intents.near`, and does at most one thing per set of terms:
+
+| When                | Condition                                                         | Action                      |
+| ------------------- | ----------------------------------------------------------------- | --------------------------- |
+| before the deadline | the newest order is still priced, and its ETH has landed in `A`   | swap, through 1Click        |
+| before the deadline | the destination balance reaches the terms' `minDelivery`          | deliver, on the solver relay |
+| after the deadline  | any destination balance; then ETH from the router's `min_refund`  | deliver; refund             |
+| after the deadline  | neither is left                                                   | drop the terms              |
+
+A swap is `A`'s whole ETH up to the terms' `maxFillMultiplier` × the order's amount — the only size
+the router accepts — quoted by 1Click to pay and refund `A`, signed by the router against the order's
+VAA (from Wormholescan, by the id scan gives), and submitted to 1Click. The router checks everything;
+the bot only decides when to ask, from the same rules ([src/apps/router/plan.ts](src/apps/router/plan.ts)).
+
+It stores nothing. What is left to do is `A`'s balances, so a restart picks up where it was, and a
+payout signed twice can only execute once. The router's params are read once at startup — restart
+the bot after the DAO changes them.
+
+The bot account's key must be **full-access**: every router call attaches the 1 yocto `v1.signer`
+takes, and a function-call key cannot attach a deposit. Hold only gas money on it.
+
+```
+GET /api/status   → each set of terms: A, its balances, the last action and error
+```
+
 ## Environment
 
 | Variable            | App     | Description                                                   | Default  |
 | ------------------- | ------- | ------------------------------------------------------------- | -------- |
-| `PORT`              | both    | HTTP port                                                     | `8080`   |
-| `LOG_LEVEL`         | both    | winston level                                                 | `info`   |
+| `PORT`              | all     | HTTP port                                                     | `8080`   |
+| `LOG_LEVEL`         | all     | winston level                                                 | `info`   |
 | `ETH_RPC`           | quoter  | Ethereum RPC — fee estimate and the guardian set              | Required |
 | `ETH_WORMHOLE_CORE` | quoter  | Wormhole core, for the guardian quorum                        | mainnet  |
 | `ETH_GAS_LIMIT`     | quoter  | Escape hatch: replaces the modelled envelope                  | unset    |
 | `FEE_MARGIN_BPS`    | quoter  | Margin when a request names none                              | `0`      |
 | `ETH_WSS`           | relayer | Ethereum websocket — `OrderProcessed` arrives by subscription | Required |
 | `INTENT_RECEIVER`   | relayer | `IntentReceiver` address to watch                             | Required |
+| `SCAN_API`          | router  | scan's `intents-v2` app                                       | Required |
+| `RPC_NEAR`          | router  | NEAR RPC                                                      | Required |
+| `ROUTER`            | router  | `IntentRouter` account                                        | Required |
+| `NEAR_ACCOUNT`      | router  | The bot's account                                             | Required |
+| `NEAR_PRIVKEY`      | router  | Its full-access key, `ed25519:…`                              | Required |
+| `ONECLICK_KEY`      | router  | 1Click partner key                                            | Required |
+| `GRACE_DAYS`        | router  | How long past their deadline terms stay listed                | `30`     |
+| `TICK_MS`           | router  | Pass interval                                                 | `30000`  |
 
 ## Development
 
@@ -89,6 +127,8 @@ GET  /api/status                              # socket target and how many depos
 pnpm install
 pnpm --filter @whm/intent dev quoter     # esbuild watch + run one app (reads .env)
 pnpm --filter @whm/intent dev relayer
+pnpm --filter @whm/intent dev router
+pnpm --filter @whm/intent test           # the router's decisions
 ```
 
 ## Production
@@ -97,6 +137,7 @@ pnpm --filter @whm/intent dev relayer
 pnpm --filter @whm/intent build          # → dist/<app>/app.js
 pnpm --filter @whm/intent start:quoter
 pnpm --filter @whm/intent start:relayer
+pnpm --filter @whm/intent start:router
 ```
 
 ## Docker

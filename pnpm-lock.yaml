@@ -122,6 +122,9 @@ importers:
       fastify:
         specifier: ^5.2.0
         version: 5.8.5
+      near-api-js:
+        specifier: ^7.3.1
+        version: 7.3.1
       viem:
         specifier: ^2.46.1
         version: 2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76)
@@ -1965,9 +1968,6 @@ packages:
 
   '@types/node@18.19.130':
     resolution: {integrity: sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==}
-
-  '@types/node@20.19.43':
-    resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
 
   '@types/node@25.9.2':
     resolution: {integrity: sha512-G05zqtJhcDLb8uslf5EjCxXg9G1KQxiV8OS0R26IC//Eoyitzqe8z37I7cqvnZlrlSfgocQRfSn/AHBZJJFyGw==}
@@ -5225,9 +5225,6 @@ packages:
   undici-types@5.26.5:
     resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
 
-  undici-types@6.21.0:
-    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
-
   undici-types@7.24.6:
     resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
 
@@ -7131,7 +7128,7 @@ snapshots:
       '@polkadot-api/wasm-executor': 0.2.3
       '@polkadot-api/ws-middleware': 0.3.5(rxjs@7.8.2)
       '@polkadot-api/ws-provider': 0.9.0(rxjs@7.8.2)
-      '@types/node': 25.9.2
+      '@types/node': 25.9.5
       commander: 15.0.0
       execa: 9.6.1
       fs.promises.exists: 1.1.4
@@ -7280,7 +7277,7 @@ snapshots:
 
   '@polkadot-api/smoldot@0.4.5(bufferutil@4.1.0)(utf-8-validate@6.0.3)':
     dependencies:
-      '@types/node': 25.9.2
+      '@types/node': 25.9.5
       smoldot: 3.2.0(bufferutil@4.1.0)(utf-8-validate@6.0.3)
     transitivePeerDependencies:
       - bufferutil
@@ -8194,7 +8191,7 @@ snapshots:
 
   '@types/bn.js@5.2.0':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 25.9.5
 
   '@types/chai@5.2.3':
     dependencies:
@@ -8203,7 +8200,7 @@ snapshots:
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 25.9.2
+      '@types/node': 25.9.5
 
   '@types/deep-eql@4.0.2': {}
 
@@ -8233,10 +8230,6 @@ snapshots:
   '@types/node@18.19.130':
     dependencies:
       undici-types: 5.26.5
-
-  '@types/node@20.19.43':
-    dependencies:
-      undici-types: 6.21.0
 
   '@types/node@25.9.2':
     dependencies:
@@ -8268,11 +8261,11 @@ snapshots:
 
   '@types/ws@7.4.7':
     dependencies:
-      '@types/node': 25.9.2
+      '@types/node': 25.9.5
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 25.9.2
+      '@types/node': 25.9.5
 
   '@wormhole-foundation/relayer-engine@0.3.2(@bull-board/ui@5.23.0)(@improbable-eng/grpc-web@0.15.0(google-protobuf@3.21.4))(@types/node@25.9.5)(bufferutil@4.1.0)(google-protobuf@3.21.4)(lodash@4.18.1)(mustache@4.2.0)(typescript@6.0.3)(utf-8-validate@5.0.10)':
     dependencies:
@@ -11212,7 +11205,7 @@ snapshots:
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.1
       '@types/long': 4.0.2
-      '@types/node': 25.9.2
+      '@types/node': 25.9.5
       long: 4.0.0
 
   protobufjs@7.6.4:
@@ -11226,7 +11219,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.1
-      '@types/node': 20.19.43
+      '@types/node': 25.9.5
       long: 5.3.2
 
   proxy-from-env@2.1.0: {}
@@ -12224,8 +12217,6 @@ snapshots:
       which-boxed-primitive: 1.1.1
 
   undici-types@5.26.5: {}
-
-  undici-types@6.21.0: {}
 
   undici-types@7.24.6: {}
 
