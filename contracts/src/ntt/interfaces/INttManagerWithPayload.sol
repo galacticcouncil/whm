@@ -5,7 +5,7 @@ import {INttManager} from "./INttManager.sol";
 
 /// @title INttManagerWithPayload — an NTT manager that carries a payload with a transfer
 /// @dev Hand-written, like `INttManager`. Signature matches hydration-ntt
-///      evm/src/NttManager/NttManagerWithPayload.sol (working tree after 929ba2f2). The payload lands in
+///      evm/src/NttManager/NttManagerWithPayload.sol at ecb06683. The payload lands in
 ///      `NativeTokenTransfer.additionalPayload`, covered by the manager message digest; the
 ///      destination manager ignores it — contracts that read the VAA themselves act on it.
 interface INttManagerWithPayload is INttManager {
