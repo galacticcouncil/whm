@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 
-import Fastify from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 
 import { banner } from "../banner";
 import { pages } from "../flow/pages";
@@ -9,14 +9,15 @@ import log from "../logger";
 const NAME = "ui";
 
 /**
- * Each section's app, by the prefix its pages call it under. The apps stay public on their own
- * ports — their read and subscribe APIs are for anyone — and this only puts every page on one
- * origin. Defaults are the apps' compose ports on this host.
+ * Each section's app, by the prefix its pages call it under — a version's sections under the
+ * version, as its pages are (`v2/orders` for `/v2/orders`). The apps stay public on their own ports —
+ * their read and subscribe APIs are for anyone — and this only puts every page on one origin.
+ * Defaults are the apps' compose ports on this host.
  */
 const UPSTREAMS: Record<string, string> = {
   transfers: process.env.TRANSFERS_API || "http://localhost:8081",
   orders: process.env.ORDERS_API || "http://localhost:8080",
-  "orders-v2": process.env.ORDERS_V2_API || "http://localhost:8084",
+  "v2/orders": process.env.ORDERS_V2_API || "http://localhost:8084",
   feeds: process.env.FEEDS_API || "http://localhost:8082",
 };
 
@@ -35,31 +36,33 @@ async function main(): Promise<void> {
   app.get("/api/health", async () => ({ ok: true, upstreams: UPSTREAMS }));
   app.get("/", async (_req, reply) => reply.redirect("/transfers"));
 
-  // `/api/<section>/<path>` → `<app>/api/<path>`, streamed: an event stream stays open for as long
-  // as the page does, and closes upstream when the page goes.
-  app.get<{ Params: { section: string; "*": string } }>(
-    "/api/:section/*",
-    async (req, reply) => {
-      const base = UPSTREAMS[req.params.section];
-      if (!base) return reply.code(404).send({ error: `no section ${req.params.section}` });
-      const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-      const abort = new AbortController();
-      req.raw.on("close", () => abort.abort());
-      let res: Response;
-      try {
-        res = await fetch(`${base}/api/${req.params["*"]}${query}`, { signal: abort.signal });
-      } catch (e) {
-        log.warn(`[ui] ${req.params.section}: ${(e as Error).message}`);
-        return reply.code(502).send({ error: `${req.params.section} unavailable` });
-      }
-      reply.code(res.status);
-      for (const h of PASS) {
-        const v = res.headers.get(h);
-        if (v) reply.header(h, v);
-      }
-      return res.body ? reply.send(Readable.fromWeb(res.body as never)) : reply.send();
-    },
-  );
+  // `/api/<section>/<path>` → `<app>/api/<path>`, and `/api/v<n>/<section>/<path>` the same for a
+  // version's section — streamed: an event stream stays open for as long as the page does, and
+  // closes upstream when the page goes.
+  type Proxied = { Params: { version?: string; section: string; "*": string } };
+  const proxy = async (req: FastifyRequest<Proxied>, reply: FastifyReply) => {
+    const section = req.params.version ? `${req.params.version}/${req.params.section}` : req.params.section;
+    const base = UPSTREAMS[section];
+    if (!base) return reply.code(404).send({ error: `no section ${section}` });
+    const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    const abort = new AbortController();
+    req.raw.on("close", () => abort.abort());
+    let res: Response;
+    try {
+      res = await fetch(`${base}/api/${req.params["*"]}${query}`, { signal: abort.signal });
+    } catch (e) {
+      log.warn(`[ui] ${section}: ${(e as Error).message}`);
+      return reply.code(502).send({ error: `${section} unavailable` });
+    }
+    reply.code(res.status);
+    for (const h of PASS) {
+      const v = res.headers.get(h);
+      if (v) reply.header(h, v);
+    }
+    return res.body ? reply.send(Readable.fromWeb(res.body as never)) : reply.send();
+  };
+  app.get<Proxied>("/api/:version(^v\\d+$)/:section/*", proxy);
+  app.get<Proxied>("/api/:section/*", proxy);
 
   pages(app, NAME);
 

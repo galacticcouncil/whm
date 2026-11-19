@@ -18,7 +18,7 @@ app-intents-v2   intent_v2_orders, and the terms still in play      :8084
 ```
 
 The UI holds no state and touches no database. It serves every page, and passes `/api/<section>/…`
-through to that section's app — `transfers`, `orders`, `orders-v2`, `feeds` — live streams included,
+through to that section's app — `transfers`, `orders`, `v2/orders`, `feeds` — live streams included,
 so the pages are one origin while the apps stay public on their own ports. `TRANSFERS_API`,
 `ORDERS_API`, `ORDERS_V2_API` and `FEEDS_API` name the apps; they default to the ports above on this
 host. Intents v2 is its own section, also called Orders, with a `v2` tag on its nav link and titles:
