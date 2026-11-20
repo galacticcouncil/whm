@@ -260,7 +260,7 @@ export const orders: Flow = {
  *
  * Only what the terms do not say is kept: where it goes and in what asset are the terms' — joined
  * through `auth_path` from `intent_v2_orders`. The signature is NEAR's; where the asset then lands — a
- * Zcash transaction for a withdrawal — is filled in by the payout poller (`payouts.ts`).
+ * withdrawal's transaction on its own chain — is filled in by the payout poller (`payouts.ts`).
  */
 export const payouts: Flow = {
   name: "payouts-v2",

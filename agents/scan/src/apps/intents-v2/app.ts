@@ -15,8 +15,8 @@ const FLOWS = [orders, payouts, intents];
  * Intents v2: orders published on Hydration, forwarded on Ethereum and swapped on NEAR, the payouts
  * of the terms they fund, and the terms themselves — what the NEAR router bot reads its work from.
  *
- * Reads the event store ingest fills — the ICE intents behind the orders among it — and Blockchair
- * for where a ZEC payout landed.
+ * Reads the event store ingest fills — the ICE intents behind the orders among it — and each
+ * destination chain's explorer for where a withdrawal landed.
  */
 async function main(): Promise<void> {
   banner(NAME);

@@ -1,34 +1,46 @@
-import { BLOCKCHAIR } from "../../chains/zcash/consts";
+import { payments as zcashPayments } from "../../chains/zcash";
 import { pool } from "../../db";
 import { broadcast, reconcile } from "../../flow";
 import log from "../../logger";
 
 import { payouts } from "./flows";
 
-/** How often deliveries still without their Zcash transaction are looked up. */
+/** How often deliveries still without their destination-chain transaction are looked up. */
 const POLL_MS = 60_000;
 
 /** A payout lands after the router signs it; allow the clocks this much disagreement. */
 const CLOCK_SKEW_MS = 60_000;
 
-const ZEC = "nep141:zec.omft.near";
-
-/** One transaction in an address's Blockchair history. */
-interface Movement {
+/** One payment into a recipient on its own chain. */
+interface Payment {
   hash: string;
-  time: string;
-  /** Zatoshi into the address; negative for a spend. */
-  balance_change: number;
+  /** Unix ms. */
+  at: number;
+  /** In the asset's smallest units there. */
+  amount: bigint;
 }
 
+/** How a destination's deliveries are found where they land. */
+interface Destination {
+  /** Recipients an explorer can see payments into — a shielded one cannot be paired. */
+  visible: (address: string) => boolean;
+  /** An address's incoming payments, oldest first. */
+  payments: (address: string) => Promise<Payment[]>;
+}
+
+/** Each destination whose withdrawals are paired with their transaction, by intents ledger id. */
+const DESTINATIONS: Record<string, Destination> = {
+  "nep141:zec.omft.near": { visible: (a) => a.startsWith("t"), payments: zcashPayments },
+};
+
+type Pending = { id: string; amount: string; signed_at: string };
+
 /**
- * Where a ZEC delivery landed. The router's delivery is a POA withdrawal signed on NEAR; POA then pays
- * on Zcash, and nothing on NEAR names that transaction. So it is read from the recipient's own
- * history: the first payment into the address after the delivery was signed, for no more than was
- * withdrawn (POA's fee comes off the way). Deliveries to one address are paired with its payments in
- * order, each payment used once.
- *
- * Transparent addresses only — a shielded payment is invisible to an explorer, and stays unpaired.
+ * Where a withdrawal landed. The router's delivery is a bridge withdrawal signed on NEAR; the bridge
+ * then pays on the asset's own chain, and nothing on NEAR names that transaction. So it is read from
+ * the recipient's own history: the first payment into the address after the delivery was signed,
+ * for no more than was withdrawn (the bridge's fee comes off the way). Deliveries to one address are
+ * paired with its payments in order, each payment used once.
  */
 export class PayoutPoller {
   private timer?: NodeJS.Timeout;
@@ -50,18 +62,26 @@ export class PayoutPoller {
     try {
       // The recipient and asset are the terms', read from any order of them.
       const pending = await pool.query(
-        `SELECT p.id, t.recipient AS receiver, p.amount, (p.signed->>'blockTimestamp')::bigint AS signed_at
+        `SELECT p.id, t.destination_asset AS asset, t.recipient AS receiver, p.amount,
+                (p.signed->>'blockTimestamp')::bigint AS signed_at
            FROM intent_v2_payouts p
            JOIN LATERAL (SELECT recipient, destination_asset, recipient_kind FROM intent_v2_orders o
                           WHERE o.auth_path = p.auth_path LIMIT 1) t ON true
           WHERE p.state = 'delivered' AND p.dest_tx IS NULL
-            AND t.destination_asset = $1 AND t.recipient_kind = 0 AND t.recipient LIKE 't%'
+            AND t.destination_asset = ANY($1) AND t.recipient_kind = 0
           ORDER BY signed_at`,
-        [ZEC],
+        [Object.keys(DESTINATIONS)],
       );
-      const byReceiver = new Map<string, { id: string; amount: string; signed_at: string }[]>();
-      for (const r of pending.rows) byReceiver.set(r.receiver, [...(byReceiver.get(r.receiver) ?? []), r]);
-      for (const [receiver, rows] of byReceiver) await this.pair(receiver, rows);
+      const byReceiver = new Map<string, { dest: Destination; receiver: string; rows: Pending[] }>();
+      for (const r of pending.rows) {
+        const dest = DESTINATIONS[r.asset]!;
+        if (!dest.visible(r.receiver)) continue;
+        const k = `${r.asset} ${r.receiver}`;
+        const group = byReceiver.get(k) ?? { dest, receiver: r.receiver, rows: [] as Pending[] };
+        group.rows.push(r);
+        byReceiver.set(k, group);
+      }
+      for (const { dest, receiver, rows } of byReceiver.values()) await this.pair(dest, receiver, rows);
     } catch (e) {
       log.error(`[intents-v2] payout tick: ${(e as Error).stack ?? String(e)}`);
     } finally {
@@ -72,16 +92,11 @@ export class PayoutPoller {
   /**
    * Pair one address's unpaired deliveries with its payments.
    *
-   * @param receiver The Zcash address.
+   * @param dest Where the asset lands.
+   * @param receiver The address there.
    * @param rows Its deliveries still without a transaction, oldest first.
    */
-  private async pair(receiver: string, rows: { id: string; amount: string; signed_at: string }[]): Promise<void> {
-    const res = await fetch(
-      `${BLOCKCHAIR}/dashboards/address/${receiver}?transaction_details=true&limit=100`,
-      { signal: AbortSignal.timeout(30_000) },
-    );
-    if (!res.ok) throw new Error(`blockchair ${receiver}: ${res.status}`);
-    const body = (await res.json()) as { data?: Record<string, { transactions?: Movement[] }> };
+  private async pair(dest: Destination, receiver: string, rows: Pending[]): Promise<void> {
     // Payments already paired with an earlier delivery to this address, under any terms.
     const used = new Set(
       (
@@ -93,20 +108,17 @@ export class PayoutPoller {
         )
       ).rows.map((r) => r.dest_tx as string),
     );
-    const incoming = (body.data?.[receiver]?.transactions ?? [])
-      .filter((t) => t.balance_change > 0 && !used.has(t.hash))
-      .map((t) => ({ ...t, at: Date.parse(`${t.time.replace(" ", "T")}Z`) }))
-      .sort((a, b) => a.at - b.at);
+    const incoming = (await dest.payments(receiver)).filter((t) => !used.has(t.hash));
 
     for (const row of rows) {
       const i = incoming.findIndex(
-        (t) => t.at >= Number(row.signed_at) - CLOCK_SKEW_MS && BigInt(t.balance_change) <= BigInt(row.amount),
+        (t) => t.at >= Number(row.signed_at) - CLOCK_SKEW_MS && t.amount <= BigInt(row.amount),
       );
       if (i < 0) continue;
       const [t] = incoming.splice(i, 1);
       const applied = await reconcile(pool, payouts, payouts.key.column, row.id, "delivered", {
         dest_tx: t!.hash,
-        dest_amount: String(t!.balance_change),
+        dest_amount: t!.amount.toString(),
         dest_at: t!.at,
       });
       if (applied) {

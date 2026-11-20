@@ -37,3 +37,32 @@ export async function inclusions(txids: string[]): Promise<Map<string, Inclusion
   }
   return out;
 }
+
+/** One payment into an address. */
+export interface Payment {
+  hash: string;
+  /** Unix ms. */
+  at: number;
+  /** Zatoshi received. */
+  amount: bigint;
+}
+
+/**
+ * The payments into a transparent address, from its latest hundred transactions, oldest first. A
+ * shielded address shows nothing to an explorer.
+ *
+ * @param address The address.
+ */
+export async function payments(address: string): Promise<Payment[]> {
+  const res = await fetch(`${BLOCKCHAIR}/dashboards/address/${address}?transaction_details=true&limit=100`, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`blockchair ${address}: ${res.status}`);
+  const body = (await res.json()) as {
+    data?: Record<string, { transactions?: { hash: string; time: string; balance_change: number }[] }>;
+  };
+  return (body.data?.[address]?.transactions ?? [])
+    .filter((t) => t.balance_change > 0)
+    .map((t) => ({ hash: t.hash, at: Date.parse(`${t.time.replace(" ", "T")}Z`), amount: BigInt(t.balance_change) }))
+    .sort((a, b) => a.at - b.at);
+}

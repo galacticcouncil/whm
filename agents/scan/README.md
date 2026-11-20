@@ -273,10 +273,12 @@ trade (auth_path) ─┬─ orders   intent_v2_orders, keyed on seq
   execution by.
 - **A payout** is the terms', not one order's: output builds up in `A` and is delivered once it
   reaches `minDelivery`, so one delivery can carry several orders. Only what the terms do not say is
-  kept — the amount, and the signing transaction. A delivery to a Zcash address is then paired with
-  its Zcash transaction by a poller: POA pays out on Zcash and nothing on NEAR names it, so the
-  recipient's Blockchair history is read — the first payment after the delivery was signed, for no
-  more than was withdrawn. Shielded recipients stay unpaired.
+  kept — the amount, and the signing transaction. A withdrawal is then paired with its transaction
+  on the asset's own chain by a poller: the bridge pays out there and nothing on NEAR names it, so
+  the recipient's history on that chain's explorer is read — the first payment after the delivery was
+  signed, for no more than was withdrawn. Each destination it can pair is one entry in `payouts.ts`:
+  which recipients an explorer can see, and how their payments are read. Recipients it cannot see,
+  like shielded ones, stay unpaired.
 - **What `A` holds** — swapped, not yet paid out — is no event, so a trade's detail read takes it
   live: `A` derived once from `v1.signer` (router, auth path) and cached, its destination balance read
   from `intents.near` on every request. The trade page refetches on each of its updates, and twice more

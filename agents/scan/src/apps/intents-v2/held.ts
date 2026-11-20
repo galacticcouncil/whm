@@ -37,7 +37,7 @@ export function tradeAccount(authPath: string): Promise<string> {
  * stored — a payout empties it.
  *
  * @param authPath The terms' auth path.
- * @param token The intents ledger id, e.g. `nep141:zec.omft.near`.
+ * @param token The intents ledger id of the trade's destination asset.
  * @returns `A` and its balance, or null when NEAR cannot be read.
  */
 export async function held(authPath: string, token: string): Promise<{ account: string; amount: string } | null> {
