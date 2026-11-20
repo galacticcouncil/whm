@@ -1,25 +1,32 @@
-# SPEC — Intents v2: unattended swaps and DCA
+# SPEC — Intents v2
 
-v2 runs a swap or a whole DCA schedule with nobody present. Each **action** gets one NEAR account `A`,
-derived by MPC from the action's terms, and one reusable POA deposit address `0xN` for it. Every
-execution bridges ETH into `A` with its own oracle price; the NEAR router signs `A`'s swap, delivery
-or refund, and only ever by the terms.
+v2 runs a swap or a whole TWAP schedule with nobody present. Each **action** gets one NEAR account `A`,
+derived by MPC from the action's terms, and one reusable Ethereum deposit address `0xN` for it — a
+standing 1Click pass-through whose recipient is `A`. Every execution bridges ETH into `A` with its own
+oracle price; the NEAR router signs `A`'s swap, delivery or refund, and only ever by the terms.
 
 ```
-HYDRATION  ICE trade → WETH → IntentDispatcher ─┬─ NTT transfer + forward payload ─► ETHEREUM IntentForwarder ─► ETH → 0xN
-                                                │                                                              POA credits A
-                                                └─ order message (price) ─────────────────────────────► NEAR IntentRouter
-                                                                                                         swap · deliver · refund
+HYDRATION    ICE trade → WETH → IntentDispatcher
+               │
+               ├───────────────────────────────┐
+               ▼                               ▼
+             NTT transfer + forward payload    order message (price)
+               │                               │
+ETHEREUM       IntentForwarder → ETH → 0xN     │
+               │                               │
+1CLICK         forwards it to A                │
+               │                               ▼
+NEAR           A's ETH ───────────────────────► IntentRouter: swap · deliver · refund
 ```
 
-| | v1 (deployed) | v2 |
-| --- | --- | --- |
-| Entry on Hydration | user calls `IntentEmitter.placeOrder` | ICE `OnResolved::Forward` → `IntentDispatcher.execute`, or `IntentDispatcher.dispatch` |
-| Rail | NTT transfer + a separate instruction VAA → `IntentReceiver` | one NTT transfer carrying the forward payload → `IntentForwarder` |
-| `depositAddress` | 1Click's, random per quote | POA's `0xN` for `A`, derived from the terms, reused by every order |
-| Who triggers the swap | 1Click, on deposit | a bot → `IntentRouter.swap(terms, orderVaa, quote)` → MPC signs for `A` |
-| Price | 1Click quote, user present | 1Click quote per order, floored by the order's oracle rate |
-| Refund | 1Click, to `refundTo` | the router, ETH to `refundTo` after the deadline |
+|                       |                                                                                               |
+| --------------------- | --------------------------------------------------------------------------------------------- |
+| Entry on Hydration    | ICE `OnResolved::Forward` → `IntentDispatcher.execute`, or `IntentDispatcher.dispatch`        |
+| Rail                  | one NTT transfer carrying the forward payload → `IntentForwarder`                             |
+| `depositAddress`      | 1Click's standing pass-through `0xN` to `A`, requested once per action, reused by every order |
+| Who triggers the swap | a bot → `IntentRouter.swap(terms, orderVaa, quote)` → MPC signs for `A`                       |
+| Price                 | 1Click quote per order, floored by the order's oracle rate                                    |
+| Refund                | the router, ETH to `refundTo` after the deadline                                              |
 
 Three things make it work unattended:
 
@@ -34,31 +41,31 @@ Three things make it work unattended:
 ### The strategy
 
 A strategy is what the router does with `A`'s ETH. The terms are its parameters; hashing them into
-`A` makes one strategy instance one account. One action — a swap, or a whole DCA schedule — has one
+`A` makes one strategy instance one account. One action — a swap, or a whole TWAP schedule — has one
 `A` and one `0xN`, reused by every order.
 
-| Strategy | Does |
-| --- | --- |
+| Strategy                                    | Does                                                                                                       |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **Limit swap** (terms version 1, this spec) | swap `A`'s ETH through a 1Click quote at ≥ `outPerIn × (1 − slippage)`; deliver; refund after the deadline |
-| Later | Dutch auction ([dutch-auction.md](dutch-auction.md)), other destination kinds |
+| Later                                       | Dutch auction ([dutch-auction.md](dutch-auction.md)), other destination kinds                              |
 
 - **The terms' version byte selects the strategy.** A new strategy is a new terms version: it
   derives disjoint accounts and changes nothing on Hydration or Ethereum.
-- **Swap and DCA are the same strategy.** The router does not tell them apart: it swaps what `A`
+- **Swap and TWAP are the same strategy.** The router does not tell them apart: it swaps what `A`
   holds at the price of the order it is given. The difference lives on Hydration — ICE fires one order
-  for a swap, N for a DCA.
+  for a swap, N for a TWAP.
 
 Data formats: [schema.md](schema.md). Build status and gates: [plan.md](plan.md).
 
-| Component | Chain | Role |
-| --- | --- | --- |
-| `IntentDispatcher` | Hydration | ICE callback and direct entry; prices, bridges, publishes the order. UUPS proxy: ICE intents, the forwarder and the router pin its address |
-| `NttManagerWithPayload` (WETH) | Hydration | the WETH NTT manager, upgraded to carry a transfer payload |
-| `IntentForwarder` | Ethereum | delivers the NTT transfer, pays the relayer, forwards the rest to `0xN` |
-| `IntentRouter` | NEAR | stateless, DAO-upgradeable; terms + order + quote → signed intent for `A` |
-| Bot | off-chain | NEAR gas key only: quotes 1Click, calls the router, publishes what it signs |
-| Relayer | off-chain | calls `processOrder` on Ethereum, paid from the order's relay ceiling |
-| Price feeds | Hydration | DIA `AggregatorV3` feeds: ETH/USD and each destination asset's USD price |
+| Component                      | Chain     | Role                                                                                                                                       |
+| ------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `IntentDispatcher`             | Hydration | ICE callback and direct entry; prices, bridges, publishes the order. UUPS proxy: ICE intents, the forwarder and the router pin its address |
+| `NttManagerWithPayload` (WETH) | Hydration | the WETH NTT manager, upgraded to carry a transfer payload                                                                                 |
+| `IntentForwarder`              | Ethereum  | delivers the NTT transfer, pays the relayer, forwards the rest to `0xN`                                                                    |
+| `IntentRouter`                 | NEAR      | stateless, DAO-upgradeable; terms + order + quote → signed intent for `A`                                                                  |
+| Bot                            | off-chain | NEAR gas key only: quotes 1Click, calls the router, publishes what it signs                                                                |
+| Relayer                        | off-chain | calls `processOrder` on Ethereum, paid from the order's relay ceiling                                                                      |
+| Price feeds                    | Hydration | DIA `AggregatorV3` feeds: ETH/USD and each destination asset's USD price                                                                   |
 
 **Guarantees.** Funds in `A` only ever go to a 1Click swap that pays and refunds `A`, to `recipient`
 (as `destinationAsset`), or to `refundTo`. No fill below `outPerIn × (1 − maxSlippageBps)` or the
@@ -74,14 +81,14 @@ bot. A stale feed bridges nothing. **Not guaranteed:** the best market price; a 
 ```
  ONCE, at creation                               user present, one signature
    ├─ pick asset, amount, cadence, destination asset, recipient, refund address
-   ├─ SDK builds the terms and derives A → 0xN   §2
+   ├─ SDK builds the terms, derives A, requests 0xN   §2
    ├─ user checks `recipient` and `refundTo`
-   └─ ICE swap or DCA intent created on Hydration, forwarding to IntentDispatcher
+   └─ ICE swap or TWAP (`Dca`) intent created on Hydration, forwarding to IntentDispatcher
 
  EVERY EXECUTION                                 nobody present
    ├─ HYDRATION   ICE trades asset → WETH; dispatcher prices, bridges, publishes the order   §3
    ├─ ETHEREUM    a relayer calls processOrder: ETH → 0xN                                    §5
-   ├─ POA         credits A with nep141:eth.omft.near                   (not our transaction)
+   ├─ 1CLICK      POA credits 1Click's account, 1Click forwards it to A (not our transaction)
    ├─ NEAR        bot quotes 1Click, router signs A's swap; later the delivery               §6
    └─ DESTINATION the asset arrives at `recipient`
 ```
@@ -102,40 +109,42 @@ deadline it is refunded (§7).
 
 One set per action, all hashed into the account:
 
-| Field | Meaning |
-| --- | --- |
-| `owner` | the user's Hydration EVM address — what ICE calls the dispatcher as; the only caller its orders are taken from |
-| `quoteId` | random 32 bytes — keeps the user's actions on separate accounts |
-| `maxSlippageBps` | floor = order rate × (1 − slippage) |
-| `maxFillMultiplier` | one fill sells at most this many times its order's amount (2..100): the backlog one order clears |
-| `minOutPerIn` | user's hard floor (destination units per 1e18 wei); below it funds wait. 0 = none |
-| `minDelivery` | before the deadline, deliver once `A` holds this much — at least POA's minimum withdrawal |
-| `deadline` | swaps end by it; after it, remaining ETH is refunded |
-| `recipientKind` | withdraw off NEAR through POA, or keep in an intents account |
-| `refundTo` | Ethereum address for refunds (native ETH) |
-| `destinationAsset` | intents ledger id, e.g. `nep141:zec.omft.near` |
-| `recipient` | where the destination asset goes |
+| Field               | Meaning                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `owner`             | the user's Hydration EVM address — what ICE calls the dispatcher as; the only caller its orders are taken from      |
+| `quoteId`           | random 32 bytes — keeps the user's actions on separate accounts                                                     |
+| `maxSlippageBps`    | floor = order rate × (1 − slippage)                                                                                 |
+| `maxFillMultiplier` | one fill sells at most this many times its order's amount (2..100): the backlog one order clears                    |
+| `minOutPerIn`       | user's hard floor (destination units per 1e18 wei); below it funds wait. 0 = none                                   |
+| `minDelivery`       | before the deadline, deliver once `A` holds this much — at least the payout path's minimum ([payout.md](payout.md)) |
+| `deadline`          | swaps end by it; after it, remaining ETH is refunded                                                                |
+| `recipientKind`     | withdraw off NEAR to the asset's chain (through POA), or keep in an intents account                                 |
+| `refundTo`          | Ethereum address for refunds (native ETH)                                                                           |
+| `destinationAsset`  | intents ledger id, e.g. `nep141:zec.omft.near`                                                                      |
+| `recipient`         | where the destination asset goes                                                                                    |
 
 `owner` is the address ICE calls with — `EvmAccounts::evm_address(owner)`: an EVM account's own
 address, a Substrate account's truncated id. Terms with any other owner cannot place an order.
 
-### Derivation — three reads, no transactions
+### Derivation — two reads and one quote, no transactions
 
 ```
 1. path = IntentDispatcher.computeAuthPath(terms)            keccak256 of the encoded terms
 
-2. NEAR  v1.signer.derived_public_key({
-             predecessor: "intents-router.hydration-whm.near",
-             path, domain_id: 1 })                           // Ed25519
-       → A = lowercase hex of the 32 key bytes               ← NEAR implicit account, no setup
+2. NEAR    v1.signer.derived_public_key({
+               predecessor: "intents-router.hydration-whm.near",
+               path, domain_id: 1 })                         // Ed25519
+         → A = lowercase hex of the 32 key bytes             ← NEAR implicit account, no setup
 
-3. POA   deposit_address({ account_id: A, chain: "eth:1" })
-       → 0xN                                                 ← stored in the ICE intent
+3. 1Click  standing pass-through quote: ANY_INPUT, 1cs_v1:any → 1cs_v1:original,
+           recipient = refundTo = A (INTENTS), deadline 2038
+         → its Ethereum deposit address 0xN                  ← stored in the ICE intent
 ```
 
-A plain native-ETH transfer to `0xN` credits `A` — no memo, no message. The SDK verifies the whole
-chain at confirmation; on-chain nothing binds `0xN` to the terms, because POA's mapping exists only
-in its RPC. That off-chain step happens exactly once per action.
+A plain native-ETH transfer to `0xN` reaches `A` — no memo, no message: POA credits 1Click's account
+for the quote, and 1Click forwards it to `A` as is. The SDK checks the quote names `A` at
+confirmation; on-chain nothing binds `0xN` to the terms, because the mapping is 1Click's. That
+off-chain step happens exactly once per action, and needs a 1Click partner key.
 
 **Change any term and you get a different account.** Extending a deadline or changing a recipient is
 a new action. The terms are public (they travel in every order) and harmless: anyone holding them can
@@ -162,7 +171,7 @@ dispatch(amount, depositAddress, maxRelayFee, terms)                    direct; 
   2. msg.sender == terms.owner
   3. outPerIn = ETH/USD ÷ DEST/USD from the destination's two feeds — older than maxFeedAge reverts
   4. bridged = WETH − NTT delivery price − order message fee, trimmed to NTT's 8 decimals
-       ≥ minOrderAmount + maxRelayFee        POA's minimum deposit, after the relayer's cut
+       ≥ minOrderAmount + maxRelayFee        the minimum deposit (1e11 wei), after the relayer's cut
        maxRelayFee ≤ bridged / 2
   5. seq = NttManagerWithPayload.transferWithPayload(bridged, Ethereum, IntentForwarder,
                                                      depositAddress | maxRelayFee)
@@ -270,14 +279,14 @@ can do its job.
 **Every fill spends what landed.** `order.amount` is the least ETH an order brings, the relay fee
 is capped at half of what bridged, and the terms' `maxFillMultiplier` is at least 2 — so one fill
 takes all of it. If a tranche does not fill, its ETH stays in `A` and the next order buys it at that
-order's price, up to its own cap: the next order *is* the retry, never below the user's hard floor.
+order's price, up to its own cap: the next order _is_ the retry, never below the user's hard floor.
 One order can sell `maxFillMultiplier × order.amount`: its own ETH takes 1× to 2× of that (2× when
 the relayer keeps nothing of a half-order ceiling), the rest clears backlog — about
 `maxFillMultiplier − 1` missed tranches with the SDK's small ceiling. It is also how much one order's
 price may sell at once; the SDK picks it per action (2 for a single swap, about the number of
-tranches for a short DCA).
+tranches for a short TWAP).
 
-**No next order** — a single swap, or a DCA's last tranche: while its order is priced, the bot may
+**No next order** — a single swap, or a TWAP's last tranche: while its order is priced, the bot may
 quote again and re-sign the same nonce; after that the funds wait for the deadline and are refunded.
 A 1Click swap that does not fill returns the ETH to `A`.
 
@@ -299,21 +308,19 @@ can send it on with `dispatch`.
   cannot redirect, fill below the floor or refund early.
 - **A relayer takes up to `maxRelayFee`** — the owner's ceiling, at most half the order.
 - **Trust:** Wormhole guardians, the WETH NTT managers' owners (Hydration governance; rate limits),
-  the MPC network, POA custody, `intents.near` governance, 1Click (its quote keys and deposit
-  accounts), the router DAO (upgrades, quote keys, params), the dispatcher owner (price routes,
+  the MPC network, POA custody, `intents.near` governance, 1Click (its quote keys, deposit accounts
+  and the standing pass-through to `A`), the router DAO (upgrades, quote keys, params), the dispatcher owner (price routes,
   minimums, the manager and forwarder it uses, upgrades), the forwarder owner (the dispatcher it
   pins, relayers, upgrades) and the SDK's `terms → 0xN` mapping.
 
 ---
 
-## 9. What has to be verified
+## 9. What has been verified
 
-The router's own gates — 1Click as counterparty, the bytes `intents.near` verifies, POA crediting a
-contract's deposit, the `v1.signer` request — were run on mainnet ([verification.md](verification.md)).
-Before a canary: the dispatcher's `execute` within ICE's 2M gas on a Hydration fork, the WETH NTT
-managers carrying the payload on both sides, ICE `Forward` in the live runtime, the router's gas on
-testnet, refunds through 1Click, control of `intents-router.hydration-whm.near`, and monitoring. The
-full list is in [plan.md §5](plan.md#5-gates).
+Deployed on mainnet; a direct `dispatch` canary and ICE swap and TWAP runs went end to end — Hydration
+to a Zcash payout ([verification.md](verification.md)). Still open: refunds (1Click's and the
+router's), the ownership handover to the DAO, and alerting. Status and gates:
+[plan.md §5](plan.md#5-gates).
 
 ---
 
@@ -334,9 +341,9 @@ unbounded-N schedule.
 **Reusing one 1Click address** is impossible: they are non-deterministic. Byte-identical requests
 return different addresses in all three deposit modes.
 
-**An `ANY_INPUT` collector** only sweeps once a pool clears $1,000, and is `INTENTS`-only —
-`400 "ANY_INPUT only supports depositType INTENTS or CONFIDENTIAL_INTENTS"` — so Wormhole cannot
-deliver into it at all.
+**A 1Click pass-through on its own** gives a standing deposit address — v2 uses one as `0xN` — but
+it only forwards, to whatever recipient the request named. It still needs a recipient nobody but the
+terms can spend, which is `A`.
 
 **Letting the bot hold the intents key** fails on `intents.near` having no per-key scoping: _"Every
 public key registered to an account can sign intents on its behalf."_ A key is unbounded authority.
@@ -350,8 +357,8 @@ MPC derivation is what remains, and it removes the key from every human-operated
 No private key for `A` exists anywhere. It is MPC-derived, keyed on `(predecessor, path)`:
 
 ```
-intents-router.hydration-whm.near + path → A₁ → 0xN₁
-attacker.near                     + path → A₂ → 0xN₂      (disjoint account, same path)
+intents-router.hydration-whm.near + path → A₁
+attacker.near                     + path → A₂      (disjoint account, same path)
 ```
 
 **Code identity is irrelevant; only account identity matters.** A byte-identical router deployed to
@@ -380,5 +387,6 @@ router's code controls every `A`. The router follows the near-ntt model: account
 changed only through an owner-gated `upgrade`, ownership held by `hydration.sputnik-dao.near`. That
 DAO is therefore trusted with every account — an accepted decision, stated rather than hidden.
 
-**Nothing binds the deposit side.** `0xN` is publicly derivable, so anyone may deposit to it and the
-funds land in `A`. Harmless — they can only ever leave by the terms — but not a control.
+**Nothing binds the deposit side.** `0xN` is public — it is in every order — so anyone may deposit to
+it and the funds land in `A`; anyone can also request another pass-through to `A`. Harmless — funds
+can only ever leave `A` by the terms — but not a control.

@@ -65,7 +65,7 @@ Relays intents v2 orders **from Hydration to Ethereum** ([spec](../../docs/inten
 The `IntentDispatcher` bridges WETH to the `IntentForwarder` over NTT with the forwarding instruction
 in the transfer's own payload, so one VAA carries everything: this calls
 `IntentForwarder.processOrder(nttVaa, feeRequested)`, which delivers the settlement, pays the fee and
-forwards the rest to POA's deposit address for the order's NEAR account.
+forwards the rest to the order's deposit address — a standing 1Click pass-through to its NEAR account.
 
 It subscribes to the same WETH transceiver as `intent` and picks out orders by the transfer itself —
 sent by the dispatcher, to the forwarder — so the two apps never act on each other's settlements.

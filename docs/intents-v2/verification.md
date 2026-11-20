@@ -2,21 +2,33 @@
 
 What has been checked live for the v2 design ([spec.md](spec.md)), and what is still open.
 
-## Open — blocking the router
+## Open
 
-**Refunds through 1Click.** Neither 1Click refunding `A` (a swap that does not fill) nor the router's
-post-deadline refund has been run.
+**Refunds.** Neither 1Click refunding `A` (a swap that does not fill) nor the router's post-deadline
+refund has been run. Also open: the ownership handover and alerting ([plan.md §5](plan.md#5-gates)),
+and the UTXO payout route ([payout.md](payout.md#unverified)).
 
-## Open — before a canary
+## Verified — the deployment, end to end
 
-DIA price routes set on Hydration · ICE `Forward` in the targeted runtime, `execute` within 2M
-gas · the WETH NTT managers carrying the transfer payload · control of `intents-router.hydration-whm.near` and its DAO handoff · monitoring. Full list:
-[plan.md §5](plan.md#5-gates).
+All on mainnet, 2026-11-19, every stage visible in scan (`/v2/trade/<auth_path>`):
 
-## Verified
+| Run            | Entry                                     | Orders      | Outcome                                                          |
+| -------------- | ----------------------------------------- | ----------- | ---------------------------------------------------------------- |
+| canary         | `dispatch`, WETH held by the caller       | 233         | forwarded, swapped, delivered to Zcash                           |
+| swap alpha     | ICE swap: 3.7 HOLLAR → WETH               | 237         | 0.00203883 WETH bridged; 366,048 zat delivered, 294,048 received |
+| TWAP alpha     | ICE `Dca`: 3 tranches every 150 blocks    | 238–240     | ~0.0009 ETH each, one batched delivery                           |
 
-Gates G1–G3 were run on mainnet on 2026-10-21 — one full round, every transaction listed:
-[poc.md](poc.md).
+- **ICE forward** works for swaps and TWAPs, inside `execute`'s 2M gas. `assetIn` is the asset's EVM
+  address: its precompile, or for an ERC20-type asset (HOLLAR, 222) its contract.
+- **The pass-through.** A standing 1Click quote (ANY_INPUT, `1cs_v1:any` → `1cs_v1:original`,
+  recipient and refundTo `A`, deadline 2038) names an Ethereum deposit address; ETH the forwarder pays
+  there is credited by POA to 1Click's account and forwarded to `A`. One address served all three TWAP
+  tranches. It replaced POA's `deposit_address`: POA's bridge RPC refuses anonymous calls (HTTP 403).
+- **A ZEC delivery costs 72,000 zat** on every one so far, whatever the amount ([payout.md](payout.md)).
+
+## Verified — the router's gates
+
+Gates G1–G3 were run on mainnet on 2026-10-21, one full round.
 
 **A counterparty exists only through a quote (G1).** `publish_intent` with `quote_hashes: []`
 refuses a lone `token_diff` at publish time (`token deltas have positive balance`); it accepts only
@@ -40,12 +52,8 @@ out; a delivery costs 0.00072 ZEC (the listed 0.00047 fee plus 0.00025 taken on 
 
 **MPC derivation.** `v1.signer` is live on NEAR mainnet. `derived_public_key({path, predecessor,
 domain_id: 1})` returns an Ed25519 key; derivation is keyed on `(predecessor, path)`, so the same path
-from another account yields a disjoint `A` and `0xN`. The chain `(router, path) → A → 0xN` is
-deterministic across repeated runs.
-
-**POA addressing.** `deposit_address` is stable and per-account — repeated calls return the same
-value, distinct per account, and it works for implicit hex ids. It is POA's own derivation (no code
-at the address, not a hash of the account id), so `0xN` must come from their RPC, once per action.
+from another account yields a disjoint `A`. `(router, path) → A` is deterministic across repeated
+runs.
 
 **Intents account model.** `intents.near` has no per-key scoping: every public key registered to an
 account can sign intents on its behalf. Intent payloads carry a nonce, so signatures are single-use.
@@ -57,8 +65,8 @@ of the last `setPrice`, which is what the dispatcher's liveness check reads.
 **The oracle relay leg is in production.** `agents/relayer`'s `oracle` app relays `OracleEmitter`
 VAAs into per-source `OracleReceiver` deployments on Hydration.
 
-**ICE forward** (hydration-node master). `OnResolved::Forward { contract, data ≤ 512 bytes }`; DCA
-forwards on every trade, swaps only on full resolution; executed by the lazy executor in a later
+**ICE forward** (hydration-node master). `OnResolved::Forward { contract, data ≤ 512 bytes }`; a `Dca`
+intent forwards on every trade, swaps only on full resolution; executed by the lazy executor in a later
 block, `msg.sender == user`, value 0, gas 2,000,000; a revert or wrong ack rolls the push back; failed
 forwards are not retried.
 

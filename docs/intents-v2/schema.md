@@ -7,16 +7,26 @@ Companion to [spec.md](spec.md). Wire formats, interfaces and calls.
 ## Message topology
 
 ```
-                      HYDRATION                                   ETHEREUM                     NEAR
-                      ─────────                                   ────────                     ────
-  IntentDispatcher.execute (ICE) / .dispatch
-    │
-    ├─ NttManagerWithPayload.transferWithPayload ─► [S] NTT transfer ─► IntentForwarder ─► ETH → 0xN
-    │      payload: version | depositAddress | maxRelayFee                                  POA credits A
-    │
-    └─ wormhole.publishMessage ─► [O] order VAA ───────────────────────────────────────► IntentRouter
-           emitter: IntentDispatcher                                                      .swap(terms, O, quote)
-           payload: (authPath, seq, amount, outPerIn)
+HYDRATION    IntentDispatcher.execute (ICE) / .dispatch
+               │
+               ├───────────────────────────────┐
+               ▼                               ▼
+             [S] NttManagerWithPayload         [O] wormhole.publishMessage
+                 .transferWithPayload              emitter: IntentDispatcher
+                 payload: version |                payload: authPath | seq |
+                 depositAddress | maxRelayFee      amount | outPerIn
+               │                               │
+WORMHOLE       NTT transfer VAA                order VAA, consistency 202
+               │                               │
+ETHEREUM       IntentForwarder.processOrder    │
+               delivers, pays the relayer,     │
+               ETH → 0xN                       │
+               │                               │
+1CLICK         POA credits 1Click's account,   │
+               1Click forwards it to A         │
+               │                               ▼
+NEAR           A's ETH ───────────────────────► IntentRouter.swap(terms, O, quote)
+                                                 .deliver(terms) · .refund(terms)
 ```
 
 [S] is the WETH manager's transfer, from the dispatcher to the forwarder, with the forward payload
@@ -25,24 +35,15 @@ emitter — the router accepts nothing else. Both carry the transfer's NTT seque
 
 ---
 
-## 1. Constants
+## 1. Deployment
 
 ```
-Hydration Wormhole chain id  73
-Hydration core bridge        0x3792a6d63c31941B2805181771795D9176fA82A1   messageFee 0
-IntentDispatcher             <to deploy>                     ← router pins chain 73 + this address;
-                                                               ICE intents call it; the forwarder pins it
-IntentForwarder (Ethereum)   <to deploy>                     ← the transfer's recipient, chain 2
-IntentRouter (NEAR)          intents-router.hydration-whm.near   ← MPC derivation predecessor
+IntentDispatcher    Hydration   0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b
+IntentForwarder     Ethereum    0x31ab66509a8a0b5a0fdf33ff4a4297481863035c
+IntentRouter        NEAR        intents-router.hydration-whm.near
 
-Wormhole core (NEAR)         contract.wormhole_crypto.near   verify_vaa: signatures + guardian set only
-MPC signer (NEAR)            v1.signer                       domain_id 1 = Ed25519
-Verifier                     intents.near
-POA bridge RPC               https://bridge.chaindefuser.com/rpc
-Solver relay RPC             https://solver-relay-v2.chaindefuser.com/rpc
-
-ETH (intents token id)       nep141:eth.omft.near
-POA min deposit (eth:1)      1e11 wei
+1Click API          https://1click.chaindefuser.com                pass-through and swap quotes; partner key
+Solver relay        https://solver-relay-v2.chaindefuser.com/rpc   deliveries and refunds
 ```
 
 ---
@@ -51,24 +52,24 @@ POA min deposit (eth:1)      1e11 wei
 
 One set per action. `authPath = keccak256(encodeQuote(terms))`; any change → new `A` → new `0xN`.
 
-| Field | Type | Validation |
-| --- | --- | --- |
-| `owner` | address | the Hydration account's EVM address — what ICE calls `execute` as; non-zero. The dispatcher takes an order of these terms only from it |
-| `quoteId` | bytes32 | random per action; non-zero |
-| `maxSlippageBps` | u16 | `< 10_000`. Must exceed the router's `min_quote_slippage_bps` plus 1Click's fees and the oracle–market gap — the floor is checked on `minAmountOut`, which the quote's slippage already lowered; at or below it no quote passes and the ETH waits for the refund. The SDK uses 2–3%; a DAO raise of the minimum applies to accounts already funded |
-| `maxFillMultiplier` | u8 | `2..=100` — one fill sells at most this many times its order's amount: 2 takes an order's own ETH whatever the relayer keeps, more catches up missed orders. The SDK picks it per action |
-| `minOutPerIn` | u128 | hard floor, destination units per 1e18 wei; 0 = none |
-| `minDelivery` | u128 | before the deadline, deliver only once `A` holds this much; the SDK sets it ≥ POA's `min_withdrawal_amount` for the token (`supported_tokens`), above it a batch size |
-| `deadline` | u64 | unix seconds |
-| `recipientKind` | u8 | 0 = withdraw off NEAR through POA; 1 = intents-account transfer |
-| `refundTo` | address | Ethereum H160, non-zero |
-| `destinationAsset` | string | intents ledger id (bare form, not `1cs_v1:`), 1..255 bytes of visible ASCII |
-| `recipient` | string | 1..255 bytes of visible ASCII; an account id for `recipientKind 1` |
+| Field               | Type    | Validation                                                                                                                                                                                                                                                                                                                                         |
+| ------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`             | address | the Hydration account's EVM address — what ICE calls `execute` as; non-zero. The dispatcher takes an order of these terms only from it                                                                                                                                                                                                             |
+| `quoteId`           | bytes32 | random per action; non-zero                                                                                                                                                                                                                                                                                                                        |
+| `maxSlippageBps`    | u16     | `< 10_000`. Must exceed the router's `min_quote_slippage_bps` plus 1Click's fees and the oracle–market gap — the floor is checked on `minAmountOut`, which the quote's slippage already lowered; at or below it no quote passes and the ETH waits for the refund. The SDK uses 2–3%; a DAO raise of the minimum applies to accounts already funded |
+| `maxFillMultiplier` | u8      | `2..=100` — one fill sells at most this many times its order's amount: 2 takes an order's own ETH whatever the relayer keeps, more catches up missed orders. The SDK picks it per action                                                                                                                                                           |
+| `minOutPerIn`       | u128    | hard floor, destination units per 1e18 wei; 0 = none                                                                                                                                                                                                                                                                                               |
+| `minDelivery`       | u128    | before the deadline, deliver only once `A` holds this much; the SDK sets it ≥ the payout path's minimum for the token ([payout.md](payout.md)), above it a batch size                                                                                                                                                                              |
+| `deadline`          | u64     | unix seconds                                                                                                                                                                                                                                                                                                                                       |
+| `recipientKind`     | u8      | 0 = withdraw off NEAR through POA; 1 = intents-account transfer                                                                                                                                                                                                                                                                                    |
+| `refundTo`          | address | Ethereum H160, non-zero                                                                                                                                                                                                                                                                                                                            |
+| `destinationAsset`  | string  | intents ledger id (bare form, not `1cs_v1:`), 1..255 bytes of visible ASCII                                                                                                                                                                                                                                                                        |
+| `recipient`         | string  | 1..255 bytes of visible ASCII; an account id for `recipientKind 1`                                                                                                                                                                                                                                                                                 |
 
 There is no on-chain asset list. Whether an asset can be bought is 1Click's: no quote, no swap — the ETH
 waits in `A` and refunds after the deadline. Whether a delivery works is the terms', built by the SDK:
-`recipientKind 0` only for tokens POA withdraws with a `WITHDRAW_TO:` memo, `minDelivery` from POA's
-minimums. The router checks only what is structural — a withdrawal needs a `nep141:` asset (at swap and
+`recipientKind 0` only for tokens POA withdraws with a `WITHDRAW_TO:` memo, `minDelivery` from the
+payout path's minimums. The router checks only what is structural — a withdrawal needs a `nep141:` asset (at swap and
 delivery, never at parse, so terms that fail it still refund) — and never ETH → ETH.
 
 Packed big-endian:
@@ -156,24 +157,30 @@ transaction; a revert or wrong ack rolls the push back.
 
 ---
 
-## 5. Account derivation — `(router, path) → A → 0xN`
+## 5. Account derivation — `(router, path) → A`, and `0xN` for it
 
 ```
-MPC   derived_public_key({ predecessor: "intents-router.hydration-whm.near", path, domain_id: 1 })
-        → ed25519:<bs58>
-        → A = lowercase hex of the 32 decoded bytes          NEAR implicit account, no registration
-POA   deposit_address({ account_id: A, chain: "eth:1" })
-        → 0xN                                                only A, never the router
+MPC     derived_public_key({ predecessor: "intents-router.hydration-whm.near", path, domain_id: 1 })
+          → ed25519:<bs58>
+          → A = lowercase hex of the 32 decoded bytes        NEAR implicit account, no registration
+1Click  a standing pass-through quote to A
+          → 0xN = its Ethereum deposit address               recipient and refundTo A, never the router
 ```
 
 ```json
 POST <NEAR RPC>  query / call_function  account_id "v1.signer"  method "derived_public_key"
 args { "path": "<authPath, canonical hex>", "predecessor": "intents-router.hydration-whm.near", "domain_id": 1 }
 
-POST https://bridge.chaindefuser.com/rpc
-{ "method": "deposit_address", "params": [{ "account_id": "<A>", "chain": "eth:1" }] }
-→ { "result": { "address": "0xN", "chain": "eth:1" } }
+POST https://1click.chaindefuser.com/v0/quote          x-api-key: <partner key>
+{ "dry": false, "swapType": "ANY_INPUT", "originAsset": "1cs_v1:any", "depositType": "INTENTS",
+  "destinationAsset": "1cs_v1:original", "amount": "0", "slippageTolerance": 50,
+  "recipient": "<A>", "recipientType": "INTENTS", "refundTo": "<A>", "refundType": "INTENTS",
+  "deadline": "2038-01-01T00:00:00.000Z" }
+→ quote.chainDepositAddresses[blockchain = "eth"].address = 0xN
+  quote.depositAddress = 1Click's intents account for the quote, which POA credits and 1Click forwards
 ```
+
+`passThrough` in `common/near/intents.ts`.
 
 The path string encoding (hex case, `0x` prefix) is frozen by golden vectors — a different encoding
 is a different account.
@@ -190,15 +197,15 @@ is a different account.
 { "signer_id": "<A>", "deadline": "<RFC 3339, ms>", "intents": [ <one of the three below> ] }
 ```
 
-| Action | Intent |
-| --- | --- |
-| **swap** | `{ "intent": "transfer", "receiver_id": "<quote.depositAddress>", "tokens": { "nep141:eth.omft.near": "<quote.amountIn>" } }` |
-| **deliver**, `recipientKind 0` | `{ "intent": "ft_withdraw", "token": "<contract>", "receiver_id": "<contract>", "amount": "<balance>", "memo": "WITHDRAW_TO:<recipient>" }` |
-| **deliver**, `recipientKind 1` | `{ "intent": "transfer", "receiver_id": "<recipient>", "tokens": { "<destinationAsset>": "<balance>" } }` |
-| **refund** | `{ "intent": "ft_withdraw", "token": "eth.omft.near", "receiver_id": "eth.omft.near", "amount": "<balance>", "memo": "WITHDRAW_TO:<refundTo, EIP-55>" }` |
+| Action                         | Intent                                                                                                                                                   |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **swap**                       | `{ "intent": "transfer", "receiver_id": "<quote.depositAddress>", "tokens": { "nep141:eth.omft.near": "<quote.amountIn>" } }`                            |
+| **deliver**, `recipientKind 0` | `{ "intent": "ft_withdraw", "token": "<contract>", "receiver_id": "<contract>", "amount": "<balance>", "memo": "WITHDRAW_TO:<recipient>" }`              |
+| **deliver**, `recipientKind 1` | `{ "intent": "transfer", "receiver_id": "<recipient>", "tokens": { "<destinationAsset>": "<balance>" } }`                                                |
+| **refund**                     | `{ "intent": "ft_withdraw", "token": "eth.omft.near", "receiver_id": "eth.omft.near", "amount": "<balance>", "memo": "WITHDRAW_TO:<refundTo, EIP-55>" }` |
 
 - The swap is a transfer into 1Click's deposit account, not a `token_diff`: 1Click has the solvers
-  trade and pays the output back to `A` in the same transaction ([poc.md](poc.md#g1--a-counterparty)).
+  trade and pays the output back to `A` in the same transaction ([verification.md](verification.md), G1).
 - `<contract>` is the ledger id without `nep141:`. Deliveries and refunds move `A`'s whole balance —
   a delivery before the deadline from `minDelivery`, after it any balance.
 
@@ -243,25 +250,29 @@ optional fields when set; the quote's amounts; non-dry, its `depositAddress`, `d
 (`signedFields` in `crates/near/scripts/intent-router/oneclick.ts`); the router reads every value it
 checks from it.
 
-| Check | Rule |
-| --- | --- |
-| signature | by a key in the router's set (DAO-managed) |
-| shape | `dry` false, `swapType` `EXACT_INPUT`, `depositType` `INTENTS`, `amount` = `amountIn` > 0 |
-| assets | `originAsset` = ETH, `destinationAsset` = the terms' |
-| payee | `recipient` = `refundTo` = `A`, both `INTENTS` |
-| fields | only the fields 1Click signs for a plain swap (an allowlist); `virtualChain*`, `customRecipientMsg`, `depositMemo` or any unknown field is refused |
-| age | `now ≤ timestamp + max_quote_age`; the quote's `deadline` ≥ the transfer's |
-| room | `slippageTolerance ≥ min_quote_slippage_bps` (absent = 0) — a quote too tight to fill would spend the order's one fill on a refund |
-| size | `amountIn` within 1% below `min(A's ETH, maxFillMultiplier × order.amount)` — never the caller's choice, so a dust quote cannot spend an order |
-| credited | `A's ETH ≥ order.amount × (1 − max_order_shortfall_bps)` — the order's own ETH has arrived; dust a stranger credits first does not count |
-| floor | `minAmountOut × 1e18 × 10⁴ ≥ amountIn × outPerIn × (10⁴ − maxSlippageBps)`, and ≥ `amountIn × minOutPerIn / 1e18` |
+| Check     | Rule                                                                                                                                               |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| signature | by a key in the router's set (DAO-managed)                                                                                                         |
+| shape     | `dry` false, `swapType` `EXACT_INPUT`, `depositType` `INTENTS`, `amount` = `amountIn` > 0                                                          |
+| assets    | `originAsset` = ETH, `destinationAsset` = the terms'                                                                                               |
+| payee     | `recipient` = `refundTo` = `A`, both `INTENTS`                                                                                                     |
+| fields    | only the fields 1Click signs for a plain swap (an allowlist); `virtualChain*`, `customRecipientMsg`, `depositMemo` or any unknown field is refused |
+| age       | `now ≤ timestamp + max_quote_age`; the quote's `deadline` ≥ the transfer's                                                                         |
+| room      | `slippageTolerance ≥ min_quote_slippage_bps` (absent = 0) — a quote too tight to fill would spend the order's one fill on a refund                 |
+| size      | `amountIn` within 1% below `min(A's ETH, maxFillMultiplier × order.amount)` — never the caller's choice, so a dust quote cannot spend an order     |
+| credited  | `A's ETH ≥ order.amount × (1 − max_order_shortfall_bps)` — the order's own ETH has arrived; dust a stranger credits first does not count           |
+| floor     | `minAmountOut × 1e18 × 10⁴ ≥ amountIn × outPerIn × (10⁴ − maxSlippageBps)`, and ≥ `amountIn × minOutPerIn / 1e18`                                  |
 
 ### `MultiPayload` — what the bot submits
 
 ```json
 {
   "standard": "nep413",
-  "payload": { "recipient": "intents.near", "nonce": "<base64>", "message": "<the JSON above, escaped>" },
+  "payload": {
+    "recipient": "intents.near",
+    "nonce": "<base64>",
+    "message": "<the JSON above, escaped>"
+  },
   "public_key": "ed25519:<bs58 of A's key>",
   "signature": "ed25519:<bs58 of the MPC signature>"
 }
@@ -333,7 +344,8 @@ GET https://api.wormholescan.io/api/v1/vaas/73/<IntentDispatcher emitter hex>/<m
 
 **Balances** — `intents.near.mt_batch_balance_of({ account_id: A, token_ids: [eth, destination] })`.
 
-**Swap** — per order, once POA has credited the order's ETH to `A` (`crates/near/scripts/intent-router/swap.ts`):
+**Swap** — per order, once the order's ETH has reached `A` (the bot: `agents/intent`, `router` app;
+by hand: `crates/near/scripts/intent-router/swap.ts`):
 
 ```
 amount = min(A's ETH, maxFillMultiplier × order.amount)       the router accepts nothing else
@@ -351,11 +363,11 @@ with its deadline; a new quote for the same order re-signs the same nonce.
 (`payout.ts`): `publish_intent({ quote_hashes: [], signed_data })` → `{ status: "OK", intent_hash }`,
 and `get_status({ intent_hash })`:
 
-| Status | Bot action |
-| --- | --- |
-| `PENDING`, `TX_BROADCASTED` | keep polling |
-| `SETTLED` | record; reconcile balances |
-| `NOT_FOUND_OR_NOT_VALID` | call again — a new block height gives a new nonce |
+| Status                      | Bot action                                        |
+| --------------------------- | ------------------------------------------------- |
+| `PENDING`, `TX_BROADCASTED` | keep polling                                      |
+| `SETTLED`                   | record; reconcile balances                        |
+| `NOT_FOUND_OR_NOT_VALID`    | call again — a new block height gives a new nonce |
 
 The bot keeps nothing whose loss strands funds: everything rebuilds from balances, router events and
 verifier nonces.
