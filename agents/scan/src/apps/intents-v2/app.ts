@@ -5,16 +5,17 @@ import log from "../../logger";
 import { WATCH } from "../../watch";
 
 import { routes } from "./api";
-import { orders } from "./flows";
+import { orders, payouts } from "./flows";
+import { PayoutPoller } from "./payouts";
 
 const NAME = "intents-v2";
-const FLOWS = [orders];
+const FLOWS = [orders, payouts];
 
 /**
- * Intents v2: orders published on Hydration and forwarded on Ethereum, and the terms they fund —
- * what the NEAR router bot reads its work from.
+ * Intents v2: orders published on Hydration, forwarded on Ethereum and swapped on NEAR, the payouts
+ * of the terms they fund, and the terms themselves — what the NEAR router bot reads its work from.
  *
- * Reads the event store ingest fills and owns nothing else.
+ * Reads the event store ingest fills, and Blockchair for where a ZEC payout landed.
  */
 async function main(): Promise<void> {
   banner(NAME);
@@ -23,7 +24,7 @@ async function main(): Promise<void> {
   await drain.initSchema();
 
   subscribe((u) => {
-    const id = u.record.seq as string;
+    const id = (u.record.seq ?? u.record.id) as string;
     if (u.kind === "created") log.info(`+ [${u.flow}] ${id} [${u.record.state}]`);
     else if (u.previousState !== u.record.state) {
       log.info(`~ [${u.flow}] ${id} [${u.previousState} -> ${u.record.state}]`);
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
 
   await serve({ name: NAME, flows: FLOWS, routes });
   await drain.start(drainIntervalMs);
+  new PayoutPoller().start();
 
   log.info("intents-v2 ready.");
 }

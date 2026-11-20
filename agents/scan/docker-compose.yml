@@ -61,6 +61,8 @@ services:
     command: [node, intents-v2/app.js]
     environment:
       - DATABASE_URL=postgres://scan:scan@postgres:5432/scan
+      # Asset symbols for what an ICE order sold, read from Hydration once.
+      - RPC_HYDRATION_WSS=
     ports:
       - "8084:8080"
     depends_on:

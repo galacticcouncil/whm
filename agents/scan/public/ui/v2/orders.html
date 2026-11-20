@@ -24,7 +24,7 @@
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
-        <input id="q" type="text" placeholder="Search by address or tx hash" autocomplete="off" spellcheck="false" />
+        <input id="q" type="text" placeholder="Search by address" autocomplete="off" spellcheck="false" />
         <span class="hint">↵</span>
       </label>
 
@@ -37,7 +37,7 @@
         <table class="tbl">
           <thead>
             <tr>
-              <th>Order</th>
+              <th>Plan</th>
               <th>Time</th>
               <th>Type</th>
               <th>From</th>
@@ -58,12 +58,15 @@
         addrLink,
         agoLong,
         asset,
+        assetIcon,
         at,
         badge,
         chainBadge,
+        chainIcon,
         esc,
         filterDrop,
         filterToggle,
+        icon,
         json,
         live,
         pager,
@@ -80,7 +83,7 @@
 
       const LIMIT = 25;
       const COLS = 7;
-      const STATES = ["published", "forwarded"];
+      const STATES = ["active", "delivered", "refunded", "ended"];
       const el = (id) => document.getElementById(id);
 
       /** What A is credited and sells — the rail's unit. */
@@ -127,46 +130,56 @@
         `<span class="end-row">${chain ? chainBadge(chain) : ""}${addrLink(address, chain)}</span>`;
 
       /**
-       * A swap is one order of its terms, a DCA several. A DCA's first tranche reads as a swap until
-       * its second arrives — nothing on-chain says how many there will be.
+       * A plan of one order is a swap, of several a DCA. A DCA reads as a swap until its second tranche
+       * arrives — nothing on-chain says how many there will be.
        */
       const type = (r) =>
-        r.tranches > 1 ? pill(`DCA #${r.tranche}`, "var(--lavender)") : pill("swap", "var(--sky)");
+        r.tranches > 1 ? pill(`DCA · ${r.tranches}`, "var(--lavender)") : pill("swap", "var(--sky)");
 
-      /** The ETH the order brings A, and what it buys — the amount out is NEAR's, not indexed here. */
+      let tokens = { hydration: {} };
+
+      /**
+       * What the plan sold — the Hydration asset its ICE trades sold, else the ETH — and what the user
+       * has received so far.
+       */
       function assets(r) {
         const d = dest(r);
-        const out = `<span class="asset-chip"><span class="sym">${esc(d?.symbol ?? r.destination_asset ?? "?")}</span></span>`;
-        return `<span class="assets">${asset(r.amount, ETH)}<span class="arrow">→</span>${out}</span>`;
+        const meta = r.asset_in != null ? tokens.hydration[r.asset_in] : null;
+        const sold =
+          r.asset_in != null
+            ? asset(r.amount_in, meta, `#${r.asset_in}`, assetIcon(meta?.icon ?? r.asset_in))
+            : asset(r.sold, ETH, "", chainIcon("ethereum"));
+        const out =
+          Number(r.received) > 0
+            ? asset(r.received, d, r.destination_asset ?? "", chainIcon(destChain(r)))
+            : `<span class="asset-chip">${icon(chainIcon(destChain(r)), d?.symbol)}<span class="sym">${esc(d?.symbol ?? r.destination_asset ?? "?")}</span></span>`;
+        return `<span class="assets">${sold}<span class="arrow">→</span>${out}</span>`;
       }
-
-      /** The order's state, plus the rail's when the rail is what holds it up. */
-      const status = (r) => `${badge(r.state)}${r.rail_state === "queued" ? ` ${badge("queued")}` : ""}`;
 
       let shown = new Set();
 
       function render(items, fresh) {
         if (!items.length) {
-          el("rows").innerHTML = `<tr><td class="table-error" colspan="${COLS}">No orders match.</td></tr>`;
+          el("rows").innerHTML = `<tr><td class="table-error" colspan="${COLS}">No plans match.</td></tr>`;
           shown = new Set();
           return;
         }
         el("rows").innerHTML = items
           .map((r) => {
-            const href = `/v2/order/${encodeURIComponent(r.seq)}`;
-            const isNew = fresh && !shown.has(r.seq);
+            const href = `/v2/plan/${encodeURIComponent(r.auth_path)}`;
+            const isNew = fresh && !shown.has(r.auth_path);
             return `<tr class="clickable${isNew ? " row-new" : ""}" data-href="${href}">
-              <td class="mono" data-label="Order"><a class="hash" href="${href}">#${esc(r.seq)}</a></td>
-              <td data-label="Time">${when(r.published?.blockTimestamp)}</td>
+              <td class="mono" data-label="Plan"><a class="hash" href="${href}" title="${esc(r.auth_path)}">${esc(r.auth_path.slice(0, 8))}</a></td>
+              <td data-label="Time">${when(r.last_at)}</td>
               <td data-label="Type">${type(r)}</td>
               <td data-label="From">${end("hydration", r.caller)}</td>
               <td data-label="To">${end(destChain(r), r.recipient)}</td>
               <td data-label="Assets">${assets(r)}</td>
-              <td class="r" data-label="Status">${status(r)}</td>
+              <td class="r" data-label="Status">${badge(r.status)}</td>
             </tr>`;
           })
           .join("");
-        shown = new Set(items.map((r) => r.seq));
+        shown = new Set(items.map((r) => r.auth_path));
       }
 
       function skeleton() {
@@ -189,13 +202,13 @@
         const { q, states } = sync();
         const p = new URLSearchParams({ limit: LIMIT, offset: (page - 1) * LIMIT });
         if (q) p.set("address", q);
-        if (states.length) p.set("state", states.join(","));
+        if (states.length) p.set("status", states.join(","));
         el("rows").classList.add("rows-pending");
-        const data = await json(`${API}/orders?${p}`);
+        const data = await json(`${API}/plans?${p}`);
         el("rows").classList.remove("rows-pending");
         if (!data) {
           el("rows").innerHTML =
-            `<tr><td class="table-error" colspan="${COLS}"><strong>Could not load orders.</strong></td></tr>`;
+            `<tr><td class="table-error" colspan="${COLS}"><strong>Could not load plans.</strong></td></tr>`;
           return;
         }
         render(data.items, fresh);
@@ -251,8 +264,11 @@
       // A change anywhere reloads the first page, and what arrived flashes. A burst coalesces.
       let pending;
       skeleton();
+      json(`${API}/tokens`).then((t) => {
+        if (t) tokens = t;
+      });
       live(
-        "orders-v2",
+        "orders-v2,payouts-v2",
         () => {
           if (page !== 1) return;
           clearTimeout(pending);

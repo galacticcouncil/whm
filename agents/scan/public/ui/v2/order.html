@@ -26,14 +26,18 @@
         agoLong,
         amount,
         asset,
+        assetIcon,
         at,
         badge,
+        chainIcon,
         copyBtn,
+        destTxLink,
         esc,
         json,
         kv,
         legCard,
         live,
+        nearIntentsUrl,
         pill,
         short,
         topbar,
@@ -68,12 +72,78 @@
           ? pill(`DCA · tranche ${o.tranche} of ${o.tranches} so far`, "var(--lavender)")
           : pill("swap", "var(--sky)");
 
+      /** Where the destination asset's payout transaction is shown, by the chain it lands on. */
+      const DEST_TX = { zcash: "zec" };
+
       /**
-       * The route, start to end. The order is published and bridged on Hydration, the settlement is
-       * signed by Wormhole, delivered on Ethereum and forwarded to POA's deposit address. What follows
-       * — POA crediting A, the swap, the delivery — happens on NEAR, which this does not index yet.
+       * The payout that carried this order's output: the first of its terms signed after its swap. A
+       * DCA's delivery can batch several orders' output, so one payout may show on several orders.
+       *
+       * @param o The order.
+       * @param payouts Its terms' payouts, oldest first.
        */
-      function route(o) {
+      function payoutOf(o, payouts) {
+        const after = Number(o.swapped?.blockTimestamp ?? o.published?.blockTimestamp ?? 0);
+        return payouts.find((p) => Number(p.signed?.blockTimestamp ?? 0) >= after) ?? null;
+      }
+
+      /**
+       * The last hop: where the user is paid. A withdrawal lands on the asset's own chain, as a
+       * transaction found there; an intents recipient is paid on NEAR. A refund goes back to Ethereum.
+       * The 1Click link is this order's swap.
+       *
+       * @param o The order.
+       * @param payout The payout that carried its output, if signed yet.
+       */
+      function destination(o, payout) {
+        const d = dest(o);
+        const oneClick = o.swap_deposit
+          ? ["", `<a class="link" href="${nearIntentsUrl(o.swap_deposit)}" target="_blank" rel="noreferrer">1Click execution ↗</a>`]
+          : null;
+        const since = o.published?.blockTimestamp;
+
+        if (payout?.state === "refunded") {
+          return legCard({
+            where: "ethereum",
+            kind: "refunded",
+            ref: payout.signed,
+            rows: [["", asset(payout.amount, ETH)], oneClick].filter(Boolean),
+            since,
+          });
+        }
+
+        const chain = destChain(o) ?? "near";
+        if (chain === "near") {
+          return legCard({
+            where: "near",
+            kind: payout ? "received" : o.swapped ? "swapped" : "pending",
+            ref: payout?.signed,
+            pending: !payout,
+            rows: [payout ? ["", asset(payout.amount, d, o.destination_asset ?? "", chainIcon(chain))] : null, oneClick].filter(Boolean),
+            since,
+          });
+        }
+
+        // Paid on another chain: the payout's own transaction there, once the poller has found it.
+        const landed = payout?.dest_tx;
+        return legCard({
+          where: chain,
+          kind: landed ? "received" : payout ? "sending" : o.swapped ? "swapped" : "pending",
+          pending: !landed,
+          rows: [
+            landed ? ["", asset(payout.dest_amount, d, o.destination_asset ?? "", chainIcon(chain))] : null,
+            landed ? ["tx", destTxLink(payout.dest_tx, null, DEST_TX[chain] ?? chain)] : null,
+            oneClick,
+          ].filter(Boolean),
+          since,
+        });
+      }
+
+      /**
+       * The route, start to end: published and bridged on Hydration, signed by Wormhole, delivered on
+       * Ethereum and forwarded into A, then swapped by the router and paid out on the destination.
+       */
+      function route(o, payout) {
         const placedAt = o.published?.blockTimestamp;
         const held = o.rail_state === "queued";
         return [
@@ -81,7 +151,12 @@
             where: "hydration",
             kind: "published",
             ref: o.published,
-            rows: [["A gets ≥", asset(o.amount, ETH)]],
+            rows: [
+              o.asset_in != null
+                ? ["sold", asset(o.amount_in, tokens.hydration[o.asset_in], `#${o.asset_in}`, assetIcon(tokens.hydration[o.asset_in]?.icon ?? o.asset_in))]
+                : null,
+              ["A gets ≥", asset(o.amount, ETH)],
+            ].filter(Boolean),
           }),
           legCard({
             where: "wormhole",
@@ -108,40 +183,11 @@
             rows: o.forwarded_amount ? [["", asset(o.forwarded_amount, ETH)]] : [],
             since: placedAt,
           }),
-          legCard({
-            where: "near",
-            kind: "swap · delivery",
-            pending: true,
-            rows: [["", '<span class="dim">on NEAR — not indexed yet</span>']],
-          }),
+          destination(o, payout),
         ].join("");
       }
 
-      /** The other orders of the same terms, oldest first — a DCA's tranches. */
-      async function tranches(o) {
-        if (!(o.tranches > 1)) return "";
-        const data = await json(`${API}/orders?authPath=${encodeURIComponent(o.auth_path)}&limit=1000`);
-        const items = (data?.items ?? []).slice().sort((a, b) => Number(a.seq) - Number(b.seq));
-        const rows = items
-          .map((t) => {
-            const ms = t.published?.blockTimestamp;
-            const self = String(t.seq) === seq;
-            return `<tr${self ? ' class="row-new"' : ""}>
-              <td class="mono"><a class="hash" href="/v2/order/${encodeURIComponent(t.seq)}">#${esc(t.seq)}</a></td>
-              <td><span class="mono muted" title="${esc(at(ms))}">${agoLong(ms)}</span></td>
-              <td>${asset(t.amount, ETH)}</td>
-              <td class="r">${badge(t.state)}</td>
-            </tr>`;
-          })
-          .join("");
-        return `
-          <div class="panel">
-            <div class="panel-head"><span class="t">Tranches</span><span class="note">every order of these terms</span></div>
-            <table class="tbl"><tbody>${rows}</tbody></table>
-          </div>`;
-      }
-
-      async function render(o) {
+      async function render(o, payouts) {
         if (!o) {
           main.innerHTML = `<div class="panel"><div class="table-error">no order with sequence ${esc(seq)}</div></div>`;
           return;
@@ -150,7 +196,7 @@
         const deadline = o.deadline ? Number(o.deadline) * 1000 : null;
 
         const order = [
-          kv("type", type(o)),
+          kv("plan", o.auth_path ? `<a class="link" href="/v2/plan/${encodeURIComponent(o.auth_path)}">${type(o)}</a>` : type(o)),
           kv("buys", esc(d?.symbol ?? o.destination_asset ?? "—")),
           // Destination units per 1 ETH, from the feeds when the order was published.
           kv("priced at", o.out_per_in && d ? `${esc(amount(o.out_per_in, d.decimals, 6))} ${esc(d.symbol)} / ETH` : mono(o.out_per_in)),
@@ -184,7 +230,7 @@
 
         main.innerHTML = `
           <h1 class="page-title tagged">Order ${esc(o.seq)} <span class="sub">${badge(o.state)}</span>${versionTag("v2")}</h1>
-          <div class="legs">${route(o)}</div>
+          <div class="legs">${route(o, payoutOf(o, payouts))}</div>
           <div class="panel">
             <div class="panel-head"><span class="t">Order</span></div>
             ${order}
@@ -196,18 +242,24 @@
           <div class="panel">
             <div class="panel-head"><span class="t">NTT rail</span></div>
             ${rail}
-          </div>
-          ${await tranches(o)}`;
+          </div>`;
       }
 
+      let authPath = null;
+      let tokens = { hydration: {} };
+
       async function load() {
-        await render(await json(`${API}/orders/${encodeURIComponent(seq)}`));
+        if (!Object.keys(tokens.hydration).length) tokens = (await json(`${API}/tokens`)) ?? tokens;
+        const o = await json(`${API}/orders/${encodeURIComponent(seq)}`);
+        authPath = o?.auth_path ?? null;
+        const payouts = authPath ? ((await json(`${API}/payouts?authPath=${encodeURIComponent(authPath)}`)) ?? []) : [];
+        await render(o, payouts);
       }
 
       live(
-        "orders-v2",
+        "orders-v2,payouts-v2",
         (u) => {
-          if (String(u.record?.seq) === seq) load();
+          if (String(u.record?.seq) === seq || (authPath && u.record?.auth_path === authPath)) load();
         },
         load,
         API,

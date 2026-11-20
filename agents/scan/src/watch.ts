@@ -85,10 +85,12 @@ const FROM = {
   hyperevm: { ntt: FROM_CHAIN.hyperevm },
   solana: { ntt: FROM_CHAIN.solana, oracles: FROM_CHAIN_ORA.solana },
   near: {
-    /** ntt-near's deploy, the earlier of the two NEAR managers. */
+    /** ntt deploy */
     ntt: 219_438_351n,
-    /** withdraw-zec's deploy. */
+    /** zec utxo deploy. */
     utxoZec: 220_248_232n,
+    /** intent router deploy. */
+    intentsV2: 224_953_950n,
   },
 };
 
@@ -216,10 +218,11 @@ function intentV2(chain: string, role: string, address: string, from: bigint): W
   return [{ chain, role, from, at: [address] }];
 }
 
-/** Intents v2: published on Hydration, forwarded on Ethereum. */
+/** Intents v2: published on Hydration, forwarded on Ethereum, swapped and paid out on NEAR. */
 const INTENTS_V2: Watch[] = [
   ...intentV2("hydration", "intent-dispatcher", INTENT_V2.dispatcher, FROM.hydration.intentsV2),
   ...intentV2("ethereum", "intent-forwarder", INTENT_V2.forwarder, FROM.ethereum.intentsV2),
+  ...intentV2("near", "intent-router", INTENT_V2.router, FROM.near.intentsV2),
 ];
 
 /** Basejump: the Ethereum source, paid out of the Hydration landing pool. */

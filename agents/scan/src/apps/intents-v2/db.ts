@@ -116,6 +116,17 @@ export interface TermsRow {
   published_at: string;
 }
 
+/** Every set of terms, one row each, with its newest order — what the router bot works from. */
+const TERMS = `
+  SELECT DISTINCT ON (o.auth_path)
+         o.auth_path, o.terms, o.deadline,
+         (COUNT(*) OVER (PARTITION BY o.auth_path))::int AS orders,
+         o.seq, o.order_vaa, o.published->>'blockTimestamp' AS published_at
+    FROM intent_v2_orders o
+   WHERE o.published IS NOT NULL
+   ORDER BY o.auth_path, o.seq DESC
+`;
+
 /**
  * Every set of terms with a deadline after `deadlineAfter`, one row each, with its newest order.
  *
@@ -127,16 +138,125 @@ export interface TermsRow {
  */
 export async function listTerms(deadlineAfter: number): Promise<TermsRow[]> {
   const r = await pool.query(
-    `SELECT * FROM (
-       SELECT DISTINCT ON (o.auth_path)
-              o.auth_path, o.terms, o.deadline,
-              (COUNT(*) OVER (PARTITION BY o.auth_path))::int AS orders,
-              o.seq, o.order_vaa, o.published->>'blockTimestamp' AS published_at
-         FROM intent_v2_orders o
-        WHERE o.published IS NOT NULL AND o.deadline > $1
-        ORDER BY o.auth_path, o.seq DESC
-     ) t ORDER BY t.deadline, t.auth_path`,
+    `SELECT * FROM (${TERMS}) t WHERE t.deadline > $1 ORDER BY t.deadline, t.auth_path`,
     [deadlineAfter],
   );
   return r.rows;
+}
+
+/**
+ * The payouts of one set of terms, oldest first — deliveries and refunds, with where each landed
+ * once the poller has found it.
+ *
+ * @param authPath The terms' `auth_path`.
+ * @returns Their payouts.
+ */
+export async function listPayouts(authPath: string): Promise<Record<string, unknown>[]> {
+  const r = await pool.query(
+    `SELECT * FROM intent_v2_payouts WHERE auth_path = $1
+      ORDER BY (signed->>'blockTimestamp')::numeric`,
+    [authPath.trim().toLowerCase()],
+  );
+  return r.rows;
+}
+
+/**
+ * Plans — one set of terms each, the user's whole action: a swap is a plan of one order, a DCA of
+ * several. The terms' fields come from its newest order (every order of a plan carries the same
+ * terms); the rest is counted over its orders and payouts.
+ *
+ * - `sold`: the ETH that reached `A` less any refunded — every fill sells `A`'s whole ETH, so what is
+ *   not refunded was sold. Orders `execute` placed also carry what the user sold on Hydration for it
+ *   (`asset_in`, `amount_in`).
+ * - `received`: what arrived — for a withdrawal, what landed on the recipient's chain once found;
+ *   for an intents recipient, the delivery itself, a transfer with no fee.
+ * - `status`: `refunded` once a refund was signed; `active` while the deadline is ahead; after it,
+ *   `delivered` if anything was paid out, else `ended`.
+ */
+const PLANS = `
+  SELECT t.*, p.delivered, p.received, p.refunded, p.payouts,
+         t.eth_in - p.refunded_amount AS sold,
+         CASE WHEN p.refunded THEN 'refunded'
+              WHEN t.deadline * 1000 > EXTRACT(EPOCH FROM now()) * 1000 THEN 'active'
+              WHEN p.payouts > 0 THEN 'delivered'
+              ELSE 'ended' END AS status
+    FROM (
+      SELECT DISTINCT ON (o.auth_path)
+             o.auth_path, o.terms, o.owner, o.caller, o.destination_asset, o.recipient,
+             o.recipient_kind, o.refund_to, o.deadline,
+             (COUNT(*) OVER w)::int AS tranches,
+             (COUNT(o.swapped) OVER w)::int AS swapped,
+             SUM(COALESCE(o.forwarded_amount, o.amount)) OVER w AS eth_in,
+             MAX(o.asset_in) OVER w AS asset_in,
+             SUM(o.amount_in) OVER w AS amount_in,
+             MIN((o.published->>'blockTimestamp')::numeric) OVER w AS first_at,
+             MAX((o.published->>'blockTimestamp')::numeric) OVER w AS last_at
+        FROM intent_v2_orders o
+       WHERE ${VALID} AND o.published IS NOT NULL
+      WINDOW w AS (PARTITION BY o.auth_path)
+       ORDER BY o.auth_path, o.seq DESC
+    ) t
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(x.amount) FILTER (WHERE x.state = 'delivered'), 0) AS delivered,
+             COALESCE(SUM(CASE WHEN t.recipient_kind = 1 THEN x.amount ELSE x.dest_amount END)
+                        FILTER (WHERE x.state = 'delivered'), 0) AS received,
+             COALESCE(SUM(x.amount) FILTER (WHERE x.state = 'refunded'), 0) AS refunded_amount,
+             COALESCE(BOOL_OR(x.state = 'refunded'), false) AS refunded,
+             COUNT(*)::int AS payouts
+        FROM intent_v2_payouts x WHERE x.auth_path = t.auth_path
+    ) p ON true
+`;
+
+/**
+ * Plans, newest activity first.
+ *
+ * @param filter `status` narrows to any of its statuses; `address` matches the caller, owner,
+ *        refund address or recipient.
+ * @returns A page of plans and how many match.
+ */
+export async function listPlans(filter: {
+  status?: string[];
+  address?: string;
+  limit: number;
+  offset: number;
+}): Promise<{ items: Record<string, unknown>[]; total: number }> {
+  const conds: string[] = ["TRUE"];
+  const params: unknown[] = [];
+  if (filter.status?.length) {
+    params.push(filter.status);
+    conds.push(`q.status = ANY($${params.length})`);
+  }
+  if (filter.address) {
+    params.push(filter.address.trim().toLowerCase());
+    const n = params.length;
+    conds.push(`(q.caller = $${n} OR q.owner = $${n} OR q.refund_to = $${n} OR lower(q.recipient) = $${n})`);
+  }
+  const where = `WHERE ${conds.join(" AND ")}`;
+  const total = await pool.query(`SELECT COUNT(*)::int AS n FROM (${PLANS}) q ${where}`, params);
+  params.push(filter.limit, filter.offset);
+  const items = await pool.query(
+    `SELECT * FROM (${PLANS}) q ${where}
+      ORDER BY q.last_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  );
+  return { items: items.rows, total: total.rows[0].n };
+}
+
+/**
+ * One plan whole: its terms and status, every order of it, every payout.
+ *
+ * @param authPath The terms' `auth_path`.
+ * @returns The plan, or null.
+ */
+export async function getPlan(
+  authPath: string,
+): Promise<{ plan: Record<string, unknown>; orders: OrderRow[]; payouts: Record<string, unknown>[] } | null> {
+  const path = authPath.trim().toLowerCase();
+  const plan = (await pool.query(`SELECT * FROM (${PLANS}) q WHERE q.auth_path = $1`, [path])).rows[0];
+  if (!plan) return null;
+  const orders = await pool.query(
+    `SELECT ${COLUMNS} FROM intent_v2_orders o ${RAIL} WHERE o.auth_path = $1 AND ${VALID} ORDER BY o.seq`,
+    [path],
+  );
+  return { plan, orders: orders.rows, payouts: await listPayouts(path) };
 }

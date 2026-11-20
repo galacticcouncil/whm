@@ -14,3 +14,8 @@ export const OrderForwardedEvt = parseAbiItem(
 export const RelayFeePaidEvt = parseAbiItem(
   "event RelayFeePaid(uint64 indexed transferSequence, address indexed relayer, uint256 fee)",
 );
+
+/** Hydration — IntentDispatcher.execute: the ICE trade behind an order, what the user sold for it. */
+export const OrderSourcedEvt = parseAbiItem(
+  "event OrderSourced(uint64 indexed seq, uint256 indexed intentId, address assetIn, uint256 amountIn)",
+);

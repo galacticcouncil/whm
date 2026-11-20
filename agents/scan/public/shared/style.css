@@ -909,6 +909,7 @@ a.addr-pill:hover .ext-site {
 /* Lifecycle stages, shared by every flow: in flight is cool, done is green, held is amber. */
 .badge.placed,
 .badge.initiated,
+.badge.active,
 .badge.published,
 .badge.requested,
 .badge.deposited {
@@ -918,6 +919,7 @@ a.addr-pill:hover .ext-site {
 
 .badge.processed,
 .badge.forwarded,
+.badge.swapped,
 .badge.received,
 .badge.signed,
 .badge.withdrawn {
@@ -926,6 +928,7 @@ a.addr-pill:hover .ext-site {
 }
 
 .badge.settled,
+.badge.delivered,
 .badge.redeemed,
 .badge.fulfilled,
 .badge.confirmed,
@@ -940,7 +943,8 @@ a.addr-pill:hover .ext-site {
   color: var(--amber);
 }
 
-.badge.expired {
+.badge.expired,
+.badge.ended {
   background: var(--panel-hover);
   color: var(--text-low);
 }

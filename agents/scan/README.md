@@ -239,24 +239,49 @@ redeemed`; a withdrawal `requested → received → signed → withdrawn → con
 
 ## Intents v2 (the intents-v2 app)
 
-Orders the `IntentDispatcher` publishes on Hydration, and the `IntentForwarder` deposits to POA on
-Ethereum (`INTENT_V2` in `deployments.ts`, blank until deployed — a blank address is not watched).
-`intent_v2_orders` is keyed on the order's `seq`, the NTT message id of its transfer, which is the
-`transferSequence` the forwarder names. Stages: `published → forwarded`; what follows is on NEAR.
+Orders the `IntentDispatcher` publishes on Hydration, the `IntentForwarder` deposits on Ethereum, and
+the `IntentRouter` swaps and pays out on NEAR (`INTENT_V2` in `deployments.ts`; a blank address is not
+watched). The router is read through its own history, for its NEP-297 `intent_signed` events.
 
-`OrderPublished` carries the terms in full, so each row keeps them as emitted beside the fields
-worth a column — owner, deadline, destination asset, recipient, refund address — and the order
-message's VAA id. Every order of one set of terms shares their `auth_path`.
+Three things, related through the terms' `auth_path`:
 
 ```
+plan (auth_path) ─┬─ orders   intent_v2_orders, keyed on seq — the tranches
+                  └─ payouts  intent_v2_payouts, keyed on the signing log — deliveries, refunds
+```
+
+- **A plan** is one set of terms, the user's whole action: a swap is a plan of one order, a DCA of
+  several. It is not a table — its fields are the terms every order of it carries, and the rest is
+  counted over its orders and payouts. Its status: `refunded` once a refund is signed, `active` while
+  the deadline is ahead, after it `delivered` if anything was paid out, else `ended`.
+- **An order** is keyed on its `seq`, the NTT message id of its transfer — the `transferSequence` the
+  forwarder names and the `seq` the router's swap names. Stages: `published → forwarded → swapped`.
+  `OrderPublished` carries the terms in full, so each row keeps them as emitted beside the fields
+  worth a column. The swap keeps 1Click's deposit account, which is what its explorer finds the
+  execution by.
+- **A payout** is the terms', not one order's: output builds up in `A` and is delivered once it
+  reaches `minDelivery`, so one delivery can carry several tranches. Only what the terms do not say is
+  kept — the amount, and the signing transaction. A delivery to a Zcash address is then paired with
+  its Zcash transaction by a poller: POA pays out on Zcash and nothing on NEAR names it, so the
+  recipient's Blockchair history is read — the first payment after the delivery was signed, for no
+  more than was withdrawn. Shielded recipients stay unpaired.
+
+```
+GET /api/plans?status=&address=&limit=&offset=   # one row per auth_path
+GET /api/plans/:authPath                          # { plan, orders, payouts }
 GET /api/orders?state=&authPath=&publishedAfter=&address=&limit=&offset=
 GET /api/orders/:seq
-GET /api/terms?deadlineAfter=<unix s>   # one row per auth_path: terms, deadline, newest order
+GET /api/payouts?authPath=
+GET /api/terms?deadlineAfter=<unix s>             # one row per auth_path: terms, deadline, newest order
 ```
 
 `/api/terms` is the NEAR router bot's work list: it reads it at startup and follows `/api/events`
 after. Whether a set of terms still has work is `A`'s balances on NEAR, which scan does not read, so
 the caller picks how far past their deadline terms stay listed.
+
+The pages: `/v2/orders` lists plans, `/v2/plan/<auth_path>` shows one — its terms, every tranche with
+its 1Click execution, every payout with where it landed — and `/v2/order/<seq>` one tranche's route,
+ending on the destination chain.
 
 ## Oracles (the feeds app)
 
