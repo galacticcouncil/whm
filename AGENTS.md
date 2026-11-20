@@ -78,17 +78,16 @@ pnpm fork:all           # parallel
 
 ### Migrations
 
+Each names its environment — `prod`, or `fork` / `testnet` where it has one; without one it stops.
+
 ```sh
-pnpm migrate:basejump-base:fork
-pnpm migrate:basejump-base                   # prod
-pnpm migrate:oracle-relay-solana:fork
-pnpm migrate:oracle-relay-solana             # prod
-pnpm migrate:oracle-relay-ethereum:fork
-pnpm migrate:oracle-relay-ethereum           # prod
-pnpm migrate:near-ntt-zec                    # prod (NEAR side; Hydration side is hydration-ntt's)
-pnpm migrate:near-ntt-near                   # prod
-pnpm migrate:utxo-emitter-zec                # prod
-pnpm migrate:utxo-withdraw-zec               # prod
+pnpm migrate:basejump-base prod
+pnpm migrate:oracle-relay-solana prod
+pnpm migrate:oracle-relay-ethereum prod
+pnpm migrate:near-ntt-zec prod               # NEAR side; Hydration side is hydration-ntt's
+pnpm migrate:near-ntt-near prod
+pnpm migrate:utxo-emitter-zec prod
+pnpm migrate:utxo-withdraw-zec prod
 ```
 
 Full migration model + conventions: [migrations/README.md](migrations/README.md).

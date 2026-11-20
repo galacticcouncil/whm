@@ -224,7 +224,7 @@ counterpart of `fork:solana`: a fresh sandbox on :3030 with the mainnet core (bo
 guardian, `fork.ts`) and `wrap.near` code, `alice.test.near` holding 10 wNEAR. Node log in
 `crates/near/.sandbox/node.log` (gitignored).
 
-- `migrations/envs/fork/near-ntt-near.env` + `pnpm migrate:near-ntt-near:fork` — `PK_NEAR` read from
+- `migrations/envs/fork/near-ntt-near.env` + `pnpm migrate:near-ntt-near fork` — `PK_NEAR` read from
   the sandbox by `crates/near/scripts/getForkKey.ts`, as the Solana fork does.
 - `forkVaa.ts` — a Hydration → NEAR NTT VAA signed by the fork guardian, for `complete.ts --vaa`.
 
@@ -265,7 +265,7 @@ seal many txs in one block, sized per tx against the 45M block gas: 4 blocks, ~6
 Dwellir — catfish's rate limiter stalls lazy storage reads. Opt-in `CHOPSTICKS_DB` + `CHOPSTICKS_BLOCK`
 (`lib/network.ts`) cache fetched state for reruns pinned to one block.
 
-**Testnet context:** `migrations/envs/testnet/near-ntt-near.env`, `pnpm migrate:near-ntt-near:testnet` —
+**Testnet context:** `migrations/envs/testnet/near-ntt-near.env`, `pnpm migrate:near-ntt-near testnet` —
 the real testnet core (`wormhole.wormhole.testnet`, guardian set 0) and `wrap.testnet`.
 `deployments/testnet/` is gitignored, like `lark/`.
 
@@ -275,7 +275,7 @@ the real testnet core (`wormhole.wormhole.testnet`, guardian set 0) and `wrap.te
 | ---- | ------ |
 | `cargo near build` | 247 KB (`target/near/ntt_manager/ntt_manager.wasm` — env paths corrected) |
 | Testnet account | `whm-ntt-0bugdc.testnet`, faucet-funded; key in `crates/near/.testnet/` (gitignored) |
-| `pnpm migrate:near-ntt-near:testnet` | 5/5 on the real testnet core and `wrap.testnet`; `ntt-near.whm-ntt-0bugdc.testnet`, emitter `34831e4d…7213`, peered with the fork wNEAR pair |
+| `pnpm migrate:near-ntt-near testnet` | 5/5 on the real testnet core and `wrap.testnet`; `ntt-near.whm-ntt-0bugdc.testnet`, emitter `34831e4d…7213`, peered with the fork wNEAR pair |
 | `transfer.ts` | 0.5 wNEAR locked, `transfer_sent`, Wormhole sequence 1 |
 | Testnet guardian | signed `15/34831e4d…7213/1` (`0x13947Bd4…C638`, set 0) — verify.md §3 confirmed live |
 | `_probeNearNttDelivery.ts --emitter … --sequence 1` | the unmodified testnet VAA verified by the real Hydration core on a fork; the wNEAR pair minted exactly 0.5 wNEAR (5e23); replay rejected |
@@ -314,7 +314,7 @@ into the manager: [near-utxo/deposit/spec.md](../near-utxo/deposit/spec.md).
 | ----- | ------ |
 | `cargo test -p ntt-manager` | 58 passed |
 | Sandbox | 13 passed — the 6 before + limits on a failed publish, thin-balance refund, 2 minimum-gas, 4 upgrade |
-| `pnpm migrate:near-ntt-near:fork` | 6/6 — keys deleted; `upgrade.ts` as owner then upgraded the keyless contract; a transfer after it published |
+| `pnpm migrate:near-ntt-near fork` | 6/6 — keys deleted; `upgrade.ts` as owner then upgraded the keyless contract; a transfer after it published |
 
 The testnet contract (`ntt-near.whm-ntt-0bugdc.testnet`) runs pre-stage-6 code: step 006 refuses on
 it (code hash ≠ `NTT_WASM`). Redeploy it with the deployer key first.

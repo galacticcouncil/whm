@@ -83,7 +83,7 @@ A NEAR sandbox set up for `near-ntt`, the way `pnpm fork:solana` is for the orac
 
 ```bash
 pnpm fork:near                        # :3030 — mainnet core (dev guardian) + wrap.near, alice with 10 wNEAR
-pnpm migrate:near-ntt-near:fork       # the real migration; PK_NEAR from the sandbox key
+pnpm migrate:near-ntt-near fork       # the real migration; PK_NEAR from the sandbox key
 
 export RPC_NEAR=http://127.0.0.1:3030
 PK=$(npx tsx crates/near/scripts/getForkKey.ts)
@@ -128,7 +128,7 @@ curl -X POST https://helper.testnet.near.org/account -H 'content-type: applicati
 
 # 2. deploy — migrations/envs/testnet/near-ntt-near.env
 ACC=<id>.testnet; PK=ed25519:<secret>
-PK_NEAR="$PK" pnpm migrate:near-ntt-near:testnet
+PK_NEAR="$PK" pnpm migrate:near-ntt-near testnet
 
 # 3. wNEAR for the sender: storage_deposit + near_deposit on wrap.testnet (near-cli-rs or any wallet)
 
@@ -149,7 +149,7 @@ the testnet guardian `0x13947Bd4…C638`, delivered on the fork: 0.5 wNEAR minte
 
 ```bash
 pnpm run build                        # cargo near — always, for mainnet
-pnpm migrate:near-ntt-zec             # or :near — PK_NEAR, env in migrations/envs/prod/near-ntt-*.env
+pnpm migrate:near-ntt-zec prod        # or near-ntt-near — PK_NEAR, env in migrations/envs/prod/near-ntt-*.env
 ```
 
 `001` deploy (create + fund + deploy + init in one transaction) · `002` register emitter on the core ·

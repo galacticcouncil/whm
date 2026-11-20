@@ -50,7 +50,7 @@ the same seven steps; env files are `migrations/envs/prod/near-ntt-<token>.env`.
 ## Run
 
 ```bash
-pnpm migrate:near-ntt-near      # or: pnpm migrate:near-ntt-zec
+pnpm migrate:near-ntt-near prod  # or: pnpm migrate:near-ntt-zec prod
 ```
 
 - **Stops at 007** until the custodian has accepted. The multisig calls `accept_ownership` (1 yocto)

@@ -360,7 +360,7 @@ async function main(): Promise<void> {
     console.log(`     call                : ${propose.toHex()}`);
     if (!IMPL_OVERRIDE) {
       console.log(`\n   NOTE: impl ${impl} exists on THIS FORK only. For mainnet, deploy with`);
-      console.log(`   pnpm migrate:basejump-landing-upgrade, re-run with --impl <address>, and submit that output.`);
+      console.log(`   pnpm migrate:basejump-landing-upgrade prod, re-run with --impl <address>, and submit that output.`);
     }
 
     // ── VAA delivery ──
