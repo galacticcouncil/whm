@@ -14,7 +14,7 @@ const { requiredArg, optionalArg, requiredEnv, optionalEnv } = args;
 const { getWallet } = wallet;
 
 const NEAR_RPC = "https://free.rpc.fastnear.com";
-const POA_RPC = "https://bridge.chaindefuser.com/rpc";
+const ONECLICK_API = "https://1click.chaindefuser.com";
 const QUOTER_URL = "https://quoter-intent.play.hydration.cloud";
 
 const MPC_SIGNER = "v1.signer";
@@ -35,22 +35,24 @@ const BPS = 10_000n;
  *   1. Terms: owner and refundTo the signer, a fresh quoteId, maxFillMultiplier 2, the hard floor
  *      --floorBps under the dispatcher's live `outPerIn`, deadline --deadlineHours out. Encoded by the
  *      dispatcher (`computeTerms`) — the bytes the router hashes.
- *   2. A: `v1.signer.derived_public_key(authPath, router, 1)`; POA's deposit address for it.
+ *   2. A: `v1.signer.derived_public_key(authPath, router, 1)`. Its deposit address: a standing 1Click
+ *      pass-through quote (`1cs_v1:any` → `1cs_v1:original`, recipient and refundTo A) — every deposit
+ *      lands on 1Click's account for the quote and is forwarded to A as is.
  *   3. maxRelayFee: the quoter, +20%.
  *   4. approve WETH + dispatch(amount, depositAddress, maxRelayFee, terms).
  *   5. Follow: scan's order (published → forwarded), then A's ETH and ZEC until it is delivered.
  *
- * The relayer's `intent-v2` app forwards on Ethereum, POA credits A, and the router bot swaps through
- * 1Click and delivers — so the canary tests all three. `--refundTest` sets the hard floor ten times
- * above the market and the deadline 20 minutes out: nothing fills, and the bot refunds the ETH to the
- * signer on Ethereum.
+ * The relayer's `intent-v2` app forwards on Ethereum, POA credits 1Click's account, 1Click forwards
+ * to A, and the router bot swaps through 1Click and delivers — so the canary tests all of them.
+ * `--refundTest` sets the hard floor ten times above the market and the deadline 20 minutes out:
+ * nothing fills, and the bot refunds the ETH to the signer on Ethereum.
  *
- * Env: RPC, CHAIN_ID (Hydration); NEAR_RPC?, QUOTER_URL?, SCAN_API? (the scan `intents-v2` app),
- *      POA_RPC?, POA_API_KEY? (sent as a bearer token when POA refuses anonymous calls)
+ * Env: RPC, CHAIN_ID (Hydration); ONECLICK_KEY (the partner key — standing quotes need one);
+ *      NEAR_RPC?, QUOTER_URL?, SCAN_API? (the v2 orders API: https://scan.play.hydration.cloud/api/v2/orders)
  * Args: --pk --dispatcher --router --amount(WETH wei) --recipient
  *       --kind? (intents | withdraw; default intents — a NEAR intents account, no POA withdrawal)
  *       --slippageBps? (default 300) --floorBps? (default 2000) --minDelivery? (default 1)
- *       --deadlineHours? (default 6) --refundTest? --wait? (minutes to follow; default 60)
+ *       --deadlineHours? (default 1) --refundTest? --wait? (minutes to follow; default 60)
  */
 
 /**
@@ -107,29 +109,38 @@ function b58decode(input: string): Uint8Array {
 }
 
 /**
- * POA's deposit address for an intents account, on Ethereum.
+ * A standing 1Click pass-through into an intents account: an Ethereum address whose every deposit is
+ * credited to 1Click's account for the quote, then forwarded to `accountId` as the same asset.
  *
  * @param accountId `A`.
- * @returns The H160 POA credits `A` from.
+ * @returns The Ethereum address to deposit to, and 1Click's account behind it.
  */
-async function depositAddress(accountId: string): Promise<`0x${string}`> {
-  const key = optionalEnv("POA_API_KEY");
-  const res = await fetch(optionalEnv("POA_RPC") ?? POA_RPC, {
+async function passThrough(accountId: string): Promise<{ address: `0x${string}`; internal: string }> {
+  const res = await fetch(`${ONECLICK_API}/v0/quote`, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
+    headers: { "content-type": "application/json", "x-api-key": requiredEnv("ONECLICK_KEY") },
     body: JSON.stringify({
-      id: "1",
-      jsonrpc: "2.0",
-      method: "deposit_address",
-      params: [{ account_id: accountId, chain: "eth:1" }],
+      dry: false,
+      swapType: "ANY_INPUT",
+      originAsset: "1cs_v1:any",
+      depositType: "INTENTS",
+      destinationAsset: "1cs_v1:original",
+      amount: "0",
+      slippageTolerance: 50,
+      recipient: accountId,
+      recipientType: "INTENTS",
+      refundTo: accountId,
+      refundType: "INTENTS",
+      // The deadline 1Click's docs give for a standing address.
+      deadline: "2038-01-01T00:00:00.000Z",
     }),
   });
-  if (!res.ok) throw new Error(`poa ${res.status} — set POA_API_KEY if it refuses anonymous calls`);
   const body = await res.json();
-  if (body.error) throw new Error(`poa rpc: ${JSON.stringify(body.error)}`);
-  const address = body.result.address as string;
-  if (!isAddress(address)) throw new Error(`POA returned a non-address: ${address}`);
-  return address;
+  if (!res.ok) throw new Error(`1click ${res.status}: ${JSON.stringify(body)}`);
+  const address = body.quote?.chainDepositAddresses?.find((c: { blockchain: string }) => c.blockchain === "eth")
+    ?.address as string | undefined;
+  if (!address || !isAddress(address)) throw new Error(`no eth deposit address: ${JSON.stringify(body)}`);
+  return { address, internal: body.quote.depositAddress };
 }
 
 async function main(): Promise<void> {
@@ -143,7 +154,7 @@ async function main(): Promise<void> {
   const floorBps = BigInt(optionalArg("--floorBps") ?? "2000");
   const minDelivery = BigInt(optionalArg("--minDelivery") ?? "1");
   const refundTest = process.argv.includes("--refundTest");
-  const deadlineHours = Number(optionalArg("--deadlineHours") ?? "6");
+  const deadlineHours = Number(optionalArg("--deadlineHours") ?? "1");
   const waitMinutes = Number(optionalArg("--wait") ?? "60");
 
   if (!isAddress(dispatcher)) throw new Error("Invalid --dispatcher.");
@@ -181,16 +192,16 @@ async function main(): Promise<void> {
   console.log(`   outPerIn  ${market} now; hard floor ${minOutPerIn}${refundTest ? " (refund test: unreachable)" : ""}`);
   console.log(`   deadline  ${new Date(Number(deadline) * 1000).toISOString()}`);
 
-  // 2. A, and where POA credits it from.
+  // 2. A, and the standing address that forwards to it.
   const publicKey = await nearView<string>(MPC_SIGNER, "derived_public_key", {
     path: authPath,
     predecessor: router,
     domain_id: 1,
   });
   const account = Buffer.from(b58decode(publicKey.replace("ed25519:", ""))).toString("hex");
-  const deposit = await depositAddress(account);
+  const { address: deposit, internal } = await passThrough(account);
   console.log(`2. A         ${account}`);
-  console.log(`   deposit   ${deposit}`);
+  console.log(`   deposit   ${deposit}  (1Click account ${internal}, forwards to A)`);
 
   // 3. The relay ceiling — the same +20% the SDK asks for.
   const quoter = optionalEnv("QUOTER_URL") ?? QUOTER_URL;
@@ -232,7 +243,7 @@ async function main(): Promise<void> {
     });
     let state = "";
     if (scan) {
-      const r = await fetch(`${scan}/api/orders/${seq}`);
+      const r = await fetch(`${scan}/orders/${seq}`);
       state = r.ok ? ((await r.json()) as { state: string }).state : `scan ${r.status}`;
     }
     const line = `${state ? `scan ${state}, ` : ""}A: ${eth} wei ETH, ${zec} ZEC`;
