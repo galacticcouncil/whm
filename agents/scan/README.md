@@ -281,11 +281,12 @@ trade (auth_path) ─┬─ orders   intent_v2_orders, keyed on seq
   live: `A` derived once from `v1.signer` (router, auth path) and cached, its destination balance read
   from `intents.near` on every request. The trade page refetches on each of its updates, and twice more
   after a swap, which is signed before 1Click's fill lands.
-- **How many orders were planned** is the ICE intent's, not an event's: a DCA's budget over its
-  amount per trade, read from `Intent.Intents` at the block before the intent's first order — ICE
-  drops an intent once it has run, so `RPC_HYDRATION_WSS` must be an archive node. A poller writes it
-  to each order's `planned`. A swap, or an intent already gone, is one order; a direct `dispatch` has
-  no intent and no count.
+- **How many orders were planned** comes from the ICE intent itself. Ingest keeps an
+  `Intent.IntentSubmitted` whose forward is the dispatcher, as the dispatcher's own JSON event — the
+  same pass that reads its logs, since the event carries the dispatcher's address in its bytes — and
+  `intent_v2_ice` keeps, per ICE intent id, the trade it funds (`auth_path` of the forwarded
+  terms) and its planned orders: a swap one, a DCA its budget over its amount per trade, none for a
+  DCA without a budget. A direct `dispatch` has no intent and no count.
 - **The asset sold** comes resolved: `asset_in` as the Hydration asset id, `asset_in_meta` its symbol,
   decimals and icon.
 

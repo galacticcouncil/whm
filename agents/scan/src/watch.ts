@@ -218,9 +218,17 @@ function intentV2(chain: string, role: string, address: string, from: bigint): W
   return [{ chain, role, from, at: [address] }];
 }
 
-/** Intents v2: published on Hydration, forwarded on Ethereum, swapped and paid out on NEAR. */
+/**
+ * Intents v2: published on Hydration, forwarded on Ethereum, swapped and paid out on NEAR. The ICE
+ * intents that forward to the dispatcher came to its role later than its logs did: a cursor of their
+ * own reads its history back for them, the logs it meets again ignored as duplicates.
+ */
 const INTENTS_V2: Watch[] = [
   ...intentV2("hydration", "intent-dispatcher", INTENT_V2.dispatcher, FROM.hydration.intentsV2),
+  ...intentV2("hydration", "intent-dispatcher", INTENT_V2.dispatcher, FROM.hydration.intentsV2).map((w) => ({
+    ...w,
+    id: "intent-dispatcher-ice",
+  })),
   ...intentV2("ethereum", "intent-forwarder", INTENT_V2.forwarder, FROM.ethereum.intentsV2),
   ...intentV2("near", "intent-router", INTENT_V2.router, FROM.near.intentsV2),
 ];

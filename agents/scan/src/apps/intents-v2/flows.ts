@@ -1,4 +1,7 @@
+import { decodeAbiParameters, keccak256, parseAbiParameters } from "viem";
+
 import { CHAINS } from "../../chains";
+import { ICE_SUBMITTED } from "../../chains/substrate/consts";
 import { INTENT_V2 } from "../../deployments";
 import { vaaId } from "../../ingest/vaa";
 import type { Flow, LogEvent } from "../../types";
@@ -50,6 +53,64 @@ interface Signed {
 
 const INTENT_SIGNED = { standard: "whm-intent-router", event: "intent_signed" };
 
+/** ICE's `IntentSubmitted`, as the Hydration watcher keeps it: numbers as strings, bytes as hex. */
+interface Submitted {
+  id: string;
+  /** `Swap`, `Dca` or `MatchFirstSwap`. */
+  kind: string;
+  /** A DCA's amount per trade. */
+  amount_in: string | null;
+  /** A DCA's total; none for one that runs until canceled. */
+  budget: string | null;
+  /** `abi.encode(depositAddress, maxRelayFee, terms)` — what ICE hands the dispatcher. */
+  forward_data: `0x${string}`;
+}
+
+const FORWARD = parseAbiParameters("address, uint256, bytes");
+
+/**
+ * How many orders an ICE intent was submitted for: a swap one, a DCA its budget over its amount per
+ * trade; none to say for a DCA without a budget, which runs until it is canceled.
+ */
+function plannedOrders(a: Submitted): number | null {
+  if (a.kind !== "Dca") return 1;
+  if (a.budget == null || a.amount_in == null || BigInt(a.amount_in) === 0n) return null;
+  const per = BigInt(a.amount_in);
+  return Number((BigInt(a.budget) + per - 1n) / per);
+}
+
+/**
+ * The ICE intents that forward to the dispatcher, for how many orders each trade was given — known
+ * from the moment it is submitted. Keyed on the ICE intent id, the `intentId` its orders'
+ * `OrderSourced` names; `auth_path`, that of the terms its forward carries, ties it to its trade.
+ */
+export const intents: Flow = {
+  name: "ice-v2",
+  table: "intent_v2_ice",
+  key: { column: "id", type: "NUMERIC" },
+  states: { submitted: 0 },
+  columns: {
+    auth_path: "TEXT",
+    /** How many orders it was submitted for; none for a DCA without a budget. */
+    planned: "INTEGER",
+  },
+  indexes: [
+    `CREATE INDEX IF NOT EXISTS idx_intent_v2_ice_auth_path ON intent_v2_ice (auth_path);`,
+  ],
+  legs: [
+    {
+      role: "intent-dispatcher",
+      near: ICE_SUBMITTED,
+      state: "submitted",
+      key: (a: Submitted) => a.id,
+      patch: (a: Submitted) => ({
+        auth_path: keccak256(decodeAbiParameters(FORWARD, a.forward_data)[2]),
+        planned: plannedOrders(a),
+      }),
+    },
+  ],
+};
+
 const transfer = (a: { transferSequence: bigint }) => a.transferSequence.toString();
 
 /**
@@ -95,10 +156,8 @@ export const orders: Flow = {
     relayer: "TEXT",
     /** 1Click's deposit account for the swap — its explorer's link to the execution. */
     swap_deposit: "TEXT",
-    /** The ICE intent behind the order, when `execute` placed it. */
+    /** The ICE intent behind the order, when `execute` placed it — its row in `intents`. */
     intent_id: "NUMERIC",
-    /** How many trades that intent was submitted for — no event says, so `ice.ts` reads it from Hydration. */
-    planned: "INTEGER",
     /** The Hydration asset the user sold for the order's WETH — its EVM address, as ICE names it — and how much. */
     asset_in: "TEXT",
     amount_in: "NUMERIC",
@@ -227,7 +286,8 @@ export const payouts: Flow = {
     role: "intent-router",
     near: INTENT_SIGNED,
     state: action === "deliver" ? "delivered" : "refunded",
-    key: (a: Signed, ev: LogEvent) => (a.action === action ? `${ev.ref.txHash}:${ev.ref.logIndex}` : null),
+    key: (a: Signed, ev: LogEvent) =>
+      a.action === action ? `${ev.ref.txHash}:${ev.ref.logIndex}` : null,
     patch: (a: Signed, ev: LogEvent) => ({
       auth_path: a.auth_path,
       amount: a.amount,

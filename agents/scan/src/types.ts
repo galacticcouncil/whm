@@ -97,8 +97,9 @@ export interface Leg<A = any> {
   /** The EVM event. Exactly one of `abi` and `near`. */
   abi?: AbiEvent;
   /**
-   * A JSON event: NEP-297, a NEAR call kept as one (`standard: "call"`, `event`: the method), or
-   * what the Solana watcher decodes a transaction into (`chains/events.ts`).
+   * A JSON event: NEP-297, a NEAR call kept as one (`standard: "call"`, `event`: the method), what
+   * the Solana watcher decodes a transaction into (`chains/events.ts`), or a Hydration pallet event
+   * the substrate watcher keeps as one (`chains/substrate/consts.ts`).
    */
   near?: NearEvent;
   state: string;

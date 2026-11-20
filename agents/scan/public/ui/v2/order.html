@@ -67,8 +67,8 @@
       const destChain = (o) => (o.recipient_kind === 1 ? "near" : (dest(o)?.chain ?? null));
 
       const type = (o) =>
-        (o.planned ?? o.order_count) > 1
-          ? pill(`Twap · order ${o.order_index}${o.planned ? ` of ${o.planned}` : ""}`, "var(--lavender)")
+        (o.trade_planned ?? o.order_count) > 1
+          ? pill(`Twap · order ${o.order_index}${o.trade_planned ? ` of ${o.trade_planned}` : ""}`, "var(--lavender)")
           : pill("Swap", "var(--sky)");
 
       /** Where the destination asset's payout transaction is shown, by the chain it lands on. */

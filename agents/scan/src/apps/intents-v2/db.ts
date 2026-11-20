@@ -20,14 +20,16 @@ const RAIL = `
 
 /**
  * Every column, the rail's, and where the order sits among its trade's orders: `order_count` counts
- * them, `order_index` is this one's place, from 1.
+ * them, `order_index` is this one's place, from 1, and `trade_planned` is how many its ICE intent was
+ * submitted for.
  */
 const COLUMNS = `
   o.*,
   n.vaa_id, n.digest, n.state AS rail_state, n.published AS rail_published,
   n.settled AS rail_settled,
   (SELECT COUNT(*)::int FROM intent_v2_orders x WHERE x.auth_path = o.auth_path) AS order_count,
-  (SELECT COUNT(*)::int FROM intent_v2_orders x WHERE x.auth_path = o.auth_path AND x.seq <= o.seq) AS order_index
+  (SELECT COUNT(*)::int FROM intent_v2_orders x WHERE x.auth_path = o.auth_path AND x.seq <= o.seq) AS order_index,
+  (SELECT MAX(i.planned) FROM intent_v2_ice i WHERE i.auth_path = o.auth_path) AS trade_planned
 `;
 
 /**
@@ -170,7 +172,8 @@ export async function listPayouts(authPath: string): Promise<Record<string, unkn
  *   (`asset_in`, `amount_in`).
  * - `received`: what arrived — for a withdrawal, what landed on the recipient's chain once found;
  *   for an intents recipient, the delivery itself, a transfer with no fee.
- * - `planned`: how many orders its ICE intent was submitted for; null for a direct `dispatch`.
+ * - `planned`: how many orders its ICE intent was submitted for (`intent_v2_ice`); null for a
+ *   direct `dispatch`, or a DCA without a budget.
  * - `status`: `refunded` once a refund was signed; `completed` once every planned order is swapped —
  *   or, with no planned count to go by, the deadline has passed — and a delivery was signed after the
  *   last swap, which emptied `A`; `expired` past the deadline with nothing paid out; else `pending`.
@@ -190,13 +193,13 @@ const TRADES = `
              o.recipient_kind, o.refund_to, o.deadline,
              (COUNT(*) OVER w)::int AS order_count,
              (COUNT(o.swapped) OVER w)::int AS swapped,
-             MAX(o.planned) OVER w AS planned,
              SUM(COALESCE(o.forwarded_amount, o.amount)) OVER w AS eth_in,
              MAX(o.asset_in) OVER w AS asset_in,
              SUM(o.amount_in) OVER w AS amount_in,
              MIN((o.published->>'blockTimestamp')::numeric) OVER w AS first_at,
              MAX((o.published->>'blockTimestamp')::numeric) OVER w AS last_at,
-             MAX((o.swapped->>'blockTimestamp')::numeric) OVER w AS last_swapped_at
+             MAX((o.swapped->>'blockTimestamp')::numeric) OVER w AS last_swapped_at,
+             (SELECT MAX(i.planned) FROM intent_v2_ice i WHERE i.auth_path = o.auth_path) AS planned
         FROM intent_v2_orders o
        WHERE ${VALID} AND o.published IS NOT NULL
       WINDOW w AS (PARTITION BY o.auth_path)
