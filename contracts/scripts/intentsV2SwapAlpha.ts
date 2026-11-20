@@ -36,9 +36,9 @@ const TERMS_GRACE_S = 3600;
  *   4. `Intent.submit_intent` — Swap(assetIn → WETH, at least --minWethOut, never partial), deadline
  *      --deadlineMinutes, Forward to the dispatcher with `abi.encode(deposit, ceiling, terms)` —
  *      through the dispatch precompile, as the signer. `--dryRun` simulates it and stops.
- *   5. Follow the plan in scan and A's balances until A is empty again.
+ *   5. Follow the trade in scan and A's balances until A is empty again.
  *
- * Env: RPC (Hydration EVM), ONECLICK_KEY; NEAR_RPC?, QUOTER_URL?, SCAN_API? (…/api/v2/orders)
+ * Env: RPC (Hydration EVM), ONECLICK_KEY; NEAR_RPC?, QUOTER_URL?, SCAN_API? (…/api/v2)
  * Args: --pk --assetIn --amountIn --minWethOut --recipient
  *       --kind? (withdraw | intents; default withdraw) --dest? (default nep141:zec.omft.near)
  *       --slippageBps? (300) --floorBps? (2000) --minDelivery? (1) --deadlineMinutes? (60)
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
 }
 
 /**
- * Follow a plan: scan's view of it, and A's balances, until A has held something and is empty again.
+ * Follow a trade: scan's view of it, and A's balances, until A has held something and is empty again.
  *
  * @param provider A NEAR provider
  * @param account A
@@ -124,13 +124,13 @@ async function follow(provider: JsonRpcProvider, account: string, dest: string, 
   let funded = false;
   for (const until = Date.now() + minutes * 60_000; Date.now() < until; await new Promise((r) => setTimeout(r, 15_000))) {
     const held = await near.balances(provider, account, [ETH, dest]);
-    let plan = "";
+    let trade = "";
     if (scan) {
-      const r = await fetch(`${scan}/plans/${authPath}`);
-      const p = r.ok ? ((await r.json()) as { plan: { status: string; tranches: number; swapped: number } }).plan : null;
-      plan = p ? `plan ${p.status}, ${p.swapped}/${p.tranches} swapped, ` : `plan ${r.status}, `;
+      const r = await fetch(`${scan}/trades/${authPath}`);
+      const t = r.ok ? ((await r.json()) as { trade: { status: string; order_count: number; swapped: number } }).trade : null;
+      trade = t ? `trade ${t.status}, ${t.swapped}/${t.order_count} swapped, ` : `trade ${r.status}, `;
     }
-    const line = `${plan}A: ${held[ETH]} wei ETH, ${held[dest]} out`;
+    const line = `${trade}A: ${held[ETH]} wei ETH, ${held[dest]} out`;
     if (line !== last) console.log(`   +${new Date().toISOString().slice(11, 19)} ${(last = line)}`);
     const empty = held[ETH] === 0n && held[dest] === 0n;
     if (funded && empty) return console.log("\nDone: A is empty again — delivered, or refunded.");

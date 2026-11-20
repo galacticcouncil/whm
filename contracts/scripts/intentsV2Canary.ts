@@ -48,7 +48,7 @@ const BPS = 10_000n;
  * nothing fills, and the bot refunds the ETH to the signer on Ethereum.
  *
  * Env: RPC, CHAIN_ID (Hydration); ONECLICK_KEY (the partner key — standing quotes need one);
- *      NEAR_RPC?, QUOTER_URL?, SCAN_API? (the v2 orders API: https://scan.play.hydration.cloud/api/v2/orders)
+ *      NEAR_RPC?, QUOTER_URL?, SCAN_API? (intents v2's API: https://scan.play.hydration.cloud/api/v2)
  * Args: --pk --dispatcher --router --amount(WETH wei) --recipient
  *       --kind? (intents | withdraw; default intents — a NEAR intents account, no POA withdrawal)
  *       --slippageBps? (default 300) --floorBps? (default 2000) --minDelivery? (default 1)

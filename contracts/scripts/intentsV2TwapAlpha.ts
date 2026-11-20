@@ -41,12 +41,12 @@ const TERMS_GRACE_S = 2 * 3600;
  *      --minWethPerTrade, within --iceSlippageBps of ICE's oracle, budget --perTrade × --tranches,
  *      every --periodBlocks), no deadline (ICE refuses one on a DCA), Forward to the dispatcher.
  *      `--dryRun` simulates it and stops.
- *   5. Follow the plan in scan until its status leaves `active`.
+ *   5. Follow the trade in scan until its status leaves `pending`.
  *
  * Every tranche must bridge enough for the dispatcher: at least its minimum order plus the ceiling,
  * with the ceiling at most half — so size --minWethPerTrade well above twice the ceiling.
  *
- * Env: RPC (Hydration EVM), ONECLICK_KEY; NEAR_RPC?, QUOTER_URL?, SCAN_API? (…/api/v2/orders)
+ * Env: RPC (Hydration EVM), ONECLICK_KEY; NEAR_RPC?, QUOTER_URL?, SCAN_API? (…/api/v2)
  * Args: --pk --assetIn --perTrade --minWethPerTrade --tranches --recipient
  *       --periodBlocks? (150, ~5 min; ICE's minimum is 15) --iceSlippageBps? (300)
  *       --kind? (withdraw | intents; default withdraw) --dest? (default nep141:zec.omft.near)
@@ -126,23 +126,25 @@ async function main(): Promise<void> {
   }
   console.log(`4. submitted ${await hydration.submitIntent(evm, intent)}`);
 
-  // 5. Follow the plan through its schedule.
+  // 5. Follow the trade through its schedule.
   const minutes = Number(optionalArg("--wait") ?? String(Math.ceil((scheduleS + TERMS_GRACE_S) / 60)));
   const scan = optionalEnv("SCAN_API");
   let last = "";
   for (const until = Date.now() + minutes * 60_000; Date.now() < until; await new Promise((r) => setTimeout(r, 30_000))) {
     const held = await near.balances(provider, account, [ETH, dest]);
-    let plan = "";
+    let trade = "";
     let status = "";
     if (scan) {
-      const r = await fetch(`${scan}/plans/${authPath}`);
-      const p = r.ok ? ((await r.json()) as { plan: { status: string; tranches: number; swapped: number } }).plan : null;
-      status = p?.status ?? "";
-      plan = p ? `plan ${p.status}, ${p.swapped}/${p.tranches} swapped, ` : `plan ${r.status}, `;
+      const r = await fetch(`${scan}/trades/${authPath}`);
+      const t = r.ok
+        ? ((await r.json()) as { trade: { status: string; planned: number | null; swapped: number } }).trade
+        : null;
+      status = t?.status ?? "";
+      trade = t ? `trade ${t.status}, ${t.swapped}/${t.planned ?? "?"} swapped, ` : `trade ${r.status}, `;
     }
-    const line = `${plan}A: ${held[ETH]} wei ETH, ${held[dest]} out`;
+    const line = `${trade}A: ${held[ETH]} wei ETH, ${held[dest]} out`;
     if (line !== last) console.log(`   +${new Date().toISOString().slice(11, 19)} ${(last = line)}`);
-    if (status && status !== "active") return console.log(`\nDone: plan ${status}.`);
+    if (status && status !== "pending") return console.log(`\nDone: trade ${status}.`);
   }
   console.log(`\nFollowed for ${minutes} min.`);
 }
