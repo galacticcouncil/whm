@@ -94,22 +94,25 @@ export interface Leg<A = any> {
    * this, its reader would drain every chain's core for events it then drops.
    */
   chains?: string[];
-  /** The EVM event. Exactly one of `abi` and `near`. */
+  /** The EVM event. Exactly one of `abi` and `json`. */
   abi?: AbiEvent;
   /**
    * A JSON event: NEP-297, a NEAR call kept as one (`standard: "call"`, `event`: the method), what
    * the Solana watcher decodes a transaction into (`chains/events.ts`), or a Hydration pallet event
    * the substrate watcher keeps as one (`chains/substrate/consts.ts`).
    */
-  near?: NearEvent;
+  json?: JsonEvent;
   state: string;
   keyBy?: string;
   key: (args: A, ev: LogEvent<A>, db: Queryable) => string | null | Promise<string | null>;
   patch: (args: A, ev: LogEvent<A>) => Record<string, unknown>;
 }
 
-/** A NEAR event's identity — NEP-297's `standard` and `event`. */
-export interface NearEvent {
+/**
+ * A JSON event's identity — NEP-297's `standard` and `event`, which the Solana and Hydration watchers
+ * reuse for what they decode.
+ */
+export interface JsonEvent {
   standard: string;
   event: string;
 }

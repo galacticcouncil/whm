@@ -1,4 +1,4 @@
-import { nearTopic } from "../../abi";
+import { jsonTopic } from "../../abi";
 import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../../db";
 import { WORMHOLE_CORE } from "../../deployments";
 import log from "../../logger";
@@ -182,7 +182,7 @@ export class SolanaWatcher {
           txs[j],
           batch[j][1],
           cursors,
-          decode(txs[j], ixs[j], WORMHOLE_CORE.solana, this.programs, vaas, nearTopic),
+          decode(txs[j], ixs[j], WORMHOLE_CORE.solana, this.programs, vaas, jsonTopic),
         );
         const n = await insertEvents(this.cfg.name, events);
         if (n > 0) this.onIngest?.(this.cfg.name);

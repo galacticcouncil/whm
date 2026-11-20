@@ -100,7 +100,7 @@ export const intents: Flow = {
   legs: [
     {
       role: "intent-dispatcher",
-      near: ICE_SUBMITTED,
+      json: ICE_SUBMITTED,
       state: "submitted",
       key: (a: Submitted) => a.id,
       patch: (a: Submitted) => ({
@@ -239,7 +239,7 @@ export const orders: Flow = {
       // The router signs the order's swap. A quote re-signed inside the order's price window lands
       // on the same row, the later one standing.
       role: "intent-router",
-      near: INTENT_SIGNED,
+      json: INTENT_SIGNED,
       state: "swapped",
       key: (a: Signed) => (a.action === "swap" && a.seq != null ? String(a.seq) : null),
       patch: (a: Signed, ev: LogEvent) => ({
@@ -284,7 +284,7 @@ export const payouts: Flow = {
   ],
   legs: (["deliver", "refund"] as const).map((action) => ({
     role: "intent-router",
-    near: INTENT_SIGNED,
+    json: INTENT_SIGNED,
     state: action === "deliver" ? "delivered" : "refunded",
     key: (a: Signed, ev: LogEvent) =>
       a.action === action ? `${ev.ref.txHash}:${ev.ref.logIndex}` : null,

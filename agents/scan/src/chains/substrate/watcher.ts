@@ -3,7 +3,7 @@ import { createClient, PolkadotClient } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { bytesToHex } from "viem";
 
-import { nearTopic } from "../../abi";
+import { jsonTopic } from "../../abi";
 import { liveIntervalMs } from "../../config";
 import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../../db";
 import log from "../../logger";
@@ -455,7 +455,7 @@ export class SubstrateWatcher {
       index,
       extrinsic,
       address,
-      topics: [nearTopic(ICE_SUBMITTED)],
+      topics: [jsonTopic(ICE_SUBMITTED)],
       data: JSON.stringify(data),
     };
   }

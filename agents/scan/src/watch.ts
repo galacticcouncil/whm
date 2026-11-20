@@ -1,7 +1,7 @@
 import { base58 } from "@scure/base";
 import { pad, toEventSelector } from "viem";
 
-import { LogMessagePublishedEvt, nearTopic } from "./abi";
+import { LogMessagePublishedEvt, jsonTopic } from "./abi";
 import { CHAINS } from "./chains";
 import { PUBLISH } from "./chains/events";
 import {
@@ -152,7 +152,7 @@ const WORMHOLE: Watch[] = [
     via: solanaLegs().map((l) => l.program),
     topics: published(
       solanaLegs().map((l) => `0x${Buffer.from(base58.decode(l.emitter)).toString("hex")}`),
-      nearTopic(PUBLISH),
+      jsonTopic(PUBLISH),
     ),
   },
 ];
@@ -303,7 +303,7 @@ const ORACLES: Watch[] = [
     via: [ORACLE.solana.program],
     topics: published(
       [`0x${Buffer.from(base58.decode(ORACLE.solana.emitter)).toString("hex")}`],
-      nearTopic(PUBLISH),
+      jsonTopic(PUBLISH),
     ),
   },
   ...(["hydration", "robinhood"] as const).map((chain) => ({

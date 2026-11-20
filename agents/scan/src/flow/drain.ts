@@ -273,7 +273,7 @@ interface RecordChange extends Applied {
  * @param row The stored event.
  */
 function decode(leg: Leg, row: EventRow): { eventName: string; args: Record<string, unknown> } {
-  if (leg.near) return { eventName: leg.near.event, args: JSON.parse(row.data) };
+  if (leg.json) return { eventName: leg.json.event, args: JSON.parse(row.data) };
   const { eventName, args } = decodeEventLog({
     abi: [leg.abi!],
     topics: row.topics as [`0x${string}`, ...`0x${string}`[]],

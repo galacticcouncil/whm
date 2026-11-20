@@ -75,7 +75,7 @@ export const messages: Flow = {
       // NEAR's core logs no consistency level: the guardians observe only final NEAR blocks and
       // sign every NEAR message at 0, so that is what its VAA carries. Solana says its own.
       role: "wormhole-core",
-      near: NEAR_PUBLISH,
+      json: NEAR_PUBLISH,
       state: "published",
       key: (a: NearPublished, ev: LogEvent) =>
         vaaId(CHAINS[ev.chain].wormholeId, a.emitter, BigInt(a.seq)),

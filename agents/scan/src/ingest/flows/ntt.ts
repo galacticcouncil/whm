@@ -14,7 +14,7 @@ import {
   type NttReceived,
   type NttSettled,
 } from "../../chains/events";
-import type { Flow, Leg, LogEvent, NearEvent } from "../../types";
+import type { Flow, Leg, LogEvent, JsonEvent } from "../../types";
 import { parseNttTransfer } from "../payload";
 import { vaaId } from "../vaa";
 import { NEAR_PUBLISH, type NearPublished } from "./messages";
@@ -140,7 +140,7 @@ export const ntt: Flow = {
     },
     {
       role: "wormhole-core",
-      near: NEAR_PUBLISH,
+      json: NEAR_PUBLISH,
       state: "published",
       key: (a: NearPublished, ev: LogEvent) =>
         parseNttTransfer(`0x${a.data}`, CHAINS[ev.chain].wormholeId)?.digest ?? null,
@@ -178,7 +178,7 @@ export const ntt: Flow = {
       // Same transaction as the publish, after it — so the row is there to find by its VAA, whose
       // emitter is the manager's own account hashed.
       role: "ntt",
-      near: { standard: "whm-ntt", event: "transfer_sent" },
+      json: { standard: "whm-ntt", event: "transfer_sent" },
       state: "published",
       keyBy: "vaa_id",
       key: (a: NearSent, ev: LogEvent) =>
@@ -193,7 +193,7 @@ export const ntt: Flow = {
       // NEAR verifies and releases in one call, so its delivery is the redemption — and it names
       // the account the recipient's 32 bytes only hash.
       role: "ntt",
-      near: { standard: "whm-ntt", event: "transfer_received" },
+      json: { standard: "whm-ntt", event: "transfer_received" },
       state: "redeemed",
       keyBy: "digest",
       key: (a: NearDelivered) => `0x${a.digest}`,
@@ -204,7 +204,7 @@ export const ntt: Flow = {
     },
     {
       role: "ntt",
-      near: { standard: "whm-ntt", event: "transfer_queued_inbound" },
+      json: { standard: "whm-ntt", event: "transfer_queued_inbound" },
       state: "queued",
       keyBy: "digest",
       key: (a: NearDelivered) => `0x${a.digest}`,
@@ -218,7 +218,7 @@ export const ntt: Flow = {
       // land before the source is indexed, so it binds the VAA id and, on Solana, the inbox item a
       // release will name.
       role: "ntt",
-      near: NTT_RECEIVED,
+      json: NTT_RECEIVED,
       state: "received",
       key: (a: NttReceived) => a.digest,
       patch: (a: NttReceived, ev: LogEvent) => ({
@@ -239,12 +239,12 @@ export const ntt: Flow = {
  * @param event The decoded event.
  * @param state The state it moves the transfer to.
  */
-function settledLegs(event: NearEvent, state: string): Leg[] {
+function settledLegs(event: JsonEvent, state: string): Leg[] {
   const patch = (_a: NttSettled, ev: LogEvent) => ({ settled: ev.ref });
   return [
     {
       role: "ntt",
-      near: event,
+      json: event,
       state,
       keyBy: "digest",
       key: (a: NttSettled) => a.digest ?? null,
@@ -252,7 +252,7 @@ function settledLegs(event: NearEvent, state: string): Leg[] {
     },
     {
       role: "ntt",
-      near: event,
+      json: event,
       state,
       keyBy: "inbox_item",
       key: (a: NttSettled) => (a.digest ? null : (a.inboxItem ?? null)),
