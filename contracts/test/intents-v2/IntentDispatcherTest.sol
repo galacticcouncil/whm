@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {IntentDispatcher} from "../../src/intents-v2/IntentDispatcher.sol";
@@ -228,6 +228,19 @@ contract IntentDispatcherTest is Test {
         assertEq(fee, 5e10);
     }
 
+    /// @notice A direct dispatch takes WETH as is — there is no ICE trade behind it to source.
+    function testDispatchEmitsNoOrderSourced() public {
+        _fund(1e15);
+        vm.recordLogs();
+        vm.prank(user);
+        dispatcher.dispatch(1e15, depositAddress, 0, _terms());
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            assertTrue(logs[i].topics[0] != IIntentDispatcher.OrderSourced.selector, "no OrderSourced");
+        }
+    }
+
     // ─── ICE callback ───────────────────────────────────────────────
 
     function testForwardDataFitsIce() public view {
@@ -243,6 +256,8 @@ contract IntentDispatcherTest is Test {
 
         vm.expectEmit(true, true, true, true, address(dispatcher));
         emit IIntentDispatcher.OrderPublished(path, 0, user, depositAddress, 1e15, 6e9, 42, terms);
+        vm.expectEmit(true, true, true, true, address(dispatcher));
+        emit IIntentDispatcher.OrderSourced(0, 7, address(0x1234), 5e18);
         vm.prank(user, user);
         bytes4 ack = dispatcher.execute(user, 7, address(0x1234), 5e18, address(weth), 1e15 + 3, data);
 

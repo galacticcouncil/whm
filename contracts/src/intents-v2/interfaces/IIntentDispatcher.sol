@@ -91,6 +91,14 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
         bytes terms
     );
 
+    /// @notice The ICE trade behind an order placed by `execute` — what the user sold for its WETH.
+    ///         Emitted beside `OrderPublished`; `dispatch` takes WETH as is and emits none.
+    /// @param seq The order's NTT message id, as in `OrderPublished`
+    /// @param intentId The resolved ICE intent
+    /// @param assetIn ERC20-mapped address of the intent's input asset
+    /// @param amountIn Input sold in this trade
+    event OrderSourced(uint64 indexed seq, uint256 indexed intentId, address assetIn, uint256 amountIn);
+
     event PriceRouteSet(string destinationAsset, address ethFeed, address destFeed, uint8 destDecimals);
     event MaxFeedAgeSet(uint256 maxFeedAge);
     event MinOrderAmountSet(uint256 minOrderAmount);

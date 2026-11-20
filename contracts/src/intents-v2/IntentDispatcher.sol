@@ -93,15 +93,21 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     ///      packed as `IntentCodec` encodes them — the intent's forward data, at most 512 bytes. Called
     ///      with no value and 2M gas. Anyone can call it: it spends only WETH that arrived since the
     ///      last order, so without a push there is nothing to bridge.
-    function execute(address, uint256, address, uint256, address assetOut, uint256 amountOut, bytes calldata data)
-        external
-        returns (bytes4)
-    {
+    function execute(
+        address,
+        uint256 intentId,
+        address assetIn,
+        uint256 amountIn,
+        address assetOut,
+        uint256 amountOut,
+        bytes calldata data
+    ) external returns (bytes4) {
         if (assetOut != address(_weth())) revert NotWeth(assetOut);
         if (_weth().balanceOf(address(this)) < _retained + amountOut) revert UnbackedAmount(amountOut);
         (address depositAddress, uint256 maxRelayFee, bytes memory terms) = abi.decode(data, (address, uint256, bytes));
 
-        _placeOrder(amountOut, depositAddress, maxRelayFee, IntentCodec.decodeQuote(terms));
+        uint64 seq = _placeOrder(amountOut, depositAddress, maxRelayFee, IntentCodec.decodeQuote(terms));
+        emit OrderSourced(seq, intentId, assetIn, amountIn);
         return this.execute.selector;
     }
 
