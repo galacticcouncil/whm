@@ -8,7 +8,7 @@
       "name": "001-deploy-dispatcher",
       "status": "completed",
       "output": {
-        "implAddress": "0xd7ae9753c1cfb3146022bebace530c3af6d25fb6",
+        "implAddress": "0x2f9b48d701c58bb04e81585054d3f053f2884091",
         "proxyAddress": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
         "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
       },
