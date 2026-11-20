@@ -6,6 +6,7 @@ import { WATCH } from "../../watch";
 
 import { routes } from "./api";
 import { orders, payouts } from "./flows";
+import { PlannedPoller } from "./ice";
 import { PayoutPoller } from "./payouts";
 
 const NAME = "intents-v2";
@@ -15,7 +16,8 @@ const FLOWS = [orders, payouts];
  * Intents v2: orders published on Hydration, forwarded on Ethereum and swapped on NEAR, the payouts
  * of the terms they fund, and the terms themselves — what the NEAR router bot reads its work from.
  *
- * Reads the event store ingest fills, and Blockchair for where a ZEC payout landed.
+ * Reads the event store ingest fills, Blockchair for where a ZEC payout landed, and Hydration for how
+ * many trades each ICE intent was submitted for.
  */
 async function main(): Promise<void> {
   banner(NAME);
@@ -34,6 +36,7 @@ async function main(): Promise<void> {
   await serve({ name: NAME, flows: FLOWS, routes });
   await drain.start(drainIntervalMs);
   new PayoutPoller().start();
+  new PlannedPoller().start();
 
   log.info("intents-v2 ready.");
 }

@@ -59,7 +59,7 @@
       topbar("scan", NAV, { conn: false });
 
       /** This section's app, through the UI's proxy. */
-      const API = "/api/feeds";
+      const API = "/api";
 
       const el = (id) => document.getElementById(id);
 
@@ -140,7 +140,6 @@
           pending = setTimeout(load, 500);
         },
         load,
-        API,
       );
       setInterval(load, 30_000);
     </script>

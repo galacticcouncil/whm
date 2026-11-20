@@ -24,8 +24,7 @@ const BINARY = /^(image|font)\//;
  * Pages live in `public/<name>/`, and the styling and helpers they share in `public/shared/`.
  * `index.html` is the root; every other page answers both a list path and a detail path, and
  * decides between them client-side. A folder one level down is a version of its pages, served under
- * its own name — `v2/orders.html` at `/v2/orders` — so a version's pages keep the names of the ones
- * they succeed.
+ * its own name — `v2/trades.html` at `/v2/trades`, `v2/order.html` at `/v2/order/<seq>`.
  *
  * @param app Fastify instance.
  * @param name The site — cwd-relative, beside the bundle.

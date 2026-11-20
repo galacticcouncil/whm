@@ -19,7 +19,7 @@ const HDX_LOGO = `<svg class="logo" viewBox="0 0 20 20" fill="currentColor" aria
 export const NAV = [
   ["/transfers", "Transfers"],
   ["/orders", "Orders"],
-  ["/v2/orders", "Orders", "v2", ["/v2/plan"]],
+  ["/v2/trades", "Trades", "new", ["/v2/order"]],
   ["/feeds", "Feeds"],
 ];
 
@@ -36,7 +36,7 @@ export const versionTag = (label) => `<span class="ver-tag">${esc(label)}</span>
  * @param {string} domain Wordmark suffix, where the explorer says "Explorer".
  * @param {Array<[string, string, string?, string[]?]>} links `[href, label, tag?, also?]`; the one
  *   matching the path is current — a section's detail pages too, `/transfer/…` under `/transfers`,
- *   `/v2/order/…` under `/v2/orders`, and any page in `also`.
+ *   `/v2/trade/…` under `/v2/trades`, and any page in `also`.
  * @param {{conn?: boolean}} [opts] `conn: false` when the page shows its live state itself.
  */
 export function topbar(domain, links = [], opts = {}) {
@@ -148,13 +148,13 @@ export async function json(url) {
  * Nothing replays what a dropped connection missed, so the page is told when the stream (re)opens
  * and refetches, rather than sitting on a view that quietly stopped being live.
  *
- * @param {string} flows Flow names to follow, comma-separated.
+ * @param {string} flows Flow names to follow, comma-separated — all of one app's; the UI routes the
+ *   stream to it.
  * @param {(update: object) => void} onUpdate
  * @param {() => void} [onOpen] Called on every successful connect, first one included.
- * @param {string} [api] The app's API base — a section's, through the UI's proxy.
  */
-export function live(flows, onUpdate, onOpen, api = "/api") {
-  const es = new EventSource(`${api}/events?flow=${encodeURIComponent(flows)}`);
+export function live(flows, onUpdate, onOpen) {
+  const es = new EventSource(`/api/events?flow=${encodeURIComponent(flows)}`);
   const mark = (up) => {
     for (const dot of document.querySelectorAll(".conn .dot")) dot.classList.toggle("live", up);
     for (const label of document.querySelectorAll(".conn .label")) {
@@ -495,12 +495,14 @@ const DEST_TX_URL = {
  * @param {string|null} hash
  * @param {string|null} url 1Click's own explorer url, when it supplied one.
  * @param {string|null} chain 1Click `blockchain` value.
+ * @param {string} [label] The link's text, in place of the shortened hash — the hash is then its title.
  */
-export function destTxLink(hash, url, chain) {
+export function destTxLink(hash, url, chain, label) {
   if (!hash) return null;
   const href = url || DEST_TX_URL[chain]?.(hash);
-  const text = esc(short(hash, 10, 8));
-  return href ? `<a class="hash" href="${esc(href)}" target="_blank" rel="noreferrer">${text}</a>` : text;
+  const text = esc(label ?? short(hash, 10, 8));
+  const title = label ? ` title="${esc(hash)}"` : "";
+  return href ? `<a class="hash" href="${esc(href)}"${title} target="_blank" rel="noreferrer">${text}</a>` : text;
 }
 
 /** The whole 1Click execution, keyed by the deposit address it was quoted for. */
@@ -687,6 +689,12 @@ const STATUS = {
     label: "Delivered",
     svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>',
   },
+  // An intents v2 trade whose ETH went back to its refund address.
+  refunded: {
+    cls: "expired",
+    label: "Refunded",
+    svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>',
+  },
   expired: {
     cls: "expired",
     label: "Expired",
@@ -701,7 +709,8 @@ export const statusLabel = (s) => STATUS[s]?.label ?? s;
  * Where a transfer is, as the explorer's status badge: done green, in flight sky, held amber,
  * failed red. `compact` is the round icon-only form a list column uses.
  *
- * @param {string} status `completed`, `pending`, `held`, `failed` — or an oracle update's
+ * @param {string} status `completed`, `pending`, `held`, `failed` — an intents v2 trade's `refunded` —
+ *   or an oracle update's
  *   `delivered`, `expired`.
  * @param {{compact?: boolean, title?: string}} [opts]
  */

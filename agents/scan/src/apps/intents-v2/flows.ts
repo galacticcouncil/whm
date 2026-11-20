@@ -97,6 +97,8 @@ export const orders: Flow = {
     swap_deposit: "TEXT",
     /** The ICE intent behind the order, when `execute` placed it. */
     intent_id: "NUMERIC",
+    /** How many trades that intent was submitted for — no event says, so `ice.ts` reads it from Hydration. */
+    planned: "INTEGER",
     /** The Hydration asset the user sold for the order's WETH — its EVM address, as ICE names it — and how much. */
     asset_in: "TEXT",
     amount_in: "NUMERIC",
@@ -194,7 +196,7 @@ export const orders: Flow = {
  * its ETH to `refundTo`.
  *
  * A table of its own, keyed by the signing log, rather than a leg on the order: a payout is the
- * terms', not one order's — a DCA's deliveries batch the output of several. An order page shows the
+ * terms', not one order's — a TWAP's deliveries batch the output of several. An order page shows the
  * first payout of its terms after its own swap.
  *
  * Only what the terms do not say is kept: where it goes and in what asset are the terms' — joined

@@ -17,12 +17,22 @@ ui               Hydration scan: Transfers · Orders · Orders v2 · Feeds :8083
 app-intents-v2   intent_v2_orders, and the terms still in play      :8084
 ```
 
-The UI holds no state and touches no database. It serves every page, and passes `/api/<section>/…`
-through to that section's app — `transfers`, `orders`, `v2/orders`, `feeds` — live streams included,
-so the pages are one origin while the apps stay public on their own ports. `TRANSFERS_API`,
-`ORDERS_API`, `ORDERS_V2_API` and `FEEDS_API` name the apps; they default to the ports above on this
-host. Intents v2 is its own section, also called Orders, with a `v2` tag on its nav link and titles:
-`/v2/orders` and `/v2/order/<seq>`, from `public/ui/v2/` — a folder of pages is served under its name.
+The UI holds no state and touches no database. It serves every page and passes the pages' API calls
+through to the app that serves them, live streams included, so the pages are one origin while the
+apps stay public on their own hosts with their own paths:
+
+```
+/api/transfers…        → transfers, as is       /api/transfers/filters → transfers /api/filters
+/api/feeds…            → feeds, as is
+/api/v1/<path>         → intents v1  /api/<path>
+/api/v2/<path>         → intents v2  /api/<path>   (trades, orders)
+/api/events?flow=…     → the app whose flows they are
+```
+
+`TRANSFERS_API`, `ORDERS_API`, `ORDERS_V2_API` and `FEEDS_API` name the apps; they default to the
+ports above on this host. Intents v2 is its own section, Trades, with a `new` tag on its nav link:
+`/v2/trades`, `/v2/trade/<auth_path>` and `/v2/order/<seq>`, from `public/ui/v2/` — a folder of pages
+is served under its name.
 
 Chains are indexed **in parallel and at wildly different speeds**, so events arrive in no
 particular order. Every flow is built to come out ordered anyway: state advances by rank and never
@@ -246,32 +256,44 @@ watched). The router is read through its own history, for its NEP-297 `intent_si
 Three things, related through the terms' `auth_path`:
 
 ```
-plan (auth_path) ─┬─ orders   intent_v2_orders, keyed on seq — the tranches
-                  └─ payouts  intent_v2_payouts, keyed on the signing log — deliveries, refunds
+trade (auth_path) ─┬─ orders   intent_v2_orders, keyed on seq
+                   └─ payouts  intent_v2_payouts, keyed on the signing log — deliveries, refunds
 ```
 
-- **A plan** is one set of terms, the user's whole action: a swap is a plan of one order, a DCA of
-  several. It is not a table — its fields are the terms every order of it carries, and the rest is
-  counted over its orders and payouts. Its status: `refunded` once a refund is signed, `active` while
-  the deadline is ahead, after it `delivered` if anything was paid out, else `ended`.
+- **A trade** is one set of terms, the user's whole cross-chain swap: a Swap is a trade of one order,
+  a Twap of several. It is not a table — its fields are the terms every order of it carries, and the
+  rest is counted over its orders and payouts. Its status: `refunded` once a refund is signed;
+  `completed` once every planned order is swapped (with no plan to count against, once the deadline
+  has passed) and a delivery was signed after the last swap; `expired` past the deadline with nothing
+  paid out; else `pending`. The detail read keeps a trade whose `A` still holds output `pending`.
 - **An order** is keyed on its `seq`, the NTT message id of its transfer — the `transferSequence` the
   forwarder names and the `seq` the router's swap names. Stages: `published → forwarded → swapped`.
   `OrderPublished` carries the terms in full, so each row keeps them as emitted beside the fields
   worth a column. The swap keeps 1Click's deposit account, which is what its explorer finds the
   execution by.
 - **A payout** is the terms', not one order's: output builds up in `A` and is delivered once it
-  reaches `minDelivery`, so one delivery can carry several tranches. Only what the terms do not say is
+  reaches `minDelivery`, so one delivery can carry several orders. Only what the terms do not say is
   kept — the amount, and the signing transaction. A delivery to a Zcash address is then paired with
   its Zcash transaction by a poller: POA pays out on Zcash and nothing on NEAR names it, so the
   recipient's Blockchair history is read — the first payment after the delivery was signed, for no
   more than was withdrawn. Shielded recipients stay unpaired.
+- **What `A` holds** — swapped, not yet paid out — is no event, so a trade's detail read takes it
+  live: `A` derived once from `v1.signer` (router, auth path) and cached, its destination balance read
+  from `intents.near` on every request. The trade page refetches on each of its updates, and twice more
+  after a swap, which is signed before 1Click's fill lands.
+- **How many orders were planned** is the ICE intent's, not an event's: a DCA's budget over its
+  amount per trade, read from `Intent.Intents` at the block before the intent's first order — ICE
+  drops an intent once it has run, so `RPC_HYDRATION_WSS` must be an archive node. A poller writes it
+  to each order's `planned`. A swap, or an intent already gone, is one order; a direct `dispatch` has
+  no intent and no count.
+- **The asset sold** comes resolved: `asset_in` as the Hydration asset id, `asset_in_meta` its symbol,
+  decimals and icon.
 
 ```
-GET /api/plans?status=&address=&limit=&offset=   # one row per auth_path
-GET /api/plans/:authPath                          # { plan, orders, payouts }
+GET /api/trades?status=&address=&limit=&offset=  # one row per auth_path
+GET /api/trades/:authPath                         # { trade, orders, payouts }; trade.held, trade.planned
 GET /api/orders?state=&authPath=&publishedAfter=&address=&limit=&offset=
 GET /api/orders/:seq
-GET /api/payouts?authPath=
 GET /api/terms?deadlineAfter=<unix s>             # one row per auth_path: terms, deadline, newest order
 ```
 
@@ -279,9 +301,9 @@ GET /api/terms?deadlineAfter=<unix s>             # one row per auth_path: terms
 after. Whether a set of terms still has work is `A`'s balances on NEAR, which scan does not read, so
 the caller picks how far past their deadline terms stay listed.
 
-The pages: `/v2/orders` lists plans, `/v2/plan/<auth_path>` shows one — its terms, every tranche with
-its 1Click execution, every payout with where it landed — and `/v2/order/<seq>` one tranche's route,
-ending on the destination chain.
+The UI serves these under `/api/v2`. The pages: `/v2/trades` lists trades, `/v2/trade/<auth_path>`
+shows one — its terms, every order with its 1Click execution, every payout with where it landed — and
+`/v2/order/<seq>` one order's route, ending on the destination chain.
 
 ## Oracles (the feeds app)
 

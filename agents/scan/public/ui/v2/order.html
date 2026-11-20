@@ -42,17 +42,16 @@
         short,
         topbar,
         vaaLink,
-        versionTag,
       } from "/shared/app.js";
 
       topbar("scan", NAV);
 
       /** This section's app, through the UI's proxy. */
-      const API = "/api/v2/orders";
+      const API = "/api/v2";
 
       // `/v2/order/<seq>`.
       const seq = decodeURIComponent(location.pathname.split("/")[3] ?? "");
-      if (!seq) location.replace("/v2/orders");
+      if (!seq) location.replace("/v2/trades");
 
       const main = document.getElementById("main");
       const mono = (v) => (v ? esc(v) : '<span class="dim">—</span>');
@@ -68,19 +67,19 @@
       const destChain = (o) => (o.recipient_kind === 1 ? "near" : (dest(o)?.chain ?? null));
 
       const type = (o) =>
-        o.tranches > 1
-          ? pill(`DCA · tranche ${o.tranche} of ${o.tranches} so far`, "var(--lavender)")
-          : pill("swap", "var(--sky)");
+        (o.planned ?? o.order_count) > 1
+          ? pill(`Twap · order ${o.order_index}${o.planned ? ` of ${o.planned}` : ""}`, "var(--lavender)")
+          : pill("Swap", "var(--sky)");
 
       /** Where the destination asset's payout transaction is shown, by the chain it lands on. */
       const DEST_TX = { zcash: "zec" };
 
       /**
        * The payout that carried this order's output: the first of its terms signed after its swap. A
-       * DCA's delivery can batch several orders' output, so one payout may show on several orders.
+       * TWAP's delivery can batch several orders' output, so one payout may show on several orders.
        *
        * @param o The order.
-       * @param payouts Its terms' payouts, oldest first.
+       * @param payouts Its trade's payouts, oldest first.
        */
       function payoutOf(o, payouts) {
         const after = Number(o.swapped?.blockTimestamp ?? o.published?.blockTimestamp ?? 0);
@@ -153,7 +152,7 @@
             ref: o.published,
             rows: [
               o.asset_in != null
-                ? ["sold", asset(o.amount_in, tokens.hydration[o.asset_in], `#${o.asset_in}`, assetIcon(tokens.hydration[o.asset_in]?.icon ?? o.asset_in))]
+                ? ["sold", asset(o.amount_in, o.asset_in_meta, `#${o.asset_in}`, assetIcon(o.asset_in_meta?.icon ?? o.asset_in))]
                 : null,
               ["A gets ≥", asset(o.amount, ETH)],
             ].filter(Boolean),
@@ -196,7 +195,7 @@
         const deadline = o.deadline ? Number(o.deadline) * 1000 : null;
 
         const order = [
-          kv("plan", o.auth_path ? `<a class="link" href="/v2/plan/${encodeURIComponent(o.auth_path)}">${type(o)}</a>` : type(o)),
+          kv("trade", o.auth_path ? `<a class="link" href="/v2/trade/${encodeURIComponent(o.auth_path)}">${type(o)}</a>` : type(o)),
           kv("buys", esc(d?.symbol ?? o.destination_asset ?? "—")),
           // Destination units per 1 ETH, from the feeds when the order was published.
           kv("priced at", o.out_per_in && d ? `${esc(amount(o.out_per_in, d.decimals, 6))} ${esc(d.symbol)} / ETH` : mono(o.out_per_in)),
@@ -229,7 +228,7 @@
         ].join("");
 
         main.innerHTML = `
-          <h1 class="page-title tagged">Order ${esc(o.seq)} <span class="sub">${badge(o.state)}</span>${versionTag("v2")}</h1>
+          <h1 class="page-title">Order ${esc(o.seq)} <span class="sub">${badge(o.state)}</span></h1>
           <div class="legs">${route(o, payoutOf(o, payouts))}</div>
           <div class="panel">
             <div class="panel-head"><span class="t">Order</span></div>
@@ -246,14 +245,13 @@
       }
 
       let authPath = null;
-      let tokens = { hydration: {} };
 
+      // The order, then its trade's payouts — one of which carried this order's output.
       async function load() {
-        if (!Object.keys(tokens.hydration).length) tokens = (await json(`${API}/tokens`)) ?? tokens;
         const o = await json(`${API}/orders/${encodeURIComponent(seq)}`);
         authPath = o?.auth_path ?? null;
-        const payouts = authPath ? ((await json(`${API}/payouts?authPath=${encodeURIComponent(authPath)}`)) ?? []) : [];
-        await render(o, payouts);
+        const trade = authPath ? await json(`${API}/trades/${encodeURIComponent(authPath)}`) : null;
+        await render(o, trade?.payouts ?? []);
       }
 
       live(
@@ -262,7 +260,6 @@
           if (String(u.record?.seq) === seq || (authPath && u.record?.auth_path === authPath)) load();
         },
         load,
-        API,
       );
     </script>
   </body>

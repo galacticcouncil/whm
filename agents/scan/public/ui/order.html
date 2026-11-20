@@ -46,7 +46,7 @@
       topbar("scan", NAV);
 
       /** This section's app, through the UI's proxy. */
-      const API = "/api/orders";
+      const API = "/api/v1";
 
       // Also answers the bare `/orders`, which has nothing to show — the list is the root.
       const sequence = decodeURIComponent(
@@ -294,7 +294,6 @@
           if (String(u.record?.transfer_sequence) === sequence) load();
         },
         load,
-        API,
       );
 
       json(`${API}/tokens`).then((t) => {

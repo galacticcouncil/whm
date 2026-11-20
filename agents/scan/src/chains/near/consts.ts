@@ -3,6 +3,9 @@ export const NEAR = { name: "near", wormholeId: 15 } as const;
 /** FastNEAR's public transaction API — free, no key; `RPC_NEAR_TX` overrides it. */
 export const FASTNEAR_TX_API = "https://tx.main.fastnear.com";
 
+/** FastNEAR's public JSON-RPC, for contract views — free, no key; `RPC_NEAR` overrides it. */
+export const FASTNEAR_RPC = "https://free.rpc.fastnear.com";
+
 /** FastNEAR's page size for an account's history, and its cap on transactions per request. */
 export const HISTORY_PAGE = 200;
 export const TX_BATCH = 20;

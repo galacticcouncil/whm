@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Orders v2 · Hydration scan</title>
+    <title>Trades · Hydration scan</title>
     <script>
       try {
         var t = localStorage.getItem("explorer-theme");
@@ -29,7 +29,7 @@
       </label>
 
       <div class="list-head">
-        <div class="list-title tagged" id="title"><span class="conn"><span class="dot"></span></span>Live orders</div>
+        <div class="list-title tagged" id="title"><span class="conn"><span class="dot"></span></span>Live trades</div>
         <div class="fbar" id="fbar"><button type="button" class="freset" id="reset" hidden>Reset</button></div>
       </div>
 
@@ -37,7 +37,6 @@
         <table class="tbl">
           <thead>
             <tr>
-              <th>Plan</th>
               <th>Time</th>
               <th>Type</th>
               <th>From</th>
@@ -60,7 +59,6 @@
         asset,
         assetIcon,
         at,
-        badge,
         chainBadge,
         chainIcon,
         esc,
@@ -71,19 +69,21 @@
         live,
         pager,
         pill,
+        statusBadge,
+        statusLabel,
         topbar,
         versionTag,
       } from "/shared/app.js";
 
       topbar("scan", NAV, { conn: false });
-      document.getElementById("title").insertAdjacentHTML("beforeend", versionTag("v2"));
+      document.getElementById("title").insertAdjacentHTML("beforeend", versionTag("new"));
 
-      /** This section's app, through the UI's proxy. */
-      const API = "/api/v2/orders";
+      /** Intents v2, through the UI's proxy. */
+      const API = "/api/v2";
 
       const LIMIT = 25;
-      const COLS = 7;
-      const STATES = ["active", "delivered", "refunded", "ended"];
+      const COLS = 6;
+      const STATES = ["pending", "completed", "refunded", "expired"];
       const el = (id) => document.getElementById(id);
 
       /** What A is credited and sells — the rail's unit. */
@@ -130,21 +130,19 @@
         `<span class="end-row">${chain ? chainBadge(chain) : ""}${addrLink(address, chain)}</span>`;
 
       /**
-       * A plan of one order is a swap, of several a DCA. A DCA reads as a swap until its second tranche
-       * arrives — nothing on-chain says how many there will be.
+       * A trade of one order is a swap, of several a TWAP — by the orders its ICE intent was given,
+       * else by those seen so far.
        */
       const type = (r) =>
-        r.tranches > 1 ? pill(`DCA · ${r.tranches}`, "var(--lavender)") : pill("swap", "var(--sky)");
-
-      let tokens = { hydration: {} };
+        (r.planned ?? r.order_count) > 1 ? pill("Twap", "var(--lavender)") : pill("Swap", "var(--sky)");
 
       /**
-       * What the plan sold — the Hydration asset its ICE trades sold, else the ETH — and what the user
+       * What the trade sold — the Hydration asset its ICE orders sold, else the ETH — and what the user
        * has received so far.
        */
       function assets(r) {
         const d = dest(r);
-        const meta = r.asset_in != null ? tokens.hydration[r.asset_in] : null;
+        const meta = r.asset_in_meta;
         const sold =
           r.asset_in != null
             ? asset(r.amount_in, meta, `#${r.asset_in}`, assetIcon(meta?.icon ?? r.asset_in))
@@ -160,22 +158,21 @@
 
       function render(items, fresh) {
         if (!items.length) {
-          el("rows").innerHTML = `<tr><td class="table-error" colspan="${COLS}">No plans match.</td></tr>`;
+          el("rows").innerHTML = `<tr><td class="table-error" colspan="${COLS}">No trades match.</td></tr>`;
           shown = new Set();
           return;
         }
         el("rows").innerHTML = items
           .map((r) => {
-            const href = `/v2/plan/${encodeURIComponent(r.auth_path)}`;
+            const href = `/v2/trade/${encodeURIComponent(r.auth_path)}`;
             const isNew = fresh && !shown.has(r.auth_path);
             return `<tr class="clickable${isNew ? " row-new" : ""}" data-href="${href}">
-              <td class="mono" data-label="Plan"><a class="hash" href="${href}" title="${esc(r.auth_path)}">${esc(r.auth_path.slice(0, 8))}</a></td>
               <td data-label="Time">${when(r.last_at)}</td>
               <td data-label="Type">${type(r)}</td>
               <td data-label="From">${end("hydration", r.caller)}</td>
               <td data-label="To">${end(destChain(r), r.recipient)}</td>
               <td data-label="Assets">${assets(r)}</td>
-              <td class="r" data-label="Status">${badge(r.status)}</td>
+              <td class="r" data-label="Status">${statusBadge(r.status)}</td>
             </tr>`;
           })
           .join("");
@@ -204,11 +201,11 @@
         if (q) p.set("address", q);
         if (states.length) p.set("status", states.join(","));
         el("rows").classList.add("rows-pending");
-        const data = await json(`${API}/plans?${p}`);
+        const data = await json(`${API}/trades?${p}`);
         el("rows").classList.remove("rows-pending");
         if (!data) {
           el("rows").innerHTML =
-            `<tr><td class="table-error" colspan="${COLS}"><strong>Could not load plans.</strong></td></tr>`;
+            `<tr><td class="table-error" colspan="${COLS}"><strong>Could not load trades.</strong></td></tr>`;
           return;
         }
         render(data.items, fresh);
@@ -247,7 +244,7 @@
         host,
         {
           label: "Status",
-          cols: [{ key: "state", options: STATES.map((s) => ({ value: s, label: s, html: badge(s) })) }],
+          cols: [{ key: "state", options: STATES.map((s) => ({ value: s, label: statusLabel(s), html: statusBadge(s) })) }],
         },
         state,
         refilter,
@@ -264,9 +261,6 @@
       // A change anywhere reloads the first page, and what arrived flashes. A burst coalesces.
       let pending;
       skeleton();
-      json(`${API}/tokens`).then((t) => {
-        if (t) tokens = t;
-      });
       live(
         "orders-v2,payouts-v2",
         () => {
@@ -275,7 +269,6 @@
           pending = setTimeout(() => load(true), 300);
         },
         () => load(),
-        API,
       );
     </script>
   </body>
