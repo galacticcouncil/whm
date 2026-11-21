@@ -32,15 +32,19 @@ that already exists for the same token.
 - `contracts/src/snowbridge/WethHubFunder.sol`: Snowbridge recipient for native ETH. `receive()` is
   empty; a permissionless `fund()` wraps the balance and sends the WETH to one NTT hub fixed at
   deployment. No owner.
+- `common/snowbridge`: the asset table (id, class, Ethereum token, twin) and the twin hubs, shared by
+  the probes and `inventory.ts`.
 - `contracts/scripts/snowbridge-converter/inventory.ts`: backing reconciliation across Hydration,
-  Asset Hub and Ethereum (issuance, SA balance, agent escrow, hub capacity, converter inventory).
+  Asset Hub and Ethereum (issuance, SA balance, agent escrow, hub capacity, converter inventory
+  against outstanding Snowbridge supply). Works before and after the switch.
 - `chopsticks/probes/snowbridgeExit.ts`: call builders (exit XCM, registry, minter, fuse, mint,
-  whitelist wrapper); `snowbridgeFork.ts`: fork specs and enactment helpers.
-- `chopsticks/probes/_probeSnowbridgeProposals.ts`: builds both proposals and rehearses them on
+  scheduled restore, whitelist wrapper) and a decode check of every proposal against live metadata;
+  `snowbridgeFork.ts`: fork specs and enactment helpers.
+- `chopsticks/probes/_probeSnowbridgeProposals.ts`: builds the proposals and rehearses them on
   Hydration + Asset Hub + Bridge Hub forks.
 - `chopsticks/probes/_probeSnowbridgeExit.ts`: the single-asset variant.
-- `chopsticks/probes/_dryRunSnowbridgeTransfer.ts`: replays the transfer proposal against live
-  Asset Hub and Bridge Hub (`DryRunApi`).
+- `chopsticks/probes/_dryRunSnowbridgeTransfer.ts`: decodes a transfer proposal's `calls.inner` and
+  replays its messages against live Asset Hub and Bridge Hub (`DryRunApi`).
 
 ## Switch
 
@@ -51,7 +55,8 @@ Utility.batch_all
 ├─ CircuitBreaker.set_asset_category(46, External)
 └─ per merge twin
    ├─ AssetRegistry.update(twin, xcm_rate_limit = limit + mint)
-   └─ Currencies.update_balance(converter, twin, + Snowbridge issuance)
+   ├─ Currencies.update_balance(converter, twin, + Snowbridge issuance)
+   └─ Scheduler.schedule_after(44,400, AssetRegistry.update(twin, xcm_rate_limit = limit))
 ```
 
 ## Transfer
@@ -64,12 +69,17 @@ Utility.batch_all
 │  ├─ ExchangeAsset(DOT → ETH relayer fee)
 │  └─ InitiateTransfer(Ethereum, ReserveWithdraw asset, preserve_origin)
 │     └─ Gateway UnlockNativeToken → hub manager (escrow donation) or WethHubFunder
-├─ Currencies.update_balance(converter, twin, ±Δ)  only if Snowbridge issuance moved
-└─ AssetRegistry.update(twin, xcm_rate_limit = original)
+└─ Currencies.update_balance(converter, twin, Δ)   Δ = (issuance − collected) − inventory, if ≠ 0
 ```
 
-Build the transfer after the switch has enacted, from a fresh SA snapshot. Once Snowbridge is off,
-the SA can only grow, so exact amounts stay withdrawable.
+The transfer is built after the switch has enacted, from the live post-switch state: a fresh SA
+snapshot and the converter's actual balances. Once Snowbridge is off the SA can only grow, so exact
+amounts stay withdrawable, and the Snowbridge supply is frozen, so Δ stays valid between build and
+enactment (a conversion moves outstanding supply and inventory by the same amount).
+
+Between the two proposals the converter is live while the backing still sits in the SA: conversions
+and NTT exits in that window draw on the hubs' existing escrow. Accepted; if the transfer fails,
+pause the converter.
 
 ## Constraints
 
@@ -81,25 +91,43 @@ the SA can only grow, so exact amounts stay withdrawable.
   false)`) and the funds stay in the Asset Hub agent, so recipients must be hub managers (plain ERC20
   transfer) or the funder (empty `receive()`). Native ether is paid with a raw `call`;
   `NttManagerWethUnwrap.receive()` would accept and strand it, hence the funder.
-- **Deposit limiter.** Root mints go through the circuit breaker's per-period issuance limit
-  (`xcm_rate_limit`). Over the limit the excess is reserved and the asset locked for minting, so the
-  switch raises each twin's limit by its mint and the transfer restores it.
-- **Recipient checks.** The probe refuses a real destination unless its `token()`, LOCKING mode and
-  `getPeer(73)` match the Hydration spoke.
+- **Deposit limiter.** Root mints go through the circuit breaker's issuance limit (`xcm_rate_limit`
+  per 43,200-block period). A period starts at its first deposit and keeps that baseline until it
+  ends, so restoring the limit while the mint is still inside its period locks the twin on the next
+  deposit (USDT 23's mint is larger than its limit). The switch raises each twin's limit by its mint
+  and schedules the restore 44,400 blocks out, after any period holding the mint has closed. The
+  raised limit stays live that long; a governance change to the limit in between is overwritten.
+- **Destination checks.** A real destination must report the asset's `token()`, LOCKING mode and
+  `getPeer(73)` = the Hydration spoke; a real spoke must report the asset precompile and BURNING.
+- **Converter checks.** A given `--converter` must be owned by `EMERGENCY_ADMIN`
+  (`0xaa7e…aa7e1`), unpaused, paired for all four merges and running this build's implementation
+  (runtime code equal up to immutables).
+- **Fees.** Each message withdraws 10 DOT from the SA, pays 1 DOT of Asset Hub fees and swaps up to
+  the rest for the 0.001 ETH relayer fee; the surplus is refunded. The probe wants the live quote
+  covered twice. The DOT spent (2.8 per message in the rehearsal) comes out of the SA's DOT, the
+  reserve behind Hydration DOT; the transfer burns nothing on Hydration to match it.
 
 ## Running
 
 ```sh
 cd chopsticks
-npx tsx probes/_probeSnowbridgeProposals.ts --spokes spokes.json --hubs hubs.json --eth-funder 0x… --converter 0x…
+# rehearsal: switch, then a transfer built on the simulated switch; never submittable
+npx tsx probes/_probeSnowbridgeProposals.ts [--spokes spokes.json] [--hubs hubs.json] [--eth-funder 0x…] [--converter 0x…]
+# before the switch
+npx tsx probes/_probeSnowbridgeProposals.ts --stage switch --final --spokes spokes.json --converter 0x…
+# after the switch has enacted
+npx tsx probes/_probeSnowbridgeProposals.ts --stage transfer --final --hubs hubs.json --eth-funder 0x… --converter 0x…
 npx tsx probes/_dryRunSnowbridgeTransfer.ts
 npx tsx probes/_probeSnowbridgeExit.ts --asset 41
 
 cd ../contracts
-npx tsx scripts/snowbridge-converter/inventory.ts --converter 0x…
+npx tsx scripts/snowbridge-converter/inventory.ts --converter 0x… [--hubs hubs.json]
 forge test --match-path 'test/snowbridge/*'
 ```
 
-Without `--spokes`, `--hubs`, `--eth-funder` and `--converter`, the probe uses placeholder
-addresses and deploys a converter on the fork. Proposal calldata is written to
-`chopsticks/probes/snowbridge-{switch,transfer}-proposal.json`.
+Without `--final`, missing spokes, hubs and funder become placeholders and a converter is deployed on
+the fork; the output goes to `chopsticks/probes/snowbridge-{switch,transfer}-proposal.rehearsal.json`
+with `submittable: false` and its blockers. With `--final` the probe writes
+`snowbridge-{switch,transfer}-proposal.json` only if there are no blockers (placeholders, a
+fork-deployed converter, failed destination, spoke, converter or fee checks, any failed rehearsal
+check), and exits 1 otherwise. The dry run refuses a proposal that is not submittable.

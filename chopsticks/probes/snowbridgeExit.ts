@@ -2,6 +2,24 @@ import { Binary, type PolkadotClient } from "polkadot-api";
 import { keccak256, toHex, type Hex } from "viem";
 
 import { acc } from "@galacticcouncil/common";
+import {
+  ETHER_LOCATION,
+  tokenLocation,
+  type SnowbridgeAsset,
+  type SnowbridgeToken,
+} from "@whm/common/snowbridge";
+
+export {
+  EMERGENCY_ADMIN,
+  ETHER_LOCATION,
+  SNOWBRIDGE_ASSETS,
+  TWIN_HUBS,
+  WETH_ETHEREUM,
+  tokenLocation,
+  type AssetClass,
+  type SnowbridgeAsset,
+  type SnowbridgeToken,
+} from "@whm/common/snowbridge";
 
 export const HYDRATION_PARA_ID = 2034;
 export const ASSET_HUB_PARA_ID = 1000;
@@ -13,71 +31,23 @@ export const HYDRATION_SA_ON_ASSET_HUB = acc.getSovereignAccounts(HYDRATION_PARA
 
 export const APYUSD_ID = 46;
 
-export type AssetClass = "rebind" | "merge" | "retire";
+// circuit breaker deposit Period (DAYS at 2 s blocks); a window runs from its first deposit, not from the mint
+export const DEPOSIT_PERIOD = 43_200;
+export const FUSE_RESTORE_AFTER = DEPOSIT_PERIOD + 1_200;
 
-export interface SnowbridgeAsset {
-  id: number;
-  symbol: string;
-  cls: AssetClass;
-  twin?: number;
-}
-
-export const SNOWBRIDGE_ASSETS: SnowbridgeAsset[] = [
-  { id: 1000765, symbol: "tBTC", cls: "rebind" },
-  { id: 46, symbol: "apyUSD", cls: "rebind" },
-  { id: 34, symbol: "ETH", cls: "rebind" },
-  { id: 1000809, symbol: "wstETH", cls: "rebind" },
-  { id: 39, symbol: "PAXG", cls: "rebind" },
-  { id: 1000766, symbol: "USDC", cls: "merge", twin: 21 },
-  { id: 1000767, symbol: "USDT", cls: "merge", twin: 23 },
-  { id: 35, symbol: "TRAC", cls: "rebind" },
-  { id: 1000624, symbol: "AAVE", cls: "rebind" },
-  { id: 1000794, symbol: "LINK", cls: "rebind" },
-  { id: 1000795, symbol: "SKY", cls: "rebind" },
-  { id: 1000796, symbol: "LDO", cls: "rebind" },
-  { id: 38, symbol: "ENA", cls: "rebind" },
-  { id: 1000625, symbol: "sUSDe", cls: "rebind" },
-  { id: 1000189, symbol: "WETH", cls: "merge", twin: 20 },
-  { id: 1000851, symbol: "LBTC", cls: "retire" },
-  { id: 41, symbol: "CFG", cls: "retire" },
-  { id: 1000190, symbol: "WBTC", cls: "merge", twin: 19 },
-  { id: 1000626, symbol: "sUSDS", cls: "retire" },
-  { id: 45, symbol: "sUSDat", cls: "retire" },
-];
-
-const ETHEREUM = { type: "Ethereum", value: { chain_id: 1n } };
-
-export const DOT_LOCATION = { parents: 1, interior: { type: "Here", value: undefined } };
-export const ETHER_LOCATION = {
-  parents: 2,
-  interior: { type: "X1", value: { type: "GlobalConsensus", value: ETHEREUM } },
+export const DEFAULT_FEES = {
+  dotWithdraw: 100_000_000_000n,
+  dotLocalFee: 10_000_000_000n,
+  etherFee: 1_000_000_000_000_000n,
 };
 
-export type SnowbridgeToken = Hex | "ETH";
-
-export function tokenLocation(token: SnowbridgeToken) {
-  if (token === "ETH") return ETHER_LOCATION;
-  return {
-    parents: 2,
-    interior: {
-      type: "X2",
-      value: [
-        { type: "GlobalConsensus", value: ETHEREUM },
-        { type: "AccountKey20", value: { network: undefined, key: token.toLowerCase() } },
-      ],
-    },
-  };
-}
+export const DOT_LOCATION = { parents: 1, interior: { type: "Here", value: undefined } };
 
 const fungible = (id: unknown, amount: bigint) => ({ id, fun: { type: "Fungible", value: amount } });
 
-export interface ExitAsset {
+export interface ExitParams {
   token: SnowbridgeToken;
   amount: bigint;
-}
-
-export interface ExitBatchParams {
-  assets: ExitAsset[];
   beneficiary: Hex;
   dotWithdraw: bigint;
   dotLocalFee: bigint;
@@ -85,28 +55,14 @@ export interface ExitBatchParams {
   topic: Hex;
 }
 
-export interface ExitParams extends Omit<ExitBatchParams, "assets"> {
-  token: SnowbridgeToken;
-  amount: bigint;
-}
-
 export function exitTopic(assetId: number, amount: bigint): Hex {
   return keccak256(toHex(`hydration:snowbridge-exit:${assetId}:${amount}`));
 }
 
-export function batchTopic(ids: number[], amounts: bigint[]): Hex {
-  return keccak256(toHex(`hydration:snowbridge-exit:${ids.join(",")}:${amounts.join(",")}`));
-}
-
-// xcm Assets must be sorted: ether (X1) sorts before every erc20 (X2), erc20s by key bytes
-export function sortExitAssets(assets: ExitAsset[]): ExitAsset[] {
-  const key = (a: ExitAsset) => (a.token === "ETH" ? "0" : `1${a.token.toLowerCase()}`);
-  return [...assets].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
-}
-
-export function buildExitBatchXcm(p: ExitBatchParams) {
-  const assets = sortExitAssets(p.assets).map((a) => fungible(tokenLocation(a.token), a.amount));
-  const count = p.assets.length + 2;
+// one token per message: asset hub's paid-execution barrier caps the leading WithdrawAsset at 2 assets
+export function buildExitXcm(p: ExitParams) {
+  const asset = fungible(tokenLocation(p.token), p.amount);
+  const allCounted = { type: "Wild", value: { type: "AllCounted", value: 3 } };
   const refundTo = {
     parents: 0,
     interior: {
@@ -121,23 +77,15 @@ export function buildExitBatchXcm(p: ExitBatchParams) {
       value: { type: "AccountKey20", value: { network: undefined, key: p.beneficiary.toLowerCase() } },
     },
   };
-  const allCounted = (n: number) => ({ type: "Wild", value: { type: "AllCounted", value: n } });
-
-  // asset hub's paid-execution barrier caps the leading WithdrawAsset at 2 assets
-  const withdraw =
-    assets.length === 1
-      ? [{ type: "WithdrawAsset", value: [fungible(DOT_LOCATION, p.dotWithdraw), ...assets] }]
-      : [{ type: "WithdrawAsset", value: [fungible(DOT_LOCATION, p.dotWithdraw)] }];
 
   return [
-    ...withdraw,
+    { type: "WithdrawAsset", value: [fungible(DOT_LOCATION, p.dotWithdraw), asset] },
     { type: "PayFees", value: { asset: fungible(DOT_LOCATION, p.dotLocalFee) } },
-    ...(assets.length === 1 ? [] : [{ type: "WithdrawAsset", value: assets }]),
     {
       type: "SetAppendix",
       value: [
         { type: "RefundSurplus", value: undefined },
-        { type: "DepositAsset", value: { assets: allCounted(count), beneficiary: refundTo } },
+        { type: "DepositAsset", value: { assets: allCounted, beneficiary: refundTo } },
       ],
     },
     {
@@ -160,20 +108,15 @@ export function buildExitBatchXcm(p: ExitBatchParams) {
           value: { type: "Definite", value: [fungible(ETHER_LOCATION, p.etherFee)] },
         },
         preserve_origin: true,
-        assets: [{ type: "ReserveWithdraw", value: { type: "Definite", value: assets } }],
+        assets: [{ type: "ReserveWithdraw", value: { type: "Definite", value: [asset] } }],
         remote_xcm: [
-          { type: "DepositAsset", value: { assets: allCounted(count), beneficiary } },
+          { type: "DepositAsset", value: { assets: allCounted, beneficiary } },
           { type: "SetTopic", value: p.topic },
         ],
       },
     },
     { type: "SetTopic", value: p.topic },
   ];
-}
-
-export function buildExitXcm(p: ExitParams) {
-  const { token, amount, ...rest } = p;
-  return buildExitBatchXcm({ ...rest, assets: [{ token, amount }] });
 }
 
 export async function encodeSendToAssetHub(hydration: PolkadotClient, xcm: unknown[]): Promise<Hex> {
@@ -234,6 +177,30 @@ export const retiredLocationShape = (token: SnowbridgeToken) => markerShape(SB_G
 export const whLocationScale = (token: SnowbridgeToken) => markerScale(WH_GENERAL_KEY, 2, token);
 export const whLocationShape = (token: SnowbridgeToken) => markerShape(WH_GENERAL_KEY, 2, token);
 
+export const switchedLocationShape = (a: SnowbridgeAsset) =>
+  a.cls === "rebind" ? whLocationShape(a.token) : retiredLocationShape(a.token);
+
+const normalize = (x: unknown): unknown => {
+  if (typeof x === "bigint") return x.toString();
+  if (x instanceof Uint8Array) return Binary.toHex(x);
+  if (Array.isArray(x)) return x.map(normalize);
+  if (x && typeof x === "object") {
+    const o = x as Record<string, unknown> & { toJSON?: () => unknown };
+    if (typeof o.toJSON === "function") return normalize(o.toJSON());
+    // an X1 junction decodes as a one-element array under some xcm versions
+    if (o.type === "X1" && Array.isArray(o.value) && o.value.length === 1) return { type: "X1", value: normalize(o.value[0]) };
+    return Object.fromEntries(
+      Object.entries(o)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, normalize(v)]),
+    );
+  }
+  return x;
+};
+
+export const sameValue = (a: unknown, b: unknown): boolean =>
+  JSON.stringify(normalize(a)).toLowerCase() === JSON.stringify(normalize(b)).toLowerCase();
+
 export function encodeLocationUpdate(assetId: number, locationScale: string): Hex {
   return `0x3301${u32le(assetId)}${"00".repeat(7)}01${locationScale}`;
 }
@@ -272,12 +239,55 @@ export async function encodeUpdateBalance(
   return Binary.toHex(await call.getEncodedData()) as Hex;
 }
 
+export async function encodeScheduleAfter(hydration: PolkadotClient, after: number, call: Hex): Promise<Hex> {
+  const api = hydration.getUnsafeApi();
+  const { decodedCall } = await api.txFromCallData(Binary.fromHex(call));
+  const tx = api.tx.Scheduler.schedule_after({ after, maybe_periodic: undefined, priority: 63, call: decodedCall });
+  return Binary.toHex(await tx.getEncodedData()) as Hex;
+}
+
 export function encodeBatchAll(calls: Hex[]): Hex {
   return `0x0d02${compact(calls.length)}${calls.map((c) => c.slice(2)).join("")}`;
 }
 
 export function encodeWhitelistedDispatch(inner: Hex): Hex {
   return `0x2703${inner.slice(2)}`;
+}
+
+export interface Call {
+  name: string;
+  hex: Hex;
+  // decoded args that must be set, every other arg must be None
+  args?: Record<string, unknown>;
+}
+
+export type DecodedCall = { type: string; value: { type: string; value: Record<string, unknown> } };
+
+export const callName = (c: DecodedCall) => `${c.type}.${c.value.type}`;
+
+export async function decodeCall(hydration: PolkadotClient, hex: Hex): Promise<DecodedCall> {
+  return (await hydration.getUnsafeApi().txFromCallData(Binary.fromHex(hex))).decodedCall as DecodedCall;
+}
+
+// decodes the whitelisted dispatch against the live metadata, so a hand-encoded call can't drift
+export async function assertProposal(hydration: PolkadotClient, outer: Hex, calls: Call[]): Promise<void> {
+  const wrapper = await decodeCall(hydration, outer);
+  if (callName(wrapper) !== "Whitelist.dispatch_whitelisted_call_with_preimage") {
+    throw new Error(`outer call decodes as ${callName(wrapper)}`);
+  }
+  const batch = wrapper.value.value.call as DecodedCall;
+  if (callName(batch) !== "Utility.batch_all") throw new Error(`inner call decodes as ${callName(batch)}`);
+  const decoded = batch.value.value.calls as DecodedCall[];
+  if (decoded.length !== calls.length) throw new Error(`batch decodes to ${decoded.length} calls, built ${calls.length}`);
+  decoded.forEach((d, i) => {
+    const want = calls[i];
+    if (callName(d) !== want.name) throw new Error(`call ${i} decodes as ${callName(d)}, built ${want.name}`);
+    if (!want.args) return;
+    const set = Object.entries(d.value.value).filter(([, v]) => v !== undefined);
+    const ok =
+      set.length === Object.keys(want.args).length && set.every(([k, v]) => k in want.args! && sameValue(v, want.args![k]));
+    if (!ok) throw new Error(`call ${i} (${want.name}) decodes as ${JSON.stringify(normalize(d.value.value))}`);
+  });
 }
 
 export const precompile = (assetId: number): Hex =>
@@ -291,11 +301,10 @@ export const placeholderHub = (assetId: number): Hex => `0x4b0b${assetId.toStrin
 
 export const placeholderFunder = (): Hex => `0xf0de${"0".repeat(36)}`;
 
-export const WETH_ETHEREUM: Hex = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
-
-export const TWIN_HUBS: Record<number, Hex> = {
-  19: "0x081b76AC3cFb65DCe93961d66cea44A74EC8Ef28",
-  20: "0x283B14B5Dd352e32154Df014EA96834F395E04b6",
-  21: "0x447b2c7485A3d6813F8197E605b10BcCD8dd8398",
-  23: "0x9fbd9F16cE7Fa17097E91cc36DC1B7b47aDCa9De",
+export const isPlaceholder = (address: string, assetId?: number): boolean => {
+  const a = address.toLowerCase();
+  return (
+    a === placeholderFunder() ||
+    (assetId !== undefined && (a === placeholderSpoke(assetId) || a === placeholderHub(assetId)))
+  );
 };

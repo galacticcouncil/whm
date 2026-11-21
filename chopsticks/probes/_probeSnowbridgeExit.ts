@@ -12,20 +12,34 @@ import type { Hex } from "viem";
 import { spawnForks, teardownForks } from "../lib/network";
 import { toJson } from "../lib/utils";
 
-import { FORK_SPECS, arg, dispatchAs, eventsAt, flag, pick, summarize, type Ev } from "./snowbridgeFork";
 import {
+  FORK_SPECS,
+  arg,
+  checklist,
+  dispatchAs,
+  dispatchOk,
+  enactWhitelisted,
+  eventsAt,
+  finalize,
+  flag,
+  pick,
+  summarize,
+  type Ev,
+} from "./snowbridgeFork";
+import {
+  DEFAULT_FEES,
   ETHER_LOCATION,
   HYDRATION_SA_ON_ASSET_HUB,
+  SNOWBRIDGE_ASSETS,
   TC_SAFE_ETHEREUM,
   buildExitXcm,
-  encodeBatchAll,
   encodeRetireLocation,
   encodeSendToAssetHub,
-  encodeWhitelistedDispatch,
   exitTopic,
   retiredLocationShape,
+  sameValue,
   tokenLocation,
-  type SnowbridgeToken,
+  type Call,
 } from "./snowbridgeExit";
 
 const USDT_ASSET_HUB = 1984;
@@ -34,16 +48,15 @@ const USDC_SNOWBRIDGE: Hex = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 
 async function main(): Promise<void> {
   const assetId = Number(arg("asset") ?? 41);
+  const asset = SNOWBRIDGE_ASSETS.find((a) => a.id === assetId);
+  if (!asset) throw new Error(`asset ${assetId} is not one of the ${SNOWBRIDGE_ASSETS.length} Snowbridge assets`);
+  const { token, symbol } = asset;
   const retire = !flag("no-retire");
   const asRoot = flag("root");
 
   const nets = await spawnForks(FORK_SPECS);
   const { hydration, assetHub, bridgeHub } = nets;
-  const checks: [string, boolean, string?][] = [];
-  const check = (name: string, ok: boolean, detail?: string) => {
-    checks.push([name, ok, detail]);
-    console.log(`   ${ok ? "✅" : "❌"} ${name}${detail ? `  ${detail}` : ""}`);
-  };
+  const { check, failed } = checklist();
 
   try {
     const hdx: any = hydration.client.getUnsafeApi();
@@ -51,13 +64,11 @@ async function main(): Promise<void> {
     const bh: any = bridgeHub.client.getUnsafeApi();
     const sa = AccountId(0).dec(Binary.fromHex(HYDRATION_SA_ON_ASSET_HUB));
 
-    const meta = await hdx.query.AssetRegistry.Assets.getValue(assetId);
-    const symbol = meta?.symbol ? Buffer.from(meta.symbol).toString("utf8") : `#${assetId}`;
-    const decimals: number = meta?.decimals ?? 0;
+    const decimals: number = (await hdx.query.AssetRegistry.Assets.getValue(assetId))?.decimals ?? 0;
     const locBefore = await hdx.query.AssetRegistry.AssetLocations.getValue(assetId);
-    const keyMatch = toJson(locBefore).match(/"key":"(0x[0-9a-fA-F]{40})"/);
-    const token: SnowbridgeToken = keyMatch ? (keyMatch[1].toLowerCase() as Hex) : "ETH";
-    if (!/GlobalConsensus/.test(toJson(locBefore))) throw new Error(`asset ${assetId} is not Snowbridge-located`);
+    if (!sameValue(locBefore, tokenLocation(token))) {
+      throw new Error(`${symbol} (${assetId}) is not at its Snowbridge location: ${toJson(locBefore)}`);
+    }
     const issuance: bigint = await hdx.query.Tokens.TotalIssuance.getValue(assetId);
 
     const loc = tokenLocation(token);
@@ -79,9 +90,9 @@ async function main(): Promise<void> {
       token,
       amount,
       beneficiary: TC_SAFE_ETHEREUM,
-      dotWithdraw: BigInt(arg("dot-withdraw") ?? 50_000_000_000n),
-      dotLocalFee: BigInt(arg("dot-fee") ?? 10_000_000_000n),
-      etherFee: BigInt(arg("ether-fee") ?? 1_000_000_000_000_000n),
+      dotWithdraw: BigInt(arg("dot-withdraw") ?? DEFAULT_FEES.dotWithdraw),
+      dotLocalFee: BigInt(arg("dot-fee") ?? DEFAULT_FEES.dotLocalFee),
+      etherFee: BigInt(arg("ether-fee") ?? DEFAULT_FEES.etherFee),
       topic: exitTopic(assetId, amount),
     };
 
@@ -92,10 +103,19 @@ async function main(): Promise<void> {
 
     const xcm = buildExitXcm(params);
     const send = await encodeSendToAssetHub(hydration.client, xcm);
-    const inner = retire ? encodeBatchAll([encodeRetireLocation(assetId, token), send]) : send;
-    const outer = encodeWhitelistedDispatch(inner);
-    const registry = await hydration.chain.head.registry;
-    const innerHash = registry.hash(Binary.fromHex(inner)).toHex() as Hex;
+    const calls: Call[] = [
+      ...(retire
+        ? [
+            {
+              name: "AssetRegistry.update",
+              hex: encodeRetireLocation(assetId, token),
+              args: { asset_id: assetId, location: retiredLocationShape(token) },
+            },
+          ]
+        : []),
+      { name: "PolkadotXcm.send", hex: send },
+    ];
+    const { inner, outer, innerHash, innerBytes } = await finalize(hydration, calls);
 
     const out = arg("out") ?? `probes/snowbridge-exit-${symbol.toLowerCase()}-proposal.json`;
     writeFileSync(
@@ -129,39 +149,25 @@ async function main(): Promise<void> {
       ),
     );
     console.log(`   proposal → ${out}`);
-    console.log(`   inner ${inner.length / 2 - 1} bytes, blake2-256 ${innerHash}`);
+    console.log(`   inner ${innerBytes} bytes, blake2-256 ${innerHash}`);
 
     console.log(`\n🥢 Hydration: enact ${asRoot ? "inner call as Root" : "whitelisted dispatch as WhitelistedCaller"}`);
     const { blockHash, events: hEvents } = asRoot
       ? await dispatchAs(hydration, inner, { system: "Root" })
-      : await dispatchAs(
-          hydration,
-          outer,
-          { Origins: "WhitelistedCaller" },
-          { Whitelist: { WhitelistedCall: [[[innerHash], {}]] } },
-        );
+      : await enactWhitelisted(hydration, outer, innerHash);
 
-    const dispatched = pick(hEvents, "Scheduler", "Dispatched").map((e) => toJson(e.event.value.value));
-    check("Scheduler.Dispatched ok", dispatched.some((d) => d.includes('"success":true') || d.includes('"Ok"')), dispatched.join(" "));
-    if (!asRoot) {
-      const wl = pick(hEvents, "Whitelist", "WhitelistedCallDispatched").map((e) => toJson(e.event.value.value));
-      check(
-        "Whitelist.WhitelistedCallDispatched ok",
-        wl.length > 0 && !wl.some((w) => w.includes('"success":false')),
-        wl.join(" "),
-      );
+    if (asRoot) {
+      const dispatched = pick(hEvents, "Scheduler", "Dispatched").map((e) => toJson(e.event.value.value));
+      check("Scheduler.Dispatched ok", dispatched.some((d) => d.includes('"success":true')), dispatched.join(" "));
+    } else {
+      dispatchOk(hEvents, check, retire);
     }
     check("PolkadotXcm.Sent", pick(hEvents, "PolkadotXcm", "Sent").length > 0);
     if (retire) {
-      check("Utility.BatchCompleted", pick(hEvents, "Utility", "BatchCompleted").length > 0);
       const locAfter = await hdx.query.AssetRegistry.AssetLocations.getValue(assetId, { at: blockHash });
-      check(
-        "AssetLocations = retired marker",
-        toJson(locAfter).toLowerCase() === toJson(retiredLocationShape(token)).toLowerCase(),
-        toJson(locAfter),
-      );
+      check("AssetLocations = retired marker", sameValue(locAfter, retiredLocationShape(token)), toJson(locAfter));
     }
-    if (checks.some(([, ok]) => !ok)) for (const l of summarize(hEvents)) console.log(`     ${l}`);
+    if (failed().length) for (const l of summarize(hEvents)) console.log(`     ${l}`);
 
     console.log(`\n🥢 Asset Hub`);
     let ahEvents: Ev[] = [];
@@ -198,11 +204,10 @@ async function main(): Promise<void> {
         saAfter.usdc === saBefore.usdc &&
         (token === USDC_SNOWBRIDGE || saAfter.usdcSnowbridge === saBefore.usdcSnowbridge),
     );
-    if (checks.some(([n, ok]) => !ok && !n.startsWith("Scheduler") && !n.startsWith("Whitelist")))
-      for (const l of summarize(ahEvents)) console.log(`     ${l}`);
+    if (failed().length) for (const l of summarize(ahEvents)) console.log(`     ${l}`);
 
     console.log(`\n🥢 Bridge Hub`);
-    let bhEvents: Ev[] = [];
+    const bhEvents: Ev[] = [];
     for (let i = 0; i < 4; i++) {
       const b = await bridgeHub.chain.newBlock();
       const evs = await eventsAt(bridgeHub, b.hash);
@@ -213,20 +218,27 @@ async function main(): Promise<void> {
     }
     const bhProcessed = pick(bhEvents, "MessageQueue", "Processed").map((e) => e.event.value.value as { success: boolean });
     check("Bridge Hub MessageQueue.Processed success", bhProcessed.length > 0 && bhProcessed.every((p) => p.success));
-    const oq = pick(bhEvents, "EthereumOutboundQueueV2");
-    check("EthereumOutboundQueueV2 events", oq.length > 0, oq.map((e) => e.event.value.type).join(","));
-    const queued = oq.map((e) => toJson(e.event.value.value)).join(" ").toLowerCase();
+    const ours = pick(bhEvents, "EthereumOutboundQueueV2", "MessageQueued")
+      .map((e) => (e.event.value.value as { message: { id: unknown; commands: { type: string; value: Record<string, unknown> }[] } }).message)
+      .filter((m) => String(m.id).toLowerCase() === params.topic.toLowerCase());
+    const commands = ours.flatMap((m) => m.commands);
     const tokenHex = token === "ETH" ? "0x0000000000000000000000000000000000000000" : token;
-    check("UnlockNativeToken token", queued.includes(tokenHex.slice(2)), tokenHex);
-    check("UnlockNativeToken recipient = Safe", queued.includes(TC_SAFE_ETHEREUM.slice(2).toLowerCase()));
-    check("UnlockNativeToken amount", queued.includes(`"${amount}"`) || queued.includes(amount.toString()));
+    check(
+      "one message under our topic: one UnlockNativeToken of the amount to the Safe",
+      ours.length === 1 &&
+        commands.length === 1 &&
+        commands[0].type === "UnlockNativeToken" &&
+        String(commands[0].value.token).toLowerCase() === tokenHex.toLowerCase() &&
+        String(commands[0].value.recipient).toLowerCase() === TC_SAFE_ETHEREUM.toLowerCase() &&
+        BigInt(commands[0].value.amount as bigint) === amount,
+      toJson(commands).slice(0, 400),
+    );
     const nonceAfter = (await bh.query.EthereumOutboundQueueV2.Nonce.getValue()) as bigint;
     check("outbound nonce +1", nonceAfter === nonceBefore + 1n, `${nonceBefore} → ${nonceAfter}`);
-    for (const e of oq) console.log(`     ${e.event.value.type} ${toJson(e.event.value.value)}`.slice(0, 2000));
 
-    const failed = checks.filter(([, ok]) => !ok);
-    console.log(`\n🥢 ${failed.length ? `❌ ${failed.length} check(s) failed` : "✅ all checks passed"}`);
-    process.exitCode = failed.length ? 1 : 0;
+    const bad = failed();
+    console.log(`\n🥢 ${bad.length ? `❌ ${bad.length} check(s) failed` : "✅ all checks passed"}`);
+    process.exitCode = bad.length ? 1 : 0;
   } finally {
     await teardownForks(nets);
   }

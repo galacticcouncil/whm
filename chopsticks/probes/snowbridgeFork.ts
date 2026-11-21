@@ -6,7 +6,15 @@ import type { Network } from "../lib/network";
 import { getEventsAt } from "../lib/queries";
 import { toJson } from "../lib/utils";
 
-import { ASSET_HUB_PARA_ID, BRIDGE_HUB_PARA_ID, HYDRATION_PARA_ID } from "./snowbridgeExit";
+import {
+  ASSET_HUB_PARA_ID,
+  BRIDGE_HUB_PARA_ID,
+  HYDRATION_PARA_ID,
+  assertProposal,
+  encodeBatchAll,
+  encodeWhitelistedDispatch,
+  type Call,
+} from "./snowbridgeExit";
 
 export const FORK_SPECS: ChainSpec[] = [
   {
@@ -108,4 +116,33 @@ export function checklist() {
   };
   const failed = () => items.filter(([, ok]) => !ok);
   return { check, failed };
+}
+
+export type Check = ReturnType<typeof checklist>["check"];
+
+export async function finalize(net: Network, calls: Call[]) {
+  const inner = calls.length === 1 ? calls[0].hex : encodeBatchAll(calls.map((c) => c.hex));
+  const outer = encodeWhitelistedDispatch(inner);
+  if (calls.length > 1) await assertProposal(net.client, outer, calls);
+  const registry = await net.chain.head.registry;
+  const innerHash = registry.hash(Binary.fromHex(inner)).toHex() as Hex;
+  return { inner, outer, innerHash, innerBytes: inner.length / 2 - 1, outerBytes: outer.length / 2 - 1 };
+}
+
+export function dispatchOk(evs: Ev[], check: Check, batch = true): boolean {
+  const dispatched = pick(evs, "Scheduler", "Dispatched").map((e) => toJson(e.event.value.value));
+  const wl = pick(evs, "Whitelist", "WhitelistedCallDispatched").map((e) => toJson(e.event.value.value));
+  const a = check("Scheduler.Dispatched ok", dispatched.some((d) => d.includes('"success":true')), dispatched.join(" "));
+  const b = check(
+    "Whitelist.WhitelistedCallDispatched ok",
+    wl.length > 0 && !wl.some((w) => w.includes('"success":false')),
+    wl.join(" ").slice(0, 300),
+  );
+  const c =
+    !batch ||
+    check(
+      "Utility.BatchCompleted",
+      pick(evs, "Utility", "BatchCompleted").length > 0 && pick(evs, "Utility", "BatchInterrupted").length === 0,
+    );
+  return a && b && c;
 }

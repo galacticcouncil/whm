@@ -1,10 +1,13 @@
 import "dotenv/config";
 
+import { readFileSync } from "node:fs";
+
 import { AccountId, createClient } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { createPublicClient, http, isAddress, parseAbi, type Address } from "viem";
 
 import { acc } from "@galacticcouncil/common";
+import { SNOWBRIDGE_ASSETS, TWIN_HUBS, tokenLocation, type SnowbridgeAsset } from "@whm/common/snowbridge";
 
 const HYDRATION_WS = process.env.RPC_HYDRATION_WS ?? "wss://hdx.tarn.hydration.cloud";
 const HYDRATION_EVM = process.env.RPC_HYDRATION ?? "https://rpc.hydradx.cloud";
@@ -15,15 +18,6 @@ const SNOWBRIDGE_GATEWAY: Address = "0x27ca963C279c93801941e1eB8799c23f407d68e7"
 const SNOWBRIDGE_AH_AGENT: Address = "0xd803472c47a87D7B63E888DE53f03B4191B846a8";
 const MONEY_MARKET_POOL: Address = "0x1b02e051683b5cfac5929c25e84adb26ecf87b38";
 const WORMHOLE_CHAIN_HYDRATION = 73;
-
-const REUSE: Record<number, { peer: number; hub: Address }> = {
-  34: { peer: 20, hub: "0x283B14B5Dd352e32154Df014EA96834F395E04b6" },
-  1000189: { peer: 20, hub: "0x283B14B5Dd352e32154Df014EA96834F395E04b6" },
-  1000190: { peer: 19, hub: "0x081b76AC3cFb65DCe93961d66cea44A74EC8Ef28" },
-  1000766: { peer: 21, hub: "0x447b2c7485A3d6813F8197E605b10BcCD8dd8398" },
-  1000767: { peer: 23, hub: "0x9fbd9F16cE7Fa17097E91cc36DC1B7b47aDCa9De" },
-  1000626: { peer: 1000745, hub: "0x5085A4863f89eC9553F70187EE73B5aAe0fd14b5" },
-};
 
 const erc20Abi = parseAbi([
   "function balanceOf(address) view returns (uint256)",
@@ -73,27 +67,43 @@ function json(v: unknown): string {
   return JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x), 2);
 }
 
-function hasEthereumConsensus(location: unknown): boolean {
-  const s = json(location);
-  return s.includes('"GlobalConsensus"') && s.includes('"Ethereum"');
-}
-
-function tokenOf(location: unknown): Address | "ETH" {
-  const m = json(location).match(/"key":\s*"(0x[0-9a-fA-F]{40})"/);
-  return m ? (m[1] as Address) : "ETH";
+// where the hydration location points: still snowbridge, or the switch's wh / sb marker
+function route(location: unknown): string {
+  const s = json(location).toLowerCase();
+  if (s.includes('"globalconsensus"') && s.includes('"ethereum"')) return "snowbridge";
+  if (s.includes('"0x7768')) return "wh";
+  if (s.includes('"0x7362')) return "sb";
+  return "other";
 }
 
 function getArgs() {
   const argv = process.argv.slice(2);
-  const i = argv.indexOf("--converter");
-  const converter = i >= 0 ? argv[i + 1] : undefined;
-  if (converter !== undefined && !isAddress(converter))
-    throw new Error("Invalid --converter address.");
-  return { converter: converter as Address | undefined, asJson: argv.includes("--json") };
+  const value = (flag: string) => {
+    const i = argv.indexOf(flag);
+    if (i < 0) return undefined;
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith("--")) throw new Error(`${flag} needs a value.`);
+    return v;
+  };
+  const converter = value("--converter");
+  if (converter !== undefined && !isAddress(converter)) throw new Error("Invalid --converter address.");
+  const hubsFile = value("--hubs");
+  const hubs: Record<number, Address> = {};
+  for (const [id, hub] of Object.entries(hubsFile ? (JSON.parse(readFileSync(hubsFile, "utf8")) as Record<string, string>) : {})) {
+    if (!isAddress(hub)) throw new Error(`Invalid --hubs address for ${id}.`);
+    hubs[Number(id)] = hub;
+  }
+  return { converter: converter as Address | undefined, hubs, asJson: argv.includes("--json") };
+}
+
+function hubOf(a: SnowbridgeAsset, hubs: Record<number, Address>): { peer: number; hub: Address } | null {
+  if (a.cls === "merge") return { peer: a.twin!, hub: TWIN_HUBS[a.twin!] };
+  if (a.cls === "rebind" && hubs[a.id]) return { peer: a.id, hub: hubs[a.id] };
+  return null;
 }
 
 async function main() {
-  const { converter, asJson } = getArgs();
+  const { converter, hubs, asJson } = getArgs();
 
   const hdx = createClient(getWsProvider(HYDRATION_WS));
   const ah = createClient(getWsProvider(ASSET_HUB_WS));
@@ -114,11 +124,6 @@ async function main() {
     );
     const treasury = palletAccount("py/trsry");
     const omnipool = palletAccount("omnipool");
-
-    const locations = await api.query.AssetRegistry.AssetLocations.getEntries(at);
-    const snowbridge = locations
-      .filter((e: any) => hasEthereumConsensus(e.value))
-      .map((e: any) => ({ id: e.keyArgs[0] as number, location: e.value }));
 
     const omnipoolAssets = new Set(
       (await api.query.Omnipool.Assets.getEntries(at)).map((e: any) => e.keyArgs[0] as number),
@@ -147,7 +152,10 @@ async function main() {
     ).map((r) => r.toLowerCase());
 
     const assets = [];
-    for (const { id, location } of snowbridge) {
+    for (const a of SNOWBRIDGE_ASSETS) {
+      const { id, token } = a;
+      const location = tokenLocation(token);
+      const hydrationLocation = await api.query.AssetRegistry.AssetLocations.getValue(id, at);
       const meta = await api.query.AssetRegistry.Assets.getValue(id, at);
       if (meta?.asset_type?.type !== "Token") continue;
       const decimals: number = meta.decimals ?? 0;
@@ -182,7 +190,6 @@ async function main() {
       const ahAsset = await ahApi.query.ForeignAssets.Asset.getValue(location, ahAt);
       const ahAccount = await ahApi.query.ForeignAssets.Account.getValue(location, sovereign, ahAt);
 
-      const token = tokenOf(location);
       const agent =
         token === "ETH"
           ? await eth.getBalance({ address: SNOWBRIDGE_AH_AGENT })
@@ -202,46 +209,59 @@ async function main() {
               args: [SNOWBRIDGE_GATEWAY],
             });
 
-      const reuse = REUSE[id];
+      const target = hubOf(a, hubs);
       let ntt = null;
-      if (reuse) {
-        const peerMeta = await api.query.AssetRegistry.Assets.getValue(reuse.peer, at);
+      if (target) {
+        const peerMeta = await api.query.AssetRegistry.Assets.getValue(target.peer, at);
         ntt = {
-          peer: reuse.peer,
+          peer: target.peer,
           peerDecimals: peerMeta?.decimals ?? null,
-          peerIssuance: (await api.query.Tokens.TotalIssuance.getValue(reuse.peer, at)) as bigint,
+          peerIssuance: (await api.query.Tokens.TotalIssuance.getValue(target.peer, at)) as bigint,
           peerFuse: (peerMeta?.xcm_rate_limit ?? null) as bigint | null,
-          minter: minters.get(reuse.peer) ?? null,
-          hub: reuse.hub,
+          minter: minters.get(target.peer) ?? null,
+          hub: target.hub,
           hubOutbound: await eth.readContract({
-            address: reuse.hub,
+            address: target.hub,
             abi: nttAbi,
             functionName: "getCurrentOutboundCapacity",
           }),
           hubInbound: await eth.readContract({
-            address: reuse.hub,
+            address: target.hub,
             abi: nttAbi,
             functionName: "getCurrentInboundCapacity",
             args: [WORMHOLE_CHAIN_HYDRATION],
           }),
           hubPaused: await eth.readContract({
-            address: reuse.hub,
+            address: target.hub,
             abi: nttAbi,
             functionName: "isPaused",
           }),
-          converterInventory: converter
-            ? await hdxEvm.readContract({
-                address: precompile(reuse.peer),
-                abi: erc20Abi,
-                functionName: "balanceOf",
-                args: [converter],
-              })
-            : null,
         };
+      }
+
+      // a merge's twin inventory must cover every .sb the converter has not collected yet
+      let conversion = null;
+      if (converter && a.cls === "merge") {
+        const collected = await hdxEvm.readContract({
+          address: precompile(id),
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [converter],
+        });
+        const inventory = await hdxEvm.readContract({
+          address: precompile(a.twin!),
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [converter],
+        });
+        const outstanding = issuance - collected;
+        conversion = { collected, inventory, outstanding, surplus: inventory - outstanding };
       }
 
       assets.push({
         id,
+        cls: a.cls,
+        route: route(hydrationLocation),
         symbol: text(meta.symbol),
         name: text(meta.name),
         decimals,
@@ -260,14 +280,7 @@ async function main() {
         },
         ethereum: { agent, gateway },
         backingSurplus: ((ahAccount?.balance ?? 0n) as bigint) - issuance,
-        converterHoldings: converter
-          ? await hdxEvm.readContract({
-              address: precompile(id),
-              abi: erc20Abi,
-              functionName: "balanceOf",
-              args: [converter],
-            })
-          : null,
+        conversion,
         ntt,
       });
     }
@@ -292,6 +305,8 @@ async function main() {
       assets.map((a) => ({
         id: a.id,
         symbol: a.symbol,
+        class: a.cls,
+        route: a.route,
         issuance: units(a.issuance, a.decimals),
         "ah sovereign": units(a.assetHub.hydrationSovereign, a.decimals),
         surplus: units(a.backingSurplus, a.decimals),
@@ -299,11 +314,11 @@ async function main() {
         omnipool: units(a.omnipool, a.decimals),
         pools: a.pools.join(","),
         "mm supplied": units(a.moneyMarket?.supplied, a.decimals),
-        "ntt peer": a.ntt?.peer ?? "new hub",
+        "ntt peer": a.ntt?.peer ?? (a.cls === "retire" ? "" : "hub not given"),
         "peer fuse": a.ntt ? units(a.ntt.peerFuse, a.decimals) : "",
         "hub out": a.ntt ? units(a.ntt.hubOutbound, a.decimals) : "",
-        inventory:
-          a.ntt?.converterInventory != null ? units(a.ntt.converterInventory, a.decimals) : "",
+        inventory: a.conversion ? units(a.conversion.inventory, a.decimals) : "",
+        "inventory surplus": a.conversion ? units(a.conversion.surplus, a.decimals) : "",
       })),
     );
   } finally {
