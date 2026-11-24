@@ -19,8 +19,8 @@ import type { MigrationConfig } from "./types";
  *   010 set the ZEC price route @dispatcher — checked by pricing it
  *   011 set the NEAR price route @dispatcher — DIA's NEAR/USD feed, wNEAR's 24 decimals; checked the same way
  *   012 set the nBTC price route @dispatcher — DIA's BTC/USD feed, Omni's nBTC; checked the same way
- *   013 route ZEC to transparent addresses through withdraw-zec @router — needs the router at the
- *       code of intents-v2-upgrade 005 (`set_utxo_route`); checks withdraw-zec serves ZEC under the prefix
+ *   013 route ZEC to transparent addresses through withdraw-zec @router — checks withdraw-zec serves
+ *       ZEC under the prefix
  *   014 route nBTC through withdraw-btc @router — the same, after utxo-withdraw-btc has deployed it.
  *       A withdrawal has no other way out: without its route a token's terms never swap
  *

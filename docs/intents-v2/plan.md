@@ -112,10 +112,9 @@ Golden vectors pin the terms, path and order message across Solidity, Rust and T
 
 ## 4. Remaining
 
-- **Close/settle, UTXO, NEAR and BTC** — `intents-v2-upgrade` 003–005 (dispatcher impl, upgrade, router
-  upgrade), `utxo-withdraw-btc`, then `intents-v2` 011–014 (NEAR and nBTC price routes, the ZEC and
-  nBTC UTXO routes); canaries: a short TWAP closed, ZEC to a `t1` address, nBTC to a `bc1q` address,
-  a NEAR swap.
+- **Close/settle, UTXO, NEAR and BTC** — dispatcher and router upgraded 2026-11-24; `utxo-withdraw-btc`,
+  then `intents-v2` 011–014 (NEAR and nBTC price routes, the ZEC and nBTC UTXO routes); canaries: a
+  short TWAP closed, ZEC to a `t1` address, nBTC to a `bc1q` address, a NEAR swap.
 - **Ownership handover** — the `intents-v2-dao` migration: forwarder and dispatcher to their owners; the
   router proposed to `hydration.sputnik-dao.near`, its full-access key deleted, the DAO accepts.
 - **Refunds** — run once: 1Click refunding `A` (a swap that does not fill) and the router's
