@@ -3,6 +3,8 @@
 
 use near_sdk::env;
 
+use super::base58check;
+
 /// ZIP-317 marginal fee, zatoshi per logical action.
 pub const ZIP317_MARGINAL_FEE: u128 = 5_000;
 /// ZIP-317 grace actions — a transaction pays for at least this many.
@@ -63,19 +65,9 @@ pub fn miner_fee(inputs: usize, outputs: usize) -> u128 {
     ZIP317_MARGINAL_FEE * actions
 }
 
-/// Base58check: 2-byte version, 20-byte hash, 4-byte checksum `sha256(sha256(version ‖ hash))`.
+/// Base58check with a 2-byte version and a 20-byte hash.
 fn decode(address: &str) -> ([u8; 2], [u8; 20]) {
-    let bytes = bs58::decode(address)
-        .into_vec()
-        .unwrap_or_else(|_| env::panic_str("InvalidAddress"));
-    if bytes.len() != 26 {
-        env::panic_str("InvalidAddress");
-    }
-    let (payload, checksum) = bytes.split_at(22);
-    let digest = env::sha256_array(env::sha256_array(payload));
-    if checksum != &digest[..4] {
-        env::panic_str("InvalidAddress");
-    }
+    let payload = base58check::decode(address, 22);
     let mut hash = [0u8; 20];
     hash.copy_from_slice(&payload[2..]);
     ([payload[0], payload[1]], hash)
@@ -147,8 +139,6 @@ mod tests {
     }
 
     fn encode(prefix: [u8; 2], hash: [u8; 20]) -> String {
-        let payload = [&prefix[..], &hash].concat();
-        let digest = env::sha256_array(env::sha256_array(&payload));
-        bs58::encode([&payload[..], &digest[..4]].concat()).into_string()
+        base58check::encode(&[&prefix[..], &hash].concat())
     }
 }
