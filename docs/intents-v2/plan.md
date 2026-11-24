@@ -1,7 +1,7 @@
 # PLAN — Intents v2
 
 Status: **deployed on mainnet (2026-11-17); a canary and ICE swap and TWAP runs delivered to Zcash
-(2026-11-19). Ownership handover pending.** Branch `feat/intent-v2`. Design: [spec.md](spec.md). Data
+(2026-11-19). Close/settle and NEAR delivery built, upgrade pending; ownership handover pending.** Branch `feat/intent-v2`. Design: [spec.md](spec.md). Data
 formats: [schema.md](schema.md). Payout paths and fees: [payout.md](payout.md).
 
 **Goal.** Unattended swaps and TWAPs from Hydration into any asset 1Click can buy on NEAR Intents: one
@@ -26,6 +26,8 @@ on Hydration, executed with nobody present.
 | D10 | No price refresh: DIA feeds on Hydration, updated on deviation; the dispatcher refuses an answer older than `maxFeedAge`.                                                          |
 | D11 | `order.amount` is net of the relay ceiling, which is capped at half of what bridges — so with `maxFillMultiplier ≥ 2` one fill takes what landed.                                  |
 | D12 | The NEAR bot is untrusted (gas key only); the Ethereum relayer is paid from the order's ceiling.                                                                                   |
+| D13 | **`close(terms, delay)` / `settle(terms, closeVaa)`:** the owner ends terms early (no more orders, a close message); after `delay` ≤ 1 day anyone settles `A` — no quote.          |
+| D14 | NEAR is delivered as native NEAR (`native_withdraw` of `nep141:wrap.near`), as v1 and 1Click pay it.                                                                               |
 
 ---
 
@@ -109,7 +111,10 @@ Golden vectors pin the terms, path and order message across Solidity, Rust and T
 
 ## 4. Remaining
 
-- **Ownership handover** — migration steps 011–015: forwarder and dispatcher to their owners; the
+- **Close/settle and NEAR** — `intents-v2-upgrade` 003–005 (dispatcher impl, upgrade, router upgrade),
+  then `intents-v2` 011 (the NEAR price route, DIA NEAR/USD); a canary closing a short TWAP, and a
+  NEAR swap.
+- **Ownership handover** — migration steps 012–016: forwarder and dispatcher to their owners; the
   router proposed to `hydration.sputnik-dao.near`, its full-access key deleted, the DAO accepts.
 - **Refunds** — run once: 1Click refunding `A` (a swap that does not fill) and the router's
   post-deadline refund.

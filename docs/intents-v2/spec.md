@@ -16,7 +16,7 @@ ETHEREUM       IntentForwarder → ETH → 0xN     │
                │                               │
 1CLICK         forwards it to A                │
                │                               ▼
-NEAR           A's ETH ───────────────────────► IntentRouter: swap · deliver · refund
+NEAR           A's ETH ───────────────────────► IntentRouter: swap · deliver · refund · settle
 ```
 
 |                       |                                                                                               |
@@ -26,7 +26,7 @@ NEAR           A's ETH ───────────────────
 | `depositAddress`      | 1Click's standing pass-through `0xN` to `A`, requested once per action, reused by every order |
 | Who triggers the swap | a bot → `IntentRouter.swap(terms, orderVaa, quote)` → MPC signs for `A`                       |
 | Price                 | 1Click quote per order, floored by the order's oracle rate                                    |
-| Refund                | the router, ETH to `refundTo` after the deadline                                              |
+| Refund                | the router, ETH to `refundTo` after the deadline, or once the owner's close counts down       |
 
 Three things make it work unattended:
 
@@ -100,6 +100,10 @@ orders. The price comes from the order message, the amount from `A`'s balance, t
 
 **What happens when nothing fills.** The ETH waits in `A`. The next order buys it; after the
 deadline it is refunded (§7).
+
+**Ending early.** An open-ended TWAP has no end its terms know of. The owner cancels the ICE intent and
+closes the terms on the dispatcher; once the close's countdown passes, anyone can have the router pay
+out what `A` holds (§3, §7).
 
 ---
 
@@ -194,6 +198,13 @@ in the dispatcher as dust, sweepable by its owner and never spendable by a calle
   outPerIn  = destination units per 1e18 wei, before slippage
 ```
 
+**The close message.** `close(terms, delay)` — only the terms' owner, a Substrate owner through
+`EVM.call` — marks the terms closed, so every later order of them reverts, and publishes
+`(authPath, delay)` at 202, `delay` at most a day. The owner may close again: each call is a fresh
+message, which is what a guardian set rotation needs. Every message stays valid, so a later close can
+shorten the countdown, never lengthen it. The message fee is the caller's. A close does not cancel the
+ICE intent; the SDK cancels it alongside, or each forward reverts and leaves its WETH with the owner.
+
 **One address, pinned three times.** ICE intents store the dispatcher as their callback, the router
 pins it as the order emitter, and the forwarder pins it as the only sender whose transfers are
 orders. It is a UUPS proxy: price sources, fees or the manager change by upgrade, and its address
@@ -253,6 +264,10 @@ swap(terms, orderVaa, quote)                               anyone, 1 yocto
 
 deliver(terms)   A's destination balance → recipient: from minDelivery before the deadline, any after
 refund(terms)    after the deadline, A's ETH (≥ min_refund) → refundTo on Ethereum
+
+settle(terms, closeVaa)                                    anyone, 1 yocto
+  close: emitter IntentDispatcher on chain 73, authPath == path, now ≥ VAA time + delay
+  → sign, each on its own: A's destination (any) → recipient; A's ETH (≥ min_refund) → refundTo
 ```
 
 The bot submits a signed swap to 1Click, whose solvers trade and pay the output back to `A` in the
@@ -267,9 +282,18 @@ can do its job.
   can be signed once under each — at most two fills, each within the cap and the floor.
 - **The fill is never the caller's choice.** It is `A`'s whole ETH up to the cap, so a dust quote
   cannot spend an order.
-- **Refunds never race swaps.** Every swap expires by the deadline; refunds start after it.
+- **Refunds never race swaps.** Every swap expires by the deadline; refunds start after it. A close is
+  the owner's exception: settle refunds what has not swapped when its countdown ends.
+- **Settle moves only what `A` holds.** It takes no quote and no price — a caller cannot choose a
+  rate — and it is a delivery and a refund as two payloads, so one failing does not block the other.
+  It can be called again: output from orders still in flight at the close goes with the next one.
+- **NEAR is paid as native NEAR.** A `recipientKind 0` delivery of `nep141:wrap.near` is
+  `native_withdraw` to the recipient's NEAR account, as v1 and 1Click pay NEAR — no bridge, no fee.
+  The router checks the recipient is an account id; a named account must exist, or `intents.near`
+  keeps the NEAR.
 - **The invariant.** Every path to `v1.signer.sign` builds its payload only from the terms (bound to
-  `A` by the hash), a verified order message, a quote 1Click signed, the clock and balance reads. No
+  `A` by the hash), a verified order or close message, a quote 1Click signed, the clock and balance
+  reads. No
   admin or generic sign.
 
 ---
@@ -290,9 +314,15 @@ tranches for a short TWAP).
 quote again and re-sign the same nonce; after that the funds wait for the deadline and are refunded.
 A 1Click swap that does not fill returns the ETH to `A`.
 
-**Refund only after the deadline.** Below the hard floor funds hold rather than refund, so a brief dip
-cannot force an exit. Refunds arrive as native ETH on Ethereum at `refundTo`. The SDK ends the ICE
-schedule a grace period before the deadline so the last tranche can still settle.
+**Refund only after the deadline — or a close.** Below the hard floor funds hold rather than refund,
+so a brief dip cannot force an exit. Refunds arrive as native ETH on Ethereum at `refundTo`. The SDK
+ends the ICE schedule a grace period before the deadline so the last tranche can still settle.
+
+**Closing early.** An ICE `Dca` with no budget runs until cancelled, and its terms' deadline is years
+out. Cancelling it on Hydration stops the orders but leaves `A` holding the last tranches' output, so
+the owner also calls `close(terms, delay)`. The countdown is for orders already on their way: they
+still swap, under their own prices, until it ends. Then `settle` pays out the destination whatever its
+size and refunds the ETH from `min_refund`; the bot calls it, and anyone can.
 
 **Failed ICE callbacks are not retried** by the runtime — a stale feed, a full outbound rate limit or
 an amount below the minimum leaves the WETH with the user on Hydration. Scan surfaces it; the owner

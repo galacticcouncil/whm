@@ -27,11 +27,13 @@ ETHEREUM       IntentForwarder.processOrder    │
                │                               ▼
 NEAR           A's ETH ───────────────────────► IntentRouter.swap(terms, O, quote)
                                                  .deliver(terms) · .refund(terms)
+                                                 .settle(terms, C)
 ```
 
 [S] is the WETH manager's transfer, from the dispatcher to the forwarder, with the forward payload
 attested inside it. [O] is the order: one per execution, consistency 202, from the dispatcher's own
-emitter — the router accepts nothing else. Both carry the transfer's NTT sequence `seq`.
+emitter — the router accepts nothing else. Both carry the transfer's NTT sequence `seq`. [C] is a
+close, `IntentDispatcher.close(terms, delay)`, from the same emitter — no transfer, no order.
 
 ---
 
@@ -61,7 +63,7 @@ One set per action. `authPath = keccak256(encodeQuote(terms))`; any change → n
 | `minOutPerIn`       | u128    | hard floor, destination units per 1e18 wei; 0 = none                                                                                                                                                                                                                                                                                               |
 | `minDelivery`       | u128    | before the deadline, deliver only once `A` holds this much; the SDK sets it ≥ the payout path's minimum for the token ([payout.md](payout.md)), above it a batch size                                                                                                                                                                              |
 | `deadline`          | u64     | unix seconds                                                                                                                                                                                                                                                                                                                                       |
-| `recipientKind`     | u8      | 0 = withdraw off NEAR through POA; 1 = intents-account transfer                                                                                                                                                                                                                                                                                    |
+| `recipientKind`     | u8      | 0 = withdraw off NEAR — through POA, or for `nep141:wrap.near` as native NEAR; 1 = intents-account transfer                                                                                                                                                                                                                                        |
 | `refundTo`          | address | Ethereum H160, non-zero                                                                                                                                                                                                                                                                                                                            |
 | `destinationAsset`  | string  | intents ledger id (bare form, not `1cs_v1:`), 1..255 bytes of visible ASCII                                                                                                                                                                                                                                                                        |
 | `recipient`         | string  | 1..255 bytes of visible ASCII; an account id for `recipientKind 1`                                                                                                                                                                                                                                                                                 |
@@ -122,6 +124,24 @@ msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        total 7
   `mulDiv(ethUsd × 10^destFeedDec, 10^destTokenDec, destUsd × 10^ethFeedDec)`, non-zero, ≤ `uint128`.
 - The VAA body timestamp (Hydration block time) is the price's age. Message identity is the VAA
   **body digest**, never the raw envelope.
+
+### Close
+
+```solidity
+function close(Quote calldata terms, uint64 delay) external payable returns (uint64 messageSequence);
+                                       // msg.sender == terms.owner; delay ≤ MAX_SETTLE_DELAY (1 day)
+function closed(bytes32 authPath) external view returns (bool);   // orders of it revert ClosedTerms
+event TradeClosed(bytes32 indexed authPath, uint64 delay, uint64 messageSequence);
+```
+
+Close VAA payload, `msg.value` the Wormhole fee:
+
+```
+msgType 2 (CLOSE) | authPath 32 | delay 8                               total 41, consistency 202
+```
+
+Repeatable: each call publishes a fresh message, and every one stays valid. The router settles once
+`now ≥ VAA timestamp + delay` of any of them.
 
 ### Settlement — the NTT transfer and its forward payload
 
@@ -201,13 +221,15 @@ is a different account.
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **swap**                       | `{ "intent": "transfer", "receiver_id": "<quote.depositAddress>", "tokens": { "nep141:eth.omft.near": "<quote.amountIn>" } }`                            |
 | **deliver**, `recipientKind 0` | `{ "intent": "ft_withdraw", "token": "<contract>", "receiver_id": "<contract>", "amount": "<balance>", "memo": "WITHDRAW_TO:<recipient>" }`              |
+| **deliver**, `wrap.near`, 0    | `{ "intent": "native_withdraw", "receiver_id": "<recipient>", "amount": "<balance>" }`                                                                   |
 | **deliver**, `recipientKind 1` | `{ "intent": "transfer", "receiver_id": "<recipient>", "tokens": { "<destinationAsset>": "<balance>" } }`                                                |
 | **refund**                     | `{ "intent": "ft_withdraw", "token": "eth.omft.near", "receiver_id": "eth.omft.near", "amount": "<balance>", "memo": "WITHDRAW_TO:<refundTo, EIP-55>" }` |
 
 - The swap is a transfer into 1Click's deposit account, not a `token_diff`: 1Click has the solvers
   trade and pays the output back to `A` in the same transaction ([verification.md](verification.md), G1).
 - `<contract>` is the ledger id without `nep141:`. Deliveries and refunds move `A`'s whole balance —
-  a delivery before the deadline from `minDelivery`, after it any balance.
+  a delivery before the deadline from `minDelivery`, after it or a settle any balance.
+- `settle` signs the same deliver and refund intents, as two messages with their own nonces.
 
 ### What is signed
 
@@ -314,7 +336,10 @@ impl IntentRouter {
     pub fn deliver(&mut self, terms: Base64VecU8) -> Promise;
     /// After the deadline, A's whole ETH balance to refundTo.
     pub fn refund(&mut self, terms: Base64VecU8) -> Promise;
-    // all three: anyone, 1 yocto (the signer's deposit), 300 TGas
+    /// After a close's countdown: A's whole destination balance to the recipient, and its ETH from
+    /// min_refund to refundTo — two payloads, each signed alone. Repeatable.
+    pub fn settle(&mut self, terms: Base64VecU8, close_vaa: Base64VecU8) -> Promise;
+    // all four: anyone, 1 yocto (the signer's deposit), 300 TGas
     // owner: set_params, set_quote_keys, upgrade (deploy + migrate(code_sha256) in one batch;
     //        migrate re-checks params and logs `upgrade`), two-step ownership
     // views: get_config, path_of(terms)
@@ -358,6 +383,11 @@ GET  1click /v0/status?depositAddress=…   until SUCCESS | REFUNDED | FAILED
 
 `REFUNDED` returns the ETH to `A`; the next order buys it. A transfer that never executes expires
 with its deadline; a new quote for the same order re-signs the same nonce.
+
+**Settle** — once scan's `/api/terms` lists a `close_vaa` (a close past its countdown) and `A` holds
+output or ETH from `min_refund`, after any still-priced order is swapped:
+`router.settle(terms, closeVaa)`, then publish **every** `intent_signed` event of the transaction —
+the return value shows one of its two payloads.
 
 **Deliver, refund** — `router.deliver(terms)` / `router.refund(terms)`, then on the relay
 (`payout.ts`): `publish_intent({ quote_hashes: [], signed_data })` → `{ status: "OK", intent_hash }`,

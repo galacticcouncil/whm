@@ -19,6 +19,10 @@ the UTXO account on-chain rather than taking it as an argument.
 Terms' `recipientKind` 0 means "withdraw to the asset's own chain" — which bridge carries it is the
 router's choice. Kind 1 is an `intents.near` transfer to a NEAR account and never withdraws.
 
+NEAR's own chain is NEAR: kind 0 of `nep141:wrap.near` is `native_withdraw`, which unwraps the wNEAR
+and transfers native NEAR to the recipient in the same transaction — no bridge, no fee beyond gas, as
+v1 and 1Click pay NEAR. A named recipient account must exist, or `intents.near` keeps the NEAR.
+
 ## The accounts
 
 | Account  | Derived from                                        | Holds                                             |
