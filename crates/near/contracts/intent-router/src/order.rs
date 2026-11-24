@@ -1,13 +1,15 @@
-//! The order message — one per execution, published by `IntentDispatcher` on Hydration with the
-//! oracle rate the swap must clear.
+//! The messages `IntentDispatcher` publishes on Hydration: an order — one per execution, with the
+//! oracle rate the swap must clear — and the close that ends a set of terms.
 //!
 //! ```text
 //! msgType 1 (ORDER) | authPath 32 | seq 8 | amount 16 | outPerIn 16        73 bytes
+//! msgType 2 (CLOSE) | authPath 32 | delay 8                                 41 bytes
 //! ```
 
 use near_common::codec::Reader;
 
 pub const ORDER: u8 = 1;
+pub const CLOSE: u8 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Order {
@@ -49,6 +51,37 @@ impl Order {
     }
 }
 
+/// The owner closed a set of terms: their account settles once `delay` seconds have passed since the
+/// message's own time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Close {
+    /// `keccak256(terms)`, computed by the emitter.
+    pub auth_path: [u8; 32],
+    /// The countdown, seconds.
+    pub delay: u64,
+}
+
+impl Close {
+    pub fn parse(payload: &[u8]) -> Result<Self, &'static str> {
+        let mut r = Reader::new(payload);
+        if r.u8()? != CLOSE {
+            return Err("NotAClose");
+        }
+        let auth_path = r.bytes32()?;
+        let delay = r.u64()?;
+        r.finish()?;
+        Ok(Self { auth_path, delay })
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(41);
+        out.push(CLOSE);
+        out.extend_from_slice(&self.auth_path);
+        out.extend_from_slice(&self.delay.to_be_bytes());
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,5 +119,27 @@ mod tests {
         assert_eq!(Order::parse(&long), Err("TrailingBytes"));
         let zero = Order { out_per_in: 0, ..sample() }.encode();
         assert_eq!(Order::parse(&zero), Err("ZeroRate"));
+    }
+
+    /// The bytes `IntentCodec.encodeClose` produces for the same close (contracts/test/intents-v2).
+    #[test]
+    fn close_golden_vector() {
+        let c = Close { auth_path: [0x11; 32], delay: 7_200 };
+        assert_eq!(
+            hex::encode(c.encode()),
+            "0211111111111111111111111111111111111111111111111111111111111111110000000000001c20"
+        );
+        assert_eq!(Close::parse(&c.encode()).unwrap(), c);
+    }
+
+    #[test]
+    fn close_rejects_bad_payloads() {
+        let bytes = Close { auth_path: [0x11; 32], delay: 7_200 }.encode();
+        assert_eq!(Close::parse(&sample().encode()), Err("NotAClose"));
+        assert_eq!(Order::parse(&bytes), Err("NotAnOrder"));
+        assert_eq!(Close::parse(&bytes[..40]), Err("Truncated"));
+        let mut long = bytes.clone();
+        long.push(0);
+        assert_eq!(Close::parse(&long), Err("TrailingBytes"));
     }
 }

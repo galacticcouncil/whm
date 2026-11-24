@@ -18,15 +18,23 @@
 //!   └─ current_salt()           ┘
 //!        → on_payout_key: intents.mt_balance_of(A, token)
 //!             → on_payout_balance: A's whole balance to the terms' recipient | refundTo → sign → on_signed
+//! settle(terms, close_vaa)
+//!   ├─ derived_public_key(path) ┐
+//!   ├─ current_salt()           │ joint
+//!   └─ core.verify_vaa(close)   ┘
+//!        → on_settle_reads: intents.mt_balance_of(A, eth) ┐ joint
+//!                           intents.mt_balance_of(A, dest) ┘
+//!             → on_settle_balances: a delivery and a refund, each its own payload → sign → on_signed
 //! ```
 //!
 //! Nothing is stored per account. Anyone may call; the bot publishes what is signed.
 //!
 //! **The invariant.** Every path to `sign` builds its payload only from the terms (bound to `A` by
-//! the hash), a verified order message, a quote 1Click signed, the clock and balance reads — and
-//! only one of three: a transfer to the deposit account of a quote that pays and refunds `A`, at or
-//! above the order's floor; `A`'s destination asset to the terms' recipient; after the deadline,
-//! `A`'s ETH to the terms' `refundTo`. No admin sign, no generic `sign(payload)`, no public callback.
+//! the hash), a verified order or close message, a quote 1Click signed, the clock and balance reads —
+//! and only one of three: a transfer to the deposit account of a quote that pays and refunds `A`, at
+//! or above the order's floor; `A`'s destination asset to the terms' recipient; after the deadline or
+//! a close's countdown, `A`'s ETH to the terms' `refundTo`. No admin sign, no generic
+//! `sign(payload)`, no public callback.
 
 pub mod floor;
 pub mod intent;
@@ -41,9 +49,9 @@ use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::serde_json::{json, Value};
 use near_sdk::{env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError};
 
-use intent::{eip55, entropy, ft_withdraw, multi_payload, nep413_digest, transfer, versioned_nonce};
+use intent::{eip55, entropy, ft_withdraw, multi_payload, native_withdraw, nep413_digest, transfer, versioned_nonce};
 use mpc::{ext_mpc, implicit_account, parse_ed25519, Payload, SignRequest, SignatureResponse, DOMAIN_ED25519};
-use order::Order;
+use order::{Close, Order};
 use quote::{Expect, Quote};
 use terms::{auth_path, path_string, RecipientKind, Terms};
 use vaa::{ext_wormhole, Vaa};
@@ -64,6 +72,10 @@ pub const GAS_FOR_ON_SWAP_READS: Gas = Gas::from_tgas(10 + 5 + 60);
 pub const GAS_FOR_ON_PAYOUT_BALANCE: Gas = Gas::from_tgas(15 + 30 + 10);
 /// `on_payout_key`'s own work, the balance read and `on_payout_balance`.
 pub const GAS_FOR_ON_PAYOUT_KEY: Gas = Gas::from_tgas(10 + 5 + 55);
+/// `on_settle_balances`' own work, then the two signs it may schedule.
+pub const GAS_FOR_ON_SETTLE_BALANCES: Gas = Gas::from_tgas(15 + 2 * (30 + 10));
+/// `on_settle_reads`' own work, the two balance reads and `on_settle_balances`.
+pub const GAS_FOR_ON_SETTLE_READS: Gas = Gas::from_tgas(10 + 2 * 5 + 95);
 
 /// `migrate` on the new code, in the same batch as its deploy.
 pub const GAS_FOR_MIGRATE: Gas = Gas::from_tgas(50);
@@ -94,6 +106,10 @@ const NEP141: &str = "nep141:";
 
 /// The memo POA's bridge tokens read the destination address from.
 const WITHDRAW_TO: &str = "WITHDRAW_TO:";
+
+/// wNEAR's ledger id. A withdrawal of it is no POA bridge: it is unwrapped and paid as native NEAR to
+/// the recipient's NEAR account, as 1Click pays NEAR.
+const WNEAR: &str = "nep141:wrap.near";
 
 #[ext_contract(ext_intents)]
 pub trait Verifier {
@@ -256,6 +272,32 @@ impl IntentRouter {
         self.payout(terms, Payout::Refund)
     }
 
+    /// Once the owner has closed the terms on Hydration and the close's countdown has run, signs what
+    /// `A` holds out — its destination balance to the recipient, `minDelivery` aside, and its ETH from
+    /// `min_refund` up to `refundTo` — each its own payload, a delivery and a refund as after the
+    /// deadline, so one the verifier refuses cannot hold the other. Nothing in them is the caller's —
+    /// no quote, no amount, no destination — so anyone may call, any time after, with 1 yocto: each
+    /// call moves what `A` holds then, so what lands late leaves with the next one.
+    #[payable]
+    pub fn settle(&mut self, terms: Base64VecU8, close_vaa: Base64VecU8) -> Promise {
+        near_sdk::assert_one_yocto();
+        self.require_gas(
+            GAS_FOR_DERIVE.saturating_add(GAS_FOR_SALT).saturating_add(GAS_FOR_VERIFY).saturating_add(GAS_FOR_ON_SETTLE_READS),
+        );
+        // Fail fast on everything checkable before the reads; on_settle_balances checks it all again.
+        parse_terms(&terms.0);
+        let path = auth_path(&terms.0);
+        self.close(&path, &close_vaa.0, now_ms());
+
+        self.reads(&path)
+            .and(ext_wormhole::ext(self.core.clone()).with_static_gas(GAS_FOR_VERIFY).verify_vaa(hex::encode(&close_vaa.0)))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_ON_SETTLE_READS)
+                    .on_settle_reads(terms, close_vaa),
+            )
+    }
+
     #[private]
     pub fn on_swap_reads(
         &mut self,
@@ -331,6 +373,59 @@ impl IntentRouter {
         let balance = balance.unwrap_or_else(|_| env::panic_str("BalanceReadFailed")).0;
         let plan = self.build_payout(&terms.0, payout, parse_hex32(&key), parse_salt(&salt), balance, now_ms(), env::block_height());
         self.sign(plan)
+    }
+
+    #[private]
+    pub fn on_settle_reads(
+        &mut self,
+        terms: Base64VecU8,
+        close_vaa: Base64VecU8,
+        #[callback_result] key: Result<String, PromiseError>,
+        #[callback_result] salt: Result<String, PromiseError>,
+        #[callback_result] verified: Result<u32, PromiseError>,
+    ) -> Promise {
+        let key = parse_ed25519(&key.unwrap_or_else(|_| env::panic_str("DeriveFailed")));
+        let salt = parse_salt(&salt.unwrap_or_else(|_| env::panic_str("SaltReadFailed")));
+        require!(verified.is_ok(), "VaaVerifyFailed");
+        let t = parse_terms(&terms.0);
+        let account = implicit_account(&key);
+        let balance = |token: String| {
+            ext_intents::ext(self.intents.clone()).with_static_gas(GAS_FOR_BALANCE).mt_balance_of(account.clone(), token)
+        };
+        balance(self.eth_token.clone())
+            .and(balance(t.destination_asset))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_ON_SETTLE_BALANCES)
+                    .on_settle_balances(terms, close_vaa, hex::encode(key), hex::encode(salt)),
+            )
+    }
+
+    #[private]
+    pub fn on_settle_balances(
+        &mut self,
+        terms: Base64VecU8,
+        close_vaa: Base64VecU8,
+        key: String,
+        salt: String,
+        #[callback_result] eth: Result<U128, PromiseError>,
+        #[callback_result] out: Result<U128, PromiseError>,
+    ) -> Promise {
+        // A read that failed — a destination id the verifier cannot parse — has nothing to move.
+        let plans = self.build_settle(
+            &terms.0,
+            &close_vaa.0,
+            parse_hex32(&key),
+            parse_salt(&salt),
+            eth.map_or(0, |b| b.0),
+            out.map_or(0, |b| b.0),
+            now_ms(),
+            env::block_height(),
+        );
+        // One sign is returned; the other runs beside it — a joint promise cannot be returned, and
+        // each emits its own event.
+        let mut signs: Vec<Promise> = plans.into_iter().map(|plan| self.sign(plan)).collect();
+        signs.pop().unwrap_or_else(|| env::panic_str("NothingToSettle"))
     }
 
     /// Checks the signature against `A`'s key and emits the publishable `MultiPayload`.
@@ -514,6 +609,45 @@ impl IntentRouter {
         (order, expiry, nonce_expiry)
     }
 
+    /// The close the VAA carries is for these terms, and its countdown — from its Hydration block
+    /// time — has run.
+    fn close(&self, path: &[u8; 32], vaa: &[u8], now_ms: u64) {
+        let vaa = Vaa::parse(vaa).unwrap_or_else(|_| env::panic_str("InvalidVaa"));
+        require!(vaa.emitter_chain == self.emitter_chain && vaa.emitter_address == self.emitter, "UnknownEmitter");
+        let close = Close::parse(&vaa.payload).unwrap_or_else(|e| env::panic_str(e));
+        require!(close.auth_path == *path, "CloseForOtherTerms");
+        let settles_ms = u64::from(vaa.timestamp).saturating_add(close.delay).saturating_mul(1_000);
+        require!(now_ms >= settles_ms, "SettleNotYet");
+    }
+
+    /// The settle: a delivery of `A`'s destination balance, unless the terms cannot deliver it — or it
+    /// is the ETH itself — and a refund of its ETH from `min_refund` up; each as after the deadline,
+    /// the close standing in for it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_settle(
+        &self,
+        terms: &[u8],
+        vaa: &[u8],
+        key: [u8; 32],
+        salt: [u8; 4],
+        eth: u128,
+        out: u128,
+        now_ms: u64,
+        height: u64,
+    ) -> Vec<Plan> {
+        let t = parse_terms(terms);
+        self.close(&auth_path(terms), vaa, now_ms);
+        let mut plans = Vec::new();
+        if out > 0 && t.destination_asset != self.eth_token && is_deliverable(&t) {
+            plans.push(self.payout_plan(terms, Payout::Deliver, key, salt, out, now_ms, height, true));
+        }
+        if eth > 0 && eth >= self.params.min_refund.0 {
+            plans.push(self.payout_plan(terms, Payout::Refund, key, salt, eth, now_ms, height, true));
+        }
+        require!(!plans.is_empty(), "NothingToSettle");
+        plans
+    }
+
     /// The swap: every check, then a transfer of exactly `amountIn` ETH to the deposit account.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_swap(
@@ -590,10 +724,27 @@ impl IntentRouter {
         now_ms: u64,
         height: u64,
     ) -> Plan {
+        self.payout_plan(terms, payout, key, salt, balance, now_ms, height, false)
+    }
+
+    /// [`Self::build_payout`], `closed` when a verified close's countdown has run — which lets the
+    /// payout through as the deadline would.
+    #[allow(clippy::too_many_arguments)]
+    fn payout_plan(
+        &self,
+        terms: &[u8],
+        payout: Payout,
+        key: [u8; 32],
+        salt: [u8; 4],
+        balance: u128,
+        now_ms: u64,
+        height: u64,
+        closed: bool,
+    ) -> Plan {
         let t = parse_terms(terms);
         let path = auth_path(terms);
         let account = implicit_account(&key);
-        let past = now_ms > t.deadline_ms();
+        let past = closed || now_ms > t.deadline_ms();
 
         let (action, token, receiver, intent) = match payout {
             Payout::Refund => {
@@ -608,14 +759,7 @@ impl IntentRouter {
                 deliverable(&t);
                 let min = if past { 1 } else { t.min_delivery.max(1) };
                 require!(balance >= min, "NothingToDeliver");
-                let intent = match t.recipient_kind {
-                    RecipientKind::Withdraw => {
-                        let contract = t.token_contract().unwrap();
-                        ft_withdraw(contract.as_str(), contract.as_str(), balance, Some(format!("{WITHDRAW_TO}{}", t.recipient)))
-                    }
-                    RecipientKind::Intents => transfer(&t.recipient, &t.destination_asset, balance),
-                };
-                ("deliver", t.destination_asset.clone(), t.recipient.clone(), intent)
+                ("deliver", t.destination_asset.clone(), t.recipient.clone(), delivery(&t, balance))
             }
         };
 
@@ -697,8 +841,34 @@ fn parse_terms(bytes: &[u8]) -> Terms {
 /// fail it must still refund.
 fn deliverable(t: &Terms) {
     match t.recipient_kind {
+        RecipientKind::Withdraw if t.destination_asset == WNEAR => {
+            require!(t.recipient_account().is_some(), "InvalidRecipient")
+        }
         RecipientKind::Withdraw => require!(t.token_contract().is_some(), "NotWithdrawable"),
         RecipientKind::Intents => require!(t.recipient_account().is_some(), "InvalidRecipient"),
+    }
+}
+
+/// `amount` of the destination to the terms' recipient: a POA withdrawal to its chain — for wNEAR,
+/// native NEAR to a NEAR account — or a transfer to an intents account. The terms must be
+/// [`deliverable`].
+fn delivery(t: &Terms, amount: u128) -> Value {
+    match t.recipient_kind {
+        RecipientKind::Withdraw if t.destination_asset == WNEAR => native_withdraw(&t.recipient, amount),
+        RecipientKind::Withdraw => {
+            let contract = t.token_contract().unwrap();
+            ft_withdraw(contract.as_str(), contract.as_str(), amount, Some(format!("{WITHDRAW_TO}{}", t.recipient)))
+        }
+        RecipientKind::Intents => transfer(&t.recipient, &t.destination_asset, amount),
+    }
+}
+
+/// [`deliverable`], as a question — a settle refunds what it cannot deliver.
+fn is_deliverable(t: &Terms) -> bool {
+    match t.recipient_kind {
+        RecipientKind::Withdraw if t.destination_asset == WNEAR => t.recipient_account().is_some(),
+        RecipientKind::Withdraw => t.token_contract().is_some(),
+        RecipientKind::Intents => t.recipient_account().is_some(),
     }
 }
 

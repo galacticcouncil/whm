@@ -79,6 +79,12 @@ pub fn ft_withdraw(token: &str, receiver: &str, amount: u128, memo: Option<Strin
     intent
 }
 
+/// Unwraps `amount` of `A`'s wNEAR and sends it to `receiver` as native NEAR — as 1Click pays NEAR.
+/// The verifier does not refund the wNEAR if the receiver account does not exist.
+pub fn native_withdraw(receiver: &str, amount: u128) -> Value {
+    json!({ "intent": "native_withdraw", "receiver_id": receiver, "amount": U128(amount) })
+}
+
 /// The `MultiPayload` the relay and 1Click take.
 pub fn multi_payload(message: &str, nonce: &[u8; 32], recipient: &str, key: &[u8; 32], signature: &[u8; 64]) -> Value {
     json!({

@@ -8,7 +8,7 @@
 //! ledger ids and `intents.near` treats every NEP-141 alike.
 
 use ed25519_dalek::{Signer, SigningKey};
-use intent_router::order::Order;
+use intent_router::order::{Close, Order};
 use intent_router::quote::stable_json;
 use intent_router::terms::{RecipientKind, Terms};
 use intent_router::time;
@@ -260,6 +260,13 @@ impl Env {
         Ok(self.guardian.sign(now, HYDRATION, EMITTER, seq, &order.encode()))
     }
 
+    /// The owner's close of `terms`, published now, settling after `delay` seconds.
+    async fn close(&self, terms: &[u8], delay: u64) -> anyhow::Result<Vec<u8>> {
+        let close = Close { auth_path: keccak(terms), delay };
+        let now = (self.now_ms().await? / 1_000) as u32;
+        Ok(self.guardian.sign(now, HYDRATION, EMITTER, 1_000 + delay, &close.encode()))
+    }
+
     /// A quote shaped like 1Click's: an exact-input swap paying and refunding `account`, its deposit
     /// account `deposit`, signed by the test key over the same stable JSON.
     async fn quote(&self, account: &str, deposit: &str, amount_in: u128, min_out: u128) -> anyhow::Result<Value> {
@@ -324,6 +331,18 @@ fn signed_event(outcome: &ExecutionFinalResult) -> anyhow::Result<Value> {
         }
     }
     anyhow::bail!("no intent_signed: {:?}", failures(outcome))
+}
+
+/// Every `intent_signed` event's data, in order — a settle signs one per payload.
+fn signed_events(outcome: &ExecutionFinalResult) -> Vec<Value> {
+    outcome
+        .logs()
+        .iter()
+        .filter_map(|log| log.strip_prefix("EVENT_JSON:"))
+        .filter_map(|json| serde_json::from_str::<Value>(json).ok())
+        .filter(|e| e["standard"] == "whm-intent-router" && e["event"] == "intent_signed")
+        .map(|e| e["data"][0].clone())
+        .collect()
 }
 
 fn failures(outcome: &ExecutionFinalResult) -> Vec<String> {
@@ -509,6 +528,49 @@ async fn refund_only_after_the_deadline() -> anyhow::Result<()> {
     assert!(executed.is_success(), "{:?}", failures(&executed));
     assert!(executed.logs().iter().any(|l| l.contains("WITHDRAW_TO:0x2222222222222222222222222222222222222222")));
     assert_eq!(env.held(&a, &env.eth).await?, 0);
+    Ok(())
+}
+
+/// An open-ended trade, closed: after the countdown a settle moves everything `A` holds — output
+/// below `minDelivery` to the recipient, the ETH to `refundTo` — each its own payload, and a later
+/// settle moves what landed since.
+#[tokio::test]
+async fn settle_moves_everything_a_holds() -> anyhow::Result<()> {
+    let env = setup().await?;
+    let now_s = env.now_ms().await? / 1_000;
+    let terms = env.terms(now_s + 365 * 86_400, RecipientKind::Withdraw, "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma");
+    let a = env.account_of(&terms).await?;
+    env.fund(&env.zec, &a, 999).await?;
+    env.fund(&env.eth, &a, ORDER_AMOUNT).await?;
+
+    // The countdown has not run: refused before any read.
+    let pending = env.close(&terms, 3_600).await?;
+    let outcome = env.call_router("settle", json!({ "terms": b64(&terms), "close_vaa": b64(&pending) })).await?;
+    assert!(failures(&outcome).join(" ").contains("SettleNotYet"), "{:?}", failures(&outcome));
+
+    let close = env.close(&terms, 0).await?;
+    let outcome = env.call_router("settle", json!({ "terms": b64(&terms), "close_vaa": b64(&close) })).await?;
+    gas_report("settle", &outcome);
+    let events = signed_events(&outcome);
+    assert_eq!(events.len(), 2, "{:?}", failures(&outcome));
+    let actions: Vec<_> = events.iter().map(|e| e["action"].as_str().unwrap().to_string()).collect();
+    assert_eq!(actions, ["deliver", "refund"]);
+    for event in &events {
+        let executed = env.execute(&event["signed_data"]).await?;
+        assert!(executed.is_success(), "{:?}", failures(&executed));
+    }
+    assert_eq!(env.held(&a, &env.zec).await?, 0);
+    assert_eq!(env.held(&a, &env.eth).await?, 0);
+
+    // A spent payload cannot run again; what lands later leaves with the next settle.
+    env.fund(&env.zec, &a, 5).await?;
+    assert!(env.execute(&events[0]["signed_data"]).await?.is_failure(), "a payload replayed");
+    let outcome = env.call_router("settle", json!({ "terms": b64(&terms), "close_vaa": b64(&close) })).await?;
+    let events = signed_events(&outcome);
+    assert_eq!(events.len(), 1);
+    let again = env.execute(&events[0]["signed_data"]).await?;
+    assert!(again.is_success(), "{:?}", failures(&again));
+    assert_eq!(env.held(&a, &env.zec).await?, 0);
     Ok(())
 }
 

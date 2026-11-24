@@ -571,3 +571,151 @@ fn a_bad_intents_recipient_still_refunds() {
     assert!(text.contains("InvalidRecipient"), "{text}");
     payout(&c, &t, Payout::Refund, 10u128.pow(15), DEADLINE_MS + 1);
 }
+
+// =============== settle ==================================================================
+
+/// The close's Hydration block time, and its countdown.
+const CLOSED_S: u64 = 1_792_585_000;
+const DELAY_S: u64 = 7_200;
+/// When the countdown ends.
+const SETTLES_MS: u64 = (CLOSED_S + DELAY_S) * 1_000;
+
+fn close_vaa(terms: &[u8], delay: u64) -> Vec<u8> {
+    let close = Close { auth_path: auth_path(terms), delay };
+    vaa_bytes(CLOSED_S as u32, 73, EMITTER, 100, &close.encode())
+}
+
+fn settle(c: &IntentRouter, t: &Terms, eth: u128, out: u128, now_ms: u64) -> Vec<Plan> {
+    let terms = terms_bytes(t);
+    set_ctx(accounts(1).as_str(), 1, now_ms);
+    c.build_settle(&terms, &close_vaa(&terms, DELAY_S), key(), SALT, eth, out, now_ms, 1_000)
+}
+
+/// After the countdown, everything moves, each its own payload: the destination to the recipient —
+/// below `minDelivery` too — and the ETH to `refundTo`.
+#[test]
+fn settle_moves_everything_a_holds() {
+    let t = sample();
+    let plans = settle(&contract(), &t, BALANCE, 5, SETTLES_MS);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(
+        message(&plans[0])["intents"],
+        json!([{ "intent": "ft_withdraw", "token": "zec.omft.near", "receiver_id": "zec.omft.near", "amount": "5", "memo": format!("WITHDRAW_TO:{T_ADDR}") }])
+    );
+    assert_eq!(plans[0].info.action, "deliver");
+    let refund_to = eip55(&t.refund_to);
+    assert_eq!(
+        message(&plans[1])["intents"],
+        json!([{ "intent": "ft_withdraw", "token": "eth.omft.near", "receiver_id": "eth.omft.near", "amount": BALANCE.to_string(), "memo": format!("WITHDRAW_TO:{refund_to}") }])
+    );
+    assert_eq!(plans[1].info.action, "refund");
+    assert_eq!(plans[1].info.receiver, refund_to);
+    assert_ne!(plans[0].nonce, plans[1].nonce);
+}
+
+/// Only what there is: no ETH, no refund; ETH below `min_refund` stays, as for a refund.
+#[test]
+fn settle_moves_only_what_there_is() {
+    let c = contract();
+    let plans = settle(&c, &sample(), 0, 3_817_820, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "deliver"));
+    let plans = settle(&c, &sample(), 10, 3_817_820, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "deliver"), "dust ETH stays");
+    let plans = settle(&c, &sample(), BALANCE, 0, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
+}
+
+#[test]
+#[should_panic(expected = "NothingToSettle")]
+fn settle_needs_something_to_move() {
+    settle(&contract(), &sample(), 10, 0, SETTLES_MS);
+}
+
+/// Any time after the countdown — a year on too — and each settle its own payloads: what lands late
+/// leaves with the next one.
+#[test]
+fn settle_any_time_after_the_countdown() {
+    let c = contract();
+    let first = settle(&c, &sample(), BALANCE, 5, SETTLES_MS);
+    let later = settle(&c, &sample(), 0, 7, SETTLES_MS + 365 * 86_400_000);
+    assert_ne!(first[0].nonce, later[0].nonce);
+    assert_eq!(message(&later[0])["intents"][0]["amount"], "7");
+}
+
+/// Terms that cannot be delivered still settle their ETH.
+#[test]
+fn undeliverable_terms_still_settle_their_eth() {
+    let mut t = sample();
+    t.destination_asset = "nep245:v2_1.omni.hot.tg:56_11111111111111111111".into();
+    let plans = settle(&contract(), &t, BALANCE, 5, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
+}
+
+/// Terms whose destination is the ETH itself refund it once, never as a delivery too.
+#[test]
+fn eth_destination_settles_as_a_refund() {
+    let mut t = sample();
+    t.destination_asset = ETH.into();
+    let plans = settle(&contract(), &t, BALANCE, BALANCE, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
+}
+
+#[test]
+fn settle_refusals() {
+    let terms = terms_bytes(&sample());
+    let refused = |err: &str, vaa: Vec<u8>, now_ms: u64| {
+        let c = contract();
+        set_ctx(accounts(1).as_str(), 1, now_ms);
+        let result = std::panic::catch_unwind(|| c.build_settle(&terms, &vaa, key(), SALT, BALANCE, 5, now_ms, 1_000));
+        let text = match result {
+            Ok(_) => "no panic".to_string(),
+            Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
+        };
+        assert!(text.contains(err), "{err}: {text}");
+    };
+    refused("SettleNotYet", close_vaa(&terms, DELAY_S), SETTLES_MS - 1);
+    let other = Close { auth_path: [9; 32], delay: DELAY_S }.encode();
+    refused("CloseForOtherTerms", vaa_bytes(CLOSED_S as u32, 73, EMITTER, 100, &other), SETTLES_MS);
+    let close = Close { auth_path: auth_path(&terms), delay: DELAY_S }.encode();
+    refused("UnknownEmitter", vaa_bytes(CLOSED_S as u32, 73, [0xee; 32], 100, &close), SETTLES_MS);
+    refused("UnknownEmitter", vaa_bytes(CLOSED_S as u32, 2, EMITTER, 100, &close), SETTLES_MS);
+    refused("NotAClose", order_vaa(&terms, SETTLES_MS, 60, BALANCE, 180_000_000), SETTLES_MS);
+}
+
+/// A zero countdown settles at once.
+#[test]
+fn a_zero_countdown_settles_at_once() {
+    let terms = terms_bytes(&sample());
+    let c = contract();
+    let now = CLOSED_S * 1_000;
+    set_ctx(accounts(1).as_str(), 1, now);
+    c.build_settle(&terms, &close_vaa(&terms, 0), key(), SALT, BALANCE, 5, now, 1_000);
+}
+
+// =============== wNEAR ===================================================================
+
+/// A withdrawal of wNEAR pays native NEAR to the recipient's NEAR account — as 1Click does — never
+/// the POA withdrawal that would send it to `wrap.near` itself.
+#[test]
+fn wnear_withdraws_as_native_near() {
+    let mut t = sample();
+    t.destination_asset = "nep141:wrap.near".into();
+    t.recipient = "alice.near".into();
+    let plan = payout(&contract(), &t, Payout::Deliver, 2_000_000, ISSUED_0);
+    assert_eq!(
+        message(&plan)["intents"],
+        json!([{ "intent": "native_withdraw", "receiver_id": "alice.near", "amount": "2000000" }])
+    );
+}
+
+/// A wNEAR recipient must be a NEAR account id: a Zcash address is refused at delivery, and a
+/// settle refunds the ETH instead.
+#[test]
+fn wnear_needs_a_near_account() {
+    let mut t = sample();
+    t.destination_asset = "nep141:wrap.near".into();
+    let result = std::panic::catch_unwind(|| payout(&contract(), &t, Payout::Deliver, 2_000_000, ISSUED_0));
+    assert!(result.is_err(), "T_ADDR is no NEAR account");
+    let plans = settle(&contract(), &t, BALANCE, 5, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
+}
