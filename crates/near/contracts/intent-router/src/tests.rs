@@ -56,10 +56,11 @@ fn params() -> Params {
     }
 }
 
-/// Owned by `accounts(0)`, which stays the caller.
+/// Owned by `accounts(0)`, which stays the caller. ZEC is routed through `withdraw-zec` from 1 zat:
+/// a withdrawal takes no other way.
 fn contract() -> IntentRouter {
     set_ctx(accounts(0).as_str(), 1, ISSUED_0);
-    IntentRouter::new(
+    let mut c = IntentRouter::new(
         accounts(0),
         "v1.signer".parse().unwrap(),
         "intents.near".parse().unwrap(),
@@ -69,7 +70,9 @@ fn contract() -> IntentRouter {
         ETH.into(),
         vec![MANAGER.into()],
         params(),
-    )
+    );
+    c.set_utxo_route(ZEC.into(), Some(UtxoRoute { min_amount: U128(1), ..zec_route() }));
+    c
 }
 
 /// `A` of the fixtures: the PoC account is the hex of its key.
@@ -374,7 +377,7 @@ const DEADLINE_MS: u64 = 1_800_000_000_000;
 
 fn payout(c: &IntentRouter, t: &Terms, payout: Payout, balance: u128, now_ms: u64) -> Plan {
     set_ctx(accounts(1).as_str(), 1, now_ms);
-    c.build_payout(&terms_bytes(t), payout, key(), SALT, balance, now_ms, 1_000)
+    c.build_payout(&terms_bytes(t), payout, key(), SALT, balance, now_ms, 1_000, a_utxo(c))
 }
 
 #[test]
@@ -384,7 +387,7 @@ fn deliver_withdraws_the_whole_balance_to_the_recipient() {
     let plan = payout(&c, &sample(), Payout::Deliver, 3_817_820, now);
     assert_eq!(
         message(&plan)["intents"],
-        json!([{ "intent": "ft_withdraw", "token": "zec.omft.near", "receiver_id": "zec.omft.near", "amount": "3817820", "memo": format!("WITHDRAW_TO:{T_ADDR}") }])
+        json!([{ "intent": "ft_withdraw", "token": "zec.omft.near", "receiver_id": A_UTXO, "amount": "3817820" }])
     );
     assert_eq!(message(&plan)["deadline"], time::format(now + 180_000));
     assert_eq!(plan.info.action, "deliver");
@@ -588,7 +591,7 @@ fn close_vaa(terms: &[u8], delay: u64) -> Vec<u8> {
 fn settle(c: &IntentRouter, t: &Terms, eth: u128, out: u128, now_ms: u64) -> Vec<Plan> {
     let terms = terms_bytes(t);
     set_ctx(accounts(1).as_str(), 1, now_ms);
-    c.build_settle(&terms, &close_vaa(&terms, DELAY_S), key(), SALT, eth, out, now_ms, 1_000)
+    c.build_settle(&terms, &close_vaa(&terms, DELAY_S), key(), SALT, eth, out, now_ms, 1_000, a_utxo(c))
 }
 
 /// After the countdown, everything moves, each its own payload: the destination to the recipient —
@@ -600,7 +603,7 @@ fn settle_moves_everything_a_holds() {
     assert_eq!(plans.len(), 2);
     assert_eq!(
         message(&plans[0])["intents"],
-        json!([{ "intent": "ft_withdraw", "token": "zec.omft.near", "receiver_id": "zec.omft.near", "amount": "5", "memo": format!("WITHDRAW_TO:{T_ADDR}") }])
+        json!([{ "intent": "ft_withdraw", "token": "zec.omft.near", "receiver_id": A_UTXO, "amount": "5" }])
     );
     assert_eq!(plans[0].info.action, "deliver");
     let refund_to = eip55(&t.refund_to);
@@ -666,7 +669,7 @@ fn settle_refusals() {
     let refused = |err: &str, vaa: Vec<u8>, now_ms: u64| {
         let c = contract();
         set_ctx(accounts(1).as_str(), 1, now_ms);
-        let result = std::panic::catch_unwind(|| c.build_settle(&terms, &vaa, key(), SALT, BALANCE, 5, now_ms, 1_000));
+        let result = std::panic::catch_unwind(|| c.build_settle(&terms, &vaa, key(), SALT, BALANCE, 5, now_ms, 1_000, None));
         let text = match result {
             Ok(_) => "no panic".to_string(),
             Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
@@ -689,7 +692,7 @@ fn a_zero_countdown_settles_at_once() {
     let c = contract();
     let now = CLOSED_S * 1_000;
     set_ctx(accounts(1).as_str(), 1, now);
-    c.build_settle(&terms, &close_vaa(&terms, 0), key(), SALT, BALANCE, 5, now, 1_000);
+    c.build_settle(&terms, &close_vaa(&terms, 0), key(), SALT, BALANCE, 5, now, 1_000, a_utxo(&c));
 }
 
 // =============== wNEAR ===================================================================
@@ -717,5 +720,199 @@ fn wnear_needs_a_near_account() {
     let result = std::panic::catch_unwind(|| payout(&contract(), &t, Payout::Deliver, 2_000_000, ISSUED_0));
     assert!(result.is_err(), "T_ADDR is no NEAR account");
     let plans = settle(&contract(), &t, BALANCE, 5, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
+}
+
+// =============== UTXO routes =============================================================
+
+/// `A_utxo` as the withdraw contract derives it — any implicit account will do here.
+const A_UTXO: &str = "3f5b1c0a9e8d7c6b5a49382716f5e4d3c2b1a0f9e8d7c6b5a493827160f5e4d3";
+
+/// `A_UTXO`, derived under the ZEC route `c` has now — what the router's callbacks receive.
+fn a_utxo(c: &IntentRouter) -> Option<UtxoAccount> {
+    c.utxo_routes().get(ZEC).cloned().map(|route| (A_UTXO.parse().unwrap(), route))
+}
+
+fn zec_route() -> UtxoRoute {
+    UtxoRoute {
+        withdraw: "withdraw-zec.hydration-whm.near".parse().unwrap(),
+        path_prefix: "zcash:v1:".into(),
+        address_prefixes: vec!["t1".into(), "t3".into()],
+        min_amount: U128(100_000),
+    }
+}
+
+/// With ZEC routed through `withdraw-zec`.
+fn routed() -> IntentRouter {
+    let mut c = contract();
+    c.set_utxo_route(ZEC.into(), Some(zec_route()));
+    c
+}
+
+/// `c` with its route removed again — the test env keeps storage across contracts.
+fn unrouted(mut c: IntentRouter) -> IntentRouter {
+    set_ctx(accounts(0).as_str(), 1, ISSUED_0);
+    c.set_utxo_route(ZEC.into(), None);
+    c
+}
+
+fn utxo_payout(c: &IntentRouter, t: &Terms, balance: u128, now_ms: u64) -> Plan {
+    set_ctx(accounts(1).as_str(), 1, now_ms);
+    c.build_payout(&terms_bytes(t), Payout::Deliver, key(), SALT, balance, now_ms, 1_000, a_utxo(c))
+}
+
+/// On a route, a transparent address's delivery is a plain withdrawal to `A_utxo`, no memo; the
+/// event names both the address and `A_utxo`.
+#[test]
+fn routed_delivery_goes_to_a_utxo() {
+    let plan = utxo_payout(&routed(), &sample(), 2_000_000, ISSUED_0);
+    assert_eq!(
+        message(&plan)["intents"],
+        json!([{ "intent": "ft_withdraw", "token": "zec.omft.near", "receiver_id": A_UTXO, "amount": "2000000" }])
+    );
+    assert_eq!(plan.info.receiver, T_ADDR);
+    assert_eq!(plan.info.utxo_account.as_deref(), Some(A_UTXO));
+}
+
+#[test]
+fn routes_match_the_token_kind_and_address() {
+    let c = routed();
+    assert_eq!(c.utxo_route(&sample()), Some(zec_route()));
+    let mut shielded = sample();
+    shielded.recipient = "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly".into();
+    assert_eq!(c.utxo_route(&shielded), None);
+    let mut intents = sample();
+    intents.recipient_kind = RecipientKind::Intents;
+    assert_eq!(c.utxo_route(&intents), None);
+    assert_eq!(unrouted(c).utxo_route(&sample()), None);
+}
+
+const SHIELDED: &str = "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly";
+
+fn panics_with(error: &str, f: impl FnOnce()) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    let text = result.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+    assert!(text.contains(error), "{error}: {text}");
+}
+
+/// Nothing withdraws but through a route: not an address it does not accept — a shielded one — and
+/// not a token without one. Such terms never swap, and a settle refunds their ETH.
+#[test]
+fn withdrawals_need_a_route() {
+    let c = routed();
+    let mut shielded = sample();
+    shielded.recipient = SHIELDED.into();
+    panics_with("NotWithdrawable", || {
+        c.swap_terms(&terms_bytes(&shielded));
+    });
+    panics_with("NotWithdrawable", || {
+        utxo_payout(&c, &shielded, 2_000_000, ISSUED_0);
+    });
+    let plans = settle(&c, &shielded, BALANCE, 2_000_000, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
+
+    let c = unrouted(c);
+    panics_with("NotWithdrawable", || {
+        c.swap_terms(&terms_bytes(&sample()));
+    });
+    panics_with("NotWithdrawable", || {
+        utxo_payout(&c, &sample(), 2_000_000, ISSUED_0);
+    });
+}
+
+/// Below the route's minimum the output waits in `A` — after the deadline too; a settle refunds only
+/// the ETH, and delivers once enough has landed.
+#[test]
+fn below_the_route_minimum_waits() {
+    let c = routed();
+    panics_with("BelowRouteMinimum", || {
+        utxo_payout(&c, &sample(), 99_999, DEADLINE_MS + 1);
+    });
+    let plans = settle(&c, &sample(), BALANCE, 99_999, SETTLES_MS);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
+    let plans = settle(&c, &sample(), 0, 100_000, SETTLES_MS);
+    assert_eq!(message(&plans[0])["intents"][0]["receiver_id"], A_UTXO);
+}
+
+/// A settle delivers through the route too; its refund is untouched.
+#[test]
+fn settle_delivers_through_the_route() {
+    let t = sample();
+    let terms = terms_bytes(&t);
+    let c = routed();
+    set_ctx(accounts(1).as_str(), 1, SETTLES_MS);
+    let plans = c.build_settle(
+        &terms,
+        &close_vaa(&terms, DELAY_S),
+        key(),
+        SALT,
+        BALANCE,
+        2_000_000,
+        SETTLES_MS,
+        1_000,
+        a_utxo(&c),
+    );
+    assert_eq!(message(&plans[0])["intents"][0]["receiver_id"], A_UTXO);
+    assert_eq!((plans[1].info.action.as_str(), plans[1].info.utxo_account.clone()), ("refund", None));
+}
+
+#[test]
+fn owner_sets_and_removes_routes() {
+    let mut c = routed();
+    assert_eq!(c.utxo_routes().get(ZEC), Some(&zec_route()));
+    c.set_utxo_route(ZEC.into(), None);
+    assert!(c.utxo_routes().is_empty());
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn only_the_owner_sets_routes() {
+    let mut c = contract();
+    set_ctx(accounts(1).as_str(), 1, ISSUED_0);
+    c.set_utxo_route(ZEC.into(), Some(zec_route()));
+}
+
+#[test]
+fn route_refusals() {
+    for (token, route, error) in [
+        (ETH, zec_route(), "UnsupportedToken"),
+        ("nep141:wrap.near", zec_route(), "UnsupportedToken"),
+        ("nep245:v2_1.omni.hot.tg:56_1", zec_route(), "UnsupportedToken"),
+        (ZEC, UtxoRoute { path_prefix: "".into(), ..zec_route() }, "InvalidPathPrefix"),
+        (ZEC, UtxoRoute { address_prefixes: vec![], ..zec_route() }, "InvalidAddressPrefixes"),
+        (ZEC, UtxoRoute { address_prefixes: vec!["".into()], ..zec_route() }, "InvalidAddressPrefixes"),
+        (ZEC, UtxoRoute { min_amount: U128(0), ..zec_route() }, "InvalidMinAmount"),
+    ] {
+        let result = std::panic::catch_unwind(move || contract().set_utxo_route(token.into(), Some(route)));
+        let message = result.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+        assert!(message.contains(error), "{token}: {message}");
+    }
+}
+
+/// An owner route change between the derive and the build: a deliver refuses to send to the
+/// `A_utxo` of the replaced route; a settle skips the delivery and still refunds.
+#[test]
+fn a_route_changed_after_the_derive_is_not_paid() {
+    let mut c = routed();
+    let stale = a_utxo(&c);
+    set_ctx(accounts(0).as_str(), 1, ISSUED_0);
+    c.set_utxo_route(ZEC.into(), Some(UtxoRoute { withdraw: "withdraw-zec-2.hydration-whm.near".parse().unwrap(), ..zec_route() }));
+    let terms = terms_bytes(&sample());
+    panics_with("RouteChanged", || {
+        set_ctx(accounts(1).as_str(), 1, ISSUED_0);
+        c.build_payout(&terms, Payout::Deliver, key(), SALT, 2_000_000, ISSUED_0, 1_000, stale.clone());
+    });
+    set_ctx(accounts(1).as_str(), 1, SETTLES_MS);
+    let plans = c.build_settle(&terms, &close_vaa(&terms, DELAY_S), key(), SALT, BALANCE, 2_000_000, SETTLES_MS, 1_000, stale);
+    assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
+}
+
+/// A settle whose `A_utxo` derive failed still refunds the ETH.
+#[test]
+fn a_failed_derive_costs_only_the_delivery() {
+    let c = routed();
+    let terms = terms_bytes(&sample());
+    set_ctx(accounts(1).as_str(), 1, SETTLES_MS);
+    let plans = c.build_settle(&terms, &close_vaa(&terms, DELAY_S), key(), SALT, BALANCE, 2_000_000, SETTLES_MS, 1_000, None);
     assert_eq!((plans.len(), plans[0].info.action.as_str()), (1, "refund"));
 }

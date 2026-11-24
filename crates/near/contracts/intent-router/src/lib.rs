@@ -18,6 +18,7 @@
 //!   └─ current_salt()           ┘
 //!        → on_payout_key: intents.mt_balance_of(A, token)
 //!             → on_payout_balance: A's whole balance to the terms' recipient | refundTo → sign → on_signed
+//!          — a delivery on a UTXO route also derives A_utxo beside the balance read → on_payout_utxo
 //! settle(terms, close_vaa)
 //!   ├─ derived_public_key(path) ┐
 //!   ├─ current_salt()           │ joint
@@ -25,14 +26,23 @@
 //!        → on_settle_reads: intents.mt_balance_of(A, eth) ┐ joint
 //!                           intents.mt_balance_of(A, dest) ┘
 //!             → on_settle_balances: a delivery and a refund, each its own payload → sign → on_signed
+//!          — on a UTXO route, A_utxo derived beside them → on_settle_utxo
 //! ```
+//!
+//! **Withdrawals go through UTXO routes.** A withdrawal of a token with a route, to an address it
+//! accepts, goes to `A_utxo` — the account the route's withdraw contract derives from the address —
+//! as a plain NEP-141 balance; that contract takes it to the coin's own chain through Omni's
+//! connector. wNEAR is unwrapped to native NEAR. Nothing else withdraws: such terms never swap and
+//! their ETH is refunded, and output below the route's minimum waits in `A`. POA carries only the
+//! ETH refunds.
 //!
 //! Nothing is stored per account. Anyone may call; the bot publishes what is signed.
 //!
 //! **The invariant.** Every path to `sign` builds its payload only from the terms (bound to `A` by
 //! the hash), a verified order or close message, a quote 1Click signed, the clock and balance reads —
 //! and only one of three: a transfer to the deposit account of a quote that pays and refunds `A`, at
-//! or above the order's floor; `A`'s destination asset to the terms' recipient; after the deadline or
+//! or above the order's floor; `A`'s destination asset to the terms' recipient — directly, or through
+//! the `A_utxo` its address derives under an owner-set route; after the deadline or
 //! a close's countdown, `A`'s ETH to the terms' `refundTo`. No admin sign, no generic
 //! `sign(payload)`, no public callback.
 
@@ -44,6 +54,8 @@ pub mod terms;
 
 /// Shared with the other WHM contracts.
 pub use near_common::{mpc, time, vaa};
+
+use std::collections::BTreeMap;
 
 use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::serde_json::{json, Value};
@@ -70,12 +82,12 @@ pub const GAS_FOR_ON_SWAP_BALANCE: Gas = Gas::from_tgas(20 + 30 + 10);
 pub const GAS_FOR_ON_SWAP_READS: Gas = Gas::from_tgas(10 + 5 + 60);
 /// `on_payout_balance`'s own work, then the sign it schedules.
 pub const GAS_FOR_ON_PAYOUT_BALANCE: Gas = Gas::from_tgas(15 + 30 + 10);
-/// `on_payout_key`'s own work, the balance read and `on_payout_balance`.
-pub const GAS_FOR_ON_PAYOUT_KEY: Gas = Gas::from_tgas(10 + 5 + 55);
+/// `on_payout_key`'s own work, the balance read, a UTXO route's derive and `on_payout_balance`.
+pub const GAS_FOR_ON_PAYOUT_KEY: Gas = Gas::from_tgas(10 + 5 + 10 + 55);
 /// `on_settle_balances`' own work, then the two signs it may schedule.
 pub const GAS_FOR_ON_SETTLE_BALANCES: Gas = Gas::from_tgas(15 + 2 * (30 + 10));
-/// `on_settle_reads`' own work, the two balance reads and `on_settle_balances`.
-pub const GAS_FOR_ON_SETTLE_READS: Gas = Gas::from_tgas(10 + 2 * 5 + 95);
+/// `on_settle_reads`' own work, the two balance reads, a UTXO route's derive and `on_settle_balances`.
+pub const GAS_FOR_ON_SETTLE_READS: Gas = Gas::from_tgas(10 + 2 * 5 + 10 + 95);
 
 /// `migrate` on the new code, in the same batch as its deploy.
 pub const GAS_FOR_MIGRATE: Gas = Gas::from_tgas(50);
@@ -104,12 +116,15 @@ const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 /// The NEP-141 prefix of an intents ledger id; the rest is the token contract.
 const NEP141: &str = "nep141:";
 
-/// The memo POA's bridge tokens read the destination address from.
+/// The memo POA's bridge tokens read the destination address from — the ETH refund's.
 const WITHDRAW_TO: &str = "WITHDRAW_TO:";
 
 /// wNEAR's ledger id. A withdrawal of it is no POA bridge: it is unwrapped and paid as native NEAR to
 /// the recipient's NEAR account, as 1Click pays NEAR.
 const WNEAR: &str = "nep141:wrap.near";
+
+/// Storage key of the UTXO routes — beside the contract state, not in it, so its layout is unchanged.
+const UTXO_ROUTES: &[u8] = b"utxo_routes";
 
 #[ext_contract(ext_intents)]
 pub trait Verifier {
@@ -139,11 +154,31 @@ pub struct Params {
     pub min_refund: U128,
 }
 
+/// How a token's withdrawals reach its own chain without POA: through the withdraw contract that
+/// derives `A_utxo` from the address, Omni's connector behind it. Generic over the coin — a new chain
+/// is a new withdraw contract and a route, no router change.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UtxoRoute {
+    /// The withdraw contract, e.g. `withdraw-zec.hydration-whm.near` — the `predecessor` of `A_utxo`.
+    pub withdraw: AccountId,
+    /// Its derivation path prefix; `A_utxo`'s path is this plus the address, e.g. `zcash:v1:t1…`.
+    pub path_prefix: String,
+    /// Address prefixes it withdraws to, e.g. `["t1", "t3"]`; any other address goes through POA.
+    pub address_prefixes: Vec<String>,
+    /// The least that goes this way — the connector's minimum withdrawal; less goes through POA.
+    pub min_amount: U128,
+}
+
 #[near(serializers = [json])]
 pub enum Payout {
     Deliver,
     Refund,
 }
+
+/// `A_utxo`, with the route it was derived under: a delivery goes to it only while that route is
+/// still the token's.
+pub(crate) type UtxoAccount = (AccountId, UtxoRoute);
 
 /// What a signed payload does, for its event.
 #[near(serializers = [json])]
@@ -161,6 +196,8 @@ pub struct Signed {
     pub min_amount_out: Option<U128>,
     /// The deposit account, the recipient, or `refundTo`.
     pub receiver: String,
+    /// A delivery on a UTXO route: the `A_utxo` it goes to, for the withdraw contract to send on.
+    pub utxo_account: Option<String>,
 }
 
 /// A payload ready for `v1.signer`.
@@ -347,13 +384,25 @@ impl IntentRouter {
         let key = parse_ed25519(&key.unwrap_or_else(|_| env::panic_str("DeriveFailed")));
         let salt = parse_salt(&salt.unwrap_or_else(|_| env::panic_str("SaltReadFailed")));
         let t = parse_terms(&terms.0);
+        let route = match payout {
+            Payout::Deliver => self.utxo_route(&t),
+            Payout::Refund => None,
+        };
         let token = match payout {
-            Payout::Deliver => t.destination_asset,
+            Payout::Deliver => t.destination_asset.clone(),
             Payout::Refund => self.eth_token.clone(),
         };
-        ext_intents::ext(self.intents.clone())
+        let balance = ext_intents::ext(self.intents.clone())
             .with_static_gas(GAS_FOR_BALANCE)
-            .mt_balance_of(implicit_account(&key), token)
+            .mt_balance_of(implicit_account(&key), token);
+        if let Some(route) = route {
+            return balance.and(self.derive_utxo(&route, &t.recipient)).then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_ON_PAYOUT_BALANCE)
+                    .on_payout_utxo(terms, hex::encode(key), hex::encode(salt), route),
+            );
+        }
+        balance
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_ON_PAYOUT_BALANCE)
@@ -371,7 +420,34 @@ impl IntentRouter {
         #[callback_result] balance: Result<U128, PromiseError>,
     ) -> Promise {
         let balance = balance.unwrap_or_else(|_| env::panic_str("BalanceReadFailed")).0;
-        let plan = self.build_payout(&terms.0, payout, parse_hex32(&key), parse_salt(&salt), balance, now_ms(), env::block_height());
+        let plan = self.build_payout(&terms.0, payout, parse_hex32(&key), parse_salt(&salt), balance, now_ms(), env::block_height(), None);
+        self.sign(plan)
+    }
+
+    /// [`Self::on_payout_balance`] for a delivery on a UTXO route, with `A_utxo`'s derived key and
+    /// the route it was derived under.
+    #[private]
+    pub fn on_payout_utxo(
+        &mut self,
+        terms: Base64VecU8,
+        key: String,
+        salt: String,
+        route: UtxoRoute,
+        #[callback_result] balance: Result<U128, PromiseError>,
+        #[callback_result] utxo_key: Result<String, PromiseError>,
+    ) -> Promise {
+        let balance = balance.unwrap_or_else(|_| env::panic_str("BalanceReadFailed")).0;
+        let utxo = implicit_account(&parse_ed25519(&utxo_key.unwrap_or_else(|_| env::panic_str("DeriveFailed"))));
+        let plan = self.build_payout(
+            &terms.0,
+            Payout::Deliver,
+            parse_hex32(&key),
+            parse_salt(&salt),
+            balance,
+            now_ms(),
+            env::block_height(),
+            Some((utxo, route)),
+        );
         self.sign(plan)
     }
 
@@ -392,8 +468,15 @@ impl IntentRouter {
         let balance = |token: String| {
             ext_intents::ext(self.intents.clone()).with_static_gas(GAS_FOR_BALANCE).mt_balance_of(account.clone(), token)
         };
-        balance(self.eth_token.clone())
-            .and(balance(t.destination_asset))
+        let reads = balance(self.eth_token.clone()).and(balance(t.destination_asset.clone()));
+        if let Some(route) = self.utxo_route(&t) {
+            return reads.and(self.derive_utxo(&route, &t.recipient)).then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_ON_SETTLE_BALANCES)
+                    .on_settle_utxo(terms, close_vaa, hex::encode(key), hex::encode(salt), route),
+            );
+        }
+        reads
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_ON_SETTLE_BALANCES)
@@ -421,11 +504,39 @@ impl IntentRouter {
             out.map_or(0, |b| b.0),
             now_ms(),
             env::block_height(),
+            None,
         );
-        // One sign is returned; the other runs beside it — a joint promise cannot be returned, and
-        // each emits its own event.
-        let mut signs: Vec<Promise> = plans.into_iter().map(|plan| self.sign(plan)).collect();
-        signs.pop().unwrap_or_else(|| env::panic_str("NothingToSettle"))
+        self.sign_all(plans)
+    }
+
+    /// [`Self::on_settle_balances`] on a UTXO route, with `A_utxo`'s derived key and the route it was
+    /// derived under. A failed derive costs only the delivery: the refund needs no `A_utxo`.
+    #[private]
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_settle_utxo(
+        &mut self,
+        terms: Base64VecU8,
+        close_vaa: Base64VecU8,
+        key: String,
+        salt: String,
+        route: UtxoRoute,
+        #[callback_result] eth: Result<U128, PromiseError>,
+        #[callback_result] out: Result<U128, PromiseError>,
+        #[callback_result] utxo_key: Result<String, PromiseError>,
+    ) -> Promise {
+        let utxo = utxo_key.ok().map(|k| (implicit_account(&parse_ed25519(&k)), route));
+        let plans = self.build_settle(
+            &terms.0,
+            &close_vaa.0,
+            parse_hex32(&key),
+            parse_salt(&salt),
+            eth.map_or(0, |b| b.0),
+            out.map_or(0, |b| b.0),
+            now_ms(),
+            env::block_height(),
+            utxo,
+        );
+        self.sign_all(plans)
     }
 
     /// Checks the signature against `A`'s key and emits the publishable `MultiPayload`.
@@ -454,6 +565,7 @@ impl IntentRouter {
             "amount": info.amount,
             "min_amount_out": info.min_amount_out,
             "receiver": info.receiver,
+            "utxo_account": info.utxo_account,
             "signed_data": signed,
         }));
         signed
@@ -478,6 +590,32 @@ impl IntentRouter {
         self.assert_owner();
         self.quote_keys = parse_quote_keys(&keys);
         emit("quote_keys_set", json!({ "keys": keys }));
+    }
+
+    /// Sets or, with `None`, removes the UTXO route of a token, by intents ledger id
+    /// (`nep141:zec.omft.near`). Applies from the next payout, running trades too.
+    #[payable]
+    pub fn set_utxo_route(&mut self, token: String, route: Option<UtxoRoute>) {
+        self.assert_owner();
+        token_contract(&token);
+        require!(token != self.eth_token && token != WNEAR, "UnsupportedToken");
+        let mut routes = stored_utxo_routes();
+        match &route {
+            Some(r) => {
+                require!(!r.path_prefix.is_empty(), "InvalidPathPrefix");
+                require!(
+                    !r.address_prefixes.is_empty() && r.address_prefixes.iter().all(|p| !p.is_empty()),
+                    "InvalidAddressPrefixes"
+                );
+                require!(r.min_amount.0 > 0, "InvalidMinAmount");
+                routes.insert(token.clone(), r.clone());
+            }
+            None => {
+                routes.remove(&token);
+            }
+        }
+        env::storage_write(UTXO_ROUTES, &near_sdk::borsh::to_vec(&routes).unwrap());
+        emit("utxo_route_set", json!({ "token": token, "route": route }));
     }
 
     /// Proposes `new_owner`, who takes over on `accept_ownership`. Proposing again replaces it.
@@ -553,6 +691,11 @@ impl IntentRouter {
         })
     }
 
+    /// Every UTXO route, by intents ledger id.
+    pub fn utxo_routes(&self) -> BTreeMap<String, UtxoRoute> {
+        stored_utxo_routes()
+    }
+
     /// The derivation path of `terms` — what `v1.signer.derived_public_key` takes, with this
     /// account as `predecessor` and `domain_id` 1. Panics on invalid terms.
     pub fn path_of(&self, terms: Base64VecU8) -> String {
@@ -570,12 +713,66 @@ impl IntentRouter {
             .and(ext_intents::ext(self.intents.clone()).with_static_gas(GAS_FOR_SALT).current_salt())
     }
 
+    /// The route a delivery of these terms takes, if any: a withdrawal of a routed token to an address
+    /// the route accepts. Its minimum is checked against the balance, later.
+    fn utxo_route(&self, t: &Terms) -> Option<UtxoRoute> {
+        if t.recipient_kind != RecipientKind::Withdraw {
+            return None;
+        }
+        stored_utxo_routes()
+            .remove(&t.destination_asset)
+            .filter(|r| r.address_prefixes.iter().any(|p| t.recipient.starts_with(p.as_str())))
+    }
+
+    /// Whether the terms' destination can be delivered at all: a withdrawal of wNEAR to a NEAR
+    /// account, or of a token through its UTXO route to an address the route accepts; a transfer to
+    /// a valid intents account id. Checked at swap and delivery, never at parse: terms that fail it
+    /// must still refund.
+    fn is_deliverable(&self, t: &Terms) -> bool {
+        match t.recipient_kind {
+            RecipientKind::Withdraw if t.destination_asset == WNEAR => t.recipient_account().is_some(),
+            RecipientKind::Withdraw => t.token_contract().is_some() && self.utxo_route(t).is_some(),
+            RecipientKind::Intents => t.recipient_account().is_some(),
+        }
+    }
+
+    /// [`Self::is_deliverable`], as a requirement.
+    fn deliverable(&self, t: &Terms) {
+        let error = match t.recipient_kind {
+            RecipientKind::Withdraw if t.destination_asset != WNEAR => "NotWithdrawable",
+            _ => "InvalidRecipient",
+        };
+        require!(self.is_deliverable(t), error);
+    }
+
+    /// Whether a settle can deliver `amount` now: deliverable terms, and a withdrawal at its route's
+    /// minimum — less waits in `A`.
+    fn can_deliver(&self, t: &Terms, amount: u128) -> bool {
+        self.is_deliverable(t) && self.utxo_route(t).is_none_or(|r| amount >= r.min_amount.0)
+    }
+
+    /// `A_utxo`'s key: the withdraw contract's derivation for the address.
+    fn derive_utxo(&self, route: &UtxoRoute, address: &str) -> Promise {
+        ext_mpc::ext(self.mpc_signer.clone()).with_static_gas(GAS_FOR_DERIVE).derived_public_key(
+            format!("{}{address}", route.path_prefix),
+            Some(route.withdraw.clone()),
+            Some(DOMAIN_ED25519),
+        )
+    }
+
+    /// One sign is returned; the others run beside it — a joint promise cannot be returned, and each
+    /// emits its own event.
+    fn sign_all(&self, plans: Vec<Plan>) -> Promise {
+        let mut signs: Vec<Promise> = plans.into_iter().map(|plan| self.sign(plan)).collect();
+        signs.pop().unwrap_or_else(|| env::panic_str("NothingToSettle"))
+    }
+
     fn payout(&self, terms: Base64VecU8, payout: Payout) -> Promise {
         near_sdk::assert_one_yocto();
         self.require_gas(GAS_FOR_DERIVE.saturating_add(GAS_FOR_SALT).saturating_add(GAS_FOR_ON_PAYOUT_KEY));
         let t = parse_terms(&terms.0);
         match payout {
-            Payout::Deliver => deliverable(&t),
+            Payout::Deliver => self.deliverable(&t),
             Payout::Refund => require!(now_ms() > t.deadline_ms(), "BeforeDeadline"),
         }
         self.reads(&auth_path(&terms.0)).then(
@@ -590,7 +787,7 @@ impl IntentRouter {
     fn swap_terms(&self, bytes: &[u8]) -> (Terms, [u8; 32]) {
         let t = parse_terms(bytes);
         require!(t.destination_asset != self.eth_token, "SameAsset");
-        deliverable(&t);
+        self.deliverable(&t);
         (t, auth_path(bytes))
     }
 
@@ -621,7 +818,8 @@ impl IntentRouter {
     }
 
     /// The settle: a delivery of `A`'s destination balance, unless the terms cannot deliver it — or it
-    /// is the ETH itself — and a refund of its ETH from `min_refund` up; each as after the deadline,
+    /// is the ETH itself, below the route's minimum, or a withdrawal without an `A_utxo` derived under
+    /// the current route — and a refund of its ETH from `min_refund` up; each as after the deadline,
     /// the close standing in for it.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_settle(
@@ -634,15 +832,20 @@ impl IntentRouter {
         out: u128,
         now_ms: u64,
         height: u64,
+        utxo: Option<UtxoAccount>,
     ) -> Vec<Plan> {
         let t = parse_terms(terms);
         self.close(&auth_path(terms), vaa, now_ms);
         let mut plans = Vec::new();
-        if out > 0 && t.destination_asset != self.eth_token && is_deliverable(&t) {
-            plans.push(self.payout_plan(terms, Payout::Deliver, key, salt, out, now_ms, height, true));
+        let utxo_ready = match self.utxo_route(&t) {
+            Some(route) => utxo.as_ref().is_some_and(|(_, derived)| *derived == route),
+            None => true,
+        };
+        if out > 0 && t.destination_asset != self.eth_token && self.can_deliver(&t, out) && utxo_ready {
+            plans.push(self.payout_plan(terms, Payout::Deliver, key, salt, out, now_ms, height, true, utxo));
         }
         if eth > 0 && eth >= self.params.min_refund.0 {
-            plans.push(self.payout_plan(terms, Payout::Refund, key, salt, eth, now_ms, height, true));
+            plans.push(self.payout_plan(terms, Payout::Refund, key, salt, eth, now_ms, height, true, None));
         }
         require!(!plans.is_empty(), "NothingToSettle");
         plans
@@ -708,11 +911,13 @@ impl IntentRouter {
             amount: U128(q.amount_in),
             min_amount_out: Some(U128(q.min_amount_out)),
             receiver: q.deposit.to_string(),
+            utxo_account: None,
         };
         Plan { path, key, message, nonce, info }
     }
 
-    /// A delivery or refund of `A`'s whole `balance`, to where the terms say.
+    /// A delivery or refund of `A`'s whole `balance`, to where the terms say — `utxo` being `A_utxo`
+    /// when the delivery's UTXO route derived it.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_payout(
         &self,
@@ -723,12 +928,14 @@ impl IntentRouter {
         balance: u128,
         now_ms: u64,
         height: u64,
+        utxo: Option<UtxoAccount>,
     ) -> Plan {
-        self.payout_plan(terms, payout, key, salt, balance, now_ms, height, false)
+        self.payout_plan(terms, payout, key, salt, balance, now_ms, height, false, utxo)
     }
 
     /// [`Self::build_payout`], `closed` when a verified close's countdown has run — which lets the
-    /// payout through as the deadline would.
+    /// payout through as the deadline would. A withdrawal goes to `utxo`, from the route's minimum, and
+    /// only if `utxo` was derived under the route the token has now.
     #[allow(clippy::too_many_arguments)]
     fn payout_plan(
         &self,
@@ -740,12 +947,14 @@ impl IntentRouter {
         now_ms: u64,
         height: u64,
         closed: bool,
+        utxo: Option<UtxoAccount>,
     ) -> Plan {
         let t = parse_terms(terms);
         let path = auth_path(terms);
         let account = implicit_account(&key);
         let past = closed || now_ms > t.deadline_ms();
 
+        let mut utxo_account = None;
         let (action, token, receiver, intent) = match payout {
             Payout::Refund => {
                 require!(past, "BeforeDeadline");
@@ -756,10 +965,23 @@ impl IntentRouter {
                 ("refund", self.eth_token.clone(), to, intent)
             }
             Payout::Deliver => {
-                deliverable(&t);
+                self.deliverable(&t);
                 let min = if past { 1 } else { t.min_delivery.max(1) };
                 require!(balance >= min, "NothingToDeliver");
-                ("deliver", t.destination_asset.clone(), t.recipient.clone(), delivery(&t, balance))
+                let intent = match t.recipient_kind {
+                    RecipientKind::Withdraw if t.destination_asset == WNEAR => native_withdraw(&t.recipient, balance),
+                    RecipientKind::Withdraw => {
+                        let route = self.utxo_route(&t).unwrap_or_else(|| env::panic_str("NotWithdrawable"));
+                        require!(balance >= route.min_amount.0, "BelowRouteMinimum");
+                        let (a_utxo, derived) = utxo.unwrap_or_else(|| env::panic_str("NoUtxoAccount"));
+                        require!(derived == route, "RouteChanged");
+                        let contract = t.token_contract().unwrap_or_else(|| env::panic_str("NotWithdrawable"));
+                        utxo_account = Some(a_utxo.to_string());
+                        ft_withdraw(contract.as_str(), a_utxo.as_str(), balance, None)
+                    }
+                    RecipientKind::Intents => transfer(&t.recipient, &t.destination_asset, balance),
+                };
+                ("deliver", t.destination_asset.clone(), t.recipient.clone(), intent)
             }
         };
 
@@ -779,6 +1001,7 @@ impl IntentRouter {
             amount: U128(balance),
             min_amount_out: None,
             receiver,
+            utxo_account,
         };
         Plan { path, key, message, nonce, info }
     }
@@ -827,6 +1050,13 @@ pub(crate) fn emit(event: &str, data: Value) {
     env::log_str(&format!("EVENT_JSON:{log}"));
 }
 
+/// The UTXO routes, by intents ledger id.
+fn stored_utxo_routes() -> BTreeMap<String, UtxoRoute> {
+    env::storage_read(UTXO_ROUTES)
+        .map(|b| near_sdk::borsh::from_slice(&b).unwrap_or_else(|_| env::panic_str("InvalidUtxoRoutes")))
+        .unwrap_or_default()
+}
+
 /// Block time, unix ms.
 fn now_ms() -> u64 {
     env::block_timestamp_ms()
@@ -836,41 +1066,6 @@ fn parse_terms(bytes: &[u8]) -> Terms {
     Terms::parse(bytes).unwrap_or_else(|e| env::panic_str(e))
 }
 
-/// What delivery needs: a withdrawal, a NEP-141 contract — `ft_withdraw` takes nothing else; a
-/// transfer, a valid intents account id. Checked at swap and delivery, never at parse: terms that
-/// fail it must still refund.
-fn deliverable(t: &Terms) {
-    match t.recipient_kind {
-        RecipientKind::Withdraw if t.destination_asset == WNEAR => {
-            require!(t.recipient_account().is_some(), "InvalidRecipient")
-        }
-        RecipientKind::Withdraw => require!(t.token_contract().is_some(), "NotWithdrawable"),
-        RecipientKind::Intents => require!(t.recipient_account().is_some(), "InvalidRecipient"),
-    }
-}
-
-/// `amount` of the destination to the terms' recipient: a POA withdrawal to its chain — for wNEAR,
-/// native NEAR to a NEAR account — or a transfer to an intents account. The terms must be
-/// [`deliverable`].
-fn delivery(t: &Terms, amount: u128) -> Value {
-    match t.recipient_kind {
-        RecipientKind::Withdraw if t.destination_asset == WNEAR => native_withdraw(&t.recipient, amount),
-        RecipientKind::Withdraw => {
-            let contract = t.token_contract().unwrap();
-            ft_withdraw(contract.as_str(), contract.as_str(), amount, Some(format!("{WITHDRAW_TO}{}", t.recipient)))
-        }
-        RecipientKind::Intents => transfer(&t.recipient, &t.destination_asset, amount),
-    }
-}
-
-/// [`deliverable`], as a question — a settle refunds what it cannot deliver.
-fn is_deliverable(t: &Terms) -> bool {
-    match t.recipient_kind {
-        RecipientKind::Withdraw if t.destination_asset == WNEAR => t.recipient_account().is_some(),
-        RecipientKind::Withdraw => t.token_contract().is_some(),
-        RecipientKind::Intents => t.recipient_account().is_some(),
-    }
-}
 
 /// `nep141:<contract>` → the contract.
 fn token_contract(ledger_id: &str) -> AccountId {

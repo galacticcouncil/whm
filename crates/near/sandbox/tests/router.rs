@@ -31,6 +31,10 @@ const EMITTER: [u8; 32] = [0xe1; 32];
 const MAX_GAS: Gas = Gas::from_tgas(300);
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 const REGISTRATION: u128 = 1_250_000_000_000_000_000_000;
+/// The ZEC route `setup` sets: `A_utxo` derives under this account, and less than this stays in `A`.
+const WITHDRAW_ZEC: &str = "withdraw-zec.test.near";
+const ROUTE_MIN: u128 = 100;
+const T_ADDR: &str = "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma";
 
 /// The order: 1 eth sent, priced at 2 zec per eth; the terms allow 1% below.
 const ORDER_AMOUNT: u128 = 10u128.pow(24);
@@ -185,6 +189,18 @@ async fn setup() -> anyhow::Result<Env> {
         .await?
         .into_result()?;
 
+    // ZEC withdraws through its UTXO route, the only way out the router has.
+    router
+        .call("set_utxo_route")
+        .args_json(json!({
+            "token": ledger(&zec),
+            "route": { "withdraw": WITHDRAW_ZEC, "path_prefix": "zcash:v1:", "address_prefixes": ["t1", "t3"], "min_amount": ROUTE_MIN.to_string() },
+        }))
+        .deposit(ONE_YOCTO)
+        .transact()
+        .await?
+        .into_result()?;
+
     let alice = subaccount(&worker, "alice", 100).await?;
     for token in [&eth, &zec] {
         alice.call(token.id(), "near_deposit").deposit(NearToken::from_near(20)).transact().await?.into_result()?;
@@ -228,6 +244,36 @@ impl Env {
             .await?
             .json()?;
         Ok(hex::encode(bs58::decode(key.trim_start_matches("ed25519:")).into_vec()?))
+    }
+
+    /// `A_utxo` for a Zcash address, as the withdraw contract derives it.
+    async fn utxo_account(&self, address: &str) -> anyhow::Result<String> {
+        let config: Value = self.router.view("get_config").await?.json()?;
+        let key: String = self
+            .worker
+            .view(&config["mpc_signer"].as_str().unwrap().parse()?, "derived_public_key")
+            .args_json(json!({ "path": format!("zcash:v1:{address}"), "predecessor": WITHDRAW_ZEC, "domain_id": 1 }))
+            .await?
+            .json()?;
+        Ok(hex::encode(bs58::decode(key.trim_start_matches("ed25519:")).into_vec()?))
+    }
+
+    /// Registers `account` on the ZEC token, as the bot does before a withdrawal.
+    async fn register_zec(&self, account: &str) -> anyhow::Result<()> {
+        self.alice
+            .call(self.zec.id(), "storage_deposit")
+            .args_json(json!({ "account_id": account }))
+            .deposit(NearToken::from_yoctonear(REGISTRATION))
+            .transact()
+            .await?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// What `account` holds on the ZEC token itself.
+    async fn on_zec(&self, account: &str) -> anyhow::Result<u128> {
+        let v: String = self.zec.view("ft_balance_of").args_json(json!({ "account_id": account })).await?.json()?;
+        Ok(v.parse()?)
     }
 
     /// Alice deposits `amount` of `token` into `intents.near`, credited to `account`.
@@ -362,7 +408,7 @@ fn gas_report(label: &str, outcome: &ExecutionFinalResult) {
 async fn swap_executes_once_per_order() -> anyhow::Result<()> {
     let env = setup().await?;
     let now_s = env.now_ms().await? / 1_000;
-    let terms = env.terms(now_s + 86_400, RecipientKind::Withdraw, "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma");
+    let terms = env.terms(now_s + 86_400, RecipientKind::Withdraw, T_ADDR);
     let a = env.account_of(&terms).await?;
     env.fund(&env.eth, &a, 3 * ORDER_AMOUNT).await?;
 
@@ -412,7 +458,7 @@ async fn swap_executes_once_per_order() -> anyhow::Result<()> {
 async fn swap_refuses_what_the_router_must_not_sign() -> anyhow::Result<()> {
     let env = setup().await?;
     let now_s = env.now_ms().await? / 1_000;
-    let terms = env.terms(now_s + 86_400, RecipientKind::Withdraw, "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma");
+    let terms = env.terms(now_s + 86_400, RecipientKind::Withdraw, T_ADDR);
     let a = env.account_of(&terms).await?;
     let vaa = env.order(&terms, 7).await?;
 
@@ -465,32 +511,6 @@ async fn swap_refuses_what_the_router_must_not_sign() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn deliver_withdraws_through_the_bridge() -> anyhow::Result<()> {
-    let env = setup().await?;
-    let now_s = env.now_ms().await? / 1_000;
-    let terms = env.terms(now_s + 86_400, RecipientKind::Withdraw, "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma");
-    let a = env.account_of(&terms).await?;
-
-    // Below the batch threshold before the deadline: nothing signed.
-    env.fund(&env.zec, &a, 999_999).await?;
-    let outcome = env.call_router("deliver", json!({ "terms": b64(&terms) })).await?;
-    assert!(failures(&outcome).join(" ").contains("NothingToDeliver"), "{:?}", failures(&outcome));
-
-    env.fund(&env.zec, &a, 1).await?;
-    let outcome = env.call_router("deliver", json!({ "terms": b64(&terms) })).await?;
-    gas_report("deliver", &outcome);
-    let event = signed_event(&outcome)?;
-    let bridge_before: String = env.zec.view("ft_balance_of").args_json(json!({ "account_id": env.zec.id() })).await?.json()?;
-    let executed = env.execute(&event["signed_data"]).await?;
-    assert!(executed.is_success(), "{:?}", failures(&executed));
-    assert!(executed.logs().iter().any(|l| l.contains("WITHDRAW_TO:t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma")));
-    assert_eq!(env.held(&a, &env.zec).await?, 0);
-    let bridge_after: String = env.zec.view("ft_balance_of").args_json(json!({ "account_id": env.zec.id() })).await?.json()?;
-    assert_eq!(bridge_after.parse::<u128>()? - bridge_before.parse::<u128>()?, 1_000_000);
-    Ok(())
-}
-
-#[tokio::test]
 async fn deliver_to_an_intents_account() -> anyhow::Result<()> {
     let env = setup().await?;
     let now_s = env.now_ms().await? / 1_000;
@@ -511,12 +531,12 @@ async fn refund_only_after_the_deadline() -> anyhow::Result<()> {
     let now_s = env.now_ms().await? / 1_000;
 
     // Before the deadline the call fails fast.
-    let open = env.terms(now_s + 86_400, RecipientKind::Withdraw, "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma");
+    let open = env.terms(now_s + 86_400, RecipientKind::Withdraw, T_ADDR);
     let outcome = env.call_router("refund", json!({ "terms": b64(&open) })).await?;
     assert!(outcome.is_failure());
 
     // Terms whose deadline has passed.
-    let past = env.terms(now_s - 1, RecipientKind::Withdraw, "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma");
+    let past = env.terms(now_s - 1, RecipientKind::Withdraw, T_ADDR);
     let a = env.account_of(&past).await?;
     env.fund(&env.eth, &a, ORDER_AMOUNT).await?;
     let outcome = env.call_router("refund", json!({ "terms": b64(&past) })).await?;
@@ -538,8 +558,10 @@ async fn refund_only_after_the_deadline() -> anyhow::Result<()> {
 async fn settle_moves_everything_a_holds() -> anyhow::Result<()> {
     let env = setup().await?;
     let now_s = env.now_ms().await? / 1_000;
-    let terms = env.terms(now_s + 365 * 86_400, RecipientKind::Withdraw, "t1KPVSRgnFHPBWMJLC7taJioN6m5Q6jVBma");
+    let terms = env.terms(now_s + 365 * 86_400, RecipientKind::Withdraw, T_ADDR);
     let a = env.account_of(&terms).await?;
+    let a_utxo = env.utxo_account(T_ADDR).await?;
+    env.register_zec(&a_utxo).await?;
     env.fund(&env.zec, &a, 999).await?;
     env.fund(&env.eth, &a, ORDER_AMOUNT).await?;
 
@@ -562,8 +584,10 @@ async fn settle_moves_everything_a_holds() -> anyhow::Result<()> {
     assert_eq!(env.held(&a, &env.zec).await?, 0);
     assert_eq!(env.held(&a, &env.eth).await?, 0);
 
+    assert_eq!(env.on_zec(&a_utxo).await?, 999);
+
     // A spent payload cannot run again; what lands later leaves with the next settle.
-    env.fund(&env.zec, &a, 5).await?;
+    env.fund(&env.zec, &a, 500).await?;
     assert!(env.execute(&events[0]["signed_data"]).await?.is_failure(), "a payload replayed");
     let outcome = env.call_router("settle", json!({ "terms": b64(&terms), "close_vaa": b64(&close) })).await?;
     let events = signed_events(&outcome);
@@ -571,6 +595,64 @@ async fn settle_moves_everything_a_holds() -> anyhow::Result<()> {
     let again = env.execute(&events[0]["signed_data"]).await?;
     assert!(again.is_success(), "{:?}", failures(&again));
     assert_eq!(env.held(&a, &env.zec).await?, 0);
+    assert_eq!(env.on_zec(&a_utxo).await?, 1_499);
+    Ok(())
+}
+
+/// A withdrawal goes through the ZEC route: to `A_utxo` as a plain token balance, from `minDelivery`
+/// before the deadline. Unregistered, `intents.near` credits `A` back; registered, it lands — from a
+/// deliver and from a settle alike, from the route's minimum. An address the route does not accept
+/// has no way out: the router signs nothing for it.
+#[tokio::test]
+async fn deliver_withdraws_through_the_route() -> anyhow::Result<()> {
+    let env = setup().await?;
+    let a_utxo = env.utxo_account(T_ADDR).await?;
+    let now_s = env.now_ms().await? / 1_000;
+    let terms = env.terms(now_s + 365 * 86_400, RecipientKind::Withdraw, T_ADDR);
+    let a = env.account_of(&terms).await?;
+
+    // Below the batch threshold before the deadline: nothing signed.
+    env.fund(&env.zec, &a, 999_999).await?;
+    let outcome = env.call_router("deliver", json!({ "terms": b64(&terms) })).await?;
+    assert!(failures(&outcome).join(" ").contains("NothingToDeliver"), "{:?}", failures(&outcome));
+    env.fund(&env.zec, &a, 1).await?;
+
+    // Unregistered: the withdrawal's transfer fails and the verifier credits A back.
+    let outcome = env.call_router("deliver", json!({ "terms": b64(&terms) })).await?;
+    gas_report("deliver", &outcome);
+    let event = signed_event(&outcome)?;
+    assert_eq!((event["receiver"].as_str(), event["utxo_account"].as_str()), (Some(T_ADDR), Some(a_utxo.as_str())));
+    // The transfer inside fails, not the batch: what happened is read off the balances.
+    let _ = env.execute(&event["signed_data"]).await?;
+    assert_eq!(env.held(&a, &env.zec).await?, 1_000_000);
+    assert_eq!(env.on_zec(&a_utxo).await?, 0);
+
+    // Registered: it lands on A_utxo.
+    env.register_zec(&a_utxo).await?;
+    let outcome = env.call_router("deliver", json!({ "terms": b64(&terms) })).await?;
+    let executed = env.execute(&signed_event(&outcome)?["signed_data"]).await?;
+    assert!(executed.is_success(), "{:?}", failures(&executed));
+    assert_eq!(env.held(&a, &env.zec).await?, 0);
+    assert_eq!(env.on_zec(&a_utxo).await?, 1_000_000);
+
+    // A settle takes the route — below minDelivery, from the route's minimum; less stays in A.
+    let close = env.close(&terms, 0).await?;
+    env.fund(&env.zec, &a, ROUTE_MIN - 1).await?;
+    let outcome = env.call_router("settle", json!({ "terms": b64(&terms), "close_vaa": b64(&close) })).await?;
+    assert!(failures(&outcome).join(" ").contains("NothingToSettle"), "{:?}", failures(&outcome));
+    env.fund(&env.zec, &a, 1).await?;
+    let outcome = env.call_router("settle", json!({ "terms": b64(&terms), "close_vaa": b64(&close) })).await?;
+    gas_report("settle (route)", &outcome);
+    let events = signed_events(&outcome);
+    assert_eq!(events.len(), 1, "{:?}", failures(&outcome));
+    let executed = env.execute(&events[0]["signed_data"]).await?;
+    assert!(executed.is_success(), "{:?}", failures(&executed));
+    assert_eq!(env.on_zec(&a_utxo).await?, 1_000_000 + ROUTE_MIN);
+
+    // A shielded address: no route takes it, so nothing is signed.
+    let shielded = env.terms(now_s + 86_400, RecipientKind::Withdraw, "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly");
+    let outcome = env.call_router("deliver", json!({ "terms": b64(&shielded) })).await?;
+    assert!(failures(&outcome).join(" ").contains("NotWithdrawable"), "{:?}", failures(&outcome));
     Ok(())
 }
 
