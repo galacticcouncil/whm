@@ -197,6 +197,7 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
         bytes memory encoded = IntentCodec.encodeQuote(terms);
         bytes32 authPath = keccak256(encoded);
         if (closed[authPath]) revert ClosedTerms(authPath);
+        if (block.timestamp > terms.deadline) revert TermsExpired(terms.deadline);
 
         Order memory order;
         order.outPerIn = _outPerIn(terms.destinationAsset);

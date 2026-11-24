@@ -560,6 +560,24 @@ contract IntentDispatcherTest is Test {
         dispatcher.execute(user, 7, address(0x1234), 5e18, address(weth), 1e15, data);
     }
 
+    /// @notice Past the terms' deadline neither entry takes an order: an ICE schedule outliving its
+    ///         terms reverts, and the runtime hands its WETH back instead of bridging it for a refund.
+    function testExpiredTermsTakeNoOrders() public {
+        IIntentDispatcher.Quote memory terms = _terms();
+        vm.warp(uint256(terms.deadline) + 1);
+
+        _fund(1e15);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.TermsExpired.selector, terms.deadline));
+        dispatcher.dispatch(1e15, depositAddress, 0, terms);
+
+        bytes memory data = _data(0);
+        _push(1e15);
+        vm.prank(user, user);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.TermsExpired.selector, terms.deadline));
+        dispatcher.execute(user, 7, address(0x1234), 5e18, address(weth), 1e15, data);
+    }
+
     /// @notice The caller pays the Wormhole fee — a close has no WETH to take it from.
     function testCloseForwardsTheMessageFee() public {
         coreBridge.setFee(5);

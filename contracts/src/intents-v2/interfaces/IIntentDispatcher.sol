@@ -143,6 +143,8 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     error InvalidRate(uint256 outPerIn);
     /// @dev The terms were closed: their account settles, and takes no more orders.
     error ClosedTerms(bytes32 authPath);
+    /// @dev The terms' deadline has passed: NEAR's router no longer swaps, only refunds.
+    error TermsExpired(uint64 deadline);
     /// @dev A close countdown above `MAX_SETTLE_DELAY`.
     error SettleDelayTooLong(uint64 delay, uint64 max);
 
