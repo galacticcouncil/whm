@@ -5,6 +5,7 @@
   "scripts": {
     "start:ingest": "node dist/ingest/app.js",
     "start:intents": "node dist/intents/app.js",
+    "start:intents-v2": "node dist/intents-v2/app.js",
     "start:transfers": "node dist/transfers/app.js",
     "start:feeds": "node dist/feeds/app.js",
     "start:ui": "node dist/ui/app.js",

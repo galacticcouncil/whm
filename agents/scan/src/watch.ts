@@ -1,12 +1,13 @@
 import { base58 } from "@scure/base";
 import { pad, toEventSelector } from "viem";
 
-import { LogMessagePublishedEvt, nearTopic } from "./abi";
+import { LogMessagePublishedEvt, jsonTopic } from "./abi";
 import { CHAINS } from "./chains";
 import { PUBLISH } from "./chains/events";
 import {
   BASEJUMP,
   INTENT,
+  INTENT_V2,
   NTT,
   nttLegs,
   ORACLE,
@@ -68,22 +69,28 @@ const FROM = {
     oracles: FROM_CHAIN_ORA.hydration,
     /** ZecUtxoEmitter's deploy. */
     utxoZec: 15_901_846n,
+    /** IntentDispatcher's deploy. */
+    intentsV2: 17_111_592n,
   },
   ethereum: {
     ntt: FROM_CHAIN.ethereum,
     intents: FROM_CHAIN.ethereum,
     basejump: FROM_CHAIN.ethereum,
     oracles: FROM_CHAIN_ORA.ethereum,
+    /** IntentForwarder's deploy. */
+    intentsV2: 26_434_322n,
   },
   base: { ntt: FROM_CHAIN.base },
   robinhood: { ntt: FROM_CHAIN.robinhood, oracles: FROM_CHAIN_ORA.robinhood },
   hyperevm: { ntt: FROM_CHAIN.hyperevm },
   solana: { ntt: FROM_CHAIN.solana, oracles: FROM_CHAIN_ORA.solana },
   near: {
-    /** ntt-near's deploy, the earlier of the two NEAR managers. */
+    /** ntt deploy */
     ntt: 219_438_351n,
-    /** withdraw-zec's deploy. */
+    /** zec utxo deploy. */
     utxoZec: 220_248_232n,
+    /** intent router deploy. */
+    intentsV2: 224_953_950n,
   },
 };
 
@@ -145,7 +152,7 @@ const WORMHOLE: Watch[] = [
     via: solanaLegs().map((l) => l.program),
     topics: published(
       solanaLegs().map((l) => `0x${Buffer.from(base58.decode(l.emitter)).toString("hex")}`),
-      nearTopic(PUBLISH),
+      jsonTopic(PUBLISH),
     ),
   },
 ];
@@ -193,6 +200,37 @@ const INTENTS: Watch[] = [
     from: FROM.ethereum.intents,
     at: [INTENT.receiver],
   },
+];
+
+/**
+ * A watch entry for an intents v2 contract, empty until it is deployed. An address without its
+ * deploy block is refused: a cursor at block 0 would pull Hydration's shared scan back to genesis.
+ *
+ * @param chain Where it is deployed.
+ * @param role The role its flow legs name.
+ * @param address The contract, blank until deployed.
+ * @param from Its deploy block.
+ * @returns The entry, or none.
+ */
+function intentV2(chain: string, role: string, address: string, from: bigint): Watch[] {
+  if (!address) return [];
+  if (from === 0n) throw new Error(`${role}: ${address} has no deploy block in FROM.${chain}`);
+  return [{ chain, role, from, at: [address] }];
+}
+
+/**
+ * Intents v2: published on Hydration, forwarded on Ethereum, swapped and paid out on NEAR. The ICE
+ * intents that forward to the dispatcher came to its role later than its logs did: a cursor of their
+ * own reads its history back for them, the logs it meets again ignored as duplicates.
+ */
+const INTENTS_V2: Watch[] = [
+  ...intentV2("hydration", "intent-dispatcher", INTENT_V2.dispatcher, FROM.hydration.intentsV2),
+  ...intentV2("hydration", "intent-dispatcher", INTENT_V2.dispatcher, FROM.hydration.intentsV2).map((w) => ({
+    ...w,
+    id: "intent-dispatcher-ice",
+  })),
+  ...intentV2("ethereum", "intent-forwarder", INTENT_V2.forwarder, FROM.ethereum.intentsV2),
+  ...intentV2("near", "intent-router", INTENT_V2.router, FROM.near.intentsV2),
 ];
 
 /** Basejump: the Ethereum source, paid out of the Hydration landing pool. */
@@ -265,7 +303,7 @@ const ORACLES: Watch[] = [
     via: [ORACLE.solana.program],
     topics: published(
       [`0x${Buffer.from(base58.decode(ORACLE.solana.emitter)).toString("hex")}`],
-      nearTopic(PUBLISH),
+      jsonTopic(PUBLISH),
     ),
   },
   ...(["hydration", "robinhood"] as const).map((chain) => ({
@@ -285,6 +323,7 @@ export const WATCH: Watch[] = [
   ...WORMHOLE,
   ...NTT_LEGS,
   ...INTENTS,
+  ...INTENTS_V2,
   ...BASEJUMPS,
   ...UTXO_ZEC,
   ...ORACLES,

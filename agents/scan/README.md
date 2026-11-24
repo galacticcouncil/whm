@@ -13,13 +13,26 @@ ingest           chains → events → wh_messages + ntt_transfers      (no UI)
 app-intents      intent_orders + 1Click                             :8080
 app-transfers    every transfer: NTT, UTXO coins via Omni, Basejump :8081
 app-feeds        oracle relay updates, each feed's value over time  :8082
-ui               Hydration scan: Transfers · Orders · Feeds         :8083
+ui               Hydration scan: Transfers · Orders · Orders v2 · Feeds :8083
+app-intents-v2   intent_v2_orders, and the terms still in play      :8084
 ```
 
-The UI holds no state and touches no database. It serves every page, and passes `/api/<section>/…`
-through to that section's app — `transfers`, `orders`, `feeds` — live streams included, so the pages
-are one origin while the apps stay public on their own ports. `TRANSFERS_API`, `ORDERS_API` and
-`FEEDS_API` name the apps; they default to the ports above on this host.
+The UI holds no state and touches no database. It serves every page and passes the pages' API calls
+through to the app that serves them, live streams included, so the pages are one origin while the
+apps stay public on their own hosts with their own paths:
+
+```
+/api/transfers…        → transfers, as is       /api/transfers/filters → transfers /api/filters
+/api/feeds…            → feeds, as is
+/api/v1/<path>         → intents v1  /api/<path>
+/api/v2/<path>         → intents v2  /api/<path>   (trades, orders)
+/api/events?flow=…     → the app whose flows they are
+```
+
+`TRANSFERS_API`, `ORDERS_API`, `ORDERS_V2_API` and `FEEDS_API` name the apps; they default to the
+ports above on this host. Intents v2 is its own section, Trades, with a `new` tag on its nav link:
+`/v2/trades`, `/v2/trade/<auth_path>` and `/v2/order/<seq>`, from `public/ui/v2/` — a folder of pages
+is served under its name.
 
 Chains are indexed **in parallel and at wildly different speeds**, so events arrive in no
 particular order. Every flow is built to come out ordered anyway: state advances by rank and never
@@ -46,6 +59,7 @@ src/
 public/
   shared/          styling and helpers every page uses
   ui/              the pages — transfers, orders, feeds, and a detail page for each
+    v2/            intents v2's orders, served under /v2
 ```
 
 ## Configuration
@@ -124,7 +138,7 @@ node admin.js rebuild <reader>                    # empty a reader's tables, rep
 
 - **Rewind** re-reads a chain. Events already stored are skipped, so it is free to overshoot; events
   found for the first time reach every reader as new.
-- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `transfers`, `feeds`) — for a new leg
+- **Rebuild** re-applies the store to one reader (`ingest`, `intents`, `intents-v2`, `transfers`, `feeds`) — for a new leg
   or changed flow logic over events already stored. Its tables are emptied and refilled; anything a
   poller wrote is re-fetched as the rows come back.
 
@@ -187,8 +201,8 @@ pnpm dev ingest             # or: intents, transfers, feeds, ui
 
 `pnpm dev <domain>` rebuilds and runs one container's worth — they are separate processes, so run
 ingest alongside whichever domain you are working on, and `ui` to see its pages. Locally the apps
-run on ports of your choosing, so point the UI at them with `TRANSFERS_API`, `ORDERS_API` and
-`FEEDS_API` in `.env`.
+run on ports of your choosing, so point the UI at them with `TRANSFERS_API`, `ORDERS_API`,
+`ORDERS_V2_API` and `FEEDS_API` in `.env`.
 
 ## Notes on the NTT rail
 
@@ -232,6 +246,67 @@ status — and `/api/transfers/:id` returns that view beside the rail's own row.
 
 Stages: NTT `published → received → redeemed | queued`; a deposit `deposited → published →
 redeemed`; a withdrawal `requested → received → signed → withdrawn → confirmed`.
+
+## Intents v2 (the intents-v2 app)
+
+Orders the `IntentDispatcher` publishes on Hydration, the `IntentForwarder` deposits on Ethereum, and
+the `IntentRouter` swaps and pays out on NEAR (`INTENT_V2` in `deployments.ts`; a blank address is not
+watched). The router is read through its own history, for its NEP-297 `intent_signed` events.
+
+Three things, related through the terms' `auth_path`:
+
+```
+trade (auth_path) ─┬─ orders   intent_v2_orders, keyed on seq
+                   └─ payouts  intent_v2_payouts, keyed on the signing log — deliveries, refunds
+```
+
+- **A trade** is one set of terms, the user's whole cross-chain swap: a Swap is a trade of one order,
+  a Twap of several. It is not a table — its fields are the terms every order of it carries, and the
+  rest is counted over its orders and payouts. Its status: `refunded` once a refund is signed;
+  `completed` once every planned order is swapped (with no plan to count against, once the deadline
+  has passed) and a delivery was signed after the last swap; `expired` past the deadline with nothing
+  paid out; else `pending`. The detail read keeps a trade whose `A` still holds output `pending`.
+- **An order** is keyed on its `seq`, the NTT message id of its transfer — the `transferSequence` the
+  forwarder names and the `seq` the router's swap names. Stages: `published → forwarded → swapped`.
+  `OrderPublished` carries the terms in full, so each row keeps them as emitted beside the fields
+  worth a column. The swap keeps 1Click's deposit account, which is what its explorer finds the
+  execution by.
+- **A payout** is the terms', not one order's: output builds up in `A` and is delivered once it
+  reaches `minDelivery`, so one delivery can carry several orders. Only what the terms do not say is
+  kept — the amount, and the signing transaction. A withdrawal is then paired with its transaction
+  on the asset's own chain by a poller: the bridge pays out there and nothing on NEAR names it, so
+  the recipient's history on that chain's explorer is read — the first payment after the delivery was
+  signed, for no more than was withdrawn. Each destination it can pair is one entry in `payouts.ts`:
+  which recipients an explorer can see, and how their payments are read. Recipients it cannot see,
+  like shielded ones, stay unpaired.
+- **What `A` holds** — swapped, not yet paid out — is no event, so a trade's detail read takes it
+  live: `A` derived once from `v1.signer` (router, auth path) and cached, its destination balance read
+  from `intents.near` on every request. The trade page refetches on each of its updates, and twice more
+  after a swap, which is signed before 1Click's fill lands.
+- **How many orders were planned** comes from the ICE intent itself. Ingest keeps an
+  `Intent.IntentSubmitted` whose forward is the dispatcher, as the dispatcher's own JSON event — the
+  same pass that reads its logs, since the event carries the dispatcher's address in its bytes — and
+  `intent_v2_ice` keeps, per ICE intent id, the trade it funds (`auth_path` of the forwarded
+  terms) and its planned orders: a swap one, a DCA its budget over its amount per trade, none for a
+  DCA without a budget. A direct `dispatch` has no intent and no count.
+- **The asset sold** comes resolved: `asset_in` as the Hydration asset id, `asset_in_meta` its symbol,
+  decimals and icon.
+
+```
+GET /api/trades?status=&address=&limit=&offset=  # one row per auth_path
+GET /api/trades/:authPath                         # { trade, orders, payouts }; trade.held, trade.planned
+GET /api/orders?state=&authPath=&publishedAfter=&address=&limit=&offset=
+GET /api/orders/:seq
+GET /api/terms?deadlineAfter=<unix s>             # one row per auth_path: terms, deadline, newest order
+```
+
+`/api/terms` is the NEAR router bot's work list: it reads it at startup and follows `/api/events`
+after. Whether a set of terms still has work is `A`'s balances on NEAR, which scan does not read, so
+the caller picks how far past their deadline terms stay listed.
+
+The UI serves these under `/api/v2`. The pages: `/v2/trades` lists trades, `/v2/trade/<auth_path>`
+shows one — its terms, every order with its 1Click execution, every payout with where it landed — and
+`/v2/order/<seq>` one order's route, ending on the destination chain.
 
 ## Oracles (the feeds app)
 

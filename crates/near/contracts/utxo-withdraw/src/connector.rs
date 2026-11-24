@@ -1,5 +1,6 @@
-//! Omni's UTXO connector (`satoshi-bridge`, deployed `0.9.7-rc.3`, commit `d2140eca`): what this
-//! contract reads from it, and the `Withdraw` message it builds for it.
+//! Omni's UTXO connector (`satoshi-bridge` — Zcash `0.9.9` at `37be7c6d`, Bitcoin `0.9.6` at
+//! `7740fae0`, read 2026-11-24): what this contract reads from it, and the `Withdraw` message it
+//! builds for it. Both take the same message.
 //!
 //! The connector validates every withdrawal itself — inputs must be coins it holds, valued from its
 //! own records; outputs only to the target or its change address; exactly one user output; the fee
@@ -29,6 +30,9 @@ pub struct ConnectorConfig {
     pub change_address: Option<String>,
     pub min_change_amount: U128,
     pub min_withdraw_amount: U128,
+    /// The miner fee range the connector accepts.
+    pub min_btc_gas_fee: Option<U128>,
+    pub max_btc_gas_fee: Option<U128>,
 }
 
 /// A connector coin, as `list_utxos` returns it. Its `tx_bytes` — the source transaction, up to

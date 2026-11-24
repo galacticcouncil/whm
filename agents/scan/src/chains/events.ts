@@ -1,11 +1,11 @@
-import type { NearEvent } from "../types";
+import type { JsonEvent } from "../types";
 
 /**
  * The events the Solana watcher stores.
  *
  * Solana's NTT logs nothing of its own, so the watcher decodes what the transaction did, instruction
  * by instruction, into these, and stores them as NEAR's are: JSON, under
- * `keccak256("<standard>:<event>")`. A leg reads them through `near`, which names an event of that
+ * `keccak256("<standard>:<event>")`. A leg reads them through `json`, which names an event of that
  * shape whichever chain wrote it.
  */
 
@@ -13,7 +13,7 @@ import type { NearEvent } from "../types";
  * A Wormhole publish, in NEAR's core's own shape, so the one leg that reads NEAR's reads all three.
  * Stored with the emitter as its second topic, so a watch entry's topic filter keeps only ours.
  */
-export const PUBLISH: NearEvent = { standard: "wormhole", event: "publish" };
+export const PUBLISH: JsonEvent = { standard: "wormhole", event: "publish" };
 
 export interface Publish {
   /** The payload, hex without `0x`. */
@@ -32,7 +32,7 @@ export interface Publish {
 }
 
 /** A VAA verified by an NTT manager: attested, not yet released. */
-export const NTT_RECEIVED: NearEvent = { standard: "ntt", event: "received" };
+export const NTT_RECEIVED: JsonEvent = { standard: "ntt", event: "received" };
 
 export interface NttReceived {
   digest: `0x${string}`;
@@ -45,10 +45,10 @@ export interface NttReceived {
 }
 
 /** Released to the recipient. */
-export const NTT_RELEASED: NearEvent = { standard: "ntt", event: "released" };
+export const NTT_RELEASED: JsonEvent = { standard: "ntt", event: "released" };
 
 /** Held back by the inbound rate limit; a later release frees it. */
-export const NTT_QUEUED: NearEvent = { standard: "ntt", event: "queued" };
+export const NTT_QUEUED: JsonEvent = { standard: "ntt", event: "queued" };
 
 /** A release or a hold: by its digest where the transaction names it, else by its inbox item. */
 export interface NttSettled {

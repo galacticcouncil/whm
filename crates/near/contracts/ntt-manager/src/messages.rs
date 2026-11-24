@@ -1,6 +1,9 @@
 //! NTT wire format — byte-for-byte `TransceiverStructs.sol`, so the Hydration side parses what this
 //! contract publishes, and this contract parses what Hydration publishes, with neither changed.
 
+pub use near_common::codec::CodecError;
+use near_common::codec::Reader;
+
 use crate::trimmed::TrimmedAmount;
 
 /// The Wormhole transceiver's payload prefix.
@@ -8,14 +11,6 @@ pub const WH_TRANSCEIVER_PAYLOAD_PREFIX: [u8; 4] = [0x99, 0x45, 0xFF, 0x10];
 
 /// The `NativeTokenTransfer` prefix, inside the manager's message.
 pub const NTT_PREFIX: [u8; 4] = [0x99, 0x4E, 0x54, 0x54];
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CodecError {
-    Truncated,
-    TrailingBytes,
-    InvalidPrefix([u8; 4]),
-    PayloadTooLong,
-}
 
 /// Emitted and received by the transceiver; wraps the manager's message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,73 +147,6 @@ fn put_prefixed(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), CodecError> {
     Ok(())
 }
 
-/// Big-endian cursor. Every read is checked; `finish` rejects trailing bytes, as `checkLength`
-/// does on EVM.
-pub(crate) struct Reader<'a> {
-    buf: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Reader<'a> {
-    pub(crate) fn new(buf: &'a [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
-
-    pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], CodecError> {
-        let end = self.pos.checked_add(n).ok_or(CodecError::Truncated)?;
-        let slice = self.buf.get(self.pos..end).ok_or(CodecError::Truncated)?;
-        self.pos = end;
-        Ok(slice)
-    }
-
-    pub(crate) fn u8(&mut self) -> Result<u8, CodecError> {
-        Ok(self.take(1)?[0])
-    }
-
-    pub(crate) fn u16(&mut self) -> Result<u16, CodecError> {
-        Ok(u16::from_be_bytes(self.take(2)?.try_into().unwrap()))
-    }
-
-    pub(crate) fn u32(&mut self) -> Result<u32, CodecError> {
-        Ok(u32::from_be_bytes(self.take(4)?.try_into().unwrap()))
-    }
-
-    pub(crate) fn u64(&mut self) -> Result<u64, CodecError> {
-        Ok(u64::from_be_bytes(self.take(8)?.try_into().unwrap()))
-    }
-
-    pub(crate) fn bytes4(&mut self) -> Result<[u8; 4], CodecError> {
-        Ok(self.take(4)?.try_into().unwrap())
-    }
-
-    pub(crate) fn bytes32(&mut self) -> Result<[u8; 32], CodecError> {
-        Ok(self.take(32)?.try_into().unwrap())
-    }
-
-    fn prefixed(&mut self) -> Result<Vec<u8>, CodecError> {
-        let len = self.u16()? as usize;
-        Ok(self.take(len)?.to_vec())
-    }
-
-    pub(crate) fn rest(&mut self) -> &'a [u8] {
-        let rest = &self.buf[self.pos..];
-        self.pos = self.buf.len();
-        rest
-    }
-
-    fn is_empty(&self) -> bool {
-        self.pos == self.buf.len()
-    }
-
-    fn finish(&self) -> Result<(), CodecError> {
-        if self.is_empty() {
-            Ok(())
-        } else {
-            Err(CodecError::TrailingBytes)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +180,16 @@ mod tests {
         assert_eq!(ntt.encode().unwrap(), mm.payload, "{label}: native token transfer");
 
         (vaa, tm, mm, ntt)
+    }
+
+    #[test]
+    fn parses_the_hydration_header() {
+        let vaa = Vaa::parse(&fixture("hydration-prime-to-solana")).unwrap();
+        // Fixture id: 73/0000…4e7b1e55d2354d4dc6abd876096dc201de0541d1/113
+        assert_eq!(vaa.guardian_set_index, 7);
+        assert_eq!(vaa.emitter_chain, 73);
+        assert_eq!(hex::encode(&vaa.emitter_address[12..]), "4e7b1e55d2354d4dc6abd876096dc201de0541d1");
+        assert_eq!(vaa.sequence, 113);
     }
 
     #[test]

@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Trade · Hydration scan</title>
+    <script>
+      try {
+        var t = localStorage.getItem("explorer-theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <link rel="preload" href="/fonts/GazpachoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/GeistMonoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/shared/style.css" />
+  </head>
+  <body>
+    <main class="wrap" id="main">
+      <div class="panel"><div class="table-error">loading…</div></div>
+    </main>
+
+    <script type="module">
+      import {
+        NAV,
+        addrLink,
+        agoLong,
+        asset,
+        assetIcon,
+        at,
+        badge,
+        chainIcon,
+        copyBtn,
+        destTxLink,
+        esc,
+        eventLink,
+        json,
+        kv,
+        live,
+        nearIntentsUrl,
+        pill,
+        short,
+        statusBadge,
+        topbar,
+      } from "/shared/app.js";
+
+      topbar("scan", NAV);
+
+      /** Intents v2, through the UI's proxy. */
+      const API = "/api/v2";
+
+      // `/v2/trade/<auth_path>`.
+      const path = decodeURIComponent(location.pathname.split("/")[3] ?? "").toLowerCase();
+      if (!path) location.replace("/v2/trades");
+
+      const main = document.getElementById("main");
+      const dim = (v) => `<span class="dim">${esc(v)}</span>`;
+
+      /** What A is credited and sells — the rail's unit. */
+      const ETH = { symbol: "ETH", decimals: 18 };
+
+      /** The destinations the dispatcher prices, by intents ledger id — as on the list. */
+      const DEST = {
+        "nep141:zec.omft.near": { symbol: "ZEC", decimals: 8, chain: "zcash", name: "Zcash" },
+        "nep141:wrap.near": { symbol: "NEAR", decimals: 24, chain: "near", name: "NEAR" },
+        "nep141:nbtc.bridge.near": { symbol: "BTC", decimals: 8, chain: "bitcoin", name: "Bitcoin" },
+      };
+      /** Where a destination chain's payout transaction is shown. */
+      const DEST_TX = { zcash: "zec", bitcoin: "btc" };
+
+      /** A trade's id as the list links it: its auth path's first four bytes. */
+      const tradeId = (authPath) => authPath.slice(0, 10);
+
+      const when = (ms) =>
+        ms ? `<span class="mono muted" title="${esc(at(ms))}">${agoLong(ms)}</span>` : dim("—");
+
+      const sum = (xs) => xs.reduce((a, x) => a + BigInt(x ?? 0), 0n);
+
+      /**
+       * How many of the trade's orders are swapped — out of those its ICE intent was given, when it
+       * came through ICE — and how many are still on their way.
+       */
+      function execution(trade) {
+        const flight = trade.order_count - trade.swapped;
+        const done = trade.planned ? `${trade.swapped} / ${trade.planned} swapped` : `${trade.swapped} swapped`;
+        return `${done}${flight > 0 ? ` <span class="dim">· ${flight} in flight</span>` : ""}`;
+      }
+
+      /**
+       * Where the trade's output stands, from its payouts and what `A` still holds.
+       *
+       * @returns `onNear` — paid on NEAR, to an intents account or as native NEAR, so the delivery is
+       *   what arrived — `landed` — every delivery found on its chain, or paid on NEAR — what `A`
+       *   holds, and the delivery's one-line status.
+       */
+      function delivery(trade, payouts) {
+        const d = DEST[trade.destination_asset];
+        const onNear = trade.recipient_kind === 1 || d?.chain === "near";
+        const delivered = payouts.filter((p) => p.state === "delivered");
+        const refunded = payouts.some((p) => p.state === "refunded");
+        const landed = onNear || delivered.every((p) => p.dest_tx);
+        const held = BigInt(trade.held ?? 0);
+        let text;
+        if (refunded) text = "Refunded to Ethereum";
+        else if (!delivered.length) text = "Awaiting payout";
+        else if (trade.recipient_kind === 1) text = "Transferred on NEAR";
+        else text = `${landed ? "Withdrawn" : "Withdrawing"} to ${d?.name ?? "its chain"}`;
+        return { onNear, delivered, landed, held, text };
+      }
+
+      /**
+       * The trade at a glance: what was sold, what arrived — or, until a payout, what `A` holds — what
+       * the ETH came to, how far the swaps are, and where delivery stands.
+       */
+      function status(trade, payouts) {
+        const d = DEST[trade.destination_asset];
+        const chain = trade.recipient_kind === 1 ? "near" : (d?.chain ?? null);
+        const out = (raw) => asset(String(raw), d, trade.destination_asset ?? "", chainIcon(chain));
+        const s = delivery(trade, payouts);
+
+        // Received: what reached the recipient's chain; until a withdrawal is found there, what left A.
+        const paid =
+          s.onNear || !s.landed
+            ? sum(s.delivered.map((p) => p.amount))
+            : sum(s.delivered.map((p) => p.dest_amount));
+        const right = s.delivered.length
+          ? `<div class="ts-k">Received</div><div class="ts-v">${out(paid)}</div>${
+              s.held > 0n ? `<div class="ts-note">+ ${out(s.held)} held · awaiting payout</div>` : ""
+            }`
+          : s.held > 0n
+            ? `<div class="ts-k">Held · awaiting payout</div><div class="ts-v">${out(s.held)}</div>`
+            : `<div class="ts-k">Received</div><div class="ts-v">${dim("nothing yet")}</div>`;
+
+        return `
+          <div class="trade-status">
+            <div class="ts-top">
+              <div><div class="ts-k">Sold</div><div class="ts-v">${sold(trade)}</div></div>
+              <div>${right}</div>
+            </div>
+            <div class="ts-foot">
+              <div><div class="ts-k">Total spent</div><div>${asset(trade.sold, ETH, "", chainIcon("ethereum"))}</div></div>
+              <div><div class="ts-k">Execution</div><div>${execution(trade)}</div></div>
+              <div><div class="ts-k">Delivery</div><div>${esc(s.text)}</div></div>
+            </div>
+          </div>`;
+      }
+
+      /**
+       * Every order of the trade, oldest first: its own route on its own page, and its swap's 1Click
+       * execution once the router has signed it.
+       */
+      function ordersPanel(trade, orders) {
+        const rows = orders
+          .map(
+            (o) => `<tr>
+              <td class="mono"><a class="hash" href="/v2/order/${encodeURIComponent(o.seq)}">#${esc(o.seq)}</a></td>
+              <td>${when(o.published?.blockTimestamp)}</td>
+              <td>${asset(o.forwarded_amount ?? o.amount, ETH, "", chainIcon("ethereum"))}</td>
+              <td>${
+                o.swap_deposit
+                  ? `<a class="link" href="${nearIntentsUrl(o.swap_deposit)}" target="_blank" rel="noreferrer">1Click execution ↗</a>`
+                  : dim("—")
+              }</td>
+              <td class="r">${badge(o.state)}</td>
+            </tr>`,
+          )
+          .join("");
+        const all = trade.order_count > 0 && trade.swapped === (trade.planned ?? trade.order_count);
+        return `
+          <div class="panel">
+            <div class="panel-head"><span class="t">Orders</span><span class="note ts-count">${execution(trade)}${
+              all ? statusBadge("completed", { compact: true }) : ""
+            }</span></div>
+            <table class="tbl">
+              <thead><tr><th>Order</th><th>Time</th><th>ETH</th><th>Swap</th><th class="r">Status</th></tr></thead>
+              <tbody>${rows || `<tr><td class="table-error" colspan="5">none yet</td></tr>`}</tbody>
+            </table>
+          </div>`;
+      }
+
+      /**
+       * Every payout, oldest first: what left `A`, and — for a withdrawal — what landed on the
+       * destination chain once found, the difference being the bridge's fee, with a link to its
+       * transaction there. A refund goes back to Ethereum.
+       */
+      function payouts(trade, list) {
+        const d = DEST[trade.destination_asset];
+        const chain = trade.recipient_kind === 1 ? "near" : (d?.chain ?? null);
+        const offNear = chain && chain !== "near";
+        const rows = list
+          .map((p) => {
+            const refund = p.state === "refunded";
+            const amount = refund ? asset(p.amount, ETH) : asset(p.amount, d, trade.destination_asset ?? "", chainIcon(chain));
+            const landed =
+              !refund && offNear
+                ? p.dest_tx
+                  ? `${asset(p.dest_amount, d, trade.destination_asset ?? "", chainIcon(chain))} ${destTxLink(p.dest_tx, null, DEST_TX[chain] ?? chain, "↗")}`
+                  : dim("sending")
+                : dim("—");
+            return `<tr>
+              <td>${when(p.signed?.blockTimestamp)}</td>
+              <td>${badge(p.state)}</td>
+              <td>${amount}</td>
+              <td>${landed}</td>
+              <td class="r">${eventLink(p.signed)}</td>
+            </tr>`;
+          })
+          .join("");
+        return `
+          <div class="panel">
+            <div class="panel-head"><span class="t">Payouts</span><span class="note">Batch output for one or more orders.</span></div>
+            <table class="tbl">
+              <thead><tr><th>Time</th><th>Kind</th><th>Amount</th><th>Received</th><th class="r">NEAR tx</th></tr></thead>
+              <tbody>${rows || `<tr><td class="table-error" colspan="5">none yet</td></tr>`}</tbody>
+            </table>
+          </div>`;
+      }
+
+      /** What the trade sold: the Hydration asset its ICE orders sold, else the ETH itself. */
+      function sold(trade) {
+        if (trade.asset_in == null) return asset(trade.sold, ETH, "", chainIcon("ethereum"));
+        const meta = trade.asset_in_meta;
+        return asset(trade.amount_in, meta, `#${trade.asset_in}`, assetIcon(meta?.icon ?? trade.asset_in));
+      }
+
+      function render(data) {
+        if (!data) {
+          main.innerHTML = `<div class="panel"><div class="table-error">no trade ${esc(short(path, 10, 8))}</div></div>`;
+          return;
+        }
+        const { trade, orders, payouts: list } = data;
+        const d = DEST[trade.destination_asset];
+        const chain = trade.recipient_kind === 1 ? "near" : (d?.chain ?? null);
+        const deadline = trade.deadline ? Number(trade.deadline) * 1000 : null;
+        const twap = (trade.planned ?? trade.order_count) > 1;
+        document.title = `Trade ${tradeId(trade.auth_path)} · Hydration scan`;
+
+        const terms = [
+          kv("type", twap ? pill("Twap", "var(--lavender)") : pill("Swap", "var(--sky)")),
+          kv("buys", esc(d?.symbol ?? trade.destination_asset ?? "—")),
+          kv("recipient", addrLink(trade.recipient, chain)),
+          kv("delivery method", trade.recipient_kind === 1 ? "Intents account on NEAR" : `Withdrawal to ${esc(d?.name ?? "its chain")}`),
+          kv("owner", addrLink(trade.owner, "hydration")),
+          kv("refund to", addrLink(trade.refund_to, "ethereum")),
+          kv("deadline", deadline ? esc(at(deadline)) : dim("—")),
+          trade.settle_at ? kv("closed · settles", esc(at(Number(trade.settle_at) * 1000))) : "",
+          kv("authorization path", `<span class="mono">${esc(short(trade.auth_path, 10, 8))}</span>${copyBtn(trade.auth_path)}`),
+          kv("terms", `<span class="mono">${esc(short(trade.terms, 10, 8))}</span>${copyBtn(trade.terms)}`),
+        ].join("");
+
+        main.innerHTML = `
+          <h1 class="page-title">Trade ${esc(tradeId(trade.auth_path))} <span class="sub">${statusBadge(trade.status)}</span></h1>
+          ${status(trade, list)}
+          <div class="panel">
+            <div class="panel-head"><span class="t">Terms</span></div>
+            ${terms}
+          </div>
+          ${ordersPanel(trade, orders)}
+          ${payouts(trade, list)}`;
+      }
+
+      async function load() {
+        render(await json(`${API}/trades/${encodeURIComponent(path)}`));
+      }
+
+      // A swap is signed before 1Click fills it, and the fill lands in A seconds later: read the held
+      // balance again once it has had time to arrive.
+      const AFTER_SWAP_MS = [15_000, 45_000];
+      live(
+        "orders-v2,payouts-v2",
+        (u) => {
+          if (u.record?.auth_path !== path) return;
+          load();
+          if (u.record?.state === "swapped") for (const ms of AFTER_SWAP_MS) setTimeout(load, ms);
+        },
+        load,
+      );
+    </script>
+  </body>
+</html>

@@ -4,7 +4,7 @@ import { base58 } from "@scure/base";
 
 import { parseNttTransfer } from "../../ingest/payload";
 import { vaaId } from "../../ingest/vaa";
-import type { NearEvent } from "../../types";
+import type { JsonEvent } from "../../types";
 import {
   NTT_QUEUED,
   NTT_RECEIVED,
@@ -52,7 +52,7 @@ export interface Decoded {
   /** The program it is stored under: the core for a publish, the manager for the rest. */
   program: string;
   index: number;
-  event: NearEvent;
+  event: JsonEvent;
   data: Publish | NttReceived | NttSettled;
   topics: string[];
 }
@@ -135,7 +135,7 @@ export function decode(
   core: string,
   programs: ReadonlySet<string>,
   vaas: Map<string, Uint8Array>,
-  topic: (e: NearEvent) => string,
+  topic: (e: JsonEvent) => string,
 ): Decoded[] {
   const out: Decoded[] = [];
   const sequences = (tx.meta.logMessages ?? [])

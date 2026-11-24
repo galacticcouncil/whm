@@ -5,6 +5,7 @@
 export const entryPoints = {
   "relayer/app": "src/apps/relayer/app.ts",
   "quoter/app": "src/apps/quoter/app.ts",
+  "router/app": "src/apps/router/app.ts",
 };
 
 /**

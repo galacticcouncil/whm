@@ -3,6 +3,7 @@ import { createClient, PolkadotClient } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { bytesToHex } from "viem";
 
+import { jsonTopic } from "../../abi";
 import { liveIntervalMs } from "../../config";
 import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../../db";
 import log from "../../logger";
@@ -11,7 +12,7 @@ import { BoundedQueue } from "../../utils";
 import { cursorId } from "../cursor";
 import { Recovery } from "../recovery";
 
-import { PROGRESS_LOG_MS, RANGE, SYSTEM_EVENTS_KEY } from "./consts";
+import { ICE_SUBMITTED, PROGRESS_LOG_MS, RANGE, SYSTEM_EVENTS_KEY } from "./consts";
 import type { SubstrateChain } from "./types";
 
 const FINALIZED_STALE_MS = 60_000;
@@ -28,7 +29,8 @@ interface IndexedLog {
   index: number;
   address: string;
   topics: `0x${string}`[];
-  data: `0x${string}`;
+  /** A log's data as hex; a pallet event's payload as JSON. */
+  data: string;
   /** The ethereum transaction this log belongs to, where the call came in as one. */
   txHash?: string;
   /** Who sent that transaction. Free here, unlike on an EVM chain. */
@@ -337,8 +339,8 @@ export class SubstrateWatcher {
   /**
    * One block from its raw events. Nearly every block has nothing for us, so the events are decoded
    * only when a watched address appears in their bytes — an `EVM.Log` carries its emitter as the
-   * raw 20 bytes, so a block without them cannot hold one. A match on other bytes only costs a
-   * decode.
+   * raw 20 bytes, and an ICE intent its forward contract, so a block without them cannot hold one. A
+   * match on other bytes only costs a decode.
    *
    * @param n The block.
    * @param at Its hash.
@@ -396,15 +398,26 @@ export class SubstrateWatcher {
         continue;
       }
 
+      const phase = records[i].phase;
+      const extrinsic = phase?.type === "ApplyExtrinsic" ? Number(phase.value) : undefined;
+
+      if (evt.type === "Intent" && evt.value.type === "IntentSubmitted") {
+        const entry = this.iceSubmitted(evt.value.value as IceSubmitted, i, extrinsic);
+        if (entry) {
+          out.push(entry);
+          awaiting.push(entry);
+        }
+        continue;
+      }
+
       if (evt.type !== "EVM" || evt.value.type !== "Log") continue;
       const { log } = evt.value.value as EvmPayload;
       const address = (log.address as string).toLowerCase();
       if (!this.targets.has(address)) continue;
 
-      const phase = records[i].phase;
       const entry: IndexedLog = {
         index: i,
-        extrinsic: phase?.type === "ApplyExtrinsic" ? Number(phase.value) : undefined,
+        extrinsic,
         address,
         topics: log.topics.map((t) => t as `0x${string}`),
         data: bytesToHex(log.data),
@@ -413,6 +426,38 @@ export class SubstrateWatcher {
       awaiting.push(entry);
     }
     return out;
+  }
+
+  /**
+   * An ICE intent submitted with a forward to a watched contract — kept as that contract's JSON
+   * event, the intent's terms in full. Submitted through the dispatch precompile it runs inside an
+   * ethereum call, whose `Ethereum.Executed` then names its transaction, as for a log.
+   *
+   * @param e The event.
+   * @param index Its index in the block.
+   * @param extrinsic The extrinsic it ran in, if any.
+   * @returns The event, or null when it forwards nowhere we watch.
+   */
+  private iceSubmitted(e: IceSubmitted, index: number, extrinsic: number | undefined): IndexedLog | null {
+    const forward = e.intent.on_resolved;
+    if (forward?.type !== "Forward") return null;
+    const address = asHex(forward.value.contract).toLowerCase();
+    if (!this.targets.has(address)) return null;
+    const { type: kind, value: d } = e.intent.data;
+    const data = {
+      id: e.id.toString(),
+      kind,
+      amount_in: d.amount_in == null ? null : String(d.amount_in),
+      budget: d.budget == null ? null : String(d.budget),
+      forward_data: asHex(forward.value.data),
+    };
+    return {
+      index,
+      extrinsic,
+      address,
+      topics: [jsonTopic(ICE_SUBMITTED)],
+      data: JSON.stringify(data),
+    };
   }
 }
 
@@ -454,6 +499,20 @@ function withTimeout<T>(p: Promise<T>, what: string): Promise<T> {
 type RawRecord = {
   phase?: { type: string; value?: unknown };
   event: { type: string; value: { type: string; value: unknown } };
+};
+
+/** A byte field as the runtime's codecs hand it over: hex already, raw bytes, or a binary object. */
+type Bytes = string | Uint8Array | { asHex(): string };
+const asHex = (v: Bytes): string =>
+  typeof v === "string" ? v : v instanceof Uint8Array ? bytesToHex(v) : v.asHex();
+
+/** `Intent.IntentSubmitted`, as far as it is read: what its trade's planned orders and terms need. */
+type IceSubmitted = {
+  id: bigint;
+  intent: {
+    data: { type: string; value: { amount_in?: bigint; budget?: bigint } };
+    on_resolved?: { type: string; value: { contract: Bytes; data: Bytes } };
+  };
 };
 
 /** Frontier's receipt for one ethereum call, emitted after the logs it covers. */

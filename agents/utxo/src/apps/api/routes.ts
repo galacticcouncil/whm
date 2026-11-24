@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { JsonRpcProvider } from "near-api-js";
 
 import { depositAddress } from "../../near/deposit";
+import type { UtxoChain } from "../../chains";
 import type { Deriver } from "../../near/derive";
 
 /** A Hydration EVM address, or the same left-padded to 32 bytes — what `TransferMsg.recipient` takes. */
@@ -22,7 +23,7 @@ const RECIPIENT = /^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
  * @param derivers One deriver per chain, by route key.
  * @returns Route registration.
  */
-export function routes(provider: JsonRpcProvider, derivers: Record<string, Deriver>) {
+export function routes(provider: JsonRpcProvider, derivers: Record<string, Deriver<UtxoChain>>) {
   return (app: FastifyInstance): void => {
     app.get<{ Params: { chain: string; address: string } }>(
       "/api/withdraw/:chain/:address",

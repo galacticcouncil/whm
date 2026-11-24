@@ -4,7 +4,7 @@ import { pad, type Address } from "viem";
  * NTT transceiver payload parsing. Shared by every app that reads an NTT settlement, whichever
  * direction it travels.
  *
- * TransceiverMessage wire format, as far as the manager's message id:
+ * TransceiverMessage wire format, as far as the transfer's own payload:
  *
  *   offset  size  field
  *        0     4  prefix
@@ -17,9 +17,14 @@ import { pad, type Address } from "viem";
  *      136     4  NTT prefix
  *      140     1  decimals
  *      141     8  amount, trimmed to `decimals`
+ *      149    32  sourceToken
+ *      181    32  to
+ *      213     2  toChain
+ *      215     2  payload length   — only when the transfer carries one
+ *      217     n  payload
  *
  * `id` is `bytes32(uint256(sequence))`, so the uint64 sits in its last 8 bytes. This mirrors
- * `NttPayload.settlementOf` in contracts/src/ntt, which is what IntentReceiver re-reads on-chain.
+ * `NttPayload.settlementOf` / `transferOf` in contracts/src/ntt, which the receivers re-read on-chain.
  */
 
 /** Only transfers carry this prefix; the same emitter also publishes init/peer broadcasts. */
@@ -27,8 +32,15 @@ export const NTT_TRANSFER_PREFIX = "9945ff10";
 
 const RECIPIENT_MANAGER_OFFSET = 36;
 const SEQUENCE_OFFSET = 70 + 24;
+const SENDER_OFFSET = 102;
+const TRANSFER_LENGTH_OFFSET = 134;
 const DECIMALS_OFFSET = 140;
 const AMOUNT_OFFSET = 141;
+const TO_OFFSET = 181;
+const PAYLOAD_LENGTH_OFFSET = 215;
+
+/** A transfer's length without a payload: prefix, decimals, amount, sourceToken, to, toChain. */
+const BARE_TRANSFER_LENGTH = 79;
 
 /**
  * Whether a transceiver message is a transfer rather than a setup broadcast.
@@ -95,3 +107,35 @@ export function recipientManager(payload: Buffer): string {
   return payload.subarray(RECIPIENT_MANAGER_OFFSET, RECIPIENT_MANAGER_OFFSET + 32).toString("hex");
 }
 
+/**
+ * Who called `transfer` on the source manager.
+ *
+ * @param payload Raw transceiver payload bytes.
+ * @returns 32 bytes as lowercase hex, no `0x`.
+ */
+export function transferSender(payload: Buffer): string {
+  return payload.subarray(SENDER_OFFSET, SENDER_OFFSET + 32).toString("hex");
+}
+
+/**
+ * The transfer's recipient on the destination chain.
+ *
+ * @param payload Raw transceiver payload bytes.
+ * @returns 32 bytes as lowercase hex, no `0x`.
+ */
+export function transferTo(payload: Buffer): string {
+  return payload.subarray(TO_OFFSET, TO_OFFSET + 32).toString("hex");
+}
+
+/**
+ * The transfer's own payload. NTT encodes it only when non-empty, so a transfer no longer than its
+ * fixed fields carries none.
+ *
+ * @param payload Raw transceiver payload bytes.
+ * @returns The payload; empty when the transfer carries none.
+ */
+export function transferPayload(payload: Buffer): Buffer {
+  if (payload.readUInt16BE(TRANSFER_LENGTH_OFFSET) <= BARE_TRANSFER_LENGTH) return Buffer.alloc(0);
+  const start = PAYLOAD_LENGTH_OFFSET + 2;
+  return payload.subarray(start, start + payload.readUInt16BE(PAYLOAD_LENGTH_OFFSET));
+}

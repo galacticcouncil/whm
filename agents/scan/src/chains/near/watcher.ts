@@ -1,4 +1,4 @@
-import { nearTopic } from "../../abi";
+import { jsonTopic } from "../../abi";
 import { applyRewinds, insertEvents, loadCursor, saveCursor, type RawEvent } from "../../db";
 import log from "../../logger";
 import type { Watch } from "../../types";
@@ -181,7 +181,7 @@ export class NearWatcher {
         address: l.executor,
         blockNumber: BigInt(l.blockHeight),
         blockTimestamp: l.blockTimestamp,
-        topics: [nearTopic(l)],
+        topics: [jsonTopic(l)],
         data: JSON.stringify(l.data),
         sender: l.predecessor,
       }));

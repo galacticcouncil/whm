@@ -46,7 +46,7 @@
       topbar("scan", NAV);
 
       /** This section's app, through the UI's proxy. */
-      const API = "/api/feeds";
+      const API = "/api";
 
       const LIMIT = 25;
       const RANGES = [
@@ -194,7 +194,6 @@
           pending = setTimeout(load, 500);
         },
         load,
-        API,
       );
     </script>
   </body>

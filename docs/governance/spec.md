@@ -754,8 +754,8 @@ Run and record the Hydration deployment before any destination migration:
 
 ```text
 pnpm fork:hydration
-pnpm migrate:governance-hydration:fork
-pnpm migrate:governance-hydration
+pnpm migrate:governance-hydration fork
+pnpm migrate:governance-hydration prod
 ```
 
 Then copy the dispatcher proxy from
@@ -764,8 +764,8 @@ Then copy the dispatcher proxy from
 
 ```text
 pnpm fork:robinhood
-pnpm migrate:governance-robinhood:fork
-pnpm migrate:governance-robinhood
+pnpm migrate:governance-robinhood fork
+pnpm migrate:governance-robinhood prod
 ```
 
 Robinhood mainnet uses EVM chain ID `4663`, Wormhole chain ID `72`, and Wormhole core

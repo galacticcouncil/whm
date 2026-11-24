@@ -4,7 +4,7 @@ import type { ConnectorConfig } from "../../chains";
 import log from "../../logger";
 import { view } from "../../near/client";
 import { listCoins, pickCoin, type Coin } from "../../near/coins";
-import type { Deriver } from "../../near/derive";
+import type { Deriver, Params } from "../../near/derive";
 
 import type { Store, Withdrawal } from "./store";
 import { balanceOf, ensureAccount, withdraw } from "./withdraw";
@@ -109,8 +109,13 @@ export class WithdrawWorker {
     const held = await balanceOf(this.provider, params.token, account);
     if (held < min) return;
 
+    // Read now, not at startup: the owner may have changed the rate since.
+    const { fee_rate: feeRate } = await view<Params>(this.provider, chain.contract, "get_params");
+    // A rate under the market's would leave the transaction waiting; the balance waits here instead.
+    if (chain.ready && !(await chain.ready(feeRate))) return;
+
     if (await ensureAccount(this.account, account)) log.info(`[${chain.name} ${account}] created`);
-    const coin = pickCoin(await coins(), config, held, chain.minerFee(config));
+    const coin = pickCoin(await coins(), config, held, chain.minerFee(config, feeRate));
     const tx = await withdraw(this.account, chain.contract, records[0].address, coin);
 
     // A failed receipt anywhere refunds `A`; only a balance that left means the connector has it.

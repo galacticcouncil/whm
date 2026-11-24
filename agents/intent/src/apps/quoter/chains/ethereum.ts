@@ -12,7 +12,7 @@ export interface EthConfig {
 }
 
 /** WETH, Ethereum mainnet. Accepted as a name for the native token — the settlement arrives as WETH
- *  and is unwrapped before `IntentReceiver` pays out, so the two are the same wei. */
+ *  and is unwrapped before the receiver pays out, so the two are the same wei. */
 const WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 
 /** Base cost of any transaction. */
@@ -26,7 +26,7 @@ const INTRINSIC_GAS = 21_000n;
  * Pinned, because it is not derivable — and stable enough to pin. Measured across deliveries at
  * 555,345 four times over and 559,674 once (a cold-account touch).
  *
- * Re-pin after an `IntentReceiver` or NTT upgrade. Signature verification lives in here rather than
+ * Re-pin after a receiver or NTT upgrade. Signature verification lives in here rather than
  * scaling with the quorum: every sample was at 13 signatures, so there is no second point to fit a
  * slope against, and claiming one would be false precision. The drift shows up for free — the
  * relayer estimates the real call for every order.
@@ -58,7 +58,10 @@ export class EthereumQuoter implements ChainQuoter {
   }
 
   /**
-   * Gas for `IntentReceiver.processOrder`, built from the call the relayer will make.
+   * Gas for `processOrder`, built from the call the relayer will make.
+   *
+   * Modelled on v1's `IntentReceiver`, the heavier call: two VAAs and two signature sets. v2's
+   * `IntentForwarder` carries and verifies one, so the same figure bounds it from above.
    *
    * The `isVAAConsumed` branch is deliberately not modelled: when a generic NTT relayer already
    * delivered the settlement, `processOrder` skips `receiveMessage` and costs far less. That is

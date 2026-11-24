@@ -1,259 +1,165 @@
-# PLAN — Intents v2 MVP
+# PLAN — Intents v2
 
-Status: **proposal, nothing implemented.** Branch `feat/intent-v2`. Design: [spec.md](spec.md).
-Review findings and their resolutions: [Appendix A](#appendix-a--review-disposition).
+Status: **deployed on mainnet (2026-11-17); a canary and ICE swap and TWAP runs delivered to Zcash
+(2026-11-19). Close/settle and NEAR delivery built, upgrade pending; ownership handover pending.** Branch `feat/intent-v2`. Design: [spec.md](spec.md). Data
+formats: [schema.md](schema.md). Payout paths and fees: [payout.md](payout.md).
 
-**Goal.** Replace 1Click with our own implementation: one **reusable deposit address per action**
-(a swap, or a whole DCA), priced **on-chain** on Hydration, executed unattended. Everything else —
-the WETH → Ethereum → POA rail, NEAR Intents, MPC — is reused as is.
+**Goal.** Unattended swaps and TWAPs from Hydration into any asset 1Click can buy on NEAR Intents: one
+**reusable deposit address per action** (a swap, or a whole TWAP), each execution priced **on-chain**
+on Hydration, executed with nobody present.
 
 ---
 
 ## 1. Decisions
 
-| #   | Decision |
-| --- | -------- |
-| D1  | Value rail unchanged: Hydration WETH → NTT → `IntentReceiver` → native ETH to POA's `0xN` → credited to NEAR account `A`. |
-| D2  | 1Click is dropped; swaps and DCA use this flow. |
-| D3  | Triggered by ICE `OnResolved::Forward` → `IntentDispatcher.execute`, or directly via `IntentDispatcher.dispatch`. |
-| D4  | **One action = one set of terms = one `A` = one `0xN`.** Terms travel inside every order; there is no separate terms publication. |
-| D5  | **Price bound to the order:** each tranche publishes one order VAA `(authPath, seq, amount, outPerIn)`. |
-| D6  | `IntentQuoteEmitter` is a thin, stable publisher (NEAR pins its address); `IntentDispatcher` holds all logic (ICE stores its address). Both UUPS. |
-| D7  | NEAR `IntentRouter` is stateless (config only), DAO-upgradeable like the near-ntt manager, at `intents-router.hydration-whm.near`. |
-| D8  | **`finalize(terms, orderVaa)` — two arguments.** |
-| D9  | Refund **only after the deadline**; below the hard floor funds hold. |
-| D10 | **Full catch-up:** each fill spends `balance(A)`; one fill per order. |
-| D11 | No price refresh: feeds pushed hourly + on a 0.1% move; the dispatcher refuses a feed older than `maxFeedAge`. |
-| D12 | v1 is floor-only: one limit order at `outPerIn × (1 − maxSlippageBps)`. |
-| D13 | The bot is NEAR-only and untrusted (gas key only). |
+| #   | Decision                                                                                                                                                                           |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Value path: Hydration WETH → NTT with a forward payload → `IntentForwarder` → native ETH to `0xN`, a standing 1Click pass-through → credited to NEAR account `A`.                  |
+| D2  | Triggered by ICE `OnResolved::Forward` → `IntentDispatcher.execute`, or directly via `IntentDispatcher.dispatch`. WETH only; only the terms' `owner` places their orders.          |
+| D3  | **One action = one set of terms = one `A` = one `0xN`.** Terms travel inside every order; there is no separate terms publication.                                                  |
+| D4  | **Price bound to the order:** each execution publishes one order VAA `(authPath, seq, amount, outPerIn)` from the dispatcher.                                                      |
+| D5  | `IntentDispatcher` is one UUPS proxy holding all Hydration logic. ICE intents, the forwarder and the router pin its address.                                                       |
+| D6  | NEAR `IntentRouter` is stateless (config only), DAO-upgradeable like the near-ntt manager, at `intents-router.hydration-whm.near`.                                                 |
+| D7  | **`swap(terms, orderVaa, quote)`, `deliver(terms)`, `refund(terms)`.** The swap goes through a 1Click quote the router verifies and floors at the order's rate. No quote, no swap. |
+| D8  | Refund **only after the deadline**; below the hard floor funds hold.                                                                                                               |
+| D9  | **Catch-up:** each fill spends `A`'s ETH up to the terms' `maxFillMultiplier × order.amount`; one fill per order.                                                                  |
+| D10 | No price refresh: DIA feeds on Hydration, updated on deviation; the dispatcher refuses an answer older than `maxFeedAge`.                                                          |
+| D11 | `order.amount` is net of the relay ceiling, which is capped at half of what bridges — so with `maxFillMultiplier ≥ 2` one fill takes what landed.                                  |
+| D12 | The NEAR bot is untrusted (gas key only); the Ethereum relayer is paid from the order's ceiling.                                                                                   |
+| D13 | **`close(terms, delay)` / `settle(terms, closeVaa)`:** the owner ends terms early (no more orders, a close message); after `delay` ≤ 1 day anyone settles `A` — no quote.          |
+| D14 | NEAR is delivered as native NEAR (`native_withdraw` of `nep141:wrap.near`), as v1 and 1Click pay it.                                                                               |
+| D15 | Withdrawals only through UTXO routes — Omni's ZEC and nBTC via `withdraw-zec` / `withdraw-btc` — or as native NEAR. POA carries only the ETH refunds.                              |
 
 ---
 
 ## 2. Architecture
 
 ```
-                 ICE intent (on_resolved)            user / integrator (direct)
-                          │                                    │
-                          ▼                                    ▼
-             ┌────────────────────────────────────────────────────────────┐
-             │ IntentDispatcher      (UUPS proxy — the address ICE stores)  │
-             │   execute(…)    ICE callback                                 │
-             │   dispatch(…)   direct path                                  │
-             │   reads price feeds (routes, heartbeat check) → outPerIn     │
-             └──────────────┬───────────────────────────────┬─────────────┘
+                 ICE intent (on_resolved)            owner (direct)
+                          │                                │
+                          ▼                                ▼
+             ┌──────────────────────────────────────────────────────────────┐
+             │ IntentDispatcher   (UUPS proxy, Hydration)                   │
+             │   execute(…)   ICE callback, as the owner                    │
+             │   dispatch(…)  direct, pulls WETH                            │
+             │   price route → two feeds → outPerIn (stale reverts)         │
+             └──────────────┬───────────────────────────────┬───────────────┘
                             │                               │
-                   placeOrder(…) → seq          publishOrder(terms, order)
-                            │                               │  (authorized dispatchers only)
+      NttManagerWithPayload.transferWithPayload    order VAA, consistency 202
+        payload: depositAddress | maxRelayFee        (authPath, seq, amount, outPerIn)
+                            │                               │
+                            ▼                               │
+             ETHEREUM  IntentForwarder.processOrder         │
+                       deliver · fee → relayer · ETH → 0xN  │
+                            │                               │
+                            ▼                               │
+             1CLICK  POA credits its account, forwards to A │
+                            │                               │
                             ▼                               ▼
-             ┌───────────────────────────┐   ┌───────────────────────────────────────────┐
-             │ IntentEmitter (live)      │   │ IntentQuoteEmitter   (UUPS proxy, stable)  │
-             │  NTT settlement           │   │   authPath = keccak256(terms)              │
-             │  + forwarding instruction │   │   OrderPublished event (full terms)        │
-             └─────────────┬─────────────┘   │   order VAA, consistency 202               │
-                           │                 └─────────────────────┬─────────────────────┘
-                           ▼                                       │
-             ETHEREUM  IntentReceiver.processOrder                 │
-                           │ native ETH → 0xN                      │
-                           ▼                                       │
-             POA  credits A                                        │
-                           │                                       │
-                           ▼                                       ▼
-             NEAR  IntentRouter.finalize(terms, orderVaa)  ← pins IntentQuoteEmitter as emitter
-                           └─→ swap | delivery | refund
+             NEAR  IntentRouter.swap(terms, orderVaa, 1Click quote)   ← pins the dispatcher as emitter
+                   IntentRouter.deliver(terms) · refund(terms)
 ```
 
-- Price source, rail or fee changes → upgrade the dispatcher. The emitter's address never changes.
-- The emitter's authorized set normally holds **one** dispatcher; a second only during a migration,
-  and it must meet the current policy (every authorized dispatcher is a price authority for every path).
-
-**Address derivation** (SDK, once per action, no transactions):
+**Address derivation** (once per action, no transactions):
 
 ```
-path = IntentQuoteEmitter.computeAuthPath(terms)                                   pure
+path = IntentDispatcher.computeAuthPath(terms)                                     pure
 A    = hex(v1.signer.derived_public_key({predecessor: router, path, domain_id: 1}))  NEAR view
-0xN  = POA deposit_address({account_id: A, chain: "eth:1"})                        POA RPC
+0xN  = 1Click standing pass-through to A (ANY_INPUT, recipient = refundTo = A)       1Click API, partner key
 ```
 
-The SDK verifies `terms → A → 0xN` at confirmation. Nothing on-chain binds `depositAddress` to the
-terms (POA's mapping is off-chain) — a disclosed trust boundary.
+Nothing on-chain binds `depositAddress` to the terms (1Click's pass-through is off-chain) — a disclosed
+trust boundary.
 
 **Slippage.** ICE limits asset → WETH on Hydration (miss = no trade, free). The terms'
-`maxSlippageBps` limits ETH → destination on NEAR (miss = hold in `A`). Fees between them are
-disclosed, not bounded.
+`maxSlippageBps` limits ETH → destination on NEAR (miss = hold in `A`). Fees between them — NTT
+delivery, the relay fee, the pass-through, 1Click's swap, the payout — are disclosed, not bounded.
 
 ---
 
-## 3. Data
+## 3. Deployed
 
-Terms, `Order`, the order VAA, the ICE `data` layout, nonces and the router interface:
-[schema.md](schema.md).
+| Component                            | Where                                                                                        | State                                             |
+| ------------------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `IntentDispatcher` (+ `IntentCodec`) | Hydration `0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b`                                       | live; upgraded to emit `OrderSourced` from ICE    |
+| `NttManagerWithPayload` (WETH)       | Hydration `0xB5cEf790D52A57fa619eD96eDd64c5328F3DCFb7`                                       | live; 256-byte payload cap                        |
+| `IntentForwarder`                    | Ethereum `0x31ab66509a8a0b5a0fdf33ff4a4297481863035c`                                        | live; one authorized relayer                      |
+| `IntentRouter`                       | NEAR `intents-router.hydration-whm.near`                                                     | live; owner `hydration-whm.near`, key not deleted |
+| Ethereum relayer                     | `agents/relayer`, `intent-v2` app                                                            | live                                              |
+| NEAR router bot                      | `agents/intent`, `router` app — reads `/api/terms` and events from scan                      | live                                              |
+| Scan                                 | `agents/scan`, `intents-v2` app; `/v2/trades`, `/v2/trade`, `/v2/order`                     | live                                              |
+| Helpers and scripts                  | `common/{evm,near}/intents.ts`; `contracts/scripts/intentsV2{Canary,SwapAlpha,TwapAlpha}.ts` | done                                              |
+| Migration                            | `migrations/definitions/intents-v2`, record `deployments/prod/intents-v2.json`               | steps 001–010 done; ownership steps open          |
+
+Live settings: `maxFeedAge` 21600 s; `minOrderAmount` 1e11 wei; one price route, `nep141:zec.omft.near`.
+Router params: `price_validity` 900 s, `max_quote_age` 30 s, `transfer_validity` 180 s,
+`min_quote_slippage_bps` 100, `max_order_shortfall_bps` 100, `min_refund` 1e14 wei.
+
+Golden vectors pin the terms, path and order message across Solidity, Rust and TypeScript.
+
+### SDK defaults — the alpha scripts
+
+- **Swap** (`intentsV2SwapAlpha`) — `maxFillMultiplier` 2; `maxSlippageBps` 300; hard floor 20% under
+  the dispatcher's `outPerIn`; terms deadline = the ICE intent's deadline + 1 h.
+- **TWAP** (`intentsV2TwapAlpha`, an ICE `Dca` intent) — period 150 blocks (~5 min at Hydration's ~2 s blocks; ICE's minimum
+  is 15); `maxFillMultiplier` = the number of tranches (2..100); ICE slippage 3%; no ICE deadline
+  (ICE refuses one on a `Dca` intent); terms deadline = the schedule + 2 h.
+- **Both** — relay ceiling = the quoter's estimate + 20% (the dispatcher refuses one above half the
+  order); `minDelivery` 1 by default, i.e. a payout as soon as anything lands — set it higher to batch
+  tranches into fewer payouts.
 
 ---
 
-## 4. Build
+## 4. Remaining
 
-### Hydration — `IntentCodec` v2
-
-`Quote` and `encodeQuote` / `decodeQuote` / `authPath` per [schema.md](schema.md) §2 (decoder gains the semantic checks);
-`encodeOrder` / `decodeOrder`.
-
-### Hydration — `IntentQuoteEmitter` (never deployed; storage layout free)
-
-- `publishOrder(terms, order)`, authorized dispatchers only (`order.seq` must come from a real
-  `placeOrder`): `authPath = keccak256(encodeQuote(terms))`; require `outPerIn > 0`; publish at 202
-  with `msg.value == messageFee()`; emit
-  `OrderPublished(authPath, seq, dispatcher, amount, outPerIn, wormholeSequence, terms)`.
-- `computeAuthPath` / `computeTerms` (pure); `setDispatcher(address, bool)`; v1 `publishQuote` removed.
-
-### Hydration — `IntentDispatcher` (new; holds nothing between calls; `nonReentrant`)
-
-- Config: `setRoute(asset, ethFeed, destFeed, destTokenDecimals)`, `setMaxFeedAge`, `setPoaMinimum`.
-- `execute(user, intentId, assetIn, amountIn, assetOut, amountOut, data) returns (bytes4)`:
-  1. require `assetOut == WETH`; decode `(depositAddress, maxRelayFee, terms)`;
-  2. `outPerIn` from the route's two `IAggregatorV3` feeds — reject `answer ≤ 0`, age `> maxFeedAge`,
-     zero, or above `uint128`;
-     `outPerIn = mulDiv(ethUsd × 10^destFeedDec, 10^destTokenDec, destUsd × 10^ethFeedDec)`;
-  3. `amount = amountOut − priceFee`; `minEthOut = ceil((poaMinimum + maxRelayFee) / 1e10) × 1e10`;
-  4. `seq = placeOrder(WETH_ID, amount, minEthOut, depositAddress, maxRelayFee)` — the live emitter
-     subtracts its cost, trims and enforces `minEthOut` itself;
-  5. `publishOrder{value: priceFee}(terms, Order(seq, amount, outPerIn))`;
-  6. emit `Dispatched(user, intentId, authPath, seq, depositAddress)`; return `execute.selector`.
-- `dispatch(assetIn, amountIn, minEthOut, depositAddress, maxRelayFee, terms)` payable (exact price
-  fee): pulls the caller's asset; same steps, with `minEthOut = max(caller's, the POA floor above)`.
-- Unsolicited WETH is spendable by anyone — the dispatcher never holds reserves.
-
-**Tests (Foundry):** codec bounds + raw-byte decoding + golden vectors; emitter authorization,
-`authPath` derivation, 202, fee; dispatcher happy path, rate maths incl. 24-decimal NEAR, stale /
-missing feeds, wrong `assetOut`, POA-floor edge with non-aligned fees, positive price fee on both
-paths, reentrancy, stray balance.
-
-**Migration `intent-mpc`:** deploy emitter · deploy dispatcher · authorize dispatcher · set routes ·
-set max feed age · set POA minimum · transfer ownership (both).
-
-### NEAR — `IntentRouter` (`crates/near/contracts/intent-router`)
-
-Config: core, MPC signer, `intents.near`, emitter chain 73 + `IntentQuoteEmitter` address,
-`price_validity`, `eth_token`, route registry (ledger id → token contract, decimals, withdrawal memo
-rule, minimum), owner. Nothing per path.
-
-```
-finalize(terms, orderVaa)
-  validate terms; path = keccak256(terms)
-  1. v1.signer.derived_public_key(self, path, 1)  → A
-  2. intents.mt_batch_balance_of(A, [eth, dest])   ‖   core.verify_vaa(orderVaa)  (only before the deadline)
-  3. private callback, clock re-read:
-       now > terms.deadline:
-         eth ≥ refund minimum    → refund ETH → refundTo         (no registry, no VAA)
-         else dest ≥ route min   → deliver dest → recipient
-         else                    → nothing to do
-       else:
-         dest ≥ route min        → deliver dest → recipient       (failed-withdrawal recovery)
-         VAA: chain 73, emitter, msgType ORDER, authPath == path, age ≤ price_validity
-         amount_in = eth balance > 0
-         floor_out = amount_in × outPerIn × (10_000 − slip) / (1e18 × 10_000)      U512, round down
-         floor_out > 0 and floor_out × 1e18 ≥ amount_in × minOutPerIn            else hold (revert)
-         sign swap: token_diff { eth −amount_in, dest +floor_out } + delivery → recipient
-  4. v1.signer.sign({ request: { payload_v2: { Eddsa: hex(nep413 digest) }, path, domain_id: 1 } })
-     → private on_signed: verify the signature locally → emit intent_signed
-
-order expiry = min(terms.deadline, vaa.timestamp + price_validity)    payload deadline AND nonce expiry
-swap nonce   = versioned(salt, order expiry, H(domain ‖ "swap" ‖ path ‖ seq)[..15])
-refund / delivery nonces: H(domain ‖ action ‖ path ‖ block_height ‖ amount), explicit expiry
-```
-
-- Fixed order expiry ⇒ a re-sign reproduces the nonce (one fill per order) and nothing outlives
-  its price.
-- Every path to `sign` uses only terms (bound to `A` by the hash), a verified order VAA, the clock and
-  balances. No admin or generic sign, no public callback. ETH → ETH routes rejected.
-- Upgrade model from near-ntt (owner `upgrade` + `migrate`, two-step ownership, keys deleted,
-  `cargo near build reproducible-wasm`). Sandbox tests against the pinned `intents.near` WASM.
-- NEAR migration `intent-router`: deploy + init · propose owner · delete keys · accept by
-  `hydration.sputnik-dao.near`.
-
-### Bot (`agents/relayer`, `intent-near` app)
-
-NEAR gas key only. Watch `OrderPublished` and `A`'s two balances; call `finalize` with the event's
-terms and the order VAA; `publish_intent([], signed)`; poll `get_status`. On expiry: if the nonce is
-unused and the VAA still valid, re-sign; otherwise wait for the next order or the deadline. Reconcile
-from balances continuously (late credits, restored withdrawals, post-deadline refunds).
-
-### Scan / SDK (minimal for MVP)
-
-Scan: index `OrderPublished`, `Dispatched`, ICE forward failures, router `intent_signed`, settlement.
-SDK: terms builder (random `quoteId`; tight DCA slippage, wider swap slippage; ICE schedule ends a
-grace period before `terms.deadline`) → derivation → confirmation check → ICE submit or `dispatch`.
+- **Close/settle, UTXO, NEAR and BTC** — dispatcher and router upgraded 2026-11-24; `utxo-withdraw-btc`,
+  then `intents-v2` 011–014 (NEAR and nBTC price routes, the ZEC and nBTC UTXO routes); canaries: a
+  short TWAP closed, ZEC to a `t1` address, nBTC to a `bc1q` address, a NEAR swap.
+- **Ownership handover** — the `intents-v2-dao` migration: forwarder and dispatcher to their owners; the
+  router proposed to `hydration.sputnik-dao.near`, its full-access key deleted, the DAO accepts.
+- **Refunds** — run once: 1Click refunding `A` (a swap that does not fill) and the router's
+  post-deadline refund.
+- **Monitoring** — alerts on stale feeds, failed ICE forwards, queued settlements, the bot's NEAR
+  balance and `A` balances left behind.
+- **More destinations** — a price route per asset (`setPriceRoute`).
 
 ---
 
 ## 5. Gates
 
-**Blocking the router (answer before Stage 3 merges):**
+| Gate              | State                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| G1 counterparty   | done 2026-10-21 — a router-built transfer into a verified 1Click quote fills             |
+| G2 signed bytes   | done 2026-10-21 — the bytes `intents.near` verifies                                      |
+| G3 deposit        | done 2026-10-21 — POA credits ETH a contract forwards; the pass-through since 2026-11-19 |
+| G4 feeds          | done — ZEC route set, `maxFeedAge` 6 h                                                   |
+| G5 ICE            | done 2026-11-19 — an ICE swap and a 3-tranche TWAP forwarded into `execute`              |
+| G6 `v1.signer`    | done — the live sign request                                                             |
+| G7 router account | controlled; DAO handoff open                                                             |
+| G8 NTT payload    | done 2026-11-19 — payload transfers delivered through the Ethereum manager               |
+| G9 monitoring     | scan shows every stage; alerting open                                                    |
+| G10 refunds       | open                                                                                     |
+| G11 router gas    | done — mainnet: `swap` ~0.0038 NEAR, `deliver` ~0.0029 NEAR                              |
 
-| Gate | Evidence |
-| --- | --- |
-| G1 solvers | a funded near-market order with `quote_hashes: []` is filled and delivered — including a multi-tranche catch-up size |
-| G2 verifier | pinned `intents.near`: NEP-413 digest, versioned nonce bytes, deadline (incl. `== now`), swap + withdraw, failed withdrawal |
-| G3 POA | contract-originated deposits credited; minimum; crediting p99; withdrawal fees and minimums |
-| G6 MPC | live `v1.signer` request format, signature, deposit, gas, latency |
-
-**Before the canary:** G4 feeds live on Hydration (Pyth pull receiver or the existing rail) ·
-G5 ICE `Forward` in the target runtime within 2M gas · G7 router account and DAO handoff ·
-G9 heartbeat alerting, failed-forward surfacing, balance reconciliation.
-
-## 6. Stages
-
-1. Hydration: codec, emitter, dispatcher, tests, migration.
-2. Price feeds (G4).
-3. NEAR router + sandbox + migration.
-4. Bot. 5. Scan / SDK. 6. Audits (`/solidity-audit`, `/near-audit`), canary, remove 1Click.
+Evidence: [verification.md](verification.md).
 
 ---
 
-## Appendix A — review disposition
+## Appendix A — trust and residuals
 
-From two independent review rounds (2026-10-13, 2026-10-14). Round-1 numbers 1–24, round-2
-additions 25–29.
+Trusted: Wormhole guardians · WETH NTT manager owners (Hydration governance) · MPC network · POA
+custody and payout · `intents.near` governance (pause, forced withdrawal roles) · 1Click (quote keys,
+deposit accounts, the standing pass-through to `A`) · router DAO (upgrade can redirect every `A`) ·
+dispatcher owner (price routes, minimums, manager, forwarder, upgrade) · forwarder owner (dispatcher
+pin, relayers, upgrade) · the SDK's `terms → 0xN` mapping.
 
-| # | Finding | Resolution |
-| --- | --- | --- |
-| 1, 26 | pacing; anyone can create an order for a path | accepted: one fill per order; a stranger's order triggers catch-up at the current oracle price, paying their own fees |
-| 2, 14 | old signatures outlive price; nonce identity | fixed order expiry for payload and nonce; bot checks nonce before re-sign |
-| 3, 8 | swap/refund race; forced early refund | refund only after deadline; swaps expire by the deadline; below floor holds |
-| 4, 25 | stranded destination tokens; delivery starving refunds | delivery branch; after deadline ETH refund first; route minimums |
-| 5 | observation age | accepted: during a feed outage the price can lag by up to `maxFeedAge`; shorten the heartbeat if G4 shows it is cheap |
-| 6, 7 | rounding; integer widths | U512 multiply-compare, positive output, i128 bounds |
-| 9 | ICE forwards not retried | surfaced; user recovers via `dispatch` |
-| 10 | POA minimum after trimming | trim-aligned `minEthOut` enforced by the live emitter |
-| 11 | MPC request format | `payload_v2` Eddsa; G6 |
-| 12 | shared receiver replay | no change: instructions publish at 202 |
-| 13 | terms ↔ deposit address | disclosed; SDK verifies at confirmation |
-| 15, 16 | price expiry before crediting; schedule end | `price_validity` from measured p99; ICE cutoff before the deadline |
-| 17, 18 | stray WETH; direct-path fee | no reserves held; `dispatch` payable |
-| 19, 20, 27 | term validation; routing metadata; route changes vs refunds | checks in all decoders; route registry; refunds never read it |
-| 21, 22, 24 | callbacks; events; implementation gap | private typed callbacks; full terms in `OrderPublished`; golden vectors |
-| 23, 28 | trust table; dispatcher set | Appendix B; one authorized dispatcher in practice |
-| 29 | `seq` namespace across rails | accepted: on a rail migration, bump the nonce domain (old VAAs are past `price_validity`) |
+Residuals: solvers keep surplus above 1Click's quote; the bot chooses when to quote within an
+order's price validity; a feed outage fails forwards (WETH stays on Hydration) and can expire
+in-flight orders (funds hold until the next order or the deadline); a full outbound rate limit fails
+forwards the same way; refunds land as ETH on Ethereum.
 
-## Appendix B — trust and residuals
+## Appendix B — deferred
 
-Trusted: Wormhole guardians · MPC network · POA custody and payout · `intents.near` governance
-(pause, forced withdrawal roles) · router DAO (upgrade can redirect every `A`) · dispatcher owner
-(price routes) · emitter owner (dispatcher set) · rail owners · the SDK's `terms → 0xN` mapping.
-
-Residuals: solvers keep surplus above the floor; several valid orders of one path within
-`price_validity` can be signed and the solver picks the lowest; a feed outage fails forwards (WETH
-stays on Hydration) and can expire in-flight orders (funds hold, swaps may refund); refunds land as
-ETH on Ethereum.
-
-## Appendix C — deferred
-
-Smoothed catch-up (`maxFillMultiple`) · relay quotes (Partner Portal key) · Dutch auction (stateful
-router, one level per call — signing all levels up front does not work without a "valid from") ·
-wNEAR rail · EMA price-agreement band · Hydration-return refunds.
-
-## Appendix D — what this supersedes
-
-The earlier MPC-variant design: a per-tranche priced quote triggered by a "DCA pallet",
-`finalize(vaa)` with router state, no exit, `contract.wormhole.near`; `IntentQuoteEmitter` v1
-(`publishQuote` over Wormhole at 200); the "prefer an immutable router" stance; earlier revisions of
-this plan.
+Dutch auction ([dutch-auction.md](dutch-auction.md); stateful router, one level per call) · relay
+quotes (Partner Portal key) · EMA price-agreement band · Hydration-return refunds · other destination
+kinds.

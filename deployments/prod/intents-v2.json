@@ -1,0 +1,187 @@
+{
+  "migration": "intents-v2",
+  "environment": "prod",
+  "startedAt": "2026-11-17T10:58:35.086Z",
+  "completedAt": "2026-11-24T13:27:03.347Z",
+  "steps": [
+    {
+      "name": "001-deploy-dispatcher",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x6c579abe6ccdded9ceeca5190b357b9a6d60a589",
+        "proxyAddress": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "ownerAddress": "0x71FeB8b2849101a6E62e3369eaAfDc6154CD0Bc0"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:58:35.088Z",
+      "completedAt": "2026-11-17T10:58:41.289Z"
+    },
+    {
+      "name": "002-deploy-forwarder",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x0852e805dda4fa6eb89da4dcff5c9d748cc95735",
+        "proxyAddress": "0x31ab66509a8a0b5a0fdf33ff4a4297481863035c",
+        "ownerAddress": "0x6d116C3E43Bc1bFd4EEBe5c7BF043a342Ea6bBB2"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:58:41.294Z",
+      "completedAt": "2026-11-17T10:59:16.176Z"
+    },
+    {
+      "name": "003-deploy-router",
+      "status": "completed",
+      "output": {
+        "txHash": "2k776wTiiA1p9bcK4sTFUyXNo2fn8w7CaCxNDZb9TvSb",
+        "routerAccount": "intents-router.hydration-whm.near",
+        "owner": "hydration-whm.near",
+        "codeSha256": "14cfcf65f64c7a949afeefcdad7f797bb41bc68205d8c035a2e33399b1216178",
+        "emitter": "0x0000000000000000000000002c967d7e00a18c1c926fd77de733a27c3fdb3f2b"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:16.177Z",
+      "completedAt": "2026-11-17T10:59:30.131Z"
+    },
+    {
+      "name": "004-authorize-relayer-1@forwarder",
+      "status": "completed",
+      "output": {
+        "txHash": "0xdf5219ebbd6e45c74e11756aa9c432159a52f061045ce1614f3a84fead97cf73",
+        "contract": "0x31ab66509a8a0b5a0fdf33ff4a4297481863035c",
+        "relayer": "0x43A8A728e2514EDEAe8e0C9FAb8B79fb5E4ecD5F"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:30.134Z",
+      "completedAt": "2026-11-17T10:59:39.308Z"
+    },
+    {
+      "name": "005-set-ntt-manager@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x72d944389151fa90381bfbdf35c7dfb0c2b9eea094337d3ddbe7916548a3b9bf",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "manager": "0xB5cEf790D52A57fa619eD96eDd64c5328F3DCFb7"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:39.310Z",
+      "completedAt": "2026-11-17T10:59:44.523Z"
+    },
+    {
+      "name": "006-set-forwarder@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0xd007b81242a9ace98e42a6018b69e3629de20be6aa525dc1ab0e260d1f1d92c0",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "forwarder": "0x00000000000000000000000031ab66509a8a0b5a0fdf33ff4a4297481863035c"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:44.524Z",
+      "completedAt": "2026-11-17T10:59:49.353Z"
+    },
+    {
+      "name": "007-set-dispatcher@forwarder",
+      "status": "completed",
+      "output": {
+        "txHash": "0x373ff9ddbfffeee4f020e0ad80ec21e39ae6c0ccfbbb3b5adf2263f6a88f6798",
+        "contract": "0x31ab66509a8a0b5a0fdf33ff4a4297481863035c",
+        "dispatcher": "0x0000000000000000000000002c967d7e00a18c1c926fd77de733a27c3fdb3f2b"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T10:59:49.354Z",
+      "completedAt": "2026-11-17T11:00:02.597Z"
+    },
+    {
+      "name": "008-set-max-feed-age@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x554eaf5f79add7e18fa6edf9d44b76ec9f2522d0b357cdccfc79e53f0785d641",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "maxFeedAge": "21600"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T11:00:02.599Z",
+      "completedAt": "2026-11-17T11:00:07.886Z"
+    },
+    {
+      "name": "009-set-min-order-amount@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x1a9c94b60915f25b9b085c4f574ce1e525a0be49e2abe46f3ca182743a39d574",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "minOrderAmount": "100000000000"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T11:00:07.888Z",
+      "completedAt": "2026-11-17T11:00:12.722Z"
+    },
+    {
+      "name": "010-set-zec-price-route@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0xd8cab03643dd7f38674f0dc56ed534a73c3e966e0e9f074f330e668fce38ab9e",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "asset": "nep141:zec.omft.near",
+        "outPerIn": "195500629"
+      },
+      "error": null,
+      "startedAt": "2026-11-17T11:00:12.724Z",
+      "completedAt": "2026-11-17T11:00:17.879Z"
+    },
+    {
+      "name": "011-set-near-price-route@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x1a7ad9396b0f0e56c40b3a3bd1a0412e7a026fd3b5e273ff1376263f584470af",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "asset": "nep141:wrap.near",
+        "outPerIn": "586014400282332384563138524"
+      },
+      "error": null,
+      "startedAt": "2026-11-24T13:26:04.149Z",
+      "completedAt": "2026-11-24T13:26:09.729Z"
+    },
+    {
+      "name": "012-set-btc-price-route@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0xf0c3ac7f2c531b697240582d76ce0476a288c39b745c6ebb5bc39e1e9d5b9ff0",
+        "contract": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "asset": "nep141:nbtc.bridge.near",
+        "outPerIn": "2820128"
+      },
+      "error": null,
+      "startedAt": "2026-11-24T13:26:09.732Z",
+      "completedAt": "2026-11-24T13:26:14.718Z"
+    },
+    {
+      "name": "013-set-zec-utxo-route@router",
+      "status": "completed",
+      "output": {
+        "txHash": "DP7MNevAGuJwhS62fuPxzTJvUzi9NSxja6LgccjDJRce",
+        "token": "nep141:zec.omft.near",
+        "withdraw": "withdraw-zec.hydration-whm.near",
+        "pathPrefix": "zcash:v1:",
+        "addressPrefixes": "t1,t3",
+        "minAmount": "100000"
+      },
+      "error": null,
+      "startedAt": "2026-11-24T13:26:14.719Z",
+      "completedAt": "2026-11-24T13:26:40.476Z"
+    },
+    {
+      "name": "014-set-btc-utxo-route@router",
+      "status": "completed",
+      "output": {
+        "txHash": "E8QfNpk4fCAjubpj6ztQPTVzw2ug6HM9WEjrPVRpeDRB",
+        "token": "nep141:nbtc.bridge.near",
+        "withdraw": "withdraw-btc.hydration-whm.near",
+        "pathPrefix": "bitcoin:v1:",
+        "addressPrefixes": "1,3,bc1q,bc1p",
+        "minAmount": "6400"
+      },
+      "error": null,
+      "startedAt": "2026-11-24T13:26:40.479Z",
+      "completedAt": "2026-11-24T13:27:03.345Z"
+    }
+  ]
+}

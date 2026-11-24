@@ -187,7 +187,7 @@ address is copied by hand.
 | `008-transfer-ownership@receiver` → `009-transfer-ownership@emitter` | both | — |
 
 ```
-1. pnpm migrate:basejump-ethereum                    # start to finish, ends TC/Safe-owned
+1. pnpm migrate:basejump-ethereum prod               # start to finish, ends TC/Safe-owned
 2. verify invariant 1 across both chains
 3. governance on the landing: setDestAsset(USDC, asset 21), fund, setAuthorizedBridge(<receiver>, true)
                                                      # ← go-live switch — referendum #404, 2026-09-16

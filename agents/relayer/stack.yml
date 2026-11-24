@@ -110,6 +110,31 @@ services:
       labels:
         swarmpit.service.deployment.autoredeploy: 'true'
 
+  app-intent-v2:
+    image: galacticcouncil/relayer:latest
+    command: [node, intent-v2/app.js]
+    environment:
+      # RELAYER_1 — the forwarder's one authorized relayer, so it alone may relay inside the first
+      # hour of an order. Its own key, off app-intent's nonce.
+      PRIVKEY: FILL THIS KEY ALWAYS
+      RPC_ETHEREUM: https://ethereum-rpc.publicnode.com
+      # The WETH transceiver's sequence when the dispatcher was deployed; nothing below it is a v2
+      # order. Read only on this namespace's first run.
+      FROM_SEQ_HYDRATION: '219'
+      # Optional: alert sink and the multiple of one submission's cost to warn below.
+      DISCORD_WEBHOOK_URL: MAYBE FILL THIS URL OR REMOVE IT
+      GAS_WARN_MULTIPLIER: '50'
+      REDIS_HOST: redis
+      SPY_ENDPOINT: spy:7073
+      WORMHOLE_API_KEY: MAYBE FILL THIS KEY OR REMOVE IT
+    networks:
+      - default
+    logging:
+      driver: json-file
+    deploy:
+      labels:
+        swarmpit.service.deployment.autoredeploy: 'true'
+
   app-basejump:
     image: galacticcouncil/relayer:latest
     command: [node, basejump/app.js]

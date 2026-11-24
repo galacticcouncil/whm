@@ -1,7 +1,7 @@
 import { JsonRpcProvider } from "near-api-js";
 
 import { banner } from "../../banner";
-import { CHAINS } from "../../chains";
+import { CHAINS, type UtxoChain } from "../../chains";
 import log from "../../logger";
 import { Deriver } from "../../near/derive";
 import { boot, serve } from "../../server";
@@ -17,7 +17,7 @@ async function start(): Promise<void> {
   banner(APP_NAME);
   const provider = new JsonRpcProvider({ url: RPC_NEAR });
 
-  const derivers: Record<string, Deriver> = {};
+  const derivers: Record<string, Deriver<UtxoChain>> = {};
   for (const chain of Object.values(CHAINS)) {
     derivers[chain.name] = await Deriver.create(provider, chain);
     log.info(`  ${chain.name}: ${chain.contract} (signer ${derivers[chain.name].params.mpc_signer})`);

@@ -52,7 +52,7 @@
       topbar("scan", NAV);
 
       /** This section's app, through the UI's proxy. */
-      const API = "/api/transfers";
+      const API = "/api";
 
       // Also answers the bare `/transfer`, which has nothing to show — the list is the root.
       const id = decodeURIComponent(location.pathname.split("/")[2] ?? "");
@@ -366,7 +366,7 @@
       // Every rail's changes: this page cannot tell from a notice which of its rows moved, and a
       // refetch is one request.
       let pending;
-      json(`${API}/filters`).then((f) => {
+      json(`${API}/transfers/filters`).then((f) => {
         assets = f?.assets ?? [];
         live(
           "ntt,utxo,utxo-signs,basejump",
@@ -375,7 +375,6 @@
             pending = setTimeout(load, 300);
           },
           load,
-          API,
         );
       });
     </script>

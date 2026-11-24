@@ -15,6 +15,7 @@ BTC / ZEC from their own chains: [deposit](../../docs/near-utxo/deposit/spec.md)
 ## Layout
 
 ```
+common/                    shared by the contracts: wire Reader, VAA + core interface, v1.signer, time
 contracts/ntt-manager/     the contract (near-sdk 5)
   src/messages.rs          NTT wire format — TransceiverMessage / NttManagerMessage / NativeTokenTransfer
   src/outbound.rs          NEAR → peer: ft_on_transfer → publish_message → on_published
@@ -22,7 +23,6 @@ contracts/ntt-manager/     the contract (near-sdk 5)
   src/payout.rs            every ft_transfer out of custody; claimable on failure
   src/rate_limit.rs        24 h linear-refill limiter
   src/trimmed.rs           8-decimal trimming, with dust
-  src/vaa.rs               VAA body parser
   tests/fixtures/          real mainnet NTT VAAs — golden vectors
 contracts/utxo-withdraw/    a UTXO-chain token on NEAR → its native chain via Omni's connector, from an
                            MPC-derived account per destination address; one deployment per chain
@@ -30,13 +30,17 @@ contracts/utxo-withdraw/    a UTXO-chain token on NEAR → its native chain via 
   src/chains/zcash.rs      Zcash: t1/t3 address → script, derivation path, ZIP-317 fee
   src/connector.rs         connector reads, bridge fee, best-fit coin, the Withdraw message
   src/delegate.rs          NEP-366 delegate actions, borsh by hand
-  src/mpc.rs               v1.signer derived_public_key / sign
+contracts/intent-router/   intents v2: signs NEAR Intents payloads for accounts derived from a user's
+                           terms — swap through a 1Click quote, deliver, refund
 sandbox/                   end-to-end tests on a NEAR sandbox (near-workspaces)
-  tests/wasm/              mainnet code of the Wormhole core, wrap.near and zec.omft.near
+  tests/wasm/              mainnet code of the Wormhole core, wrap.near, zec.omft.near and intents.near
+  mock-mpc/                a v1.signer stand-in that derives and signs for real
+  tests/router.rs          intent-router, every payload executed by the real intents.near
   forge/                   EVM check: a NEAR-published payload through the real TransceiverStructs
   tests/delegate.rs        utxo-withdraw's delegate encoding against nearcore's own types
 scripts/ntt-manager/       user scripts + local fork
 scripts/utxo-withdraw/     derive a withdraw account; sign and relay a withdraw or claim (the bot's job)
+scripts/intent-router/     derive an action's account; swap through 1Click, deliver, refund (the bot's job)
 ```
 
 Deployment is [`migrations/definitions/near-ntt-{zec,near}`](../../migrations/definitions/) — NEAR
@@ -79,7 +83,7 @@ A NEAR sandbox set up for `near-ntt`, the way `pnpm fork:solana` is for the orac
 
 ```bash
 pnpm fork:near                        # :3030 — mainnet core (dev guardian) + wrap.near, alice with 10 wNEAR
-pnpm migrate:near-ntt-near:fork       # the real migration; PK_NEAR from the sandbox key
+pnpm migrate:near-ntt-near fork       # the real migration; PK_NEAR from the sandbox key
 
 export RPC_NEAR=http://127.0.0.1:3030
 PK=$(npx tsx crates/near/scripts/getForkKey.ts)
@@ -124,7 +128,7 @@ curl -X POST https://helper.testnet.near.org/account -H 'content-type: applicati
 
 # 2. deploy — migrations/envs/testnet/near-ntt-near.env
 ACC=<id>.testnet; PK=ed25519:<secret>
-PK_NEAR="$PK" pnpm migrate:near-ntt-near:testnet
+PK_NEAR="$PK" pnpm migrate:near-ntt-near testnet
 
 # 3. wNEAR for the sender: storage_deposit + near_deposit on wrap.testnet (near-cli-rs or any wallet)
 
@@ -145,7 +149,7 @@ the testnet guardian `0x13947Bd4…C638`, delivered on the fork: 0.5 wNEAR minte
 
 ```bash
 pnpm run build                        # cargo near — always, for mainnet
-pnpm migrate:near-ntt-zec             # or :near — PK_NEAR, env in migrations/envs/prod/near-ntt-*.env
+pnpm migrate:near-ntt-zec prod        # or near-ntt-near — PK_NEAR, env in migrations/envs/prod/near-ntt-*.env
 ```
 
 `001` deploy (create + fund + deploy + init in one transaction) · `002` register emitter on the core ·

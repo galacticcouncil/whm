@@ -12,28 +12,41 @@
 
 const HDX_LOGO = `<svg class="logo" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M18.0532 11.3604C18.2827 11.1319 18.5778 10.8381 18.8718 10.5463C19.5265 9.89543 19.5265 8.83853 18.8718 8.18664L18.1782 7.49598C15.6959 9.96786 11.982 10.4637 9.00484 8.98646C11.017 9.35678 13.1028 9.06807 14.951 8.0785C16.1876 7.41641 16.4222 5.74741 15.4295 4.75886L11.3366 0.683262C10.4217 -0.227754 8.93928 -0.227754 8.02542 0.683262L3.61392 5.07613C6.51941 3.84682 10.0089 4.4171 12.3714 6.78594C8.76716 5.04349 4.30136 5.66171 1.3088 8.64164C1.07931 8.87016 0.78323 9.16499 0.490223 9.45676C-0.163408 10.1086 -0.163408 11.1645 0.490223 11.8154L1.18279 12.505C3.66515 10.0332 7.37896 9.53735 10.3562 11.0146C8.34404 10.6442 6.25816 10.933 4.40996 11.9225C3.17339 12.5846 2.93878 14.2536 3.93152 15.2422L8.0244 19.3178C8.93928 20.2288 10.4217 20.2288 11.3356 19.3178L15.7471 14.9249C12.8416 16.1542 9.35215 15.5839 6.98965 13.2151C10.5938 14.9575 15.0596 14.3393 18.0522 11.3594L18.0532 11.3604Z"></path></svg>`;
 
-/** The sections, one per app: the top bar's nav on every page. */
+/**
+ * The sections, one per app: the top bar's nav on every page. A third entry tags the link; a fourth
+ * names other pages the section owns, highlighted under it.
+ */
 export const NAV = [
   ["/transfers", "Transfers"],
   ["/orders", "Orders"],
+  ["/v2/trades", "Trades", "new", ["/v2/order"]],
   ["/feeds", "Feeds"],
 ];
+
+/**
+ * A version tag, the small badge in a link's or a title's top-right corner.
+ *
+ * @param {string} label
+ */
+export const versionTag = (label) => `<span class="ver-tag">${esc(label)}</span>`;
 
 /**
  * Render the top bar. Same shape as the explorer's — mark, wordmark, pill nav, right-hand cluster.
  *
  * @param {string} domain Wordmark suffix, where the explorer says "Explorer".
- * @param {Array<[string, string]>} links `[href, label]`; the one matching the path is current — a
- *   section's detail pages too, `/transfer/…` under `/transfers`.
+ * @param {Array<[string, string, string?, string[]?]>} links `[href, label, tag?, also?]`; the one
+ *   matching the path is current — a section's detail pages too, `/transfer/…` under `/transfers`,
+ *   `/v2/trade/…` under `/v2/trades`, and any page in `also`.
  * @param {{conn?: boolean}} [opts] `conn: false` when the page shows its live state itself.
  */
 export function topbar(domain, links = [], opts = {}) {
   const here = location.pathname;
+  const under = (base) => here === base || here.startsWith(`${base}/`);
   const nav = links
-    .map(([href, label]) => {
+    .map(([href, label, tag, also = []]) => {
       const active =
-        href === "/" ? here === "/" : here.startsWith(href) || here.startsWith(`${href.replace(/s$/, "")}/`);
-      return `<a href="${href}"${active ? ' aria-current="page"' : ""}>${esc(label)}</a>`;
+        href === "/" ? here === "/" : under(href) || under(href.replace(/s$/, "")) || also.some(under);
+      return `<a href="${href}"${active ? ' aria-current="page"' : ""}${tag ? ' class="tagged"' : ""}>${esc(label)}${tag ? versionTag(tag) : ""}</a>`;
     })
     .join("");
   const conn =
@@ -135,13 +148,13 @@ export async function json(url) {
  * Nothing replays what a dropped connection missed, so the page is told when the stream (re)opens
  * and refetches, rather than sitting on a view that quietly stopped being live.
  *
- * @param {string} flows Flow names to follow, comma-separated.
+ * @param {string} flows Flow names to follow, comma-separated — all of one app's; the UI routes the
+ *   stream to it.
  * @param {(update: object) => void} onUpdate
  * @param {() => void} [onOpen] Called on every successful connect, first one included.
- * @param {string} [api] The app's API base — a section's, through the UI's proxy.
  */
-export function live(flows, onUpdate, onOpen, api = "/api") {
-  const es = new EventSource(`${api}/events?flow=${encodeURIComponent(flows)}`);
+export function live(flows, onUpdate, onOpen) {
+  const es = new EventSource(`/api/events?flow=${encodeURIComponent(flows)}`);
   const mark = (up) => {
     for (const dot of document.querySelectorAll(".conn .dot")) dot.classList.toggle("live", up);
     for (const label of document.querySelectorAll(".conn .label")) {
@@ -279,6 +292,13 @@ const CHAINS = {
     tx: (r) => `https://blockchair.com/zcash/transaction/${r.txHash}`,
     addr: (a) => `https://blockchair.com/zcash/address/${a}`,
   },
+  bitcoin: {
+    label: "Bitcoin",
+    c: ["#f7931a", "#b86a0c"],
+    icon: "https://s2.coinmarketcap.com/static/img/coins/64x64/1.png",
+    tx: (r) => `https://blockchair.com/bitcoin/transaction/${r.txHash}`,
+    addr: (a) => `https://blockchair.com/bitcoin/address/${a}`,
+  },
   wormhole: {
     label: "Wormhole",
     c: ["#3a3f4b", "#1b1e25"],
@@ -287,7 +307,7 @@ const CHAINS = {
 };
 
 /** 1Click's `blockchain` values, where the intents domain names a destination chain. */
-const ALIAS = { eth: "ethereum", zec: "zcash", sol: "solana" };
+const ALIAS = { eth: "ethereum", zec: "zcash", sol: "solana", btc: "bitcoin" };
 const chainOf = (c) => CHAINS[c] ?? CHAINS[ALIAS[c]];
 
 /** The explorer's label for a host, so an external account says where it links. */
@@ -482,12 +502,14 @@ const DEST_TX_URL = {
  * @param {string|null} hash
  * @param {string|null} url 1Click's own explorer url, when it supplied one.
  * @param {string|null} chain 1Click `blockchain` value.
+ * @param {string} [label] The link's text, in place of the shortened hash — the hash is then its title.
  */
-export function destTxLink(hash, url, chain) {
+export function destTxLink(hash, url, chain, label) {
   if (!hash) return null;
   const href = url || DEST_TX_URL[chain]?.(hash);
-  const text = esc(short(hash, 10, 8));
-  return href ? `<a class="hash" href="${esc(href)}" target="_blank" rel="noreferrer">${text}</a>` : text;
+  const text = esc(label ?? short(hash, 10, 8));
+  const title = label ? ` title="${esc(hash)}"` : "";
+  return href ? `<a class="hash" href="${esc(href)}"${title} target="_blank" rel="noreferrer">${text}</a>` : text;
 }
 
 /** The whole 1Click execution, keyed by the deposit address it was quoted for. */
@@ -674,6 +696,19 @@ const STATUS = {
     label: "Delivered",
     svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>',
   },
+  // An intents v2 trade its owner closed: no more orders, and what `A` holds is paid out once the
+  // close's countdown passes.
+  closing: {
+    cls: "pending",
+    label: "Closing",
+    svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6"/></svg>',
+  },
+  // An intents v2 trade whose ETH went back to its refund address.
+  refunded: {
+    cls: "expired",
+    label: "Refunded",
+    svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>',
+  },
   expired: {
     cls: "expired",
     label: "Expired",
@@ -688,7 +723,8 @@ export const statusLabel = (s) => STATUS[s]?.label ?? s;
  * Where a transfer is, as the explorer's status badge: done green, in flight sky, held amber,
  * failed red. `compact` is the round icon-only form a list column uses.
  *
- * @param {string} status `completed`, `pending`, `held`, `failed` — or an oracle update's
+ * @param {string} status `completed`, `pending`, `held`, `failed` — an intents v2 trade's `closing`, `refunded` —
+ *   or an oracle update's
  *   `delivered`, `expired`.
  * @param {{compact?: boolean, title?: string}} [opts]
  */

@@ -18,5 +18,7 @@
   "solidity.formatter": "forge",
   "solidity.packageDefaultDependenciesContractsDirectory": "src",
   "solidity.packageDefaultDependenciesDirectory": "dependencies",
-  "rust-analyzer.linkedProjects": ["crates/solana/Cargo.toml"]
+  "rust-analyzer.linkedProjects": ["crates/solana/Cargo.toml"],
+  "workbench.editor.enablePreview": false,
+  "workbench.editor.enablePreviewFromQuickOpen": false
 }

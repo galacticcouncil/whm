@@ -258,6 +258,44 @@ a.hash:hover {
   background: var(--accent-soft);
 }
 
+/* A link carrying a version tag: the tag sits on its top-right corner, over the pill's edge. */
+.nav a.tagged,
+.list-title.tagged,
+.page-title.tagged {
+  position: relative;
+}
+
+.ver-tag {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: var(--accent-on);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* In the drawer the link spans the row, so the tag follows the label instead of the row's corner. */
+.drawer-sec > a .ver-tag {
+  position: static;
+  margin-left: -2px;
+  align-self: flex-start;
+}
+
+/* On a title the tag rides the last word rather than the block's far edge. */
+.list-title.tagged,
+.page-title.tagged {
+  padding-right: 16px;
+  width: fit-content;
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
@@ -871,6 +909,7 @@ a.addr-pill:hover .ext-site {
 /* Lifecycle stages, shared by every flow: in flight is cool, done is green, held is amber. */
 .badge.placed,
 .badge.initiated,
+.badge.active,
 .badge.published,
 .badge.requested,
 .badge.deposited {
@@ -879,6 +918,8 @@ a.addr-pill:hover .ext-site {
 }
 
 .badge.processed,
+.badge.forwarded,
+.badge.swapped,
 .badge.received,
 .badge.signed,
 .badge.withdrawn {
@@ -887,6 +928,7 @@ a.addr-pill:hover .ext-site {
 }
 
 .badge.settled,
+.badge.delivered,
 .badge.redeemed,
 .badge.fulfilled,
 .badge.confirmed,
@@ -901,7 +943,8 @@ a.addr-pill:hover .ext-site {
   color: var(--amber);
 }
 
-.badge.expired {
+.badge.expired,
+.badge.ended {
   background: var(--panel-hover);
   color: var(--text-low);
 }
@@ -2338,5 +2381,78 @@ body.noscroll {
 
   .pf-card {
     padding: 14px;
+  }
+}
+
+/* ─── Intents v2 trade status ───────────────────────────────── */
+
+/* What a trade sold, what arrived, and where it stands. */
+.trade-status {
+  margin-bottom: 14px;
+  padding: 20px 22px;
+  background: var(--bg-elev);
+  border: 1px solid var(--separator);
+  border-radius: 18px;
+}
+
+/* Both rows share one three-column grid: Sold over Total spent, Received over Execution. */
+.trade-status .ts-top,
+.trade-status .ts-foot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.trade-status .ts-top {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.trade-status .ts-k {
+  margin-bottom: 6px;
+  color: var(--text-low);
+  font-family: "GeistMono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.trade-status .ts-v .asset-chip {
+  gap: 10px;
+  font-family: "Gazpacho", serif;
+  font-size: 24px;
+}
+
+.trade-status .ts-v .sym {
+  color: var(--text-high);
+}
+
+.trade-status .ts-v .asset-chip .icon {
+  width: 28px;
+  height: 28px;
+}
+
+.trade-status .ts-note {
+  margin-top: 6px;
+  color: var(--text-medium);
+  font-size: 12px;
+}
+
+.trade-status .ts-foot {
+  padding-top: 14px;
+  color: var(--text-high);
+  font-size: 14px;
+}
+
+.panel-head .ts-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .trade-status .ts-top,
+  .trade-status .ts-foot {
+    grid-template-columns: 1fr;
   }
 }

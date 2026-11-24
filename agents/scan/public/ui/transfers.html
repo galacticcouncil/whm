@@ -78,7 +78,7 @@
       topbar("scan", NAV, { conn: false });
 
       /** This section's app, through the UI's proxy. */
-      const API = "/api/transfers";
+      const API = "/api";
 
       const LIMIT = 25;
       const el = (id) => document.getElementById(id);
@@ -230,7 +230,7 @@
       });
 
       async function mountFilters() {
-        meta = (await json(`${API}/filters`)) ?? meta;
+        meta = (await json(`${API}/transfers/filters`)) ?? meta;
         const fbar = el("fbar");
         const reset = el("reset");
         const mount = (spec) => {
@@ -293,7 +293,6 @@
             pending = setTimeout(() => load(true), 300);
           },
           () => load(),
-          API,
         ),
       );
     </script>

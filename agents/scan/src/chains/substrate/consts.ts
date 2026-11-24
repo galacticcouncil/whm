@@ -16,3 +16,9 @@ export const RANGE = 100n;
 
 /** Log backfill progress at most this often. */
 export const PROGRESS_LOG_MS = 10_000;
+
+/**
+ * ICE's `Intent.IntentSubmitted`, kept when its `on_resolved` forwards to a watched contract: stored
+ * as a JSON event under that contract, so it routes to the contract's role like one of its own logs.
+ */
+export const ICE_SUBMITTED = { standard: "hydration-ice", event: "IntentSubmitted" } as const;

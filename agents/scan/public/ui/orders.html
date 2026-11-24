@@ -37,7 +37,6 @@
         <table class="tbl">
           <thead>
             <tr>
-              <th>Order</th>
               <th>Time</th>
               <th>From</th>
               <th>To</th>
@@ -74,7 +73,7 @@
       topbar("scan", NAV, { conn: false });
 
       /** This section's app, through the UI's proxy. */
-      const API = "/api/orders";
+      const API = "/api/v1";
 
       const LIMIT = 25;
       const STATES = ["placed", "processed", "settled", "refunded", "failed"];
@@ -144,7 +143,7 @@
 
       function render(items, fresh) {
         if (!items.length) {
-          el("rows").innerHTML = '<tr><td class="table-error" colspan="6">No orders match.</td></tr>';
+          el("rows").innerHTML = '<tr><td class="table-error" colspan="5">No orders match.</td></tr>';
           shown = new Set();
           return;
         }
@@ -153,7 +152,6 @@
             const href = `/order/${encodeURIComponent(r.transfer_sequence)}`;
             const isNew = fresh && !shown.has(r.transfer_sequence);
             return `<tr class="clickable${isNew ? " row-new" : ""}" data-href="${href}">
-              <td class="mono" data-label="Order"><a class="hash" href="${href}">#${esc(r.settlement_sequence ?? r.transfer_sequence)}</a></td>
               <td data-label="Time">${when(r.placed?.blockTimestamp)}</td>
               <td data-label="From">${end("hydration", r.caller)}</td>
               <td data-label="To">${end(destChain(r), r.dest_address)}</td>
@@ -170,7 +168,7 @@
         el("rows").innerHTML = Array.from(
           { length: 8 },
           (_, i) =>
-            `<tr class="sk-tr">${Array.from({ length: 6 }, (_, j) => `<td style="--w:${widths[(i + j) % widths.length]}"></td>`).join("")}</tr>`,
+            `<tr class="sk-tr">${Array.from({ length: 5 }, (_, j) => `<td style="--w:${widths[(i + j) % widths.length]}"></td>`).join("")}</tr>`,
         ).join("");
       }
 
@@ -191,7 +189,7 @@
         el("rows").classList.remove("rows-pending");
         if (!data) {
           el("rows").innerHTML =
-            '<tr><td class="table-error" colspan="6"><strong>Could not load orders.</strong></td></tr>';
+            '<tr><td class="table-error" colspan="5"><strong>Could not load orders.</strong></td></tr>';
           return;
         }
         render(data.items, fresh);
@@ -257,7 +255,6 @@
             pending = setTimeout(() => load(true), 300);
           },
           () => load(),
-          API,
         );
       });
     </script>

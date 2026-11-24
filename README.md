@@ -74,7 +74,7 @@ pnpm install                              # workspace deps
 pnpm --filter @whm/contracts install      # forge soldeer install
 pnpm --filter @whm/contracts build        # forge build
 pnpm --filter @whm/crates-solana build    # anchor build -p oracle-emitter
-pnpm --filter @whm/crates-near build      # cargo near build (ntt-manager, utxo-withdraw)
+pnpm --filter @whm/crates-near build      # cargo near build (ntt-manager, utxo-withdraw, intent-router)
 pnpm --filter @whm/crates-near test       # unit tests; test:sandbox for end-to-end
 ```
 
@@ -103,27 +103,19 @@ pnpm fork:hyper-evm     # anvil :8552
 pnpm fork:solana        # solana-test-validator :8898 (Wormhole + Oracle clone)
 pnpm fork:all           # all evm forks in parallel
 
-# Run migrations (against fork or prod)
-pnpm migrate:basejump-base:fork
-pnpm migrate:basejump-base                  # prod
-pnpm migrate:oracle-relay-solana:fork
-pnpm migrate:oracle-relay-solana            # prod
-pnpm migrate:oracle-relay-ethereum:fork
-pnpm migrate:oracle-relay-ethereum          # prod
-pnpm migrate:governance-hydration:fork
-pnpm migrate:governance-hydration           # prod; run before destination migrations
-pnpm migrate:governance-robinhood:fork
-pnpm migrate:governance-robinhood           # prod
-pnpm migrate:governance-ethereum:fork
-pnpm migrate:governance-ethereum            # prod
-pnpm migrate:governance-hyper-evm:fork
-pnpm migrate:governance-hyper-evm           # prod
-pnpm migrate:governance-base:fork
-pnpm migrate:governance-base                # prod
-pnpm migrate:near-ntt-zec                   # prod (NEAR side; Hydration side is hydration-ntt's)
-pnpm migrate:near-ntt-near                  # prod
-pnpm migrate:utxo-emitter-zec               # prod
-pnpm migrate:utxo-withdraw-zec              # prod
+# Run migrations — each names its environment: prod, or fork / testnet where it has one
+pnpm migrate:basejump-base prod
+pnpm migrate:oracle-relay-solana prod
+pnpm migrate:oracle-relay-ethereum prod
+pnpm migrate:governance-hydration prod
+pnpm migrate:governance-robinhood prod
+pnpm migrate:governance-ethereum prod
+pnpm migrate:governance-hyper-evm prod
+pnpm migrate:governance-base prod
+pnpm migrate:near-ntt-zec prod
+pnpm migrate:near-ntt-near prod
+pnpm migrate:utxo-emitter-zec prod
+pnpm migrate:utxo-withdraw-zec prod
 
 # Print MRL oracle state
 pnpm print:oracles

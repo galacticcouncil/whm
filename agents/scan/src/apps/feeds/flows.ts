@@ -203,7 +203,7 @@ export const updates: Flow = {
       // Solana, as its watcher decodes the post.
       role: "wormhole-core",
       chains: ["solana"],
-      near: PUBLISH,
+      json: PUBLISH,
       state: "published",
       key: (a: Publish, ev: LogEvent) =>
         published(emitterOf(a), BigInt(a.seq), a.data, ev, a.timestamp)?.key ?? null,

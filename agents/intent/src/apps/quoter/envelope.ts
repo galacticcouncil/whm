@@ -1,9 +1,9 @@
 /**
  * The call a relayer will build, sized before it exists.
  *
- * `maxRelayFee` is committed at `placeOrder` time, so neither VAA has been signed yet and nothing
+ * `maxRelayFee` is committed when the order is placed, so no VAA has been signed yet and nothing
  * can be estimated against a node. What *is* known is the shape: a VAA's wire size is fixed by its
- * framing, and both payloads this path carries are fixed-length. So the envelope is derived rather
+ * framing, and every payload the intents paths carry is fixed-length. So the envelope is derived rather
  * than guessed, and it tracks a guardian-set change instead of going stale.
  *
  * See [docs/intents/relay-fee.md](../../../../../docs/intents/relay-fee.md).

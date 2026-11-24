@@ -1,0 +1,18 @@
+[package]
+name = "mock-mpc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# A stand-in for `v1.signer` in the sandbox: same methods, a real Ed25519 key per
+# (predecessor, path), signing synchronously. Never deployed anywhere else.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+hex = { workspace = true }
+bs58 = { workspace = true }
+near-common = { path = "../../common" }
+ed25519-dalek = { version = "2", default-features = false }

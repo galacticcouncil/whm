@@ -7,6 +7,7 @@
     "start:oracle": "node dist/oracle/app.js",
     "start:oracle-robinhood": "node dist/oracle-robinhood/app.js",
     "start:intent": "node dist/intent/app.js",
+    "start:intent-v2": "node dist/intent-v2/app.js",
     "start:basejump": "node dist/basejump/app.js",
     "start:psm-hydration": "node dist/psm-hydration/app.js",
     "start:psm-base": "node dist/psm-base/app.js",

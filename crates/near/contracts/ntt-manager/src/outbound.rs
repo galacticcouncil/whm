@@ -12,7 +12,7 @@
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
-use near_sdk::{env, ext_contract, near, require, AccountId, Gas, Promise, PromiseError, PromiseOrValue};
+use near_sdk::{env, near, require, AccountId, Gas, Promise, PromiseError, PromiseOrValue};
 
 use crate::messages::{sequence_id, NativeTokenTransfer, NttManagerMessage, TransceiverMessage};
 use crate::payout::GAS_FOR_PAY_OUT;
@@ -23,12 +23,7 @@ use crate::{account_hash, emit, now, parse_bytes32, NttManager, NttManagerExt, P
 pub const GAS_FOR_PUBLISH: Gas = Gas::from_tgas(20);
 pub const GAS_FOR_ON_PUBLISHED: Gas = Gas::from_tgas(10);
 
-#[ext_contract(ext_wormhole)]
-pub trait WormholeCore {
-    fn publish_message(&mut self, data: String, nonce: u32) -> u64;
-    /// Verifies signatures and the guardian set; returns the set index. Does not parse the body.
-    fn verify_vaa(&self, vaa: String) -> u32;
-}
+pub use near_common::vaa::ext_wormhole;
 
 /// `ft_transfer_call`'s `msg`.
 #[near(serializers = [json])]

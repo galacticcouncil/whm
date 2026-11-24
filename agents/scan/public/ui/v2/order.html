@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Order v2 · Hydration scan</title>
+    <script>
+      try {
+        var t = localStorage.getItem("explorer-theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
+    <link rel="preload" href="/fonts/GazpachoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/GeistMonoMedium-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/shared/style.css" />
+  </head>
+  <body>
+    <main class="wrap" id="main">
+      <div class="panel"><div class="table-error">loading…</div></div>
+    </main>
+
+    <script type="module">
+      import {
+        NAV,
+        addrLink,
+        agoLong,
+        amount,
+        asset,
+        assetIcon,
+        at,
+        badge,
+        chainIcon,
+        copyBtn,
+        destTxLink,
+        esc,
+        json,
+        kv,
+        legCard,
+        live,
+        nearIntentsUrl,
+        pill,
+        short,
+        topbar,
+        vaaLink,
+      } from "/shared/app.js";
+
+      topbar("scan", NAV);
+
+      /** This section's app, through the UI's proxy. */
+      const API = "/api/v2";
+
+      // `/v2/order/<seq>`.
+      const seq = decodeURIComponent(location.pathname.split("/")[3] ?? "");
+      if (!seq) location.replace("/v2/trades");
+
+      const main = document.getElementById("main");
+      const mono = (v) => (v ? esc(v) : '<span class="dim">—</span>');
+
+      /** What A is credited and sells — the rail's unit. */
+      const ETH = { symbol: "ETH", decimals: 18 };
+
+      /** The destinations the dispatcher prices, by intents ledger id — as on the list. */
+      const DEST = {
+        "nep141:zec.omft.near": { symbol: "ZEC", decimals: 8, chain: "zcash" },
+        "nep141:wrap.near": { symbol: "NEAR", decimals: 24, chain: "near" },
+        "nep141:nbtc.bridge.near": { symbol: "BTC", decimals: 8, chain: "bitcoin" },
+      };
+      const dest = (o) => DEST[o.destination_asset];
+      const destChain = (o) => (o.recipient_kind === 1 ? "near" : (dest(o)?.chain ?? null));
+
+      const type = (o) =>
+        (o.trade_planned ?? o.order_count) > 1
+          ? pill(`Twap · order ${o.order_index}${o.trade_planned ? ` of ${o.trade_planned}` : ""}`, "var(--lavender)")
+          : pill("Swap", "var(--sky)");
+
+      /** Where the destination asset's payout transaction is shown, by the chain it lands on. */
+      const DEST_TX = { zcash: "zec", bitcoin: "btc" };
+
+      /**
+       * The payout that carried this order's output: the first of its terms signed after its swap. A
+       * TWAP's delivery can batch several orders' output, so one payout may show on several orders.
+       *
+       * @param o The order.
+       * @param payouts Its trade's payouts, oldest first.
+       */
+      function payoutOf(o, payouts) {
+        const after = Number(o.swapped?.blockTimestamp ?? o.published?.blockTimestamp ?? 0);
+        return payouts.find((p) => Number(p.signed?.blockTimestamp ?? 0) >= after) ?? null;
+      }
+
+      /**
+       * The last hop: where the user is paid. A withdrawal lands on the asset's own chain, as a
+       * transaction found there; an intents recipient is paid on NEAR. A refund goes back to Ethereum.
+       * The 1Click link is this order's swap.
+       *
+       * @param o The order.
+       * @param payout The payout that carried its output, if signed yet.
+       */
+      function destination(o, payout) {
+        const d = dest(o);
+        const oneClick = o.swap_deposit
+          ? ["", `<a class="link" href="${nearIntentsUrl(o.swap_deposit)}" target="_blank" rel="noreferrer">1Click execution ↗</a>`]
+          : null;
+        const since = o.published?.blockTimestamp;
+
+        if (payout?.state === "refunded") {
+          return legCard({
+            where: "ethereum",
+            kind: "refunded",
+            ref: payout.signed,
+            rows: [["", asset(payout.amount, ETH)], oneClick].filter(Boolean),
+            since,
+          });
+        }
+
+        const chain = destChain(o) ?? "near";
+        if (chain === "near") {
+          return legCard({
+            where: "near",
+            kind: payout ? "received" : o.swapped ? "swapped" : "pending",
+            ref: payout?.signed,
+            pending: !payout,
+            rows: [payout ? ["", asset(payout.amount, d, o.destination_asset ?? "", chainIcon(chain))] : null, oneClick].filter(Boolean),
+            since,
+          });
+        }
+
+        // Paid on another chain: the payout's own transaction there, once the poller has found it.
+        const landed = payout?.dest_tx;
+        return legCard({
+          where: chain,
+          kind: landed ? "received" : payout ? "sending" : o.swapped ? "swapped" : "pending",
+          pending: !landed,
+          rows: [
+            landed ? ["", asset(payout.dest_amount, d, o.destination_asset ?? "", chainIcon(chain))] : null,
+            landed ? ["tx", destTxLink(payout.dest_tx, null, DEST_TX[chain] ?? chain)] : null,
+            oneClick,
+          ].filter(Boolean),
+          since,
+        });
+      }
+
+      /**
+       * The route, start to end: published and bridged on Hydration, signed by Wormhole, delivered on
+       * Ethereum and forwarded into A, then swapped by the router and paid out on the destination.
+       */
+      function route(o, payout) {
+        const placedAt = o.published?.blockTimestamp;
+        const held = o.rail_state === "queued";
+        return [
+          legCard({
+            where: "hydration",
+            kind: "published",
+            ref: o.published,
+            rows: [
+              o.asset_in != null
+                ? ["sold", asset(o.amount_in, o.asset_in_meta, `#${o.asset_in}`, assetIcon(o.asset_in_meta?.icon ?? o.asset_in))]
+                : null,
+              ["A gets ≥", asset(o.amount, ETH)],
+            ].filter(Boolean),
+          }),
+          legCard({
+            where: "wormhole",
+            kind: "signed",
+            ref: o.rail_published,
+            rows: [
+              o.vaa_id ? ["settlement", vaaLink(o.vaa_id)] : null,
+              o.order_vaa ? ["order", vaaLink(o.order_vaa)] : null,
+            ].filter(Boolean),
+            since: placedAt,
+          }),
+          legCard({
+            where: "ethereum",
+            kind: held ? "rate limited" : "delivered",
+            ref: o.rail_settled,
+            held,
+            rows: held ? [["", '<span class="dim">held by the inbound rate limiter</span>']] : [],
+            since: placedAt,
+          }),
+          legCard({
+            where: "ethereum",
+            kind: "forwarded",
+            ref: o.forwarded,
+            rows: o.forwarded_amount ? [["", asset(o.forwarded_amount, ETH)]] : [],
+            since: placedAt,
+          }),
+          destination(o, payout),
+        ].join("");
+      }
+
+      async function render(o, payouts) {
+        if (!o) {
+          main.innerHTML = `<div class="panel"><div class="table-error">no order with sequence ${esc(seq)}</div></div>`;
+          return;
+        }
+        const d = dest(o);
+        const deadline = o.deadline ? Number(o.deadline) * 1000 : null;
+
+        const order = [
+          kv("trade", o.auth_path ? `<a class="link" href="/v2/trade/${encodeURIComponent(o.auth_path)}">${type(o)}</a>` : type(o)),
+          kv("buys", esc(d?.symbol ?? o.destination_asset ?? "—")),
+          // Destination units per 1 ETH, from the feeds when the order was published.
+          kv("priced at", o.out_per_in && d ? `${esc(amount(o.out_per_in, d.decimals, 6))} ${esc(d.symbol)} / ETH` : mono(o.out_per_in)),
+          kv("caller", addrLink(o.caller, "hydration")),
+          kv("owner", addrLink(o.owner, "hydration")),
+          kv("recipient", addrLink(o.recipient, destChain(o))),
+          kv("delivered as", o.recipient_kind === 1 ? "an intents account on NEAR" : "a withdrawal to its chain"),
+          kv("refund to", addrLink(o.refund_to, "ethereum")),
+          kv("deadline", deadline ? `<span title="${esc(at(deadline))}">${esc(at(deadline))}</span>` : '<span class="dim">—</span>'),
+          kv("auth path", o.auth_path ? `<span class="mono">${esc(short(o.auth_path, 10, 8))}</span>${copyBtn(o.auth_path)}` : '<span class="dim">—</span>'),
+          kv("terms", o.terms ? `<span class="mono">${esc(short(o.terms, 10, 8))}</span>${copyBtn(o.terms)}` : '<span class="dim">—</span>'),
+          kv("ntt sequence", mono(o.seq)),
+        ].join("");
+
+        // The ceiling was committed on Hydration and is already off `amount`; the fee is what the
+        // relayer actually took, and whatever it left goes to A on top.
+        const relay = [
+          kv("A gets at least", asset(o.amount, ETH)),
+          kv("forwarded", o.forwarded_amount ? asset(o.forwarded_amount, ETH) : '<span class="dim">—</span>'),
+          kv("relay fee paid", o.relay_fee ? asset(o.relay_fee, ETH) : '<span class="dim">—</span>'),
+          kv("relayer", addrLink(o.relayer, "ethereum")),
+          kv("deposit address", addrLink(o.deposit_address, "ethereum")),
+        ].join("");
+
+        const rail = [
+          kv("state", o.rail_state ? badge(o.rail_state) : '<span class="dim">—</span>'),
+          kv("settlement vaa", vaaLink(o.vaa_id)),
+          kv("order vaa", vaaLink(o.order_vaa)),
+          kv("ntt digest", mono(short(o.digest, 14, 10))),
+        ].join("");
+
+        main.innerHTML = `
+          <h1 class="page-title">Order ${esc(o.seq)} <span class="sub">${badge(o.state)}</span></h1>
+          <div class="legs">${route(o, payoutOf(o, payouts))}</div>
+          <div class="panel">
+            <div class="panel-head"><span class="t">Order</span></div>
+            ${order}
+          </div>
+          <div class="panel">
+            <div class="panel-head"><span class="t">Relay</span><span class="note">ETH is the rail, not the destination</span></div>
+            ${relay}
+          </div>
+          <div class="panel">
+            <div class="panel-head"><span class="t">NTT rail</span></div>
+            ${rail}
+          </div>`;
+      }
+
+      let authPath = null;
+
+      // The order, then its trade's payouts — one of which carried this order's output.
+      async function load() {
+        const o = await json(`${API}/orders/${encodeURIComponent(seq)}`);
+        authPath = o?.auth_path ?? null;
+        const trade = authPath ? await json(`${API}/trades/${encodeURIComponent(authPath)}`) : null;
+        await render(o, trade?.payouts ?? []);
+      }
+
+      live(
+        "orders-v2,payouts-v2",
+        (u) => {
+          if (String(u.record?.seq) === seq || (authPath && u.record?.auth_path === authPath)) load();
+        },
+        load,
+      );
+    </script>
+  </body>
+</html>

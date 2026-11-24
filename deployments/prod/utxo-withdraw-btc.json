@@ -1,0 +1,46 @@
+{
+  "migration": "utxo-withdraw-btc",
+  "environment": "prod",
+  "startedAt": "2026-11-24T13:21:30.622Z",
+  "completedAt": null,
+  "steps": [
+    {
+      "name": "001-deploy-withdraw",
+      "status": "completed",
+      "output": {
+        "txHash": "4PSVuRHWGVwREZtpR2qF4aXh5rYHMWVZwRXGR5CXWt1a",
+        "withdrawAccount": "withdraw-btc.hydration-whm.near",
+        "owner": "hydration-whm.near",
+        "codeSha256": "1a55ec553915c44218f9e4d08d7d10b41f39dc3f4e6a28c6076eab8e99e722a1",
+        "chain": "Bitcoin"
+      },
+      "error": null,
+      "startedAt": "2026-11-24T13:21:30.623Z",
+      "completedAt": "2026-11-24T13:21:44.424Z"
+    },
+    {
+      "name": "002-transfer-ownership@withdraw",
+      "status": "failed",
+      "output": null,
+      "error": "Missing WITHDRAW_NEW_OWNER",
+      "startedAt": "2026-11-24T13:21:44.426Z",
+      "completedAt": null
+    },
+    {
+      "name": "003-delete-keys@withdraw",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "004-accept-ownership@withdraw",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    }
+  ]
+}

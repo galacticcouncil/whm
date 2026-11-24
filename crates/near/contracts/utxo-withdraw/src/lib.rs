@@ -1,5 +1,6 @@
-//! UTXO withdraw — sends a UTXO-chain token on NEAR (`zec.omft.near`) to its native chain through
-//! Omni's connector, from an account derived from the destination address. Design:
+//! UTXO withdraw — sends a UTXO-chain token on NEAR (`zec.omft.near`, `nbtc.bridge.near`) to its
+//! native chain through Omni's connector, from an account derived from the destination address. One
+//! deployment per chain. Design:
 //! `docs/near-utxo/withdraw/spec.md`.
 //!
 //! ```text
@@ -36,11 +37,15 @@
 pub mod chain;
 /// Per-chain logic, one module each; `chain::Chain` dispatches to them.
 pub mod chains {
+    pub mod base58check;
+    pub mod bitcoin;
     pub mod zcash;
 }
 pub mod connector;
 pub mod delegate;
-pub mod mpc;
+
+/// `v1.signer`, shared with the other WHM contracts.
+pub use near_common::mpc;
 
 use std::collections::BTreeMap;
 
@@ -77,6 +82,10 @@ pub const MAX_VALIDITY: u64 = 100;
 /// `migrate` on the new code, in the same batch as its deploy.
 pub const GAS_FOR_MIGRATE: Gas = Gas::from_tgas(50);
 
+/// Storage key of the owner's fee rate — beside the contract state, not in it, so its layout and
+/// `migrate` are unchanged.
+const FEE_RATE: &[u8] = b"fee_rate";
+
 /// The `v1.signer` deposit, and the 1 yocto `ft_transfer_call` and `claim_lost_found` require.
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 
@@ -108,9 +117,9 @@ pub struct UtxoWithdraw {
     chain: Chain,
     /// `v1.signer` on mainnet.
     mpc_signer: AccountId,
-    /// The connector's token — `zec.omft.near`.
+    /// The connector's token — `zec.omft.near`, `nbtc.bridge.near`.
     token: AccountId,
-    /// `zcash-connector.bridge.near`.
+    /// `zcash-connector.bridge.near`, `btc-connector.bridge.near`.
     connector: AccountId,
 
     /// Blocks a signed delegate stays valid.
@@ -277,6 +286,18 @@ impl UtxoWithdraw {
         emit("params_set", json!({ "validity": validity, "withdraw_tgas": withdraw_tgas }));
     }
 
+    /// Sets the miner fee rate, sat/vB, on a chain whose fee is a market price — Bitcoin; up to the
+    /// chain's highest, which keeps the fee inside the connector's range. Takes effect at the next
+    /// withdrawal. Zcash's ZIP-317 fee takes none.
+    #[payable]
+    pub fn set_fee_rate(&mut self, fee_rate: u64) {
+        self.assert_owner();
+        let (_, max) = self.chain.fee_rates().unwrap_or_else(|| env::panic_str("FixedFee"));
+        require!(fee_rate > 0 && fee_rate <= max, "InvalidFeeRate");
+        env::storage_write(FEE_RATE, &fee_rate.to_le_bytes());
+        emit("fee_rate_set", json!({ "fee_rate": fee_rate }));
+    }
+
     /// Proposes `new_owner`, who takes over on `accept_ownership`. Proposing again replaces it.
     #[payable]
     pub fn transfer_ownership(&mut self, new_owner: AccountId) {
@@ -343,6 +364,7 @@ impl UtxoWithdraw {
             "connector": self.connector,
             "validity": self.validity,
             "withdraw_tgas": self.withdraw_gas.as_tgas(),
+            "fee_rate": self.fee_rate(),
         })
     }
 
@@ -388,7 +410,7 @@ impl UtxoWithdraw {
         require!(balance >= config.min_withdraw_amount.0, "BelowMinimum");
 
         // One coin in, user output and change out: the fee never varies.
-        let fee = self.chain.miner_fee(1, 2);
+        let fee = self.miner_fee(config);
         let bridge_fee = config.withdraw_bridge_fee.get_fee(balance);
         let user_out = balance
             .checked_sub(bridge_fee)
@@ -481,6 +503,25 @@ impl UtxoWithdraw {
             )
     }
 
+    /// The miner fee of a one-coin, two-output withdrawal. At a market rate it is kept inside the
+    /// range the connector accepts now, so an Omni change to that range does not refuse every
+    /// withdrawal; a chain's own fixed fee — ZIP-317 — is never moved.
+    fn miner_fee(&self, config: &ConnectorConfig) -> u128 {
+        let Some(rate) = self.fee_rate() else { return self.chain.miner_fee(0, 1, 2) };
+        let fee = self.chain.miner_fee(rate, 1, 2);
+        let fee = config.max_btc_gas_fee.map_or(fee, |max| fee.min(max.0));
+        config.min_btc_gas_fee.map_or(fee, |min| fee.max(min.0))
+    }
+
+    /// The fee rate in force, sat/vB: the owner's, else the chain's default; `None` on a chain that
+    /// fixes its own fee.
+    fn fee_rate(&self) -> Option<u64> {
+        let (default, _) = self.chain.fee_rates()?;
+        Some(env::storage_read(FEE_RATE).map_or(default, |b| {
+            u64::from_le_bytes(b.try_into().unwrap_or_else(|_| env::panic_str("InvalidFeeRate")))
+        }))
+    }
+
     fn path(&self, address: &str) -> String {
         format!("{}{}", self.chain.path_prefix(), address)
     }
@@ -502,10 +543,7 @@ pub(crate) fn emit(event: &str, data: serde_json::Value) {
     env::log_str(&format!("EVENT_JSON:{log}"));
 }
 
-fn parse_hex32(value: &str) -> [u8; 32] {
-    let bytes = hex::decode(value).unwrap_or_else(|_| env::panic_str("InvalidHex"));
-    bytes.try_into().unwrap_or_else(|_| env::panic_str("InvalidBytes32"))
-}
+use near_common::parse_bytes32 as parse_hex32;
 
 #[cfg(test)]
 mod tests {
@@ -549,6 +587,8 @@ mod tests {
             change_address: Some(CHANGE.into()),
             min_change_amount: U128(10_000),
             min_withdraw_amount: U128(100_000),
+            min_btc_gas_fee: Some(U128(5_000)),
+            max_btc_gas_fee: Some(U128(1_000_000)),
         }
     }
 
@@ -656,6 +696,120 @@ mod tests {
     #[test]
     fn path_is_prefix_and_address() {
         assert_eq!(contract().path_of(CHANGE.into()), format!("zcash:v1:{CHANGE}"));
+    }
+
+    // =============== Bitcoin ============================================================
+
+    const BTC_CHANGE: &str = "bc1qp42j7hn3lup7gck6y6eks6x2lmnp800t6gy7sk";
+
+    fn bitcoin() -> UtxoWithdraw {
+        set_ctx(accounts(0).as_str(), 1, 1_000);
+        UtxoWithdraw::new(
+            accounts(0),
+            Chain::Bitcoin,
+            "v1.signer".parse().unwrap(),
+            "nbtc.bridge.near".parse().unwrap(),
+            "btc-connector.bridge.near".parse().unwrap(),
+            100,
+            200,
+        )
+    }
+
+    /// `btc-connector.bridge.near`'s live config.
+    fn btc_config() -> ConnectorConfig {
+        ConnectorConfig {
+            chain: "BitcoinMainnet".into(),
+            withdraw_bridge_fee: BridgeFee { fee_min: U128(400), fee_rate: 0 },
+            change_address: Some(BTC_CHANGE.into()),
+            min_change_amount: U128(537),
+            min_withdraw_amount: U128(6_400),
+            min_btc_gas_fee: Some(U128(100)),
+            max_btc_gas_fee: Some(U128(5_000)),
+        }
+    }
+
+    /// 0.001 BTC to a Taproot address from a 0.01 BTC coin: the bridge keeps 400, the miner 825.
+    #[test]
+    fn bitcoin_worked_example() {
+        let taproot = "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0";
+        let (d, _) = bitcoin().build_withdraw(taproot, KEY, 100_000, &btc_config(), &coin(), 1_000_000);
+        assert_eq!(d.receiver_id.as_str(), "nbtc.bridge.near");
+        let args: serde_json::Value = serde_json::from_slice(&d.args).unwrap();
+        assert_eq!(args["receiver_id"], "btc-connector.bridge.near");
+        let w = &msg_of(&d)["Withdraw"];
+        assert_eq!(w["max_gas_fee"], "825");
+        assert_eq!(
+            w["output"],
+            json!([
+                { "value": 98_775u64, "script_pubkey": "512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798" },
+                { "value": 900_400u64, "script_pubkey": "00140d552f5e71ff03e462da26b36868cafee613bdeb" },
+            ])
+        );
+    }
+
+    /// The owner's rate prices the next withdrawal: at 2 sat/vB the miner takes 330.
+    #[test]
+    fn bitcoin_fee_rate_is_the_owners() {
+        let mut c = bitcoin();
+        assert_eq!(c.get_params()["fee_rate"], 5);
+        c.set_fee_rate(2);
+        assert_eq!(c.get_params()["fee_rate"], 2);
+        let taproot = "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0";
+        let (d, _) = c.build_withdraw(taproot, KEY, 100_000, &btc_config(), &coin(), 1_000_000);
+        let w = &msg_of(&d)["Withdraw"];
+        assert_eq!(w["max_gas_fee"], "330");
+        assert_eq!(w["output"][0]["value"], 99_270u64);
+    }
+
+    /// The connector's range holds the fee: a lowered maximum caps it, a raised minimum lifts it.
+    #[test]
+    fn bitcoin_fee_stays_in_the_connector_range() {
+        let c = bitcoin();
+        let taproot = "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0";
+        let fee = |min: u128, max: u128| {
+            let config = ConnectorConfig { min_btc_gas_fee: Some(U128(min)), max_btc_gas_fee: Some(U128(max)), ..btc_config() };
+            let (d, _) = c.build_withdraw(taproot, KEY, 100_000, &config, &coin(), 1_000_000);
+            msg_of(&d)["Withdraw"]["max_gas_fee"].as_str().unwrap().to_string()
+        };
+        assert_eq!(fee(100, 5_000), "825");
+        assert_eq!(fee(100, 700), "700");
+        assert_eq!(fee(900, 5_000), "900");
+        // Zcash's ZIP-317 fee is the network's rule, not moved by the range.
+        let (d, _) = contract().build_withdraw(CHANGE, KEY, 1_000_000, &ConnectorConfig { max_btc_gas_fee: Some(U128(6_000)), ..live_config() }, &coin(), 1 << 40);
+        assert_eq!(msg_of(&d)["Withdraw"]["max_gas_fee"], "10000");
+    }
+
+    #[test]
+    fn fee_rate_refusals() {
+        for (rate, error) in [(0, "InvalidFeeRate"), (31, "InvalidFeeRate")] {
+            let result = std::panic::catch_unwind(move || bitcoin().set_fee_rate(rate));
+            let text = result.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+            assert!(text.contains(error), "{rate}: {text}");
+        }
+        bitcoin().set_fee_rate(30);
+        let result = std::panic::catch_unwind(|| contract().set_fee_rate(5));
+        let text = result.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+        assert!(text.contains("FixedFee"), "{text}");
+        assert!(contract().get_params()["fee_rate"].is_null());
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn only_the_owner_sets_the_fee_rate() {
+        let mut c = bitcoin();
+        set_ctx(accounts(1).as_str(), 1, 1_000);
+        c.set_fee_rate(2);
+    }
+
+    #[test]
+    fn bitcoin_path() {
+        assert_eq!(bitcoin().path_of(BTC_CHANGE.into()), format!("bitcoin:v1:{BTC_CHANGE}"));
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidAddress")]
+    fn bitcoin_rejects_a_zcash_address() {
+        bitcoin().path_of(CHANGE.into());
     }
 
     #[test]

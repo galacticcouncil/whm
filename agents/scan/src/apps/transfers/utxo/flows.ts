@@ -188,7 +188,7 @@ export const utxo: Flow = {
       // The proof's arguments carry what no log does: the coin's transaction — so who paid, and to
       // which address — and the order with its refund address.
       role: "utxo-connector",
-      near: { standard: "call", event: "verify_deposit_v2" },
+      json: { standard: "call", event: "verify_deposit_v2" },
       state: "deposited",
       key: (_a: VerifyDeposit, ev: LogEvent) => (byConnector(ev.address) ? source(ev) : null),
       patch: (a: VerifyDeposit, ev: LogEvent) => {
@@ -217,7 +217,7 @@ export const utxo: Flow = {
       // A v5 transaction's id commits to more than its bytes' double hash, so the id comes from the
       // connector, which names the coin it now holds as `txid@vout`.
       role: "utxo-connector",
-      near: { standard: "bridge", event: "utxo_added" },
+      json: { standard: "bridge", event: "utxo_added" },
       state: "deposited",
       key: (_a: unknown, ev: LogEvent) => (byConnector(ev.address) ? source(ev) : null),
       patch: (a: { utxo_storage_keys: string[] }) => ({
@@ -226,7 +226,7 @@ export const utxo: Flow = {
     },
     {
       role: "utxo-connector",
-      near: { standard: "bridge", event: "verify_deposit_details" },
+      json: { standard: "bridge", event: "verify_deposit_details" },
       state: "deposited",
       key: (_a: unknown, ev: LogEvent) => (byConnector(ev.address) ? source(ev) : null),
       patch: (a: DepositDetails) => ({
@@ -237,7 +237,7 @@ export const utxo: Flow = {
     {
       role: "wormhole-core",
       chains: ["near"],
-      near: NEAR_PUBLISH,
+      json: NEAR_PUBLISH,
       state: "deposited",
       key: (a: NearPublished, ev: LogEvent) =>
         ownDigest(`0x${a.data}`, ev, DEPOSIT_SENDERS) ? source(ev) : null,
@@ -288,7 +288,7 @@ export const signs: Flow = {
   legs: [
     {
       role: "utxo-withdraw",
-      near: { standard: "whm-utxo-withdraw", event: "signed" },
+      json: { standard: "whm-utxo-withdraw", event: "signed" },
       state: "signed",
       key: (_a: Signed, ev: LogEvent) =>
         byWithdraw(ev.address) ? `${ev.ref.txHash}:${ev.ref.logIndex}` : null,

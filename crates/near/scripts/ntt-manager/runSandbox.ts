@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   console.log(`core:         wormhole.test.near  (guardian ${privateKeyToAccount(FORK_GUARDIAN_PK).address})`);
   console.log(`token:        wrap.test.near`);
   console.log(`user:         alice.test.near  (10 wNEAR, same key as root)`);
-  console.log(`\nnext:         pnpm migrate:near-ntt-near:fork`);
+  console.log(`\nnext:         pnpm migrate:near-ntt-near fork`);
 }
 
 async function setup(): Promise<void> {

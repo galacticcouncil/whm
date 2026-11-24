@@ -220,12 +220,12 @@ addresses for source and Hydration, and per-asset oracle addresses.
 # fork
 pnpm fork:hydration
 pnpm fork:ethereum                            # oracle-relay-ethereum only
-pnpm migrate:oracle-relay-solana:fork
-pnpm migrate:oracle-relay-ethereum:fork
+pnpm migrate:oracle-relay-solana fork
+pnpm migrate:oracle-relay-ethereum fork
 
 # prod
-pnpm migrate:oracle-relay-solana
-pnpm migrate:oracle-relay-ethereum
+pnpm migrate:oracle-relay-solana prod
+pnpm migrate:oracle-relay-ethereum prod
 ```
 
 See [migrations/README.md](../../migrations/README.md) for the migration model.

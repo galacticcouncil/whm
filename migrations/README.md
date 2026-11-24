@@ -22,7 +22,7 @@ State files live outside this dir, in `deployments/<context>/<migration>.json` â
 
 ## Running
 
-The production `pnpm migrate:governance-hydration` wrapper also verifies the dispatcher
+The production `pnpm migrate:governance-hydration prod` wrapper also verifies the dispatcher
 implementation and ERC-1967 proxy sources on Neckwork using its Sourcify V2 API.
 Fork runs skip explorer verification. Direct invocation of `migrations/run.ts` requires
 running `pnpm verify:governance-hydration` separately afterward.
@@ -56,7 +56,7 @@ bash sh/migrate-basejump-base.sh prod
 Or via the root npm script:
 
 ```bash
-pnpm migrate:basejump-base
+pnpm migrate:basejump-base prod
 ```
 
 | Flag          | Required | Description                                             |

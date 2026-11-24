@@ -10,7 +10,9 @@ pub mod outbound;
 pub mod payout;
 pub mod rate_limit;
 pub mod trimmed;
-pub mod vaa;
+
+/// The VAA envelope, shared with the other WHM contracts.
+pub use near_common::vaa;
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
@@ -330,11 +332,7 @@ pub(crate) fn now() -> u64 {
     env::block_timestamp() / 1_000_000_000
 }
 
-pub(crate) fn parse_bytes32(value: &str) -> [u8; 32] {
-    let bytes = hex::decode(value.trim_start_matches("0x"))
-        .unwrap_or_else(|_| env::panic_str("InvalidHex"));
-    bytes.try_into().unwrap_or_else(|_| env::panic_str("InvalidBytes32"))
-}
+pub(crate) use near_common::parse_bytes32;
 
 #[cfg(test)]
 pub(crate) mod tests {
