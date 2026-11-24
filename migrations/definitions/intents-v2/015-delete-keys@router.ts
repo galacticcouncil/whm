@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { deleteKeys } from "../../actions/near-ntt/deleteKeys";
 
 const step: MigrationStep = {
-  name: "014-delete-keys@router",
+  name: "015-delete-keys@router",
   description: "Delete the router account's keys — upgrades only through its owner",
   action: async (ctx) => {
     const wasm = ctx.env.ROUTER_WASM;

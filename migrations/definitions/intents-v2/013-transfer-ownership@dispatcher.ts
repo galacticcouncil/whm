@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { setOwner } from "../../actions/setOwner";
 
 const step: MigrationStep = {
-  name: "012-transfer-ownership@dispatcher",
+  name: "013-transfer-ownership@dispatcher",
   description: "Transfer Hydration dispatcher ownership to the Emergency Admin",
   action: async (ctx) => {
     const newOwner = ctx.env.HYDRATION_EMERGENCY_ADMIN;

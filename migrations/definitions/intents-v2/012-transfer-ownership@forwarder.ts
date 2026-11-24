@@ -4,7 +4,7 @@ import type { MigrationStep } from "./types";
 import { setOwner } from "../../actions/setOwner";
 
 const step: MigrationStep = {
-  name: "011-transfer-ownership@forwarder",
+  name: "012-transfer-ownership@forwarder",
   description: "Transfer Ethereum forwarder ownership to the Technical Committee Safe",
   action: async (ctx) => {
     // Left empty in the env until the canary passes, so a full run stops here with every contract

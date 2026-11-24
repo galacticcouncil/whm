@@ -128,7 +128,15 @@
       "completedAt": "2026-11-17T11:00:17.879Z"
     },
     {
-      "name": "011-transfer-ownership@forwarder",
+      "name": "011-set-near-price-route@dispatcher",
+      "status": "pending",
+      "output": null,
+      "error": null,
+      "startedAt": null,
+      "completedAt": null
+    },
+    {
+      "name": "012-transfer-ownership@forwarder",
       "status": "failed",
       "output": null,
       "error": "Missing or invalid ETHEREUM_TC_SAFE: ",
@@ -136,7 +144,7 @@
       "completedAt": null
     },
     {
-      "name": "012-transfer-ownership@dispatcher",
+      "name": "013-transfer-ownership@dispatcher",
       "status": "pending",
       "output": null,
       "error": null,
@@ -144,7 +152,7 @@
       "completedAt": null
     },
     {
-      "name": "013-transfer-ownership@router",
+      "name": "014-transfer-ownership@router",
       "status": "pending",
       "output": null,
       "error": null,
@@ -152,7 +160,7 @@
       "completedAt": null
     },
     {
-      "name": "014-delete-keys@router",
+      "name": "015-delete-keys@router",
       "status": "pending",
       "output": null,
       "error": null,
@@ -160,7 +168,7 @@
       "completedAt": null
     },
     {
-      "name": "015-accept-ownership@router",
+      "name": "016-accept-ownership@router",
       "status": "pending",
       "output": null,
       "error": null,
