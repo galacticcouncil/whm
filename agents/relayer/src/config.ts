@@ -56,6 +56,35 @@ export function optNum(name: string, fallback: number): number {
 }
 
 /**
+ * Read an optional whole number with a fallback.
+ *
+ * @param name Variable name.
+ * @param fallback Value to use when unset.
+ * @param min Least value accepted.
+ * @returns The parsed number.
+ * @throws When set to anything but a decimal whole number of at least `min`.
+ */
+export function optWhole(name: string, fallback: bigint, min = 0n): bigint {
+  const v = opt(name, fallback.toString()).trim();
+  if (!/^[0-9]+$/.test(v) || BigInt(v) < min) throw new Error(`${name} must be a whole number of at least ${min}, got "${v}"`);
+  return BigInt(v);
+}
+
+/**
+ * Read an optional on/off switch with a fallback.
+ *
+ * @param name Variable name.
+ * @param fallback Value to use when unset.
+ * @returns True when on.
+ * @throws When set to anything but "on" or "off".
+ */
+export function onOff(name: string, fallback: "on" | "off"): boolean {
+  const v = opt(name, fallback).trim().toLowerCase();
+  if (v !== "on" && v !== "off") throw new Error(`${name} must be "on" or "off", got "${v}"`);
+  return v === "on";
+}
+
+/**
  * Parse and validate a 32-byte hex private key read from `name`, normalizing the `0x` prefix.
  *
  * @param name Env var the raw value came from, for the error message only.

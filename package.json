@@ -27,6 +27,7 @@
     "migrate:governance-hyper-evm": "bash sh/migrate-governance-hyper-evm.sh",
     "migrate:governance-base": "bash sh/migrate-governance-base.sh",
     "migrate:oracle-relay-hydration": "bash sh/migrate-oracle-relay-hydration.sh",
+    "migrate:psm-base": "bash sh/migrate-psm-base.sh",
     "migrate:intent": "bash sh/migrate-intent.sh",
     "migrate:intents-v2": "bash sh/migrate-intents-v2.sh",
     "migrate:intents-v2-dao": "bash sh/migrate-intents-v2-dao.sh",

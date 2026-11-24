@@ -1,10 +1,12 @@
 import { encodeFunctionData } from "viem";
 
 import type { ifs } from "@whm/common/evm";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
 import type { WalletContext } from "../types";
 
 import intentReceiverJson from "../../../contracts/out/IntentReceiver.sol/IntentReceiver.json";
-import erc1967ProxyJson from "../../../contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json";
+
+const erc1967ProxyJson = forgeArtifact("ERC1967Proxy");
 
 export type DeployParams = WalletContext & {
   wormhole: `0x${string}`; // Wormhole core bridge on this chain
@@ -57,7 +59,7 @@ export async function deploy(params: DeployParams): Promise<DeployResult> {
     args: [wormhole, transceiver],
   });
 
-  const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson as ifs.ContractArtifact;
+  const { abi: proxyAbi, bytecode: proxyBytecode } = erc1967ProxyJson;
 
   const proxyHash = await walletClient.deployContract({
     abi: proxyAbi,

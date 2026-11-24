@@ -22,6 +22,7 @@ import { encodeDeployData, encodeEventTopics, encodeFunctionData, type Abi, type
 import { privateKeyToAccount } from "viem/accounts";
 
 import { h160, erc20 } from "@galacticcouncil/common";
+import { forgeArtifact } from "@whm/common/evm/artifacts";
 
 import { configs } from "../lib/configs";
 import { spawnForks, teardownForks, type Network } from "../lib/network";
@@ -46,7 +47,7 @@ const artifact = (path: string): Artifact =>
   JSON.parse(readFileSync(resolve(OUT, path), "utf8")) as Artifact;
 
 const EMITTER = artifact("IntentEmitter.sol/IntentEmitter.json");
-const PROXY = artifact("ERC1967Proxy.sol/ERC1967Proxy.json");
+const PROXY = forgeArtifact("ERC1967Proxy");
 
 const emitterAbi = EMITTER.abi as Abi;
 const proxyAbi = PROXY.abi as Abi;
