@@ -344,7 +344,7 @@ since the connector custodies the native coin behind the NEAR token; the NEAR MP
 | Chain  | Emitter (Hydration) | `UtxoWithdraw` (NEAR)             | File                 |
 | ------ | ------------------- | --------------------------------- | -------------------- |
 | Zcash  | `ZecUtxoEmitter`    | `withdraw-zec.hydration-whm.near` | [zcash.md](zcash.md) |
-| Bitcoin | — next            | `withdraw-btc.hydration-whm.near` | —                    |
+| Bitcoin | — (router only)   | `withdraw-btc.hydration-whm.near` | [bitcoin.md](bitcoin.md) |
 
 A new chain is a `chains/<chain>.rs` in the contract, its own emitter on Hydration, a deployment
 on NEAR, a route in each bot and a `src/chains/<chain>.ts` in `agents/utxo`.
@@ -354,8 +354,7 @@ on NEAR, a route in each bot and a `src/chains/<chain>.ts` in `agents/utxo`.
 1. **Coins with large `tx_bytes`** — the relayer's best fit does not skip them yet.
 2. **Oracle-priced fee** — an emitter upgrade converting a NEAR fee at the Hydration feeds' rate
    ([Sizing the fee](#sizing-the-fee)); decide stale-feed behaviour first.
-3. **Bitcoin** — a `Bitcoin` chain in the contract (its fee policy is the open part: Bitcoin's miner
-   fee depends on the fee rate, not a flat ZIP-317 amount), its emitter (bech32 is variable-length),
-   its deployment and routes.
+3. **Bitcoin from Hydration** — the contract's `Bitcoin` chain withdraws the intents router's nBTC
+   ([bitcoin.md](bitcoin.md)); a Hydration emitter (bech32 is variable-length) and a BTC NTT remain.
 
 Per-chain items are in each chain's file.

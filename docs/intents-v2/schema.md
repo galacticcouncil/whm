@@ -63,16 +63,18 @@ One set per action. `authPath = keccak256(encodeQuote(terms))`; any change → n
 | `minOutPerIn`       | u128    | hard floor, destination units per 1e18 wei; 0 = none                                                                                                                                                                                                                                                                                               |
 | `minDelivery`       | u128    | before the deadline, deliver only once `A` holds this much; the SDK sets it ≥ the payout path's minimum for the token ([payout.md](payout.md)), above it a batch size                                                                                                                                                                              |
 | `deadline`          | u64     | unix seconds                                                                                                                                                                                                                                                                                                                                       |
-| `recipientKind`     | u8      | 0 = withdraw off NEAR — through POA, or for `nep141:wrap.near` as native NEAR; 1 = intents-account transfer                                                                                                                                                                                                                                        |
+| `recipientKind`     | u8      | 0 = withdraw to the asset's own chain — through its UTXO route, or for `nep141:wrap.near` as native NEAR; 1 = intents-account transfer                                                                                                                                                                                                             |
 | `refundTo`          | address | Ethereum H160, non-zero                                                                                                                                                                                                                                                                                                                            |
 | `destinationAsset`  | string  | intents ledger id (bare form, not `1cs_v1:`), 1..255 bytes of visible ASCII                                                                                                                                                                                                                                                                        |
 | `recipient`         | string  | 1..255 bytes of visible ASCII; an account id for `recipientKind 1`                                                                                                                                                                                                                                                                                 |
 
 There is no on-chain asset list. Whether an asset can be bought is 1Click's: no quote, no swap — the ETH
-waits in `A` and refunds after the deadline. Whether a delivery works is the terms', built by the SDK:
-`recipientKind 0` only for tokens POA withdraws with a `WITHDRAW_TO:` memo, `minDelivery` from the
-payout path's minimums. The router checks only what is structural — a withdrawal needs a `nep141:` asset (at swap and
-delivery, never at parse, so terms that fail it still refund) — and never ETH → ETH.
+waits in `A` and refunds after the deadline. Whether a delivery works the router decides at swap and
+delivery, never at parse, so terms that fail it still refund: a withdrawal needs wNEAR to a NEAR
+account, or a token with a UTXO route to an address the route accepts ([payout.md](payout.md)); an
+intents transfer a valid account id; never ETH → ETH. The SDK builds the rest: `recipientKind 0`
+only for routed tokens, an address it has checksum-validated, `minDelivery` at least the route's
+minimum.
 
 Packed big-endian:
 
@@ -220,7 +222,7 @@ is a different account.
 | Action                         | Intent                                                                                                                                                   |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **swap**                       | `{ "intent": "transfer", "receiver_id": "<quote.depositAddress>", "tokens": { "nep141:eth.omft.near": "<quote.amountIn>" } }`                            |
-| **deliver**, `recipientKind 0` | `{ "intent": "ft_withdraw", "token": "<contract>", "receiver_id": "<contract>", "amount": "<balance>", "memo": "WITHDRAW_TO:<recipient>" }`              |
+| **deliver**, UTXO route, 0     | `{ "intent": "ft_withdraw", "token": "<contract>", "receiver_id": "<A_utxo>", "amount": "<balance>" }`                                                   |
 | **deliver**, `wrap.near`, 0    | `{ "intent": "native_withdraw", "receiver_id": "<recipient>", "amount": "<balance>" }`                                                                   |
 | **deliver**, `recipientKind 1` | `{ "intent": "transfer", "receiver_id": "<recipient>", "tokens": { "<destinationAsset>": "<balance>" } }`                                                |
 | **refund**                     | `{ "intent": "ft_withdraw", "token": "eth.omft.near", "receiver_id": "eth.omft.near", "amount": "<balance>", "memo": "WITHDRAW_TO:<refundTo, EIP-55>" }` |
@@ -228,7 +230,9 @@ is a different account.
 - The swap is a transfer into 1Click's deposit account, not a `token_diff`: 1Click has the solvers
   trade and pays the output back to `A` in the same transaction ([verification.md](verification.md), G1).
 - `<contract>` is the ledger id without `nep141:`. Deliveries and refunds move `A`'s whole balance —
-  a delivery before the deadline from `minDelivery`, after it or a settle any balance.
+  a delivery before the deadline from `minDelivery`, after it or a settle any balance, and a UTXO
+  route's from its `min_amount`.
+- The `WITHDRAW_TO:` memo is POA's, and only the ETH refund uses it.
 - `settle` signs the same deliver and refund intents, as two messages with their own nonces.
 
 ### What is signed
@@ -340,6 +344,9 @@ impl IntentRouter {
     /// min_refund to refundTo — two payloads, each signed alone. Repeatable.
     pub fn settle(&mut self, terms: Base64VecU8, close_vaa: Base64VecU8) -> Promise;
     // all four: anyone, 1 yocto (the signer's deposit), 300 TGas
+    // owner: set_utxo_route(token, Option<UtxoRoute>) — a token's withdrawals to an accepted address,
+    //        from min_amount up, go to A_utxo = v1.signer key for (route.withdraw, path_prefix + address);
+    //        stored under its own key; view utxo_routes()
     // owner: set_params, set_quote_keys, upgrade (deploy + migrate(code_sha256) in one batch;
     //        migrate re-checks params and logs `upgrade`), two-step ownership
     // views: get_config, path_of(terms)
@@ -353,7 +360,7 @@ Event, so the bot needs no view on the happy path:
 ```json
 { "standard": "whm-intent-router", "version": "1.0.0", "event": "intent_signed",
   "data": [{ "action": "swap | deliver | refund", "account": "<A>", "auth_path": "0x…", "seq": 7,
-             "token": "…", "amount": "…", "min_amount_out": "…", "receiver": "…",
+             "token": "…", "amount": "…", "min_amount_out": "…", "receiver": "…", "utxo_account": "<A_utxo> | null",
              "signed_data": { "...MultiPayload..." } }] }
 ```
 

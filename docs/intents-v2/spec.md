@@ -122,7 +122,7 @@ One set per action, all hashed into the account:
 | `minOutPerIn`       | user's hard floor (destination units per 1e18 wei); below it funds wait. 0 = none                                   |
 | `minDelivery`       | before the deadline, deliver once `A` holds this much — at least the payout path's minimum ([payout.md](payout.md)) |
 | `deadline`          | swaps end by it; after it, remaining ETH is refunded                                                                |
-| `recipientKind`     | withdraw off NEAR to the asset's chain (through POA), or keep in an intents account                                 |
+| `recipientKind`     | withdraw to the asset's own chain (through its UTXO route), or keep in an intents account                           |
 | `refundTo`          | Ethereum address for refunds (native ETH)                                                                           |
 | `destinationAsset`  | intents ledger id, e.g. `nep141:zec.omft.near`                                                                      |
 | `recipient`         | where the destination asset goes                                                                                    |
@@ -172,7 +172,7 @@ dispatch(amount, depositAddress, maxRelayFee, terms)                    direct; 
   data = abi.encode(depositAddress, maxRelayFee, terms)
 
   1. WETH only; execute spends only WETH that arrived since the last order
-  2. msg.sender == terms.owner
+  2. msg.sender == terms.owner; the terms not closed, not past their deadline
   3. outPerIn = ETH/USD ÷ DEST/USD from the destination's two feeds — older than maxFeedAge reverts
   4. bridged = WETH − NTT delivery price − order message fee, trimmed to NTT's 8 decimals
        ≥ minOrderAmount + maxRelayFee        the minimum deposit (1e11 wei), after the relayer's cut
@@ -287,6 +287,11 @@ can do its job.
 - **Settle moves only what `A` holds.** It takes no quote and no price — a caller cannot choose a
   rate — and it is a delivery and a refund as two payloads, so one failing does not block the other.
   It can be called again: output from orders still in flight at the close goes with the next one.
+- **Withdrawals go through UTXO routes.** For a token with an owner-set route — ZEC, nBTC — a
+  withdrawal to an address the route accepts goes to `A_utxo`, the account its UTXO withdraw contract
+  derives from the address, and on through Omni's connector ([payout.md](payout.md)). There is no
+  other way out: terms a route does not take never swap, and their ETH is refunded. POA carries only
+  the ETH refunds.
 - **NEAR is paid as native NEAR.** A `recipientKind 0` delivery of `nep141:wrap.near` is
   `native_withdraw` to the recipient's NEAR account, as v1 and 1Click pay NEAR — no bridge, no fee.
   The router checks the recipient is an account id; a named account must exist, or `intents.near`
