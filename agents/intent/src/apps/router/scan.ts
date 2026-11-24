@@ -5,6 +5,10 @@ export interface TermsRow {
   auth_path: string;
   /** Encoded terms, `0x` hex. */
   terms: string;
+  /** Unix seconds — the earliest a close of these terms lets anyone settle; null while open. */
+  settle_at: string | null;
+  /** A close VAA id whose countdown has passed — what `settle` takes; null until one has. */
+  close_vaa: string | null;
 }
 
 /** One order — scan's `/api/orders`, as far as the bot reads it. */

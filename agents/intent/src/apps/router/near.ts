@@ -67,28 +67,45 @@ export async function balances(intents: string, account: string, tokens: string[
   return r.map(BigInt);
 }
 
+/** One `intent_signed` event's data — `signed_data` is the publishable MultiPayload. */
+export type Signed = { signed_data: unknown } & Record<string, unknown>;
+
 /**
- * Have the router sign: `swap`, `deliver` or `refund`, with the signer's 1 yocto.
+ * Have the router sign, with the signer's 1 yocto, and collect every payload it signed — `settle`
+ * signs a delivery and a refund apart, and the transaction's result shows only one of them.
  *
  * @param method The router method.
  * @param args Its arguments.
- * @returns The `intent_signed` event's data — `signed_data` is the publishable MultiPayload.
+ * @returns Every `intent_signed` event's data, in receipt order.
  * @throws With the failed receipts when nothing was signed — a refusal lands in a callback, after
  *         the transaction itself succeeded.
  */
-export async function sign(method: string, args: object): Promise<{ signed_data: unknown } & Record<string, unknown>> {
+export async function signAll(method: string, args: object): Promise<Signed[]> {
   const outcome = await bot.signAndSendTransaction({
     receiverId: config.router,
     actions: [actions.functionCall(method, args, teraToGas(300), 1n)],
     waitUntil: "FINAL",
   });
-  const signed = outcome.receipts_outcome
+  const signed: Signed[] = outcome.receipts_outcome
     .flatMap((r) => r.outcome.logs)
     .filter((l) => l.startsWith("EVENT_JSON:"))
     .map((l) => JSON.parse(l.slice("EVENT_JSON:".length)))
-    .find((e) => e.standard === "whm-intent-router" && e.event === "intent_signed");
-  if (!signed) throw new Error(`${method} ${outcome.transaction.hash}: nothing signed — ${failures(outcome)}`);
-  return signed.data[0];
+    .filter((e) => e.standard === "whm-intent-router" && e.event === "intent_signed")
+    .flatMap((e) => e.data);
+  if (!signed.length) throw new Error(`${method} ${outcome.transaction.hash}: nothing signed — ${failures(outcome)}`);
+  return signed;
+}
+
+/**
+ * Have the router sign one payload: `swap`, `deliver` or `refund`.
+ *
+ * @param method The router method.
+ * @param args Its arguments.
+ * @returns The `intent_signed` event's data.
+ * @throws As `signAll`.
+ */
+export async function sign(method: string, args: object): Promise<Signed> {
+  return (await signAll(method, args))[0];
 }
 
 /**

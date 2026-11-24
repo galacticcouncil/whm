@@ -19,6 +19,7 @@ const base: PlanInput = {
   priceValidityMs: 3_600_000,
   maxOrderShortfallBps: 100n,
   minRefund: 100n,
+  graceMs: 86_400_000,
 };
 
 test("swaps A's whole ETH once the order has landed", () => {
@@ -57,4 +58,35 @@ test("after the deadline: deliver any output, then refund, then drop", () => {
   assert.equal(plan({ ...past, dest: 0n, eth: 100n }).kind, "refund");
   assert.equal(plan({ ...past, dest: 0n, eth: 99n }).kind, "drop");
   assert.equal(plan({ ...past, dest: 0n, eth: 0n }).kind, "drop");
+});
+
+/** Closed, the countdown just passed, a close VAA from scan; nothing priced. */
+const closed: PlanInput = { ...base, order: undefined, settleAtMs: NOW - 1, closeVaa: "73/dispatcher/9" };
+
+test("before a close's countdown, closed terms work as before", () => {
+  const counting = { ...closed, settleAtMs: NOW + 60_000 };
+  assert.equal(plan({ ...counting, order: ORDER }).kind, "swap");
+  assert.equal(plan({ ...counting, eth: 0n, dest: 499n }).kind, "wait");
+  assert.equal(plan({ ...counting, eth: 0n, dest: 500n }).kind, "deliver");
+});
+
+test("after the countdown a priced order still swaps first", () => {
+  assert.equal(plan({ ...closed, order: ORDER }).kind, "swap");
+});
+
+test("after the countdown settles any output, minDelivery aside, and ETH from minRefund", () => {
+  const settle = { kind: "settle", closeVaa: "73/dispatcher/9" };
+  assert.deepEqual(plan({ ...closed, eth: 0n, dest: 1n }), settle);
+  assert.deepEqual(plan({ ...closed, eth: 100n, dest: 0n }), settle);
+  assert.equal(plan({ ...closed, eth: 99n, dest: 0n }).kind, "wait");
+});
+
+test("waits for scan's close VAA", () => {
+  assert.equal(plan({ ...closed, closeVaa: undefined }).kind, "wait");
+});
+
+test("closed and empty: watched through the grace, then dropped", () => {
+  const empty = { ...closed, eth: 0n, dest: 0n };
+  assert.equal(plan(empty).kind, "wait");
+  assert.equal(plan({ ...empty, nowMs: closed.settleAtMs! + closed.graceMs + 1 }).kind, "drop");
 });

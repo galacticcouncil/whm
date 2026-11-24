@@ -1,7 +1,7 @@
 import log from "../../logger";
 
 import { config } from "./config";
-import { balances, deriveAccount, sign, type RouterConfig } from "./near";
+import { balances, deriveAccount, sign, signAll, type RouterConfig } from "./near";
 import { quote, signedFields, submitIntent } from "./oneclick";
 import { plan, type Action } from "./plan";
 import { publish } from "./relay";
@@ -90,6 +90,9 @@ export class Worker {
       priceValidityMs,
       maxOrderShortfallBps: BigInt(p.max_order_shortfall_bps),
       minRefund: BigInt(p.min_refund),
+      settleAtMs: row.settle_at ? Number(row.settle_at) * 1000 : undefined,
+      closeVaa: row.close_vaa ?? undefined,
+      graceMs: config.graceDays * 86_400_000,
     });
     this.seen.set(path, { account, eth: eth.toString(), dest: dest.toString(), action: action.kind, at: now });
 
@@ -120,6 +123,14 @@ export class Worker {
         const signed = await sign(action.kind, { terms });
         const r = await publish(signed.signed_data);
         log.info(`[${path}] ${action.kind} ${signed.amount} ${signed.token} → ${signed.receiver}: ${r.status}, intent ${r.hash}`);
+        return;
+      }
+      case "settle": {
+        const vaa = await loadVaa(action.closeVaa);
+        for (const signed of await signAll("settle", { terms, close_vaa: vaa.toString("base64") })) {
+          const r = await publish(signed.signed_data);
+          log.info(`[${path}] settle ${signed.amount} ${signed.token} → ${signed.receiver}: ${r.status}, intent ${r.hash}`);
+        }
         return;
       }
       case "drop":

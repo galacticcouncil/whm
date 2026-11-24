@@ -16,12 +16,19 @@ export interface PlanInput {
   priceValidityMs: number;
   maxOrderShortfallBps: bigint;
   minRefund: bigint;
+  /** When a close of these terms lets anyone settle, if they were closed. */
+  settleAtMs?: number;
+  /** A close VAA id past its countdown, once scan has one. */
+  closeVaa?: string;
+  /** How long after the countdown closed terms are still watched for ETH that lands late. */
+  graceMs: number;
 }
 
 export type Action =
   | { kind: "swap"; seq: string; amount: bigint }
   | { kind: "deliver" }
   | { kind: "refund" }
+  | { kind: "settle"; closeVaa: string }
   | { kind: "wait" }
   | { kind: "drop" };
 
@@ -33,6 +40,11 @@ export type Action =
  * (`A`'s whole ETH up to the fill cap — the only size the router accepts); deliver once the
  * destination balance reaches `minDelivery`. After it: deliver whatever bought, refund ETH from
  * `minRefund`, and drop the terms once neither is left.
+ *
+ * Once a close's countdown has passed, a still-priced order swaps first, as before; then one `settle`
+ * moves whatever `A` holds — any destination to the recipient, ETH from `minRefund` back. With
+ * nothing to move, the terms stay watched for `graceMs` — an order in flight at the close may land
+ * late — then drop.
  *
  * @param i The terms, `A`'s balances, the newest order and the router's params.
  * @returns The action.
@@ -53,6 +65,12 @@ export function plan(i: PlanInput): Action {
   ) {
     const cap = o.amount * i.maxFillMultiplier;
     return { kind: "swap", seq: o.seq, amount: i.eth < cap ? i.eth : cap };
+  }
+
+  if (i.settleAtMs !== undefined && i.nowMs >= i.settleAtMs) {
+    const held = i.dest > 0n || (i.eth > 0n && i.eth >= i.minRefund);
+    if (held) return i.closeVaa ? { kind: "settle", closeVaa: i.closeVaa } : { kind: "wait" };
+    return i.nowMs > i.settleAtMs + i.graceMs ? { kind: "drop" } : { kind: "wait" };
   }
 
   if (i.dest > 0n && i.dest >= i.minDelivery) return { kind: "deliver" };
