@@ -186,6 +186,40 @@ export async function listPayouts(authPath: string): Promise<Record<string, unkn
   return r.rows;
 }
 
+export interface UtxoPayoutRow {
+  id: string;
+  auth_path: string;
+  amount: string;
+  /** Intents ledger id, e.g. `nep141:zec.omft.near`. */
+  token: string;
+  /** The address on the coin's chain. */
+  receiver: string;
+  utxo_account: string;
+  /** Unix ms. */
+  signed_at: string;
+}
+
+/**
+ * Deliveries the router sent to an `A_utxo`, signed at or after `afterMs`, oldest first — what the
+ * UTXO relayer withdraws to the coin's own chain. Inclusive, so a reader resuming from its last
+ * timestamp sees rows of the same millisecond again; it keys them by `id`.
+ *
+ * @param afterMs Unix ms.
+ * @param limit Page size.
+ * @returns The deliveries.
+ */
+export async function listUtxoPayouts(afterMs: number, limit: number): Promise<UtxoPayoutRow[]> {
+  const r = await pool.query(
+    `SELECT id, auth_path, amount, token, receiver, utxo_account, signed->>'blockTimestamp' AS signed_at
+       FROM intent_v2_payouts
+      WHERE utxo_account IS NOT NULL AND (signed->>'blockTimestamp')::numeric >= $1
+      ORDER BY (signed->>'blockTimestamp')::numeric, id
+      LIMIT $2`,
+    [afterMs, limit],
+  );
+  return r.rows;
+}
+
 /**
  * Trades — one set of terms each, the user's whole cross-chain swap: a swap is a trade of one order, a
  * TWAP of several. The terms' fields come from its newest order (every order of a trade carries the

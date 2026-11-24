@@ -97,6 +97,7 @@
       const DEST = {
         "nep141:zec.omft.near": { symbol: "ZEC", decimals: 8, chain: "zcash" },
         "nep141:wrap.near": { symbol: "NEAR", decimals: 24, chain: "near" },
+        "nep141:nbtc.bridge.near": { symbol: "BTC", decimals: 8, chain: "bitcoin" },
       };
       const dest = (r) => DEST[r.destination_asset];
       const destChain = (r) => (r.recipient_kind === 1 ? "near" : (dest(r)?.chain ?? null));

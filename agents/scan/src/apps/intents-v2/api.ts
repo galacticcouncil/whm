@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { hydrationAssets } from "../intents/metadata";
 
 import { hydrationAssetId } from "./assets";
-import { getOrder, getTrade, listOrders, listTerms, listTrades } from "./db";
+import { getOrder, getTrade, listOrders, listTerms, listTrades, listUtxoPayouts } from "./db";
 import { held } from "./held";
 
 /**
@@ -32,7 +32,7 @@ async function withAssets<T extends Record<string, unknown>>(page: { items: T[];
 
 /**
  * Register the intents v2 read API: trades and their orders for the pages, the terms in play for the
- * router bot. The UI serves it under `/api/v2`.
+ * router bot, the deliveries on a UTXO route for the UTXO relayer. The UI serves it under `/api/v2`.
  *
  * @param app The domain's fastify instance.
  */
@@ -70,6 +70,14 @@ export function routes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "query param `deadlineAfter` (unix seconds) is required" });
     }
     return listTerms(after);
+  });
+
+  app.get<{ Querystring: { utxo?: string; after?: string; limit?: string } }>("/api/payouts", async (req, reply) => {
+    const after = Number(req.query.after);
+    if (req.query.utxo !== "true" || !Number.isSafeInteger(after)) {
+      return reply.code(400).send({ error: "query params `utxo=true` and `after` (unix ms) are required" });
+    }
+    return listUtxoPayouts(after, Math.min(Number(req.query.limit ?? 500), 1000));
   });
 
   app.get<{ Querystring: { status?: string; address?: string; limit?: string; offset?: string } }>(

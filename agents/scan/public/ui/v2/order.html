@@ -63,6 +63,7 @@
       const DEST = {
         "nep141:zec.omft.near": { symbol: "ZEC", decimals: 8, chain: "zcash" },
         "nep141:wrap.near": { symbol: "NEAR", decimals: 24, chain: "near" },
+        "nep141:nbtc.bridge.near": { symbol: "BTC", decimals: 8, chain: "bitcoin" },
       };
       const dest = (o) => DEST[o.destination_asset];
       const destChain = (o) => (o.recipient_kind === 1 ? "near" : (dest(o)?.chain ?? null));
@@ -73,7 +74,7 @@
           : pill("Swap", "var(--sky)");
 
       /** Where the destination asset's payout transaction is shown, by the chain it lands on. */
-      const DEST_TX = { zcash: "zec" };
+      const DEST_TX = { zcash: "zec", bitcoin: "btc" };
 
       /**
        * The payout that carried this order's output: the first of its terms signed after its swap. A

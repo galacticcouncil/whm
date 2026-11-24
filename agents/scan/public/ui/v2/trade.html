@@ -62,9 +62,10 @@
       const DEST = {
         "nep141:zec.omft.near": { symbol: "ZEC", decimals: 8, chain: "zcash", name: "Zcash" },
         "nep141:wrap.near": { symbol: "NEAR", decimals: 24, chain: "near", name: "NEAR" },
+        "nep141:nbtc.bridge.near": { symbol: "BTC", decimals: 8, chain: "bitcoin", name: "Bitcoin" },
       };
       /** Where a destination chain's payout transaction is shown. */
-      const DEST_TX = { zcash: "zec" };
+      const DEST_TX = { zcash: "zec", bitcoin: "btc" };
 
       /** A trade's id as the list links it: its auth path's first four bytes. */
       const tradeId = (authPath) => authPath.slice(0, 10);

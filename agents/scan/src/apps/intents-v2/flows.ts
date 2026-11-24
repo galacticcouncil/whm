@@ -47,8 +47,12 @@ interface Signed {
   /** The order filled — swaps only. */
   seq: number | null;
   amount: string;
+  /** The ledger id that leaves `A`. */
+  token: string;
   /** 1Click's deposit account on a swap; the terms' recipient or `refundTo` on a payout. */
   receiver: string;
+  /** A delivery on a UTXO route: the `A_utxo` the withdraw contract sends on from. */
+  utxo_account?: string | null;
 }
 
 const INTENT_SIGNED = { standard: "whm-intent-router", event: "intent_signed" };
@@ -317,6 +321,12 @@ export const payouts: Flow = {
     auth_path: "TEXT",
     /** What left `A`: the destination asset delivered, or the ETH refunded. */
     amount: "NUMERIC",
+    /** Its intents ledger id. */
+    token: "TEXT",
+    /** The recipient, or `refundTo`. */
+    receiver: "TEXT",
+    /** A delivery on a UTXO route: the `A_utxo` it went to — the UTXO relayer takes it on from there. */
+    utxo_account: "TEXT",
     /** The payout's transaction on the recipient's own chain, once found. */
     dest_tx: "TEXT",
     /** What arrived there, in that chain's smallest units — the amount less the bridge's fee. */
@@ -337,6 +347,9 @@ export const payouts: Flow = {
     patch: (a: Signed, ev: LogEvent) => ({
       auth_path: a.auth_path,
       amount: a.amount,
+      token: a.token,
+      receiver: a.receiver,
+      utxo_account: a.utxo_account ?? null,
       signed: ev.ref,
     }),
   })),

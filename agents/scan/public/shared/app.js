@@ -292,6 +292,13 @@ const CHAINS = {
     tx: (r) => `https://blockchair.com/zcash/transaction/${r.txHash}`,
     addr: (a) => `https://blockchair.com/zcash/address/${a}`,
   },
+  bitcoin: {
+    label: "Bitcoin",
+    c: ["#f7931a", "#b86a0c"],
+    icon: "https://s2.coinmarketcap.com/static/img/coins/64x64/1.png",
+    tx: (r) => `https://blockchair.com/bitcoin/transaction/${r.txHash}`,
+    addr: (a) => `https://blockchair.com/bitcoin/address/${a}`,
+  },
   wormhole: {
     label: "Wormhole",
     c: ["#3a3f4b", "#1b1e25"],
@@ -300,7 +307,7 @@ const CHAINS = {
 };
 
 /** 1Click's `blockchain` values, where the intents domain names a destination chain. */
-const ALIAS = { eth: "ethereum", zec: "zcash", sol: "solana" };
+const ALIAS = { eth: "ethereum", zec: "zcash", sol: "solana", btc: "bitcoin" };
 const chainOf = (c) => CHAINS[c] ?? CHAINS[ALIAS[c]];
 
 /** The explorer's label for a host, so an external account says where it links. */

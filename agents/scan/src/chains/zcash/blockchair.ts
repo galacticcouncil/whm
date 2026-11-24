@@ -43,7 +43,7 @@ export interface Payment {
   hash: string;
   /** Unix ms. */
   at: number;
-  /** Zatoshi received. */
+  /** Received, in the chain's base unit — zatoshi, satoshi. */
   amount: bigint;
 }
 
@@ -52,9 +52,10 @@ export interface Payment {
  * shielded address shows nothing to an explorer.
  *
  * @param address The address.
+ * @param api Blockchair's API for the chain — Zcash's by default; its Bitcoin API has the same shape.
  */
-export async function payments(address: string): Promise<Payment[]> {
-  const res = await fetch(`${BLOCKCHAIR}/dashboards/address/${address}?transaction_details=true&limit=100`, {
+export async function payments(address: string, api = BLOCKCHAIR): Promise<Payment[]> {
+  const res = await fetch(`${api}/dashboards/address/${address}?transaction_details=true&limit=100`, {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`blockchair ${address}: ${res.status}`);

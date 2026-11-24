@@ -1,9 +1,12 @@
-import { payments as zcashPayments } from "../../chains/zcash";
+import { payments as blockchairPayments } from "../../chains/zcash";
 import { pool } from "../../db";
 import { broadcast, reconcile } from "../../flow";
 import log from "../../logger";
 
 import { payouts } from "./flows";
+
+/** Blockchair's Bitcoin API — the same shape as its Zcash one. */
+const BLOCKCHAIR_BITCOIN = "https://api.blockchair.com/bitcoin";
 
 /** How often deliveries still without their destination-chain transaction are looked up. */
 const POLL_MS = 60_000;
@@ -30,7 +33,8 @@ interface Destination {
 
 /** Each destination whose withdrawals are paired with their transaction, by intents ledger id. */
 const DESTINATIONS: Record<string, Destination> = {
-  "nep141:zec.omft.near": { visible: (a) => a.startsWith("t"), payments: zcashPayments },
+  "nep141:zec.omft.near": { visible: (a) => a.startsWith("t"), payments: (a) => blockchairPayments(a) },
+  "nep141:nbtc.bridge.near": { visible: () => true, payments: (a) => blockchairPayments(a, BLOCKCHAIR_BITCOIN) },
 };
 
 type Pending = { id: string; amount: string; signed_at: string };
