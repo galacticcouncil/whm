@@ -1,0 +1,32 @@
+{
+  "migration": "intents-v2-upgrade",
+  "environment": "prod",
+  "startedAt": "2026-11-19T11:49:28.206Z",
+  "completedAt": "2026-11-19T11:49:52.584Z",
+  "steps": [
+    {
+      "name": "001-deploy-impl",
+      "status": "completed",
+      "output": {
+        "implAddress": "0x2f9b48d701c58bb04e81585054d3f053f2884091",
+        "currentImplAddress": "0xd7ae9753C1CFb3146022bEBACe530C3af6d25FB6",
+        "proxyAddress": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b"
+      },
+      "error": null,
+      "startedAt": "2026-11-19T11:49:28.207Z",
+      "completedAt": "2026-11-19T11:49:47.570Z"
+    },
+    {
+      "name": "002-upgrade@dispatcher",
+      "status": "completed",
+      "output": {
+        "txHash": "0x554a82539881a8a66d2571a8ded4b4ac3d1143ff51c59cf8c6ee8ba66f0b8ea9",
+        "proxyAddress": "0x2c967d7e00a18c1c926fd77de733a27c3fdb3f2b",
+        "implAddress": "0x2f9b48d701c58bb04e81585054d3f053f2884091"
+      },
+      "error": null,
+      "startedAt": "2026-11-19T11:49:47.572Z",
+      "completedAt": "2026-11-19T11:49:52.582Z"
+    }
+  ]
+}
