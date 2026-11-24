@@ -21,6 +21,8 @@ import {IIntentDispatcher} from "./interfaces/IIntentDispatcher.sol";
 ///
 ///         Order message: msgType 1 | authPath 32 | seq 8 | amount 16 | outPerIn 16 — 73 bytes.
 ///
+///         Close message: msgType 2 | authPath 32 | delay 8 — 41 bytes.
+///
 ///         Forward payload, in the NTT transfer's `additionalPayload`:
 ///           version 1 | depositAddress 20 | maxRelayFee 16 — 37 bytes.
 library IntentCodec {
@@ -46,10 +48,15 @@ library IntentCodec {
     /// @notice The order message's type byte.
     uint8 internal constant MSG_ORDER = 1;
 
+    /// @notice The close message's type byte.
+    uint8 internal constant MSG_CLOSE = 2;
+
     /// @dev Fixed prefix through `destAssetLen`, i.e. everything before the first string.
     uint256 internal constant TERMS_HEADER_SIZE = 118;
 
     uint256 internal constant ORDER_SIZE = 73;
+
+    uint256 internal constant CLOSE_SIZE = 41;
 
     /// @notice The forward payload's version.
     uint8 internal constant FORWARD_VERSION = 1;
@@ -165,6 +172,14 @@ library IntentCodec {
     /// @notice The order message: what the router reads to price one fill of the path's account.
     function encodeOrder(bytes32 path, IIntentDispatcher.Order memory o) internal pure returns (bytes memory) {
         return abi.encodePacked(MSG_ORDER, path, o.seq, o.amount, o.outPerIn);
+    }
+
+    // ─── Close ───────────────────────────────────────────────────
+
+    /// @notice The close message: the path's account settles once `delay` seconds have passed since
+    ///         it was published — the message's own time.
+    function encodeClose(bytes32 path, uint64 delay) internal pure returns (bytes memory) {
+        return abi.encodePacked(MSG_CLOSE, path, delay);
     }
 
     // ─── Forward ─────────────────────────────────────────────────

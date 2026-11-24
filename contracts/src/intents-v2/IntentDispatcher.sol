@@ -43,6 +43,9 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     /// @notice Orders carry a price the router acts on, so they wait for finality.
     uint8 public constant CONSISTENCY_FINALIZED = 202;
 
+    /// @notice The longest countdown a close may set before its account settles, seconds.
+    uint64 public constant MAX_SETTLE_DELAY = 1 days;
+
     /// @dev No transceiver instructions — the zero-count prefix NTT expects.
     bytes internal constant NO_INSTRUCTIONS = hex"00";
 
@@ -68,6 +71,9 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
     /// @dev WETH held between calls — trim dust, never an order's. `execute` spends only what
     ///      arrived above it.
     uint256 internal _retained;
+
+    /// @inheritdoc IIntentDispatcher
+    mapping(bytes32 => bool) public closed;
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -122,6 +128,23 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
         return _placeOrder(amount, depositAddress, maxRelayFee, terms);
     }
 
+    /// @inheritdoc IIntentDispatcher
+    function close(Quote calldata terms, uint64 delay) external payable returns (uint64 messageSequence) {
+        if (msg.sender != terms.owner) revert NotTermsOwner(msg.sender, terms.owner);
+        if (delay > MAX_SETTLE_DELAY) revert SettleDelayTooLong(delay, MAX_SETTLE_DELAY);
+        bytes32 authPath = keccak256(IntentCodec.encodeQuote(terms));
+        closed[authPath] = true;
+
+        messageSequence = wormhole.publishMessage{value: msg.value}(
+            nonce, IntentCodec.encodeClose(authPath, delay), CONSISTENCY_FINALIZED
+        );
+        // Wormhole needs no unique nonce, and a close costs no WETH: a wrap must not stop orders.
+        unchecked {
+            nonce++;
+        }
+        emit TradeClosed(authPath, delay, messageSequence);
+    }
+
     // ─── Views ───────────────────────────────────────────────────
 
     /// @inheritdoc IIntentDispatcher
@@ -171,17 +194,21 @@ contract IntentDispatcher is Initializable, UUPSUpgradeable, IIntentDispatcher {
         if (depositAddress == address(0)) revert InvalidDepositAddress();
         if (msg.sender != terms.owner) revert NotTermsOwner(msg.sender, terms.owner);
 
-        Order memory order;
-        order.outPerIn = _outPerIn(terms.destinationAsset);
         bytes memory encoded = IntentCodec.encodeQuote(terms);
         bytes32 authPath = keccak256(encoded);
+        if (closed[authPath]) revert ClosedTerms(authPath);
+
+        Order memory order;
+        order.outPerIn = _outPerIn(terms.destinationAsset);
 
         uint256 fee = wormhole.messageFee();
         (order.seq, order.amount) = _bridge(weth, fee, depositAddress, maxRelayFee);
 
         uint64 messageSequence =
             wormhole.publishMessage{value: fee}(nonce, IntentCodec.encodeOrder(authPath, order), CONSISTENCY_FINALIZED);
-        nonce++;
+        unchecked {
+            nonce++;
+        }
         _retained = _weth().balanceOf(address(this));
 
         emit OrderPublished(

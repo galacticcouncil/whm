@@ -473,4 +473,99 @@ contract IntentDispatcherTest is Test {
         vm.expectRevert(IIntentDispatcher.NotOwner.selector);
         dispatcher.upgradeToAndCall(impl, "");
     }
+
+    // ─── Close ──────────────────────────────────────────────────────
+
+    /// @notice A close marks the terms and publishes `msgType 2 | authPath | delay`, finalized like an
+    ///         order — what the router settles on.
+    function testCloseMarksTheTermsAndPublishes() public {
+        bytes32 path = dispatcher.computeAuthPath(_terms());
+
+        vm.expectEmit(true, true, true, true, address(dispatcher));
+        emit IIntentDispatcher.TradeClosed(path, 2 hours, 42);
+        vm.prank(user);
+        uint64 sequence = dispatcher.close(_terms(), 2 hours);
+
+        assertEq(sequence, 42, "the close message's sequence");
+        assertTrue(dispatcher.closed(path), "closed");
+        assertEq(coreBridge.lastPayload(), abi.encodePacked(uint8(2), path, uint64(2 hours)), "close message");
+        assertEq(coreBridge.lastPayload().length, 41, "41 bytes");
+        assertEq(coreBridge.lastConsistency(), 202, "finalized");
+    }
+
+    /// @notice The close message's bytes, pinned — the router's `order.rs` parses the same vector.
+    function testCloseMessageGoldenVector() public pure {
+        bytes32 path = 0x1111111111111111111111111111111111111111111111111111111111111111;
+        assertEq(
+            IntentCodec.encodeClose(path, 7200),
+            hex"0211111111111111111111111111111111111111111111111111111111111111110000000000001c20"
+        );
+    }
+
+    /// @notice Only the terms' owner closes them — anyone else could cut a running TWAP short.
+    function testOnlyTheTermsOwnerCloses() public {
+        address stranger = makeAddr("stranger");
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.NotTermsOwner.selector, stranger, user));
+        dispatcher.close(_terms(), 0);
+    }
+
+    /// @notice The owner may close again — a fresh message, for when the first no longer verifies.
+    function testOwnerClosesAgain() public {
+        bytes32 path = dispatcher.computeAuthPath(_terms());
+        vm.startPrank(user);
+        uint64 first = dispatcher.close(_terms(), 0);
+        uint64 second = dispatcher.close(_terms(), 1 hours);
+        vm.stopPrank();
+        assertEq(second, first + 1, "a second message");
+        assertEq(coreBridge.lastPayload(), abi.encodePacked(uint8(2), path, uint64(1 hours)), "its own delay");
+        assertTrue(dispatcher.closed(path), "still closed");
+    }
+
+    /// @notice The nonce wraps rather than reverting — closes are cheap, and orders share it.
+    function testNonceWraps() public {
+        vm.store(address(dispatcher), bytes32(uint256(1)), bytes32(uint256(type(uint32).max) << 160));
+        assertEq(dispatcher.nonce(), type(uint32).max, "at the top");
+        vm.prank(user);
+        dispatcher.close(_terms(), 0);
+        assertEq(dispatcher.nonce(), 0, "wrapped");
+    }
+
+    /// @notice The countdown is bounded; zero, settling at once, is the user's to choose.
+    function testCloseDelayIsBounded() public {
+        uint64 max = dispatcher.MAX_SETTLE_DELAY();
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.SettleDelayTooLong.selector, max + 1, max));
+        dispatcher.close(_terms(), max + 1);
+        vm.prank(user);
+        dispatcher.close(_terms(), max);
+    }
+
+    /// @notice Closed terms take no more orders, by either entry — an ICE trade forwarding after the
+    ///         close reverts, and the runtime hands its WETH back.
+    function testClosedTermsTakeNoOrders() public {
+        bytes32 path = dispatcher.computeAuthPath(_terms());
+        vm.prank(user);
+        dispatcher.close(_terms(), 0);
+
+        _fund(1e15);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.ClosedTerms.selector, path));
+        dispatcher.dispatch(1e15, depositAddress, 0, _terms());
+
+        bytes memory data = _data(0);
+        _push(1e15);
+        vm.prank(user, user);
+        vm.expectRevert(abi.encodeWithSelector(IIntentDispatcher.ClosedTerms.selector, path));
+        dispatcher.execute(user, 7, address(0x1234), 5e18, address(weth), 1e15, data);
+    }
+
+    /// @notice The caller pays the Wormhole fee — a close has no WETH to take it from.
+    function testCloseForwardsTheMessageFee() public {
+        coreBridge.setFee(5);
+        vm.deal(user, 5);
+        vm.prank(user);
+        dispatcher.close{value: 5}(_terms(), 0);
+        assertEq(coreBridge.lastValue(), 5, "fee to the core");
+    }
 }

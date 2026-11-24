@@ -99,6 +99,13 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     /// @param amountIn Input sold in this trade
     event OrderSourced(uint64 indexed seq, uint256 indexed intentId, address assetIn, uint256 amountIn);
 
+    /// @notice The owner closed a set of terms: they take no more orders, and their account settles —
+    ///         everything it holds paid out — once `delay` seconds have passed since the close message.
+    /// @param authPath Hash of the terms
+    /// @param delay The countdown, seconds, from the close message's time
+    /// @param messageSequence Wormhole core sequence of the close message — what the router settles on
+    event TradeClosed(bytes32 indexed authPath, uint64 delay, uint64 messageSequence);
+
     event PriceRouteSet(string destinationAsset, address ethFeed, address destFeed, uint8 destDecimals);
     event MaxFeedAgeSet(uint256 maxFeedAge);
     event MinOrderAmountSet(uint256 minOrderAmount);
@@ -134,6 +141,10 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     /// @dev The feed reports an update after the current block — its age could never expire.
     error FutureFeedAnswer(address feed, uint256 updatedAt);
     error InvalidRate(uint256 outPerIn);
+    /// @dev The terms were closed: their account settles, and takes no more orders.
+    error ClosedTerms(bytes32 authPath);
+    /// @dev A close countdown above `MAX_SETTLE_DELAY`.
+    error SettleDelayTooLong(uint64 delay, uint64 max);
 
     // ─── Dispatch ────────────────────────────────────────────────
 
@@ -141,16 +152,29 @@ interface IIntentDispatcher is IIntentResolutionReceiver {
     /// @param depositAddress POA's deposit address for the account the terms derive — the SDK
     ///        computes it once per action; nothing on-chain binds the two.
     /// @param maxRelayFee Ceiling a redeemer may claim on Ethereum.
-    /// @dev Not payable: the rail's costs come out of `amount`, as they do out of an ICE trade. What
-    ///      bridges must be at least POA's minimum deposit plus `maxRelayFee`, and `maxRelayFee` at
-    ///      most half of it, so the order credits and swaps in one fill.
     /// @return seq The order's NTT message id
-    function dispatch(
-        uint256 amount,
-        address depositAddress,
-        uint256 maxRelayFee,
-        Quote calldata terms
-    ) external returns (uint64 seq);
+    function dispatch(uint256 amount, address depositAddress, uint256 maxRelayFee, Quote calldata terms)
+        external
+        returns (uint64 seq);
+
+    /// @notice End a set of terms: no more orders, and once `delay` seconds have passed since the
+    ///         close message, anyone may have the router pay out everything their account holds — the
+    ///         destination to `recipient`, the ETH to `refundTo`. Orders already on their way still
+    ///         swap in the meantime, under their own prices. The owner may close again, each time
+    ///         publishing a fresh message — after a guardian set rotation, the old one no longer
+    ///         verifies. Every message stays valid, so a later close can shorten the countdown, never
+    ///         lengthen it.
+    ///
+    ///         It does not cancel an ICE intent forwarding to these terms: ICE keeps trading, and each
+    ///         forward then reverts and leaves its WETH with the owner. Cancel the intent with it.
+    /// @param terms The terms to close; only their owner may.
+    /// @param delay The countdown, seconds, at most `MAX_SETTLE_DELAY`. Zero settles at once,
+    ///        refunding as ETH whatever has not swapped by then.
+    /// @return messageSequence Wormhole core sequence of the close message
+    function close(Quote calldata terms, uint64 delay) external payable returns (uint64 messageSequence);
+
+    /// @notice Whether a set of terms is closed, by path.
+    function closed(bytes32 authPath) external view returns (bool);
 
     /// @notice The rate the next order for `destinationAsset` would carry: destination smallest
     ///         units per 1e18 wei. Reverts on a missing route or a stale feed, as a dispatch would.
