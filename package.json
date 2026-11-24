@@ -33,6 +33,7 @@
     "hyperevm:big-blocks:off": "bash sh/hyperevm-big-blocks.sh off",
     "migrate:utxo-emitter-zec": "bash sh/migrate-utxo-emitter-zec.sh",
     "migrate:utxo-withdraw-zec": "bash sh/migrate-utxo-withdraw-zec.sh",
+    "migrate:utxo-withdraw-btc": "bash sh/migrate-utxo-withdraw-btc.sh",
     "print:oracles": "bash sh/print-oracles.sh",
     "print:agents": "bash sh/print-agents.sh"
   },
