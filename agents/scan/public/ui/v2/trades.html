@@ -83,7 +83,7 @@
 
       const LIMIT = 25;
       const COLS = 6;
-      const STATES = ["pending", "completed", "refunded", "expired"];
+      const STATES = ["pending", "closing", "completed", "refunded", "expired"];
       const el = (id) => document.getElementById(id);
 
       /** What A is credited and sells — the rail's unit. */
@@ -91,10 +91,12 @@
 
       /**
        * The destinations the dispatcher prices, by intents ledger id: the price routes its owner sets.
-       * Where a withdrawal lands is the asset's own chain; an intents account stays on NEAR.
+       * Where a withdrawal lands is the asset's own chain — NEAR's own is native NEAR, unwrapped on
+       * NEAR; an intents account stays on NEAR.
        */
       const DEST = {
         "nep141:zec.omft.near": { symbol: "ZEC", decimals: 8, chain: "zcash" },
+        "nep141:wrap.near": { symbol: "NEAR", decimals: 24, chain: "near" },
       };
       const dest = (r) => DEST[r.destination_asset];
       const destChain = (r) => (r.recipient_kind === 1 ? "near" : (dest(r)?.chain ?? null));

@@ -6,6 +6,9 @@ import { orders } from "./flows";
 
 const VALID = validLegs(orders, "o");
 
+/** wNEAR's intents ledger id — the router withdraws it as native NEAR, paid on NEAR itself. */
+const WNEAR = "nep141:wrap.near";
+
 /**
  * The rail an order rides, joined on: its `seq` is the WETH manager's sequence, so scoping to that
  * manager is what stops another corridor's transfer from matching. `ingest` owns these tables; this
@@ -116,17 +119,38 @@ export interface TermsRow {
   seq: string;
   order_vaa: string;
   published_at: string;
+  /** Unix seconds — the earliest a close of these terms lets anyone settle; null while open. */
+  settle_at: string | null;
+  /** The newest close whose countdown has passed — what `settle` takes; null until one has. */
+  close_vaa: string | null;
 }
 
-/** Every set of terms, one row each, with its newest order — what the router bot works from. */
+/**
+ * The closes of each trade: the earliest countdown end — every close message stays valid, so the
+ * soonest one counts — and the newest close already past its countdown, the one most likely to
+ * still verify after a guardian set rotation.
+ */
+const CLOSES = `
+  SELECT c.auth_path, MIN(c.settle_at) AS settle_at,
+         (ARRAY_AGG(c.close_vaa ORDER BY c.message_sequence DESC)
+            FILTER (WHERE c.settle_at <= EXTRACT(EPOCH FROM now())))[1] AS close_vaa
+    FROM intent_v2_closes c
+   GROUP BY c.auth_path
+`;
+
+/** Every set of terms, one row each, with its newest order and its closes — what the router bot works from. */
 const TERMS = `
-  SELECT DISTINCT ON (o.auth_path)
-         o.auth_path, o.terms, o.deadline,
-         (COUNT(*) OVER (PARTITION BY o.auth_path))::int AS orders,
-         o.seq, o.order_vaa, o.published->>'blockTimestamp' AS published_at
-    FROM intent_v2_orders o
-   WHERE o.published IS NOT NULL
-   ORDER BY o.auth_path, o.seq DESC
+  SELECT t.*, c.settle_at, c.close_vaa
+    FROM (
+      SELECT DISTINCT ON (o.auth_path)
+             o.auth_path, o.terms, o.deadline,
+             (COUNT(*) OVER (PARTITION BY o.auth_path))::int AS orders,
+             o.seq, o.order_vaa, o.published->>'blockTimestamp' AS published_at
+        FROM intent_v2_orders o
+       WHERE o.published IS NOT NULL
+       ORDER BY o.auth_path, o.seq DESC
+    ) t
+    LEFT JOIN (${CLOSES}) c ON c.auth_path = t.auth_path
 `;
 
 /**
@@ -171,20 +195,25 @@ export async function listPayouts(authPath: string): Promise<Record<string, unkn
  *   not refunded was sold. Orders `execute` placed also carry what the user sold on Hydration for it
  *   (`asset_in`, `amount_in`).
  * - `received`: what arrived — for a withdrawal, what landed on the recipient's chain once found;
- *   for an intents recipient, the delivery itself, a transfer with no fee.
+ *   for an intents recipient, or NEAR withdrawn as native NEAR, the delivery itself, paid on NEAR
+ *   with no fee.
  * - `planned`: how many orders its ICE intent was submitted for (`intent_v2_ice`); null for a
  *   direct `dispatch`, or a DCA without a budget.
+ * - `settle_at`, `close_vaa`: from the owner's closes (`intent_v2_closes`), as for `/api/terms`.
  * - `status`: `refunded` once a refund was signed; `completed` once every planned order is swapped —
- *   or, with no planned count to go by, the deadline has passed — and a delivery was signed after the
- *   last swap, which emptied `A`; `expired` past the deadline with nothing paid out; else `pending`.
+ *   or, with no planned count to go by, the deadline or a close's countdown has passed — and a
+ *   delivery was signed after the last swap, which emptied `A`; `closing` once closed, until then;
+ *   `expired` past the deadline with nothing paid out; else `pending`.
  */
 const TRADES = `
-  SELECT t.*, p.delivered, p.received, p.refunded, p.payouts,
+  SELECT t.*, p.delivered, p.received, p.refunded, p.payouts, c.settle_at, c.close_vaa,
          t.eth_in - p.refunded_amount AS sold,
          CASE WHEN p.refunded THEN 'refunded'
               WHEN t.swapped > 0 AND p.last_delivered_at >= t.last_swapped_at
-                   AND (t.swapped >= t.planned OR t.deadline * 1000 <= EXTRACT(EPOCH FROM now()) * 1000)
+                   AND (t.swapped >= t.planned
+                        OR LEAST(t.deadline, c.settle_at) * 1000 <= EXTRACT(EPOCH FROM now()) * 1000)
                 THEN 'completed'
+              WHEN c.settle_at IS NOT NULL THEN 'closing'
               WHEN t.deadline * 1000 <= EXTRACT(EPOCH FROM now()) * 1000 AND p.payouts = 0 THEN 'expired'
               ELSE 'pending' END AS status
     FROM (
@@ -207,7 +236,8 @@ const TRADES = `
     ) t
     LEFT JOIN LATERAL (
       SELECT COALESCE(SUM(x.amount) FILTER (WHERE x.state = 'delivered'), 0) AS delivered,
-             COALESCE(SUM(CASE WHEN t.recipient_kind = 1 THEN x.amount ELSE x.dest_amount END)
+             COALESCE(SUM(CASE WHEN t.recipient_kind = 1 OR t.destination_asset = '${WNEAR}'
+                               THEN x.amount ELSE x.dest_amount END)
                         FILTER (WHERE x.state = 'delivered'), 0) AS received,
              COALESCE(SUM(x.amount) FILTER (WHERE x.state = 'refunded'), 0) AS refunded_amount,
              COALESCE(BOOL_OR(x.state = 'refunded'), false) AS refunded,
@@ -215,6 +245,7 @@ const TRADES = `
              COUNT(*)::int AS payouts
         FROM intent_v2_payouts x WHERE x.auth_path = t.auth_path
     ) p ON true
+    LEFT JOIN (${CLOSES}) c ON c.auth_path = t.auth_path
 `;
 
 /**

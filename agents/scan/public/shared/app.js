@@ -689,6 +689,13 @@ const STATUS = {
     label: "Delivered",
     svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>',
   },
+  // An intents v2 trade its owner closed: no more orders, and what `A` holds is paid out once the
+  // close's countdown passes.
+  closing: {
+    cls: "pending",
+    label: "Closing",
+    svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6"/></svg>',
+  },
   // An intents v2 trade whose ETH went back to its refund address.
   refunded: {
     cls: "expired",
@@ -709,7 +716,7 @@ export const statusLabel = (s) => STATUS[s]?.label ?? s;
  * Where a transfer is, as the explorer's status badge: done green, in flight sky, held amber,
  * failed red. `compact` is the round icon-only form a list column uses.
  *
- * @param {string} status `completed`, `pending`, `held`, `failed` — an intents v2 trade's `refunded` —
+ * @param {string} status `completed`, `pending`, `held`, `failed` — an intents v2 trade's `closing`, `refunded` —
  *   or an oracle update's
  *   `delivered`, `expired`.
  * @param {{compact?: boolean, title?: string}} [opts]

@@ -5,11 +5,11 @@ import log from "../../logger";
 import { WATCH } from "../../watch";
 
 import { routes } from "./api";
-import { intents, orders, payouts } from "./flows";
+import { closes, intents, orders, payouts } from "./flows";
 import { PayoutPoller } from "./payouts";
 
 const NAME = "intents-v2";
-const FLOWS = [orders, payouts, intents];
+const FLOWS = [orders, payouts, intents, closes];
 
 /**
  * Intents v2: orders published on Hydration, forwarded on Ethereum and swapped on NEAR, the payouts

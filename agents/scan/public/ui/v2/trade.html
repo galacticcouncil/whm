@@ -61,6 +61,7 @@
       /** The destinations the dispatcher prices, by intents ledger id — as on the list. */
       const DEST = {
         "nep141:zec.omft.near": { symbol: "ZEC", decimals: 8, chain: "zcash", name: "Zcash" },
+        "nep141:wrap.near": { symbol: "NEAR", decimals: 24, chain: "near", name: "NEAR" },
       };
       /** Where a destination chain's payout transaction is shown. */
       const DEST_TX = { zcash: "zec" };
@@ -86,12 +87,13 @@
       /**
        * Where the trade's output stands, from its payouts and what `A` still holds.
        *
-       * @returns `landed` — every delivery found on its chain (or paid on NEAR) — what `A` holds, and
-       *   the delivery's one-line status.
+       * @returns `onNear` — paid on NEAR, to an intents account or as native NEAR, so the delivery is
+       *   what arrived — `landed` — every delivery found on its chain, or paid on NEAR — what `A`
+       *   holds, and the delivery's one-line status.
        */
       function delivery(trade, payouts) {
         const d = DEST[trade.destination_asset];
-        const onNear = trade.recipient_kind === 1;
+        const onNear = trade.recipient_kind === 1 || d?.chain === "near";
         const delivered = payouts.filter((p) => p.state === "delivered");
         const refunded = payouts.some((p) => p.state === "refunded");
         const landed = onNear || delivered.every((p) => p.dest_tx);
@@ -99,9 +101,9 @@
         let text;
         if (refunded) text = "Refunded to Ethereum";
         else if (!delivered.length) text = "Awaiting payout";
-        else if (onNear) text = "Transferred on NEAR";
+        else if (trade.recipient_kind === 1) text = "Transferred on NEAR";
         else text = `${landed ? "Withdrawn" : "Withdrawing"} to ${d?.name ?? "its chain"}`;
-        return { delivered, landed, held, text };
+        return { onNear, delivered, landed, held, text };
       }
 
       /**
@@ -116,7 +118,7 @@
 
         // Received: what reached the recipient's chain; until a withdrawal is found there, what left A.
         const paid =
-          trade.recipient_kind === 1 || !s.landed
+          s.onNear || !s.landed
             ? sum(s.delivered.map((p) => p.amount))
             : sum(s.delivered.map((p) => p.dest_amount));
         const right = s.delivered.length
@@ -239,6 +241,7 @@
           kv("owner", addrLink(trade.owner, "hydration")),
           kv("refund to", addrLink(trade.refund_to, "ethereum")),
           kv("deadline", deadline ? esc(at(deadline)) : dim("—")),
+          trade.settle_at ? kv("closed · settles", esc(at(Number(trade.settle_at) * 1000))) : "",
           kv("authorization path", `<span class="mono">${esc(short(trade.auth_path, 10, 8))}</span>${copyBtn(trade.auth_path)}`),
           kv("terms", `<span class="mono">${esc(short(trade.terms, 10, 8))}</span>${copyBtn(trade.terms)}`),
         ].join("");

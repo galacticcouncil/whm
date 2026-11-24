@@ -6,7 +6,7 @@ import { INTENT_V2 } from "../../deployments";
 import { vaaId } from "../../ingest/vaa";
 import type { Flow, LogEvent } from "../../types";
 
-import { OrderForwardedEvt, OrderPublishedEvt, OrderSourcedEvt, RelayFeePaidEvt } from "./abi";
+import { OrderForwardedEvt, OrderPublishedEvt, OrderSourcedEvt, RelayFeePaidEvt, TradeClosedEvt } from "./abi";
 import { decodeTerms } from "./terms";
 
 interface Published {
@@ -52,6 +52,52 @@ interface Signed {
 }
 
 const INTENT_SIGNED = { standard: "whm-intent-router", event: "intent_signed" };
+
+interface Closed {
+  authPath: `0x${string}`;
+  delay: bigint;
+  messageSequence: bigint;
+}
+
+/**
+ * The owner's closes of a set of terms. Every close is its own message, and every one stays valid, so
+ * the countdown that ends first is the one that counts: `settle_at` is a close's Hydration block time
+ * plus its delay, and the router lets anyone settle after the earliest. A trade may close more than
+ * once — after a guardian rotation the old message no longer verifies — so rows are keyed on the
+ * close message's own sequence.
+ */
+export const closes: Flow = {
+  name: "closes-v2",
+  table: "intent_v2_closes",
+  key: { column: "message_sequence", type: "BIGINT" },
+  states: { closed: 0 },
+  columns: {
+    auth_path: "TEXT",
+    /** The countdown, seconds. */
+    delay: "BIGINT",
+    /** Unix seconds — the close's Hydration block time plus its delay. */
+    settle_at: "BIGINT",
+    /** The close message's VAA id — what the router's `settle` takes. */
+    close_vaa: "TEXT",
+    closed: "JSONB",
+  },
+  indexes: [`CREATE INDEX IF NOT EXISTS idx_intent_v2_closes_auth_path ON intent_v2_closes (auth_path);`],
+  legs: [
+    {
+      role: "intent-dispatcher",
+      abi: TradeClosedEvt,
+      state: "closed",
+      key: (a: Closed) => a.messageSequence.toString(),
+      patch: (a: Closed, ev: LogEvent) => ({
+        auth_path: a.authPath.toLowerCase(),
+        delay: a.delay.toString(),
+        settle_at: (BigInt(Math.floor(Number(ev.ref.blockTimestamp) / 1000)) + a.delay).toString(),
+        close_vaa: vaaId(CHAINS[ev.chain].wormholeId, INTENT_V2.dispatcher, a.messageSequence),
+        closed: ev.ref,
+      }),
+    },
+  ],
+};
 
 /** ICE's `IntentSubmitted`, as the Hydration watcher keeps it: numbers as strings, bytes as hex. */
 interface Submitted {
