@@ -8,6 +8,7 @@
     "./evm/artifacts": "./evm/artifacts.ts",
     "./migration": "./migration/index.ts",
     "./near": "./near/index.ts",
+    "./snowbridge": "./snowbridge/index.ts",
     "./wormhole": "./wormhole/index.ts"
   }
 }
