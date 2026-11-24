@@ -3,10 +3,16 @@ import type { Redis } from "ioredis";
 /** Processed records stay readable this long. */
 const CLOSED_TTL_S = 30 * 24 * 3600;
 
-/** One `WithdrawRequested`, kept until `A`'s balance has left for the destination chain. */
+/**
+ * One withdrawal into `A` — a `WithdrawRequested`, or an intents router delivery on a UTXO route —
+ * kept until `A`'s balance has left for the destination chain.
+ */
 export interface Withdrawal {
   chain: string;
-  /** The coin's NTT manager sequence — with `chain`, the record's id. */
+  /**
+   * The coin's NTT manager sequence, or `intent:<payout id>` for a router delivery — with `chain`,
+   * the record's id.
+   */
   sequence: string;
   /** The derived account `A`, lowercase hex. */
   account: string;
@@ -14,8 +20,12 @@ export interface Withdrawal {
   address: string;
   /** What settled to `A`, net of the fee, in the chain's base unit. */
   amount: string;
+  /** The `WithdrawRequested`'s Hydration block, or when the router signed its delivery, unix ms. */
   block: string;
-  /** `mismatch`: the event's account is not what its address derives — never worked. */
+  /**
+   * `mismatch`: the event's account is not what its address derives, or the address is one the
+   * withdraw contract rejects — never worked.
+   */
   state: "open" | "withdrawn" | "mismatch";
   createdAt: number;
   updatedAt: number;
@@ -32,6 +42,19 @@ export class Store {
     private readonly redis: Redis,
     private readonly prefix: string,
   ) {}
+
+  /** The newest router delivery read from scan, unix ms, or null on a fresh store. */
+  async scanCursor(): Promise<number | null> {
+    const v = await this.redis.get(`${this.prefix}:scan-cursor`);
+    return v === null ? null : Number(v);
+  }
+
+  /**
+   * @param ms The newest router delivery read from scan, unix ms.
+   */
+  async saveScanCursor(ms: number): Promise<void> {
+    await this.redis.set(`${this.prefix}:scan-cursor`, ms.toString());
+  }
 
   /** The last Hydration block the watcher finished, or null on a fresh store. */
   async cursor(): Promise<bigint | null> {

@@ -43,6 +43,12 @@ export const redis = {
   prefix: optional("REDIS_PREFIX", "utxo"),
 };
 
+/** Scan's `intents-v2` app — the intents router's deliveries on a UTXO route. */
+export const scan = {
+  apiUrl: required("SCAN_API").replace(/\/$/, ""),
+  intervalMs: optionalNumber("SCAN_INTERVAL_MS", 30_000),
+};
+
 /** Backstop for the watcher; the real trigger is the finalized-block subscription. */
 export const liveIntervalMs = optionalNumber("LIVE_INTERVAL_MS", 12_000);
 

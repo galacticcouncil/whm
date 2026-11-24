@@ -1,7 +1,7 @@
 import type { JsonRpcProvider } from "near-api-js";
 
 import { decodeBase58 } from "../chains/base58";
-import type { UtxoChain } from "../chains";
+import type { WithdrawChain } from "../chains";
 
 import { view } from "./client";
 
@@ -12,6 +12,8 @@ export interface Params {
   connector: string;
   validity: number;
   withdraw_tgas: number;
+  /** Sat/vB the contract prices the miner fee at; null where the chain fixes its own fee. */
+  fee_rate: number | null;
 }
 
 /** Derivations never change; the bound only caps memory. */
@@ -22,12 +24,12 @@ const CACHE_MAX = 100_000;
  * `derived_public_key` on the MPC signer with the contract as predecessor and domain 1. Views only,
  * no keys.
  */
-export class Deriver {
+export class Deriver<C extends WithdrawChain = WithdrawChain> {
   private readonly cache = new Map<string, string>();
 
   private constructor(
     private readonly provider: JsonRpcProvider,
-    public readonly chain: UtxoChain,
+    public readonly chain: C,
     public readonly params: Params,
   ) {}
 
@@ -40,7 +42,7 @@ export class Deriver {
    * @returns A deriver.
    * @throws When the golden address does not derive the golden account.
    */
-  static async create(provider: JsonRpcProvider, chain: UtxoChain): Promise<Deriver> {
+  static async create<C extends WithdrawChain>(provider: JsonRpcProvider, chain: C): Promise<Deriver<C>> {
     const params = await view<Params>(provider, chain.contract, "get_params");
     const deriver = new Deriver(provider, chain, params);
     const account = await deriver.account(chain.golden.address);

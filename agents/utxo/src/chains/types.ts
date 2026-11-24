@@ -3,19 +3,44 @@ export interface ConnectorConfig {
   withdraw_bridge_fee: { fee_min: string; fee_rate: number };
   min_change_amount: string;
   min_withdraw_amount: string;
+  /** The miner fee range the connector accepts. */
+  min_btc_gas_fee?: string;
+  max_btc_gas_fee?: string;
 }
 
 /**
- * One UTXO chain — what differs per coin. Mirrors the NEAR contract's `chains/<chain>.rs`; each coin
- * has its own emitter on Hydration and its own `UtxoWithdraw` deployment on NEAR.
+ * A chain the relayer withdraws to — what differs per coin on the way out. Mirrors the NEAR
+ * contract's `chains/<chain>.rs`; each coin has its own `UtxoWithdraw` deployment on NEAR.
  */
-export interface UtxoChain {
+export interface WithdrawChain {
   /** Route key — `/api/<name>/…`, `<prefix>:<name>:<sequence>`. */
   name: string;
   /** The chain's `UtxoWithdraw` — the predecessor its accounts derive under. */
   contract: string;
   /** An address and the account it derives under `contract`, checked at startup. */
   golden: { address: string; account: string };
+  /**
+   * What the miner takes from a one-input, two-output withdrawal — as the contract computes it.
+   *
+   * @param config The connector's config.
+   * @param feeRate The contract's fee rate, sat/vB — `get_params().fee_rate`; null where the chain
+   *        fixes its own fee.
+   */
+  minerFee(config: ConnectorConfig, feeRate: number | null): bigint;
+  /**
+   * Whether to withdraw now. Where the fee rate can fall below the market's, only while the
+   * mempool is at or under it — a withdrawal sent above it waits unconfirmed. Absent: always.
+   *
+   * @param feeRate The contract's fee rate, sat/vB.
+   */
+  ready?(feeRate: number | null): Promise<boolean>;
+}
+
+/**
+ * One UTXO chain bridged to Hydration: a withdraw chain with its own emitter on Hydration and its
+ * deposit route.
+ */
+export interface UtxoChain extends WithdrawChain {
   /** Deposits onto Hydration — the chain's Omni connector, mint target and API name. */
   deposit: {
     /** The chain's Omni connector — the deposit address is its view of the order. */
@@ -39,10 +64,4 @@ export interface UtxoChain {
    * @returns The address string the derivation path is defined over.
    */
   decode(bytes: `0x${string}`): string;
-  /**
-   * What the miner takes from a one-input, two-output withdrawal.
-   *
-   * @param config The connector's config.
-   */
-  minerFee(config: ConnectorConfig): bigint;
 }
