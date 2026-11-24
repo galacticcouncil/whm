@@ -27,6 +27,7 @@
     "migrate:oracle-relay-hydration": "bash sh/migrate-oracle-relay-hydration.sh",
     "migrate:intent": "bash sh/migrate-intent.sh",
     "migrate:intents-v2": "bash sh/migrate-intents-v2.sh",
+    "migrate:intents-v2-dao": "bash sh/migrate-intents-v2-dao.sh",
     "migrate:near-ntt-zec": "bash sh/migrate-near-ntt-zec.sh",
     "migrate:near-ntt-near": "bash sh/migrate-near-ntt-near.sh",
     "hyperevm:big-blocks:on": "bash sh/hyperevm-big-blocks.sh on",

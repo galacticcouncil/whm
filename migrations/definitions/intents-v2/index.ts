@@ -18,20 +18,20 @@ import type { MigrationConfig } from "./types";
  *   009 set the min order amount @dispatcher — POA's ETH minimum
  *   010 set the ZEC price route @dispatcher — checked by pricing it
  *   011 set the NEAR price route @dispatcher — DIA's NEAR/USD feed, wNEAR's 24 decimals; checked the same way
- *   ── canary ──
- *   012 transfer forwarder ownership to the Ethereum Technical Committee Safe — ETHEREUM_TC_SAFE
- *       stays empty until the canary passes, so a full run stops here, every contract deployer-owned
- *   013 transfer dispatcher ownership to the Hydration Emergency Admin
- *   014 propose the NEAR DAO as the router's owner
- *   015 delete the router account's keys — refuses unless the code on chain is ROUTER_WASM
- *   016 accept the router's ownership — stops until the DAO has; re-run to finish
+ *   012 set the nBTC price route @dispatcher — DIA's BTC/USD feed, Omni's nBTC; checked the same way
+ *   013 route ZEC to transparent addresses through withdraw-zec @router — needs the router at the
+ *       code of intents-v2-upgrade 005 (`set_utxo_route`); checks withdraw-zec serves ZEC under the prefix
+ *   014 route nBTC through withdraw-btc @router — the same, after utxo-withdraw-btc has deployed it.
+ *       A withdrawal has no other way out: without its route a token's terms never swap
+ *
+ * Every contract stays the deployer's: the handover to governance is intents-v2-dao, after the canary.
  *
  * The three reference each other, so all deploy before any is wired, and every cross-chain address
  * is read from ctx.outputs — never copied — so no two ends can diverge. The router pins the
  * dispatcher at init: there is no setter.
  *
- * THE CANARY, between 011 and 012: one small single swap end to end (ICE or `dispatch` → forwarder
- * → POA → `swap` → `deliver`), and one short-deadline action left to `refund`. Router gas, POA's
+ * THE CANARY, after 014 and before intents-v2-dao: one small single swap end to end (ICE or
+ * `dispatch` → forwarder → POA → `swap` → `deliver`), and one short-deadline action left to `refund`. Router gas, POA's
  * credit against the deposit and the params are checked then, while every fix is still a deployer
  * call: `set_params` and, if needed, a redeploy with the router's key.
  *

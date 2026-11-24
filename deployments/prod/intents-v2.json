@@ -136,15 +136,7 @@
       "completedAt": null
     },
     {
-      "name": "012-transfer-ownership@forwarder",
-      "status": "failed",
-      "output": null,
-      "error": "Missing or invalid ETHEREUM_TC_SAFE: ",
-      "startedAt": "2026-11-17T11:00:17.881Z",
-      "completedAt": null
-    },
-    {
-      "name": "013-transfer-ownership@dispatcher",
+      "name": "012-set-btc-price-route@dispatcher",
       "status": "pending",
       "output": null,
       "error": null,
@@ -152,7 +144,7 @@
       "completedAt": null
     },
     {
-      "name": "014-transfer-ownership@router",
+      "name": "013-set-zec-utxo-route@router",
       "status": "pending",
       "output": null,
       "error": null,
@@ -160,15 +152,7 @@
       "completedAt": null
     },
     {
-      "name": "015-delete-keys@router",
-      "status": "pending",
-      "output": null,
-      "error": null,
-      "startedAt": null,
-      "completedAt": null
-    },
-    {
-      "name": "016-accept-ownership@router",
+      "name": "014-set-btc-utxo-route@router",
       "status": "pending",
       "output": null,
       "error": null,

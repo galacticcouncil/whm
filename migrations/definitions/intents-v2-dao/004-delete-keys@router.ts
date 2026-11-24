@@ -4,9 +4,11 @@ import type { MigrationStep } from "./types";
 import { deleteKeys } from "../../actions/near-ntt/deleteKeys";
 
 const step: MigrationStep = {
-  name: "015-delete-keys@router",
+  name: "004-delete-keys@router",
   description: "Delete the router account's keys — upgrades only through its owner",
   action: async (ctx) => {
+    const router = ctx.env.NEAR_ROUTER;
+    if (!router) throw new Error("Missing NEAR_ROUTER");
     const wasm = ctx.env.ROUTER_WASM;
     if (!wasm) throw new Error("Missing ROUTER_WASM");
 
@@ -14,7 +16,7 @@ const step: MigrationStep = {
     // change what signs for every A. Refuses unless the code on chain is ROUTER_WASM.
     return await deleteKeys({
       ...ctx.wallet.near,
-      nttAccount: ctx.outputs["003-deploy-router"].routerAccount,
+      nttAccount: router,
       wasmPath: resolve(wasm),
     });
   },

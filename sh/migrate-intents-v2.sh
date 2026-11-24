@@ -8,7 +8,7 @@ set -euo pipefail
 #   Ethereum  : IntentForwarder  (UUPS proxy) + dispatcher pin, relayer
 #   NEAR      : IntentRouter — create, deploy and init in one transaction, emitter = the dispatcher
 #
-# A full run stops at 011 while ETHEREUM_TC_SAFE is empty — run the canary, fill it in, run again.
+# Every contract stays the deployer's — run the canary, then hand over with the intents-v2-dao migration.
 #
 # Requires:
 #   PK           — Hydration deployer (EVMAccounts.ContractDeployer)

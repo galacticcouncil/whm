@@ -12,7 +12,11 @@ import type { MigrationConfig } from "./types";
  *       countdown, publishing a close message; one mapping appended after its storage
  *   004 upgrade the dispatcher proxy to it — the deployer still owns the proxy, so this is a step
  *   005 upgrade the NEAR intent router to ROUTER_WASM — `settle` pays out what the terms' account
- *       holds once a close's countdown has run; its state is unchanged, its owner still the deployer
+ *       holds once a close's countdown has run, and owner-set UTXO routes send a token's withdrawals
+ *       to the account its UTXO withdraw contract derives; its state is unchanged (the routes live
+ *       under their own key), its owner still the deployer
+ *
+ * Code only: configuration the new code takes — price routes, the UTXO route — is intents-v2's.
  *
  * Terms, their accounts and the order message are untouched. Build from the committed source first —
  * `forge build` in contracts/, `cargo near build` in crates/near/contracts/intent-router — and verify
@@ -23,7 +27,7 @@ import type { MigrationConfig } from "./types";
  *   PK_NEAR — NEAR deployer, `ed25519:…`, for NEAR_ACCOUNT: the router's owner
  *
  * Env file: migrations/envs/<context>/intents-v2-upgrade.env — HYDRATION_DISPATCHER, RPC_NEAR,
- * NEAR_ACCOUNT, ROUTER_ACCOUNT, ROUTER_WASM beside the Hydration RPC.
+ * NEAR_ACCOUNT, NEAR_ROUTER, ROUTER_WASM beside the Hydration RPC.
  */
 const config: MigrationConfig = {
   name: "intents-v2-upgrade",
