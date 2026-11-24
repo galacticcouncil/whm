@@ -20,6 +20,8 @@ const base: PlanInput = {
   maxOrderShortfallBps: 100n,
   minRefund: 100n,
   graceMs: 86_400_000,
+  deliverable: true,
+  minPayout: 1n,
 };
 
 test("swaps A's whole ETH once the order has landed", () => {
@@ -89,4 +91,24 @@ test("closed and empty: watched through the grace, then dropped", () => {
   const empty = { ...closed, eth: 0n, dest: 0n };
   assert.equal(plan(empty).kind, "wait");
   assert.equal(plan({ ...empty, nowMs: closed.settleAtMs! + closed.graceMs + 1 }).kind, "drop");
+});
+
+test("output below the route's minimum waits in A — before and after the deadline", () => {
+  const routed = { ...base, eth: 0n, order: undefined, minPayout: 1_000n };
+  assert.equal(plan({ ...routed, dest: 999n }).kind, "wait");
+  assert.equal(plan({ ...routed, dest: 1_000n }).kind, "deliver");
+  const past = { ...routed, nowMs: base.deadlineMs + 1 };
+  assert.equal(plan({ ...past, dest: 999n }).kind, "drop");
+  assert.equal(plan({ ...past, dest: 999n, eth: 100n }).kind, "refund");
+  assert.equal(plan({ ...past, dest: 1_000n }).kind, "deliver");
+});
+
+test("terms the router cannot deliver never swap; their ETH refunds or settles", () => {
+  const stuck = { ...base, deliverable: false };
+  assert.equal(plan(stuck).kind, "wait");
+  assert.equal(plan({ ...stuck, eth: 0n, order: undefined, dest: 5_000n }).kind, "wait");
+  assert.equal(plan({ ...stuck, nowMs: base.deadlineMs + 1, order: undefined }).kind, "refund");
+  const closed = { ...stuck, order: undefined, settleAtMs: NOW - 1, closeVaa: "73/dispatcher/9" };
+  assert.deepEqual(plan(closed), { kind: "settle", closeVaa: "73/dispatcher/9" });
+  assert.equal(plan({ ...closed, eth: 0n, dest: 5_000n }).kind, "wait");
 });

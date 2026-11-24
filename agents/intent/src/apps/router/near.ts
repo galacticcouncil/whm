@@ -1,6 +1,7 @@
 import { Account, actions, JsonRpcProvider, KeyPairSigner, PublicKey, teraToGas, type KeyPairString } from "near-api-js";
 
 import { config } from "./config";
+import type { UtxoRoute } from "./utxo";
 
 type TxOutcome = Awaited<ReturnType<Account["signAndSendTransaction"]>>;
 
@@ -38,20 +39,44 @@ export function routerConfig(): Promise<RouterConfig> {
   return view<RouterConfig>(config.router, "get_config");
 }
 
+/** @returns The router's UTXO routes, by intents ledger id. */
+export function utxoRoutes(): Promise<Record<string, UtxoRoute>> {
+  return view<Record<string, UtxoRoute>>(config.router, "utxo_routes");
+}
+
 /**
- * `A` for a derivation path — the implicit account of the key `v1.signer` derives for the router.
+ * The implicit account of the key `v1.signer` derives for a path — `A` under the router, `A_utxo`
+ * under a UTXO route's withdraw contract.
  *
  * @param mpcSigner `v1.signer`.
- * @param path The terms' `auth_path`, `0x` + lowercase hex.
- * @returns `A`'s account id.
+ * @param path The derivation path: the terms' `auth_path`, or a route's prefix plus the address.
+ * @param predecessor Whose derivation it is; the router by default.
+ * @returns The account id.
  */
-export async function deriveAccount(mpcSigner: string, path: string): Promise<string> {
-  const key = await view<string>(mpcSigner, "derived_public_key", {
-    path,
-    predecessor: config.router,
-    domain_id: 1,
-  });
+export async function deriveAccount(mpcSigner: string, path: string, predecessor = config.router): Promise<string> {
+  const key = await view<string>(mpcSigner, "derived_public_key", { path, predecessor, domain_id: 1 });
   return Buffer.from(PublicKey.fromString(key).data).toString("hex");
+}
+
+/**
+ * Register `account` on a NEP-141 token unless it is — the bot pays the token's minimum storage.
+ *
+ * @param token The token contract.
+ * @param account The account.
+ * @returns Whether it had to be registered.
+ */
+export async function ensureRegistered(token: string, account: string): Promise<boolean> {
+  if (await view<unknown>(token, "storage_balance_of", { account_id: account })) return false;
+  const { min } = await view<{ min: string }>(token, "storage_balance_bounds");
+  const outcome = await bot.signAndSendTransaction({
+    receiverId: token,
+    actions: [actions.functionCall("storage_deposit", { account_id: account, registration_only: true }, teraToGas(30), BigInt(min))],
+    waitUntil: "FINAL",
+  });
+  if (typeof outcome.status === "object" && "Failure" in outcome.status) {
+    throw new Error(`storage_deposit ${account} on ${token}: ${JSON.stringify(outcome.status)}`);
+  }
+  return true;
 }
 
 /**

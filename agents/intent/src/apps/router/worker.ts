@@ -1,12 +1,13 @@
 import log from "../../logger";
 
 import { config } from "./config";
-import { balances, deriveAccount, sign, signAll, type RouterConfig } from "./near";
+import { balances, deriveAccount, ensureRegistered, sign, signAll, utxoRoutes, type RouterConfig } from "./near";
 import { quote, signedFields, submitIntent } from "./oneclick";
 import { plan, type Action } from "./plan";
 import { publish } from "./relay";
 import { liveTerms, newestOrder, type TermsRow } from "./scan";
-import { decodeTerms } from "./terms";
+import { decodeTerms, type Terms } from "./terms";
+import { delivery, routeFor, type UtxoRoute } from "./utxo";
 import { loadVaa } from "./wormholescan";
 
 /** A quote outlives the transfer the router signs against it by this much. */
@@ -34,12 +35,17 @@ export class Worker {
   private readonly filled = new Set<string>();
   /** Terms finished by this process. */
   private readonly done = new Set<string>();
+  /** The router's UTXO routes, read each pass. */
+  private routes: Record<string, UtxoRoute> = {};
+  /** `A_utxo` registrations this process has seen, by `token:account`. */
+  private readonly registered = new Set<string>();
 
   constructor(private readonly rc: RouterConfig) {}
 
   /** One pass over every set of terms in play. */
   async pass(): Promise<void> {
     const since = Math.floor(Date.now() / 1000) - config.graceDays * 86_400;
+    this.routes = await utxoRoutes();
     for (const row of await liveTerms(since)) {
       if (this.done.has(row.auth_path)) continue;
       try {
@@ -79,6 +85,7 @@ export class Worker {
       deadlineMs: t.deadlineMs,
       maxFillMultiplier: t.maxFillMultiplier,
       minDelivery: t.minDelivery,
+      ...delivery(t, this.routes),
       eth,
       dest,
       order: order && {
@@ -120,12 +127,14 @@ export class Worker {
       }
       case "deliver":
       case "refund": {
+        if (action.kind === "deliver") await this.registerUtxo(path, t);
         const signed = await sign(action.kind, { terms });
         const r = await publish(signed.signed_data);
         log.info(`[${path}] ${action.kind} ${signed.amount} ${signed.token} → ${signed.receiver}: ${r.status}, intent ${r.hash}`);
         return;
       }
       case "settle": {
+        await this.registerUtxo(path, t);
         const vaa = await loadVaa(action.closeVaa);
         for (const signed of await signAll("settle", { terms, close_vaa: vaa.toString("base64") })) {
           const r = await publish(signed.signed_data);
@@ -140,5 +149,23 @@ export class Worker {
       case "wait":
         return;
     }
+  }
+
+  /**
+   * Before a delivery the router sends to `A_utxo`, register `A_utxo` on the token — unregistered,
+   * the withdrawal fails and `intents.near` credits `A` back.
+   *
+   * @param path The terms' `auth_path`, for the log.
+   * @param t The terms.
+   */
+  private async registerUtxo(path: string, t: Terms): Promise<void> {
+    const route = routeFor(t, this.routes);
+    if (!route) return;
+    const token = t.destinationAsset.replace(/^nep141:/, "");
+    const account = await deriveAccount(this.rc.mpc_signer, `${route.path_prefix}${t.recipient}`, route.withdraw);
+    const id = `${token}:${account}`;
+    if (this.registered.has(id)) return;
+    if (await ensureRegistered(token, account)) log.info(`[${path}] registered ${account} on ${token}`);
+    this.registered.add(id);
   }
 }

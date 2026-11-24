@@ -5,6 +5,10 @@ export interface PlanInput {
   deadlineMs: number;
   maxFillMultiplier: bigint;
   minDelivery: bigint;
+  /** Whether the router can deliver the terms' destination at all — see `delivery` in `utxo.ts`. */
+  deliverable: boolean;
+  /** The least the router delivers at once: a UTXO route's minimum, else 1. */
+  minPayout: bigint;
   /** `A`'s ETH. */
   eth: bigint;
   /** `A`'s destination asset. */
@@ -38,8 +42,12 @@ export type Action =
  *
  * Before the deadline: swap when the newest order is still priced and its ETH has landed in `A`
  * (`A`'s whole ETH up to the fill cap — the only size the router accepts); deliver once the
- * destination balance reaches `minDelivery`. After it: deliver whatever bought, refund ETH from
- * `minRefund`, and drop the terms once neither is left.
+ * destination balance reaches `minDelivery` and `minPayout`. After it: deliver from `minPayout`,
+ * refund ETH from `minRefund`, and drop the terms once neither is left — output below `minPayout`
+ * stays in `A`.
+ *
+ * Terms the router cannot deliver — a withdrawal with no route — never swap: their ETH waits for the
+ * refund or a settle.
  *
  * Once a close's countdown has passed, a still-priced order swaps first, as before; then one `settle`
  * moves whatever `A` holds — any destination to the recipient, ETH from `minRefund` back. With
@@ -50,8 +58,9 @@ export type Action =
  * @returns The action.
  */
 export function plan(i: PlanInput): Action {
+  const payable = i.deliverable && i.dest > 0n && i.dest >= i.minPayout;
   if (i.nowMs > i.deadlineMs) {
-    if (i.dest > 0n) return { kind: "deliver" };
+    if (payable) return { kind: "deliver" };
     if (i.eth > 0n && i.eth >= i.minRefund) return { kind: "refund" };
     return { kind: "drop" };
   }
@@ -59,6 +68,7 @@ export function plan(i: PlanInput): Action {
   const o = i.order;
   if (
     o &&
+    i.deliverable &&
     !i.filled.has(o.seq) &&
     i.nowMs < o.publishedAtMs + i.priceValidityMs &&
     i.eth * BPS >= o.amount * (BPS - i.maxOrderShortfallBps)
@@ -68,11 +78,11 @@ export function plan(i: PlanInput): Action {
   }
 
   if (i.settleAtMs !== undefined && i.nowMs >= i.settleAtMs) {
-    const held = i.dest > 0n || (i.eth > 0n && i.eth >= i.minRefund);
+    const held = payable || (i.eth > 0n && i.eth >= i.minRefund);
     if (held) return i.closeVaa ? { kind: "settle", closeVaa: i.closeVaa } : { kind: "wait" };
     return i.nowMs > i.settleAtMs + i.graceMs ? { kind: "drop" } : { kind: "wait" };
   }
 
-  if (i.dest > 0n && i.dest >= i.minDelivery) return { kind: "deliver" };
+  if (payable && i.dest >= i.minDelivery) return { kind: "deliver" };
   return { kind: "wait" };
 }

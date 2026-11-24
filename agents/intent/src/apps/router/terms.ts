@@ -4,8 +4,11 @@ export interface Terms {
   minDelivery: bigint;
   /** Unix ms. */
   deadlineMs: number;
+  /** 0 = withdraw to the asset's own chain, 1 = an intents account. */
+  recipientKind: number;
   /** Intents ledger id, e.g. `nep141:zec.omft.near`. */
   destinationAsset: string;
+  recipient: string;
 }
 
 /**
@@ -16,11 +19,16 @@ export interface Terms {
  */
 export function decodeTerms(bytes: Buffer): Terms {
   const d = bytes[117];
-  if (bytes[0] !== 1 || d === undefined || bytes.length < 118 + d) throw new Error("unknown terms layout");
+  const r = d === undefined ? undefined : bytes[118 + d];
+  if (bytes[0] !== 1 || d === undefined || r === undefined || bytes.length < 119 + d + r) {
+    throw new Error("unknown terms layout");
+  }
   return {
     maxFillMultiplier: BigInt(bytes[55]!),
     minDelivery: BigInt(`0x${bytes.subarray(72, 88).toString("hex")}`),
     deadlineMs: Number(bytes.readBigUInt64BE(88)) * 1000,
+    recipientKind: bytes[96]!,
     destinationAsset: bytes.subarray(118, 118 + d).toString("utf8"),
+    recipient: bytes.subarray(119 + d, 119 + d + r).toString("utf8"),
   };
 }
