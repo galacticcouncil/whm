@@ -34,7 +34,25 @@ export const DISPATCHER_ABI = parseAbi([
   "function computeAuthPath(Quote terms) pure returns (bytes32)",
   "function outPerIn(string destinationAsset) view returns (uint128)",
   "function dispatch(uint256 amount, address depositAddress, uint256 maxRelayFee, Quote terms) returns (uint64)",
+  "function minOrderAmount() view returns (uint256)",
+  "function nttManager() view returns (address)",
+  "function wormhole() view returns (address)",
 ]);
+
+/** What an order's cost is read from: the rail's delivery price to Ethereum, and Wormhole's fee. */
+const ORDER_COST_ABI = parseAbi([
+  "function quoteDeliveryPrice(uint16 recipientChain, bytes transceiverInstructions) view returns (uint256[], uint256)",
+  "function messageFee() view returns (uint256)",
+]);
+
+/** Ethereum's Wormhole chain id — where the dispatcher bridges every order. */
+const ETHEREUM_WORMHOLE_ID = 2;
+
+/** The rail's precision: the dispatcher bridges whole multiples of this, in wei. */
+const TRIM_UNIT = 10n ** 10n;
+
+/** The router's `FILL_TOLERANCE_BPS`: a swap may sell this much less than `A`'s whole ETH. */
+const FILL_TOLERANCE_BPS = 100n;
 
 /** The terms of one action, as the dispatcher takes them. */
 export interface Terms {
@@ -87,6 +105,63 @@ export async function encodeTerms(
 export function estimateOut(weth: bigint, maxRelayFee: bigint, outPerIn: bigint, slippageBps: number): bigint {
   const eth = weth > maxRelayFee ? weth - maxRelayFee : 0n;
   return (((eth * outPerIn) / 10n ** 18n) * (10_000n - BigInt(slippageBps))) / 10_000n;
+}
+
+/** What the dispatcher takes from an order before bridging it, and its least order. */
+export interface OrderBase {
+  /** The rail's delivery price to Ethereum plus Wormhole's message fee, wei. */
+  cost: bigint;
+  /** The dispatcher's `minOrderAmount`, wei. */
+  minOrderAmount: bigint;
+}
+
+/**
+ * The dispatcher's order cost and least order, read live.
+ *
+ * @param client Hydration public client
+ * @param dispatcher The dispatcher
+ * @returns Its cost and least order
+ */
+export async function orderBase(client: PublicClient, dispatcher: Hex): Promise<OrderBase> {
+  const read = <T>(functionName: "minOrderAmount" | "nttManager" | "wormhole") =>
+    client.readContract({ address: dispatcher, abi: DISPATCHER_ABI, functionName }) as Promise<T>;
+  const [minOrderAmount, manager, wormhole] = await Promise.all([
+    read<bigint>("minOrderAmount"),
+    read<Hex>("nttManager"),
+    read<Hex>("wormhole"),
+  ]);
+  const [[, deliveryPrice], fee] = await Promise.all([
+    client.readContract({
+      address: manager,
+      abi: ORDER_COST_ABI,
+      functionName: "quoteDeliveryPrice",
+      args: [ETHEREUM_WORMHOLE_ID, "0x00"],
+    }),
+    client.readContract({ address: wormhole, abi: ORDER_COST_ABI, functionName: "messageFee" }),
+  ]);
+  return { cost: deliveryPrice + fee, minOrderAmount };
+}
+
+/**
+ * The least WETH one order must sell for whatever fill the router accepts to pay out at once. Of
+ * the WETH, the dispatcher bridges what is left after `cost`, trimmed to the rail's precision, and
+ * needs that to be at least its least order plus the relay ceiling, and at least twice the ceiling.
+ * `A` then receives at least what bridged less the ceiling; a swap sells all but the router's fill
+ * tolerance of it at no less than the terms' hard floor, and that must reach the route's minimum.
+ *
+ * @param base The dispatcher's cost and least order
+ * @param maxRelayFee The relay ceiling the order carries, wei
+ * @param minOutPerIn The terms' hard floor, destination units per 1e18 wei
+ * @param routeMin The route's `min_amount` in destination units; 0 where there is none
+ * @returns Wei
+ */
+export function minOrderWeth(base: OrderBase, maxRelayFee: bigint, minOutPerIn: bigint, routeMin: bigint): bigint {
+  const ceilDiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
+  if (routeMin > 0n && minOutPerIn === 0n) throw new Error("no hard floor: no order is sure to reach the route's minimum");
+  const forRoute =
+    routeMin > 0n ? maxRelayFee + ceilDiv(routeMin * 10n ** 18n * 10_000n, minOutPerIn * (10_000n - FILL_TOLERANCE_BPS)) : 0n;
+  const bridged = [base.minOrderAmount + maxRelayFee, 2n * maxRelayFee, forRoute].reduce((a, b) => (b > a ? b : a));
+  return base.cost + ceilDiv(bridged, TRIM_UNIT) * TRIM_UNIT;
 }
 
 /**

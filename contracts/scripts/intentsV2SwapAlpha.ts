@@ -38,7 +38,8 @@ const REFUND_TEST_TERMS_S = 20 * 60;
  *      --floorBps under the dispatcher's live price, deadline the ICE deadline plus an hour.
  *   2. The recipient, checked as the router will pay it: the route's withdraw contract validates a
  *      ZEC/BTC address, a NEAR recipient must exist. The relay ceiling (the quoter, +20%), and the
- *      expected output against the route's minimum — less would wait in A for good.
+ *      least WETH (`minOrderWeth`) for which even a fill at the hard floor reaches the route's
+ *      minimum — less could wait in A for good, so it is refused.
  *   3. A for the terms, and its standing 1Click pass-through — the order's deposit address.
  *   4. `Intent.submit_intent` — Swap(assetIn → WETH, at least --minWethOut, never partial), deadline
  *      --deadlineMinutes, Forward to the dispatcher with `abi.encode(deposit, ceiling, terms)` —
@@ -105,10 +106,13 @@ async function main(): Promise<void> {
   const ceiling = await hydration.relayFeeCeiling(optionalEnv("QUOTER_URL") ?? QUOTER);
   const weth = direct ? BigInt(requiredArg("--amount")) : BigInt(requiredArg("--minWethOut"));
   const expected = hydration.estimateOut(weth, ceiling, market, slippageBps);
+  const routeMin = route && !refundTest ? BigInt(route.min_amount) : 0n;
+  const least = hydration.minOrderWeth(await hydration.orderBase(evm.publicClient, dispatcher), ceiling, terms.minOutPerIn, routeMin);
   console.log(`2. payout    ${route ? `UTXO route via ${route.withdraw}, from ${route.min_amount}` : kind === "intents" ? "intents transfer" : "native NEAR"}`);
   console.log(`   ceiling   ${formatEther(ceiling)} ETH\n   expected  about ${expected} out`);
-  if (route && !refundTest && expected < BigInt(route.min_amount)) {
-    throw new Error(`about ${expected} out is below the route's ${route.min_amount}: it would wait in A for good — swap more WETH`);
+  console.log(`   least     ${formatEther(least)} WETH — ${routeMin > 0n ? "pays out at the hard floor" : "the dispatcher's least order"}`);
+  if (weth < least) {
+    throw new Error(`${formatEther(weth)} WETH is below ${formatEther(least)}: ${routeMin > 0n ? "a fill at the floor would wait in A for good" : "the dispatcher would refuse it"} — swap more WETH`);
   }
 
   // 3. A, and where its orders deposit.
