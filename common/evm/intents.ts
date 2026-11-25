@@ -17,6 +17,9 @@ export const DISPATCH = "0x0000000000000000000000000000000000000401";
 /** WETH on Hydration: what every ICE trade an order comes from must buy. */
 export const WETH_ASSET_ID = 20;
 
+/** WETH's ERC20 precompile: `0x0100000000 | 20` — what `dispatch` pulls. */
+export const WETH = "0x0000000000000000000000000000000100000014";
+
 /** `Intent` is pallet 98 in Hydration's runtime; `submit_intent` its call 0. */
 const INTENT_PALLET = 98;
 const SUBMIT_INTENT = 0;
@@ -30,6 +33,7 @@ export const DISPATCHER_ABI = parseAbi([
   "function computeTerms(Quote terms) pure returns (bytes)",
   "function computeAuthPath(Quote terms) pure returns (bytes32)",
   "function outPerIn(string destinationAsset) view returns (uint128)",
+  "function dispatch(uint256 amount, address depositAddress, uint256 maxRelayFee, Quote terms) returns (uint64)",
 ]);
 
 /** The terms of one action, as the dispatcher takes them. */
@@ -68,6 +72,21 @@ export async function encodeTerms(
   const [encoded, authPath] = await Promise.all([read<Hex>("computeTerms"), read<Hex>("computeAuthPath")]);
   if (keccak256(encoded) !== authPath) throw new Error("computeAuthPath is not keccak256(computeTerms)");
   return { encoded, authPath };
+}
+
+/**
+ * About what an order of `weth` buys: less the relay ceiling, at the dispatcher's rate, less the
+ * terms' slippage. The rail's delivery price comes off too, so it is an upper estimate.
+ *
+ * @param weth WETH one order bridges, wei
+ * @param maxRelayFee The relay ceiling, wei
+ * @param outPerIn The dispatcher's rate, destination units per 1e18 wei
+ * @param slippageBps The terms' `maxSlippageBps`
+ * @returns Destination units
+ */
+export function estimateOut(weth: bigint, maxRelayFee: bigint, outPerIn: bigint, slippageBps: number): bigint {
+  const eth = weth > maxRelayFee ? weth - maxRelayFee : 0n;
+  return (((eth * outPerIn) / 10n ** 18n) * (10_000n - BigInt(slippageBps))) / 10_000n;
 }
 
 /**

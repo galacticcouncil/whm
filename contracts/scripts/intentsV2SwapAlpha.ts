@@ -3,7 +3,7 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 
 import { JsonRpcProvider } from "near-api-js";
-import { formatEther, type Hex } from "viem";
+import { erc20Abi, formatEther, type Hex } from "viem";
 
 import { args } from "@whm/common";
 import { intents as hydration, wallet } from "@whm/common/evm";
@@ -24,37 +24,49 @@ const KIND = { withdraw: 0, intents: 1 } as const;
 /** The terms outlive the ICE intent by this much, for the order to cross to NEAR and fill. */
 const TERMS_GRACE_S = 3600;
 
+/** `--refundTest`: the ICE intent's and the terms' lifetimes — nothing fills, the bot then refunds. */
+const REFUND_TEST_ICE_S = 10 * 60;
+const REFUND_TEST_TERMS_S = 20 * 60;
+
 /**
- * Intents v2 alpha — one swap through a Hydration ICE intent, the way users place them: ICE sells
- * `--amountIn` of `--assetIn` for WETH and forwards it to the dispatcher's `execute`, which bridges it
- * as one order; the router then buys `--dest` for `--recipient` on NEAR.
+ * Intents v2 alpha — one swap, the way users place them: ICE sells `--amountIn` of `--assetIn` for
+ * WETH and forwards it to the dispatcher's `execute`, which bridges it as one order; the router then
+ * buys `--dest` and pays it out — ZEC and BTC to their own chains through the router's UTXO routes,
+ * NEAR as native NEAR — or, `--kind intents`, to a NEAR intents account.
  *
  *   1. Terms: owner and refundTo the signer, a fresh quoteId, maxFillMultiplier 2, the hard floor
  *      --floorBps under the dispatcher's live price, deadline the ICE deadline plus an hour.
- *   2. A for the terms, and its standing 1Click pass-through — the order's deposit address.
- *   3. The relay ceiling: the quoter, +20%.
+ *   2. The recipient, checked as the router will pay it: the route's withdraw contract validates a
+ *      ZEC/BTC address, a NEAR recipient must exist. The relay ceiling (the quoter, +20%), and the
+ *      expected output against the route's minimum — less would wait in A for good.
+ *   3. A for the terms, and its standing 1Click pass-through — the order's deposit address.
  *   4. `Intent.submit_intent` — Swap(assetIn → WETH, at least --minWethOut, never partial), deadline
  *      --deadlineMinutes, Forward to the dispatcher with `abi.encode(deposit, ceiling, terms)` —
  *      through the dispatch precompile, as the signer. `--dryRun` simulates it and stops.
- *   5. Follow the trade in scan and A's balances until A is empty again.
+ *      `--direct` instead approves and `dispatch`es `--amount` of the signer's WETH, no ICE.
+ *   5. Follow the trade — scan, A and A_utxo — until it is completed or refunded and its payout has
+ *      landed on its chain.
+ *
+ * `--refundTest` puts the hard floor ten times above the market and the terms' deadline 20 minutes
+ * out: nothing fills, and the bot refunds the ETH to the signer on Ethereum.
  *
  * Env: RPC (Hydration EVM), ONECLICK_KEY; NEAR_RPC?, QUOTER_URL?, SCAN_API? (…/api/v2)
- * Args: --pk --assetIn --amountIn --minWethOut --recipient
- *       --kind? (withdraw | intents; default withdraw) --dest? (default nep141:zec.omft.near)
+ * Args: --pk --recipient; --assetIn --amountIn --minWethOut (ICE) | --direct --amount (WETH wei)
+ *       --dest? (zec | btc | near | a ledger id; default zec) --kind? (withdraw | intents; default withdraw)
  *       --slippageBps? (300) --floorBps? (2000) --minDelivery? (1) --deadlineMinutes? (60)
- *       --dispatcher? --router? --dryRun? --wait? (minutes; 60)
+ *       --refundTest? --dispatcher? --router? --dryRun? --wait? (minutes; 60)
  */
 async function main(): Promise<void> {
   const pk = requiredArg("--pk") as Hex;
   const dispatcher = (optionalArg("--dispatcher") ?? DISPATCHER) as Hex;
   const router = optionalArg("--router") ?? ROUTER;
-  const assetIn = Number(requiredArg("--assetIn"));
-  const amountIn = BigInt(requiredArg("--amountIn"));
-  const minWethOut = BigInt(requiredArg("--minWethOut"));
   const recipient = requiredArg("--recipient");
   const kind = (optionalArg("--kind") ?? "withdraw") as keyof typeof KIND;
-  const dest = optionalArg("--dest") ?? "nep141:zec.omft.near";
-  const deadlineMinutes = Number(optionalArg("--deadlineMinutes") ?? "60");
+  const dest = near.destination(optionalArg("--dest") ?? "zec");
+  const slippageBps = Number(optionalArg("--slippageBps") ?? "300");
+  const direct = process.argv.includes("--direct");
+  const refundTest = process.argv.includes("--refundTest");
+  const dryRun = process.argv.includes("--dryRun");
   if (!(kind in KIND)) throw new Error("--kind is withdraw or intents");
 
   const evm = wallet.getWallet(requiredEnv("RPC"), 222222, pk);
@@ -68,75 +80,84 @@ async function main(): Promise<void> {
     functionName: "outPerIn",
     args: [dest],
   })) as bigint;
-  const iceDeadline = BigInt(Date.now() + deadlineMinutes * 60_000);
+  const now = Date.now();
+  const iceDeadline = BigInt(now + (refundTest ? REFUND_TEST_ICE_S * 1000 : Number(optionalArg("--deadlineMinutes") ?? "60") * 60_000));
+  const termsDeadline = refundTest ? BigInt(Math.floor(now / 1000) + REFUND_TEST_TERMS_S) : iceDeadline / 1000n + BigInt(TERMS_GRACE_S);
   const terms: hydration.Terms = {
     owner: signer,
     quoteId: `0x${randomBytes(32).toString("hex")}`,
-    maxSlippageBps: Number(optionalArg("--slippageBps") ?? "300"),
+    maxSlippageBps: slippageBps,
     maxFillMultiplier: 2,
-    minOutPerIn: (market * (BPS - BigInt(optionalArg("--floorBps") ?? "2000"))) / BPS,
+    minOutPerIn: refundTest ? market * 10n : (market * (BPS - BigInt(optionalArg("--floorBps") ?? "2000"))) / BPS,
     minDelivery: BigInt(optionalArg("--minDelivery") ?? "1"),
-    deadline: iceDeadline / 1000n + BigInt(TERMS_GRACE_S),
+    deadline: termsDeadline,
     recipientKind: KIND[kind],
     refundTo: signer,
     destinationAsset: dest,
     recipient,
   };
   const { encoded, authPath } = await hydration.encodeTerms(evm.publicClient, dispatcher, terms);
-  console.log(`1. terms     ${encoded}\n   authPath  ${authPath}\n   floor     ${terms.minOutPerIn} (now ${market})`);
+  console.log(`1. terms     ${encoded}\n   authPath  ${authPath}`);
+  console.log(`   dest      ${dest} → ${recipient}\n   floor     ${terms.minOutPerIn} (now ${market})${refundTest ? " — refund test: unreachable" : ""}`);
 
-  // 2. A, and where its orders deposit.
+  // 2. The recipient as the router pays it, the relay ceiling, and the expected output.
+  const route = await near.checkRecipient(provider, router, dest, KIND[kind], recipient);
+  const ceiling = await hydration.relayFeeCeiling(optionalEnv("QUOTER_URL") ?? QUOTER);
+  const weth = direct ? BigInt(requiredArg("--amount")) : BigInt(requiredArg("--minWethOut"));
+  const expected = hydration.estimateOut(weth, ceiling, market, slippageBps);
+  console.log(`2. payout    ${route ? `UTXO route via ${route.withdraw}, from ${route.min_amount}` : kind === "intents" ? "intents transfer" : "native NEAR"}`);
+  console.log(`   ceiling   ${formatEther(ceiling)} ETH\n   expected  about ${expected} out`);
+  if (route && !refundTest && expected < BigInt(route.min_amount)) {
+    throw new Error(`about ${expected} out is below the route's ${route.min_amount}: it would wait in A for good — swap more WETH`);
+  }
+
+  // 3. A, and where its orders deposit.
   const account = await near.deriveAccount(provider, router, authPath);
   const deposit = await near.passThrough(requiredEnv("ONECLICK_KEY"), account);
-  console.log(`2. A         ${account}\n   deposit   ${deposit.address}  (1Click ${deposit.internal})`);
+  const utxo = route ? await near.utxoLeg(provider, route, dest, recipient) : undefined;
+  console.log(`3. A         ${account}\n   deposit   ${deposit.address}  (1Click ${deposit.internal})`);
+  if (utxo) console.log(`   A_utxo    ${utxo.account} on ${utxo.token}`);
 
-  // 3. The relay ceiling.
-  const ceiling = await hydration.relayFeeCeiling(optionalEnv("QUOTER_URL") ?? QUOTER);
-  console.log(`3. ceiling   ${formatEther(ceiling)} ETH`);
-
-  // 4. The ICE intent.
-  const intent: hydration.IntentInput = {
-    data: { kind: "swap", assetIn, assetOut: hydration.WETH_ASSET_ID, amountIn, amountOut: minWethOut },
-    deadline: iceDeadline,
-    forward: { contract: dispatcher, data: hydration.forwardData(deposit.address as Hex, ceiling, encoded) },
-  };
-  if (process.argv.includes("--dryRun")) {
-    await evm.publicClient.call({ account: evm.account, to: hydration.DISPATCH, data: hydration.encodeSubmitIntent(intent) });
-    return console.log("4. dry run   submit_intent would succeed");
-  }
-  console.log(`4. submitted ${await hydration.submitIntent(evm, intent)}`);
-
-  await follow(provider, account, dest, authPath, Number(optionalArg("--wait") ?? "60"));
-}
-
-/**
- * Follow a trade: scan's view of it, and A's balances, until A has held something and is empty again.
- *
- * @param provider A NEAR provider
- * @param account A
- * @param dest The destination asset
- * @param authPath The terms' `auth_path`
- * @param minutes How long to follow
- */
-async function follow(provider: JsonRpcProvider, account: string, dest: string, authPath: Hex, minutes: number) {
-  const scan = optionalEnv("SCAN_API");
-  let last = "";
-  let funded = false;
-  for (const until = Date.now() + minutes * 60_000; Date.now() < until; await new Promise((r) => setTimeout(r, 15_000))) {
-    const held = await near.balances(provider, account, [ETH, dest]);
-    let trade = "";
-    if (scan) {
-      const r = await fetch(`${scan}/trades/${authPath}`);
-      const t = r.ok ? ((await r.json()) as { trade: { status: string; order_count: number; swapped: number } }).trade : null;
-      trade = t ? `trade ${t.status}, ${t.swapped}/${t.order_count} swapped, ` : `trade ${r.status}, `;
+  // 4. The order: an ICE intent, or a direct dispatch.
+  if (direct) {
+    const call = { address: dispatcher, abi: hydration.DISPATCHER_ABI, functionName: "dispatch", args: [weth, deposit.address as Hex, ceiling, terms] } as const;
+    if (dryRun) return console.log("4. dry run   checks passed — a direct dispatch approves first, so it is not simulated");
+    const approve = await evm.walletClient.writeContract({ address: hydration.WETH, abi: erc20Abi, functionName: "approve", args: [dispatcher, weth], chain: null, account: evm.account });
+    await evm.publicClient.waitForTransactionReceipt({ hash: approve });
+    const { request } = await evm.publicClient.simulateContract({ account: evm.account, ...call });
+    const tx = await evm.walletClient.writeContract(request);
+    await evm.publicClient.waitForTransactionReceipt({ hash: tx });
+    console.log(`4. dispatch  ${tx}`);
+  } else {
+    const intent: hydration.IntentInput = {
+      data: {
+        kind: "swap",
+        assetIn: Number(requiredArg("--assetIn")),
+        assetOut: hydration.WETH_ASSET_ID,
+        amountIn: BigInt(requiredArg("--amountIn")),
+        amountOut: weth,
+      },
+      deadline: iceDeadline,
+      forward: { contract: dispatcher, data: hydration.forwardData(deposit.address as Hex, ceiling, encoded) },
+    };
+    if (dryRun) {
+      await evm.publicClient.call({ account: evm.account, to: hydration.DISPATCH, data: hydration.encodeSubmitIntent(intent) });
+      return console.log("4. dry run   submit_intent would succeed");
     }
-    const line = `${trade}A: ${held[ETH]} wei ETH, ${held[dest]} out`;
-    if (line !== last) console.log(`   +${new Date().toISOString().slice(11, 19)} ${(last = line)}`);
-    const empty = held[ETH] === 0n && held[dest] === 0n;
-    if (funded && empty) return console.log("\nDone: A is empty again — delivered, or refunded.");
-    funded ||= !empty;
+    console.log(`4. submitted ${await hydration.submitIntent(evm, intent)}`);
   }
-  console.log(`\nFollowed for ${minutes} min.`);
+
+  // 5. Follow it to its payout.
+  await near.followTrade({
+    provider,
+    account,
+    authPath,
+    asset: dest,
+    eth: ETH,
+    utxo,
+    scanApi: optionalEnv("SCAN_API"),
+    minutes: Number(optionalArg("--wait") ?? "60"),
+  });
 }
 
 main().catch((error) => {
