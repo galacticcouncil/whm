@@ -12,6 +12,7 @@ import {
   nttLegs,
   ORACLE,
   ORACLE_ROUTES,
+  PSM,
   UTXO,
   WORMHOLE_CORE,
   type EvmLeg,
@@ -71,6 +72,8 @@ const FROM = {
     utxoZec: 15_901_846n,
     /** IntentDispatcher's deploy. */
     intentsV2: 17_111_592n,
+    /** The PSM's first mint; the facilitator logged no transfer before it. */
+    psm: 17_463_388n,
   },
   ethereum: {
     ntt: FROM_CHAIN.ethereum,
@@ -80,7 +83,11 @@ const FROM = {
     /** IntentForwarder's deploy. */
     intentsV2: 26_434_322n,
   },
-  base: { ntt: FROM_CHAIN.base },
+  base: {
+    ntt: FROM_CHAIN.base,
+    /** The PSM's first deposit; the vault logged no transfer before it. */
+    psm: 62_530_219n,
+  },
   robinhood: { ntt: FROM_CHAIN.robinhood, oracles: FROM_CHAIN_ORA.robinhood },
   hyperevm: { ntt: FROM_CHAIN.hyperevm },
   solana: { ntt: FROM_CHAIN.solana, oracles: FROM_CHAIN_ORA.solana },
@@ -281,6 +288,21 @@ const UTXO_ZEC: Watch[] = [
 ];
 
 /**
+ * The HOLLAR PSM: each corridor's vault on its EVM chain and its facilitator on Hydration. Both name
+ * who sent and who is paid in their own events, so neither needs the Wormhole core or a sender
+ * lookup.
+ */
+const PSMS: Watch[] = (Object.keys(PSM) as (keyof typeof PSM)[]).flatMap((chain) => [
+  { chain, role: "psm-vault", from: FROM[chain].psm, at: [PSM[chain].vault] },
+  {
+    chain: "hydration",
+    role: "psm-facilitator",
+    from: FROM.hydration.psm,
+    at: [PSM[chain].facilitator],
+  },
+]);
+
+/**
  * Oracle relays: each source's emitter, read off its chain's Wormhole core under a cursor of its
  * own — so the relays backfill from their own start while the core's NTT cursor stays where it is —
  * and the receivers on each destination.
@@ -326,6 +348,7 @@ export const WATCH: Watch[] = [
   ...INTENTS_V2,
   ...BASEJUMPS,
   ...UTXO_ZEC,
+  ...PSMS,
   ...ORACLES,
 ].filter((w) => w.at.length > 0);
 

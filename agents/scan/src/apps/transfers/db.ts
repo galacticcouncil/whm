@@ -9,17 +9,18 @@ import { bytes32ToAddress, normalizeRecipient } from "../../utils";
 import { INTENT } from "../../deployments";
 
 import { basejump } from "./basejump/flows";
-import { BASEJUMP_ASSETS, nttSymbol, tokenKeys } from "./tokens";
+import { psm } from "./psm/flows";
+import { BASEJUMP_ASSETS, nttSymbol, PSM_ASSETS, tokenKeys } from "./tokens";
 import { byChain } from "./utxo/routes";
 
 /** The kinds of transfer, by the rail that carries them. */
-export type Kind = "ntt" | "utxo" | "basejump";
+export type Kind = "ntt" | "utxo" | "basejump" | "psm";
 
 /** What the list says about a transfer, whichever rail it rode. */
 export interface TransferView {
   id: string;
   kind: Kind;
-  /** `transfer`, `intent`, `deposit`, `withdraw`, `basejump`. */
+  /** `transfer`, `intent`, `deposit`, `withdraw`, `basejump`, `psm`. */
   type: string;
   /** When it was sent, unix ms. */
   time: number | null;
@@ -63,6 +64,43 @@ const SIGN = `
             OR (s.signed->>'blockTimestamp')::bigint <= (u.withdrawn->>'blockTimestamp')::bigint)
      ORDER BY (s.signed->>'blockTimestamp')::bigint DESC LIMIT 1
   ) s ON TRUE`;
+
+/**
+ * A PSM transfer's status, read off its refs — the two directions share a table and a `state`, so
+ * neither says by itself what happened. A cancelled mint failed even once its USDC is back; a
+ * redemption sent back failed even once its HOLLAR is; a credit not paid yet is still on its way.
+ */
+const PSM_STATUS = `
+  CASE WHEN p.direction = 'deposit' THEN
+         CASE WHEN p.mint_cancelled IS NOT NULL THEN 'failed'
+              WHEN p.minted IS NOT NULL OR p.flushed IS NOT NULL THEN 'completed'
+              WHEN p.mint_queued IS NOT NULL THEN 'held'
+              ELSE 'pending' END
+       ELSE
+         CASE WHEN p.claimed IS NOT NULL THEN 'completed'
+              WHEN p.returned IS NOT NULL OR p.cancelled IS NOT NULL THEN 'failed'
+              WHEN p.unpayable IS NOT NULL OR p.disputed IS NOT NULL THEN 'held'
+              ELSE 'pending' END
+  END`;
+
+/** Where a PSM transfer has got to, in its own direction's words. */
+const PSM_STAGE = `
+  CASE WHEN p.direction = 'deposit' THEN
+         CASE WHEN p.mint_cancelled IS NOT NULL AND p.claimed IS NOT NULL THEN 'refunded'
+              WHEN p.mint_cancelled IS NOT NULL THEN 'cancelled'
+              WHEN p.minted IS NOT NULL OR p.flushed IS NOT NULL THEN 'minted'
+              WHEN p.mint_queued IS NOT NULL THEN 'queued'
+              ELSE 'deposited' END
+       ELSE
+         CASE WHEN p.claimed IS NOT NULL THEN 'claimed'
+              WHEN (p.returned IS NOT NULL OR p.cancelled IS NOT NULL) AND p.minted IS NOT NULL THEN 'reminted'
+              WHEN p.cancelled IS NOT NULL THEN 'cancelled'
+              WHEN p.returned IS NOT NULL THEN 'returned'
+              WHEN p.unpayable IS NOT NULL THEN 'unpayable'
+              WHEN p.disputed IS NOT NULL THEN 'disputed'
+              WHEN p.credited IS NOT NULL THEN 'credited'
+              ELSE 'initiated' END
+  END`;
 
 /**
  * Every transfer, in one shape. A UTXO transfer rides NTT, so NTT lists only what no other rail
@@ -120,6 +158,32 @@ const UNION = `
          ${refs("b.initiated", "b.completed", "b.queued", "b.fulfilled")}
     FROM basejump_transfers b
    WHERE ${validLegs(basejump, "b")}
+  UNION ALL
+  SELECT 'psm:' || p.id, 'psm', 'psm',
+         (p.initiated->>'blockTimestamp')::bigint,
+         CASE p.direction WHEN 'deposit' THEN p.corridor ELSE 'hydration' END, p.sender,
+         CASE p.direction WHEN 'deposit' THEN 'hydration' ELSE p.corridor END, p.recipient,
+         -- What the sender sent: USDC into the vault, or the HOLLAR burned — both in USDC's units.
+         -- A credit cancelled out of the queue gave its gross back: no fee was kept.
+         'psm:' || p.direction, p.amount, NULL, CASE WHEN p.cancelled IS NULL THEN p.fee END,
+         ${PSM_STATUS}, ${PSM_STAGE},
+         ${refs(
+           "p.initiated",
+           "p.minted",
+           "p.mint_queued",
+           "p.flushed",
+           "p.mint_cancelled",
+           "p.credited",
+           "p.claimed",
+           "p.unpayable",
+           "p.cancelled",
+           "p.returned",
+           "p.disputed",
+         )}
+           -- A redemption is a substrate call: no ethereum transaction, so its extrinsic names it.
+           || ARRAY_REMOVE(ARRAY[p.initiated->>'extrinsic'], NULL)
+    FROM psm_transfers p
+   WHERE p.initiated IS NOT NULL AND ${validLegs(psm, "p")}
 `;
 
 /** What the list can be narrowed by: each a set of values, matched as any of them. */
@@ -209,6 +273,7 @@ export async function getTransfer(
              ${SIGN}
             WHERE u.id = $1`,
     basejump: `SELECT * FROM basejump_transfers WHERE id = $1`,
+    psm: `SELECT * FROM psm_transfers WHERE id = $1`,
   };
   const r = await pool.query(sql[view.kind], [key]);
   const record = r.rows[0] ?? {};
@@ -233,6 +298,8 @@ function present(r: Record<string, any>): TransferView {
     ({ symbol, decimals } = byChain(r.token) ?? { symbol: null, decimals: null });
   if (r.kind === "basejump")
     ({ symbol, decimals } = BASEJUMP_ASSETS[r.token] ?? { symbol: null, decimals: null });
+  if (r.kind === "psm")
+    ({ symbol, decimals } = PSM_ASSETS[r.token] ?? { symbol: null, decimals: null });
 
   return {
     id: r.id,

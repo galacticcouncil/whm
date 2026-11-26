@@ -11,7 +11,7 @@ anyone may subscribe to. The **UI** is one site over all of them.
 ```
 ingest           chains → events → wh_messages + ntt_transfers      (no UI)
 app-intents      intent_orders + 1Click                             :8080
-app-transfers    every transfer: NTT, UTXO coins via Omni, Basejump :8081
+app-transfers    every transfer: NTT, UTXO via Omni, Basejump, PSM  :8081
 app-feeds        oracle relay updates, each feed's value over time  :8082
 ui               Hydration scan: Transfers · Orders · Orders v2 · Feeds :8083
 app-intents-v2   intent_v2_orders, and the terms still in play      :8084
@@ -243,9 +243,27 @@ status — and `/api/transfers/:id` returns that view beside the rail's own row.
     derived account's history for the connector's `generate_btc_pending_info` (the payout txid), and
     Blockchair for the payout's block, once a minute.
 - **Basejump** — `basejump_transfers`, the fast path out of the landing pool.
+- **PSM** — `psm_transfers`, the HOLLAR PSM's two directions in one table, by `direction`:
+  - A **deposit** starts at the vault's `Deposited` and ends at the facilitator's `Minted` on
+    Hydration — or at `MintQueued`, then `PendingMintFlushed` or `PendingMintCancelled`. A cancelled
+    mint's USDC comes back through the vault's payout queue, like a redemption.
+  - A **redemption** starts at the facilitator's `RedeemInitiated` and ends at the vault's `Claimed`,
+    after `RedeemCredited` booked it into the payout queue; or it is retired unpaid
+    (`CreditUnpayable`), cancelled out of the queue (`RedemptionCancelled`), or sent back before it
+    is booked (`RedeemReturned`), the HOLLAR minted again.
+  - Only the two starts carry the message's sequence, so they key the row. A delivery is matched
+    to its start by who it is for and how much, oldest first, and waits as an orphan when its
+    chain was read ahead of the start's. The same holds for the second hand-off of a sent-back
+    redemption or a cancelled mint — its re-mint or its refund — which is merged into the row when
+    the event explaining it lands. A payment names no queue slot: the queue pays strictly
+    head first, so it settles the lowest slot still queued, which is why every credit is stored,
+    matched or not.
+  - Amounts are USDC units both ways; a redemption lists the HOLLAR burned, at par.
 
 Stages: NTT `published → received → redeemed | queued`; a deposit `deposited → published →
-redeemed`; a withdrawal `requested → received → signed → withdrawn → confirmed`.
+redeemed`; a withdrawal `requested → received → signed → withdrawn → confirmed`; a PSM deposit
+`deposited → queued → minted | cancelled → refunded`; a PSM redemption `initiated → credited →
+claimed | unpayable | cancelled`, or `returned → reminted`.
 
 ## Intents v2 (the intents-v2 app)
 

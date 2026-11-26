@@ -8,18 +8,20 @@ import { WATCH } from "../../watch";
 
 import { routes } from "./api";
 import { basejump } from "./basejump/flows";
+import { psm } from "./psm/flows";
 import { ConfirmPoller } from "./utxo/confirms";
 import { signs, utxo } from "./utxo/flows";
 import { WithdrawPoller } from "./utxo/withdraws";
 
 const NAME = "transfers";
-const FLOWS = [basejump, utxo, signs];
+const FLOWS = [basejump, utxo, signs, psm];
 
 /**
- * Every transfer Hydration takes part in, in one place: NTT corridors, UTXO coins through Omni, and
- * Basejump.
+ * Every transfer Hydration takes part in, in one place: NTT corridors, UTXO coins through Omni,
+ * Basejump and the HOLLAR PSM.
  *
- * Owns the rails no one else does — Basejump's payouts and the UTXO legs — and reads `ntt_transfers`,
+ * Owns the rails no one else does — Basejump's payouts, the UTXO legs and the PSM's two directions —
+ * and reads `ntt_transfers`,
  * which ingest owns, for the rest. A UTXO withdrawal's last two legs are on no watched account, so
  * two pollers carry them: the derived NEAR account's withdraw, and the coin's payout landing.
  */

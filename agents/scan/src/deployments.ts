@@ -250,6 +250,18 @@ export const UTXO = {
   },
 } as const;
 
+/**
+ * HOLLAR PSM corridors, keyed by the EVM chain USDC is locked on (deployments/prod/psm-<chain>.json):
+ * `HollarBaseVault` there, and the `HollarBaseFacilitator` on Hydration that mints against it. A
+ * corridor has a facilitator of its own, so either address names the corridor.
+ */
+export const PSM = {
+  base: {
+    vault: "0xd5fd74f570343245afce4a4c0b24b59179cfdfa7",
+    facilitator: "0xda30cfdf3647c291cb3b0eed6ac5f0fea7f393c4",
+  },
+} as const;
+
 /** Where a relay's updates land: the `OracleReceiver` on the destination chain. */
 export interface OracleReceiver {
   chain: string;
