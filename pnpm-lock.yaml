@@ -17,8 +17,8 @@ importers:
         specifier: ^0.32.1
         version: 0.32.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@defuse-protocol/one-click-sdk-typescript':
-        specifier: ^0.1.17
-        version: 0.1.17
+        specifier: ^0.1.26
+        version: 0.1.26
       '@galacticcouncil/common':
         specifier: ^1.2.0
         version: 1.2.0(polkadot-api@2.2.2(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@5.0.10))(rxjs@7.8.2)
@@ -114,8 +114,8 @@ importers:
   agents/intent:
     dependencies:
       '@defuse-protocol/one-click-sdk-typescript':
-        specifier: ^0.1.17
-        version: 0.1.17
+        specifier: ^0.1.26
+        version: 0.1.26
       '@fastify/cors':
         specifier: ^10.0.2
         version: 10.1.0
@@ -153,8 +153,8 @@ importers:
   agents/scan:
     dependencies:
       '@defuse-protocol/one-click-sdk-typescript':
-        specifier: ^0.1.17
-        version: 0.1.17
+        specifier: ^0.1.26
+        version: 0.1.26
       '@fastify/cors':
         specifier: ^10.0.2
         version: 10.1.0
@@ -452,8 +452,8 @@ packages:
   '@datastructures-js/queue@4.3.0':
     resolution: {integrity: sha512-2RYt1+N4dtdcilwmB+A6j9HT/5MImHSK2UUjBA8WQAHoA2AEJC4YxJSSGhGTOBMyLMKpMiowwTrnB315YgtTrA==}
 
-  '@defuse-protocol/one-click-sdk-typescript@0.1.17':
-    resolution: {integrity: sha512-yfZ2TYYhTZx62IbHRLTamPcr6qrwYJQZpUFpCTMXv35WXUPHcjNMOPOBKdYOySuCTFX0eSJGFPccwC9LTC8cSA==}
+  '@defuse-protocol/one-click-sdk-typescript@0.1.26':
+    resolution: {integrity: sha512-vYoBgEbppergtYd/H1IaJW9Jm5mPrX+jAwuuhMvDFstirJB53KFe2HnGLTg0KNyg6qztbOeDK0sA/oEAee+EAw==}
     engines: {node: '>=16', pnpm: '>=8'}
 
   '@dmsnell/diff-match-patch@1.1.0':
@@ -3712,6 +3712,10 @@ packages:
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
 
+  json-stable-stringify@1.3.0:
+    resolution: {integrity: sha512-qtYiSSFlwot9XHtF9bD9c7rwKjr+RecWT//ZnPvSmEjpV5mmPOCN4j8UjY5hbjNkOwZ/jQv3J6R1/pL7RwgMsg==}
+    engines: {node: '>= 0.4'}
+
   json-stringify-safe@5.0.1:
     resolution: {integrity: sha512-ZClg6AaYvamvYEE82d3Iyd3vSSIjQ+odgjaTzRuO3s7toCdFKczob2i0zCh7JE8kWn17yvAWhUVxvqGwUalsRA==}
 
@@ -3723,6 +3727,9 @@ packages:
     resolution: {integrity: sha512-zE9+AXFq+MkTolDor2Cw1nJzLC0aleqPkYf52Kb4Kn4mJcka/gFHpGI2JBVEJCfWOvBl0OoxZS+wuLdislQcqg==}
     engines: {node: ^18.0.0 || >=20.0.0}
     hasBin: true
+
+  jsonify@0.0.1:
+    resolution: {integrity: sha512-2/Ki0GcmuqSrgFyelQq9M05y7PS0mEwuIzrf3f1fPqkVDVRvZrPZtVSMHxdgo8Aq0sxAOb/cr2aqqA3LeWHVPg==}
 
   jsonpointer@5.0.1:
     resolution: {integrity: sha512-p/nXbhSEcu3pZRdkW1OfJhpsVtW1gd4Wa1fnQc9YLiTfAjn0312eMKimbdIQzuZl9aa9xUGaRlP9T/CJE/ditQ==}
@@ -6071,10 +6078,14 @@ snapshots:
 
   '@datastructures-js/queue@4.3.0': {}
 
-  '@defuse-protocol/one-click-sdk-typescript@0.1.17':
+  '@defuse-protocol/one-click-sdk-typescript@0.1.26':
     dependencies:
+      '@noble/hashes': 1.8.0
+      '@scure/base': 1.2.6
       axios: 1.16.1
       form-data: 4.0.5
+      json-stable-stringify: 1.3.0
+      tweetnacl: 1.0.3
     transitivePeerDependencies:
       - debug
       - supports-color
@@ -10152,10 +10163,6 @@ snapshots:
     dependencies:
       ws: 8.18.3(bufferutil@4.1.0)(utf-8-validate@5.0.10)
 
-  isows@1.0.7(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.3)):
-    dependencies:
-      ws: 8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.3)
-
   jackspeak@3.4.3:
     dependencies:
       '@isaacs/cliui': 8.0.2
@@ -10226,6 +10233,14 @@ snapshots:
 
   json-schema-traverse@1.0.0: {}
 
+  json-stable-stringify@1.3.0:
+    dependencies:
+      call-bind: 1.0.8
+      call-bound: 1.0.4
+      isarray: 2.0.5
+      jsonify: 0.0.1
+      object-keys: 1.1.1
+
   json-stringify-safe@5.0.1: {}
 
   json5@1.0.2:
@@ -10236,6 +10251,8 @@ snapshots:
   jsondiffpatch@0.7.6:
     dependencies:
       '@dmsnell/diff-match-patch': 1.1.0
+
+  jsonify@0.0.1: {}
 
   jsonpointer@5.0.1: {}
 
@@ -12304,7 +12321,7 @@ snapshots:
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
       abitype: 1.2.3(typescript@6.0.3)(zod@3.25.76)
-      isows: 1.0.7(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.3))
+      isows: 1.0.7(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))
       ox: 0.12.1(typescript@6.0.3)(zod@3.25.76)
       ws: 8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.3)
     optionalDependencies:
