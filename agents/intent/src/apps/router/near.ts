@@ -1,6 +1,7 @@
 import { Account, actions, JsonRpcProvider, KeyPairSigner, PublicKey, teraToGas, type KeyPairString } from "near-api-js";
 
 import { config } from "./config";
+import { Refused } from "./once";
 import type { UtxoRoute } from "./utxo";
 
 type TxOutcome = Awaited<ReturnType<Account["signAndSendTransaction"]>>;
@@ -102,7 +103,7 @@ export type Signed = { signed_data: unknown } & Record<string, unknown>;
  * @param method The router method.
  * @param args Its arguments.
  * @returns Every `intent_signed` event's data, in receipt order.
- * @throws With the failed receipts when nothing was signed — a refusal lands in a callback, after
+ * @throws `Refused`, with the failed receipts, when nothing was signed — a refusal lands in a callback, after
  *         the transaction itself succeeded.
  */
 export async function signAll(method: string, args: object): Promise<Signed[]> {
@@ -117,7 +118,7 @@ export async function signAll(method: string, args: object): Promise<Signed[]> {
     .map((l) => JSON.parse(l.slice("EVENT_JSON:".length)))
     .filter((e) => e.standard === "whm-intent-router" && e.event === "intent_signed")
     .flatMap((e) => e.data);
-  if (!signed.length) throw new Error(`${method} ${outcome.transaction.hash}: nothing signed — ${failures(outcome)}`);
+  if (!signed.length) throw new Refused(`${method} ${outcome.transaction.hash}: nothing signed — ${failures(outcome)}`);
   return signed;
 }
 
@@ -131,6 +132,27 @@ export async function signAll(method: string, args: object): Promise<Signed[]> {
  */
 export async function sign(method: string, args: object): Promise<Signed> {
   return (await signAll(method, args))[0];
+}
+
+/**
+ * Execute a payload the router signed — a delivery, refund or settle — on the verifier, from the
+ * bot's own account: `execute_intents` takes any caller, so no solver relay stands in the way.
+ *
+ * @param intents The verifier, `intents.near`.
+ * @param signedData The `intent_signed` event's `signed_data`.
+ * @returns The transaction's hash.
+ * @throws `Refused`, with the failed receipts, when the verifier refused it — `A` then still holds
+ *         the funds.
+ */
+export async function execute(intents: string, signedData: unknown): Promise<string> {
+  const outcome = await bot.signAndSendTransaction({
+    receiverId: intents,
+    actions: [actions.functionCall("execute_intents", { signed: [signedData] }, teraToGas(300), 0n)],
+    waitUntil: "FINAL",
+  });
+  const failed = failures(outcome);
+  if (failed !== "[]") throw new Refused(`execute_intents ${outcome.transaction.hash}: ${failed}`);
+  return outcome.transaction.hash;
 }
 
 /**

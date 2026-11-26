@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { Refused } from "./once";
 
 const ONECLICK_API = "https://1click.chaindefuser.com";
 
@@ -20,7 +21,7 @@ export interface QuoteResponse {
  * @param path The endpoint.
  * @param body JSON to POST.
  * @returns The JSON response.
- * @throws On a non-2xx.
+ * @throws On a non-2xx — `Refused` on a 4xx other than 429, which no resend changes.
  */
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${ONECLICK_API}${path}`, {
@@ -30,7 +31,10 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     signal: AbortSignal.timeout(30_000),
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`1Click ${path}: HTTP ${res.status} ${text.slice(0, 400)}`);
+  if (!res.ok) {
+    const message = `1Click ${path}: HTTP ${res.status} ${text.slice(0, 400)}`;
+    throw res.status >= 400 && res.status < 500 && res.status !== 429 ? new Refused(message) : new Error(message);
+  }
   return JSON.parse(text) as T;
 }
 

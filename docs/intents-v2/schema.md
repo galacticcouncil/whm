@@ -45,7 +45,7 @@ IntentForwarder     Ethereum    0x31ab66509a8a0b5a0fdf33ff4a4297481863035c
 IntentRouter        NEAR        intents-router.hydration-whm.near
 
 1Click API          https://1click.chaindefuser.com                pass-through and swap quotes; partner key
-Solver relay        https://solver-relay-v2.chaindefuser.com/rpc   deliveries and refunds
+Verifier            intents.near   deliveries, refunds and settles: the bot's execute_intents
 ```
 
 ---
