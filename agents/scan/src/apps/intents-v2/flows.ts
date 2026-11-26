@@ -310,7 +310,8 @@ export const orders: Flow = {
  *
  * Only what the terms do not say is kept: where it goes and in what asset are the terms' — joined
  * through `auth_path` from `intent_v2_orders`. The signature is NEAR's; where the asset then lands — a
- * withdrawal's transaction on its own chain — is filled in by the payout poller (`payouts.ts`).
+ * withdrawal's transaction on its own chain, and its confirmation — is filled in from Omni's
+ * connector by the payout poller (`payouts.ts`).
  */
 export const payouts: Flow = {
   name: "payouts-v2",
@@ -327,11 +328,11 @@ export const payouts: Flow = {
     receiver: "TEXT",
     /** A delivery on a UTXO route: the `A_utxo` it went to — the UTXO relayer takes it on from there. */
     utxo_account: "TEXT",
-    /** The payout's transaction on the recipient's own chain, once found. */
+    /** The withdrawal's transaction on the recipient's own chain, as the connector names it on submit. */
     dest_tx: "TEXT",
-    /** What arrived there, in that chain's smallest units — the amount less the bridge's fee. */
+    /** What it pays there, in that chain's smallest units — the amount less the bridge's and miner's fees. */
     dest_amount: "NUMERIC",
-    /** When it arrived, unix ms. */
+    /** When the connector verified it landed, unix ms; null while it confirms. */
     dest_at: "BIGINT",
     signed: "JSONB",
   },

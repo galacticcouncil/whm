@@ -1,54 +1,29 @@
-import { payments as blockchairPayments } from "../../chains/zcash";
+import { accountWithdrawals } from "../../chains/near/omni";
+import type { FastNear } from "../../chains/near/fastnear";
 import { pool } from "../../db";
 import { broadcast, reconcile } from "../../flow";
 import log from "../../logger";
 
 import { payouts } from "./flows";
+import { landing, type Pending } from "./landing";
 
-/** Blockchair's Bitcoin API — the same shape as its Zcash one. */
-const BLOCKCHAIR_BITCOIN = "https://api.blockchair.com/bitcoin";
+/** How often deliveries not yet confirmed on their own chain are followed. */
+const POLL_MS = 20_000;
 
-/** How often deliveries still without their destination-chain transaction are looked up. */
-const POLL_MS = 60_000;
-
-/** A payout lands after the router signs it; allow the clocks this much disagreement. */
-const CLOCK_SKEW_MS = 60_000;
-
-/** One payment into a recipient on its own chain. */
-interface Payment {
-  hash: string;
-  /** Unix ms. */
-  at: number;
-  /** In the asset's smallest units there. */
-  amount: bigint;
-}
-
-/** How a destination's deliveries are found where they land. */
-interface Destination {
-  /** Recipients an explorer can see payments into — a shielded one cannot be paired. */
-  visible: (address: string) => boolean;
-  /** An address's incoming payments, oldest first. */
-  payments: (address: string) => Promise<Payment[]>;
-}
-
-/** Each destination whose withdrawals are paired with their transaction, by intents ledger id. */
-const DESTINATIONS: Record<string, Destination> = {
-  "nep141:zec.omft.near": { visible: (a) => a.startsWith("t"), payments: (a) => blockchairPayments(a) },
-  "nep141:nbtc.bridge.near": { visible: () => true, payments: (a) => blockchairPayments(a, BLOCKCHAIR_BITCOIN) },
-};
-
-type Pending = { id: string; amount: string; signed_at: string };
+/** Omni's connectors on NEAR, one per UTXO route the router withdraws through. */
+const CONNECTORS = new Set(["zcash-connector.bridge.near", "btc-connector.bridge.near"]);
 
 /**
- * Where a withdrawal landed. The router's delivery is a bridge withdrawal signed on NEAR; the bridge
- * then pays on the asset's own chain, and nothing on NEAR names that transaction. So it is read from
- * the recipient's own history: the first payment into the address after the delivery was signed,
- * for no more than was withdrawn (the bridge's fee comes off the way). Deliveries to one address are
- * paired with its payments in order, each payment used once.
+ * Where a withdrawal landed, read on NEAR alone. The router's delivery puts the coin on `A_utxo`; the
+ * UTXO relayer withdraws it through Omni's connector, which names the coin's transaction and what it
+ * pays the moment it is submitted, and later verifies its inclusion on the coin's chain. Both name
+ * `A_utxo`, so its history in FastNEAR's index holds them.
  */
 export class PayoutPoller {
   private timer?: NodeJS.Timeout;
   private busy = false;
+
+  constructor(private readonly api: FastNear) {}
 
   start(): void {
     void this.tick();
@@ -64,28 +39,15 @@ export class PayoutPoller {
     if (this.busy) return;
     this.busy = true;
     try {
-      // The recipient and asset are the terms', read from any order of them.
-      const pending = await pool.query(
-        `SELECT p.id, t.destination_asset AS asset, t.recipient AS receiver, p.amount,
-                (p.signed->>'blockTimestamp')::bigint AS signed_at
-           FROM intent_v2_payouts p
-           JOIN LATERAL (SELECT recipient, destination_asset, recipient_kind FROM intent_v2_orders o
-                          WHERE o.auth_path = p.auth_path LIMIT 1) t ON true
-          WHERE p.state = 'delivered' AND p.dest_tx IS NULL
-            AND t.destination_asset = ANY($1) AND t.recipient_kind = 0
+      const pending = await pool.query<Pending & { utxo_account: string }>(
+        `SELECT id, utxo_account, dest_tx, (signed->>'blockTimestamp')::bigint AS signed_at
+           FROM intent_v2_payouts
+          WHERE state = 'delivered' AND utxo_account IS NOT NULL AND dest_at IS NULL
           ORDER BY signed_at`,
-        [Object.keys(DESTINATIONS)],
       );
-      const byReceiver = new Map<string, { dest: Destination; receiver: string; rows: Pending[] }>();
-      for (const r of pending.rows) {
-        const dest = DESTINATIONS[r.asset]!;
-        if (!dest.visible(r.receiver)) continue;
-        const k = `${r.asset} ${r.receiver}`;
-        const group = byReceiver.get(k) ?? { dest, receiver: r.receiver, rows: [] as Pending[] };
-        group.rows.push(r);
-        byReceiver.set(k, group);
-      }
-      for (const { dest, receiver, rows } of byReceiver.values()) await this.pair(dest, receiver, rows);
+      const byAccount = new Map<string, Pending[]>();
+      for (const r of pending.rows) byAccount.set(r.utxo_account, [...(byAccount.get(r.utxo_account) ?? []), r]);
+      for (const [account, rows] of byAccount) await this.follow(account, rows);
     } catch (e) {
       log.error(`[intents-v2] payout tick: ${(e as Error).stack ?? String(e)}`);
     } finally {
@@ -94,37 +56,17 @@ export class PayoutPoller {
   }
 
   /**
-   * Pair one address's unpaired deliveries with its payments.
+   * Follow one `A_utxo`'s pending deliveries to their withdrawal and its verification.
    *
-   * @param dest Where the asset lands.
-   * @param receiver The address there.
-   * @param rows Its deliveries still without a transaction, oldest first.
+   * @param account `A_utxo`.
+   * @param rows Its deliveries not yet confirmed, oldest first.
    */
-  private async pair(dest: Destination, receiver: string, rows: Pending[]): Promise<void> {
-    // Payments already paired with an earlier delivery to this address, under any terms.
-    const used = new Set(
-      (
-        await pool.query(
-          `SELECT DISTINCT p.dest_tx FROM intent_v2_payouts p
-             JOIN intent_v2_orders o ON o.auth_path = p.auth_path
-            WHERE o.recipient = $1 AND p.dest_tx IS NOT NULL`,
-          [receiver],
-        )
-      ).rows.map((r) => r.dest_tx as string),
-    );
-    const incoming = (await dest.payments(receiver)).filter((t) => !used.has(t.hash));
-
+  private async follow(account: string, rows: Pending[]): Promise<void> {
+    const { withdrawals, verifications } = await accountWithdrawals(this.api, account, CONNECTORS);
     for (const row of rows) {
-      const i = incoming.findIndex(
-        (t) => t.at >= Number(row.signed_at) - CLOCK_SKEW_MS && t.amount <= BigInt(row.amount),
-      );
-      if (i < 0) continue;
-      const [t] = incoming.splice(i, 1);
-      const applied = await reconcile(pool, payouts, payouts.key.column, row.id, "delivered", {
-        dest_tx: t!.hash,
-        dest_amount: t!.amount.toString(),
-        dest_at: t!.at,
-      });
+      const patch = landing(row, withdrawals, verifications);
+      if (!patch) continue;
+      const applied = await reconcile(pool, payouts, payouts.key.column, row.id, "delivered", patch);
       if (applied) {
         broadcast({ flow: payouts.name, kind: "updated", record: applied.row, previousState: applied.previousState });
       }

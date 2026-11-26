@@ -13,6 +13,7 @@
     "build": "node ./esbuild.dist.mjs",
     "clean": "rm -rf dist/",
     "dev": "node ./esbuild.dev.mjs",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
     "dev:db": "docker compose -f docker-compose.dev.yml up -d",
     "admin": "esbuild src/admin.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/admin.js --log-level=warning && node --env-file=.env dist/admin.js",
     "docker:build": "docker build -t galacticcouncil/scan:latest .",
@@ -20,11 +21,11 @@
     "docker:up": "docker stack deploy -c docker-compose.yml scan"
   },
   "dependencies": {
-    "@defuse-protocol/one-click-sdk-typescript": "^0.1.17",
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.26",
     "@fastify/cors": "^10.0.2",
-    "@galacticcouncil/common": "^1.0.0",
-    "@galacticcouncil/descriptors": "^2.4.0",
-    "@galacticcouncil/sdk-next": "^1.3.0",
+    "@galacticcouncil/common": "^1.2.0",
+    "@galacticcouncil/descriptors": "^2.11.0",
+    "@galacticcouncil/sdk-next": "^2.7.0",
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.3.0",
     "@scure/base": "^1.2.6",

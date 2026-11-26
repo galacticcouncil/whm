@@ -228,7 +228,8 @@ export async function listUtxoPayouts(afterMs: number, limit: number): Promise<U
  * - `sold`: the ETH that reached `A` less any refunded — every fill sells `A`'s whole ETH, so what is
  *   not refunded was sold. Orders `execute` placed also carry what the user sold on Hydration for it
  *   (`asset_in`, `amount_in`).
- * - `received`: what arrived — for a withdrawal, what landed on the recipient's chain once found;
+ * - `received`: what arrived — for a withdrawal, what it paid on the recipient's chain once the
+ *   connector verified it landed;
  *   for an intents recipient, or NEAR withdrawn as native NEAR, the delivery itself, paid on NEAR
  *   with no fee.
  * - `planned`: how many orders its ICE intent was submitted for (`intent_v2_ice`); null for a
@@ -270,8 +271,8 @@ const TRADES = `
     ) t
     LEFT JOIN LATERAL (
       SELECT COALESCE(SUM(x.amount) FILTER (WHERE x.state = 'delivered'), 0) AS delivered,
-             COALESCE(SUM(CASE WHEN t.recipient_kind = 1 OR t.destination_asset = '${WNEAR}'
-                               THEN x.amount ELSE x.dest_amount END)
+             COALESCE(SUM(CASE WHEN t.recipient_kind = 1 OR t.destination_asset = '${WNEAR}' THEN x.amount
+                               WHEN x.dest_at IS NOT NULL THEN x.dest_amount END)
                         FILTER (WHERE x.state = 'delivered'), 0) AS received,
              COALESCE(SUM(x.amount) FILTER (WHERE x.state = 'refunded'), 0) AS refunded_amount,
              COALESCE(BOOL_OR(x.state = 'refunded'), false) AS refunded,

@@ -88,8 +88,8 @@ delivery, the relay fee, the pass-through, 1Click's swap, the payout — are dis
 | Ethereum relayer                     | `agents/relayer`, `intent-v2` app                                                            | live                                              |
 | NEAR router bot                      | `agents/intent`, `router` app — reads `/api/terms` and events from scan                      | live                                              |
 | Scan                                 | `agents/scan`, `intents-v2` app; `/v2/trades`, `/v2/trade`, `/v2/order`                     | live                                              |
-| Helpers and scripts                  | `common/{evm,near}/intents.ts`; `contracts/scripts/intentsV2{Canary,SwapAlpha,TwapAlpha}.ts` | done                                              |
-| Migration                            | `migrations/definitions/intents-v2`, record `deployments/prod/intents-v2.json`               | steps 001–010 done; ownership steps open          |
+| Helpers and scripts                  | `common/{evm,near}/intents.ts`; `contracts/scripts/intentsV2{SwapAlpha,TwapAlpha}.ts`        | done                                              |
+| Migration                            | `migrations/definitions/intents-v2`, record `deployments/prod/intents-v2.json`               | steps 001–014 done; handover in `intents-v2-dao`  |
 
 Live settings: `maxFeedAge` 21600 s; `minOrderAmount` 1e11 wei; one price route, `nep141:zec.omft.near`.
 Router params: `price_validity` 900 s, `max_quote_age` 30 s, `transfer_validity` 180 s,
@@ -104,9 +104,13 @@ Golden vectors pin the terms, path and order message across Solidity, Rust and T
 - **TWAP** (`intentsV2TwapAlpha`, an ICE `Dca` intent) — period 150 blocks (~5 min at Hydration's ~2 s blocks; ICE's minimum
   is 15); `maxFillMultiplier` = the number of tranches (2..100); ICE slippage 3%; no ICE deadline
   (ICE refuses one on a `Dca` intent); terms deadline = the schedule + 2 h.
-- **Both** — relay ceiling = the quoter's estimate + 20% (the dispatcher refuses one above half the
-  order); `minDelivery` 1 by default, i.e. a payout as soon as anything lands — set it higher to batch
-  tranches into fewer payouts.
+- **Both** — `--dest zec | btc | near`; relay ceiling = the quoter's estimate + 20% (the dispatcher
+  refuses one above half the order); `minDelivery` 1 by default, i.e. a payout as soon as the route's
+  minimum lands — set it higher to batch tranches into fewer payouts. Before anything is spent the
+  recipient is checked as the router will pay it (the route's withdraw contract validates a ZEC/BTC
+  address, a NEAR recipient must exist) and the expected output against the route's minimum.
+- **Swap only** — `--direct` dispatches the signer's WETH without ICE; `--refundTest` sets an
+  unreachable floor and a 20-minute deadline, so the bot refunds the ETH.
 
 ---
 

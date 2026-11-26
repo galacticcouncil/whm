@@ -1,4 +1,5 @@
-import { FastNear, nearLogs } from "../../../chains/near/fastnear";
+import { accountWithdrawals } from "../../../chains/near/omni";
+import type { FastNear } from "../../../chains/near/fastnear";
 import { pool } from "../../../db";
 import { broadcast, reconcile } from "../../../flow";
 import log from "../../../logger";
@@ -13,20 +14,6 @@ interface Pending {
   near_account: string;
   /** When NEAR delivered to the account, unix ms. */
   received_at: string;
-}
-
-interface Withdrawal {
-  ref: {
-    chain: string;
-    blockNumber: string;
-    blockTimestamp: number;
-    txHash: string;
-    logIndex: number;
-  };
-  utxoTx: string;
-  bridgeFee: string | null;
-  minerFee: string | null;
-  received: string | null;
 }
 
 /**
@@ -82,7 +69,8 @@ export class WithdrawPoller {
   }
 
   private async settle(account: string, rows: Pending[]): Promise<void> {
-    const found = await this.withdrawals(account);
+    const connectors = new Set(ROUTES.map((r) => r.connector));
+    const found = (await accountWithdrawals(this.api, account, connectors)).withdrawals;
     for (const row of rows) {
       const w = found.find((x) => x.ref.blockTimestamp >= Number(row.received_at));
       if (!w) continue;
@@ -102,42 +90,5 @@ export class WithdrawPoller {
         });
       }
     }
-  }
-
-  /**
-   * The account's withdrawals through any route's connector, oldest first.
-   *
-   * @param account The derived account.
-   */
-  private async withdrawals(account: string): Promise<Withdrawal[]> {
-    const connectors = new Set(ROUTES.map((r) => r.connector));
-    const hashes = (await this.api.history(account)).map((h) => h.transaction_hash);
-    const out: Withdrawal[] = [];
-    for (const tx of await this.api.transactions(hashes)) {
-      const logs = nearLogs(tx).filter((l) => connectors.has(l.executor));
-      const pending = logs.find(
-        (l) =>
-          l.event === "generate_btc_pending_info" &&
-          (l.data as { account_id?: string }).account_id === account,
-      );
-      if (!pending) continue;
-      const detail = logs.find((l) => l.event === "withdraw_btc_detail")?.data as
-        | { withdraw_fee?: string; btc_gas_fee?: string; actual_received_amount?: string }
-        | undefined;
-      out.push({
-        ref: {
-          chain: "near",
-          blockNumber: String(pending.blockHeight),
-          blockTimestamp: pending.blockTimestamp,
-          txHash: tx.transaction.hash,
-          logIndex: pending.index,
-        },
-        utxoTx: (pending.data as { btc_pending_id: string }).btc_pending_id,
-        bridgeFee: detail?.withdraw_fee ?? null,
-        minerFee: detail?.btc_gas_fee ?? null,
-        received: detail?.actual_received_amount ?? null,
-      });
-    }
-    return out.sort((a, b) => a.ref.blockTimestamp - b.ref.blockTimestamp);
   }
 }

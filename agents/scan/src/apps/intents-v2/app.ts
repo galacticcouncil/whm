@@ -1,4 +1,6 @@
 import { banner } from "../../banner";
+import { near } from "../../chains/near/factory";
+import { FastNear } from "../../chains/near/fastnear";
 import { drainIntervalMs } from "../../config";
 import { Drain, serve, subscribe } from "../../flow";
 import log from "../../logger";
@@ -15,8 +17,8 @@ const FLOWS = [orders, payouts, intents, closes];
  * Intents v2: orders published on Hydration, forwarded on Ethereum and swapped on NEAR, the payouts
  * of the terms they fund, and the terms themselves — what the NEAR router bot reads its work from.
  *
- * Reads the event store ingest fills — the ICE intents behind the orders among it — and each
- * destination chain's explorer for where a withdrawal landed.
+ * Reads the event store ingest fills — the ICE intents behind the orders among it — and, for where a
+ * withdrawal landed, Omni's connectors on NEAR through FastNEAR's index.
  */
 async function main(): Promise<void> {
   banner(NAME);
@@ -34,7 +36,7 @@ async function main(): Promise<void> {
 
   await serve({ name: NAME, flows: FLOWS, routes });
   await drain.start(drainIntervalMs);
-  new PayoutPoller().start();
+  new PayoutPoller(new FastNear(near().txApi)).start();
 
   log.info("intents-v2 ready.");
 }

@@ -89,7 +89,7 @@
        * Where the trade's output stands, from its payouts and what `A` still holds.
        *
        * @returns `onNear` — paid on NEAR, to an intents account or as native NEAR, so the delivery is
-       *   what arrived — `landed` — every delivery found on its chain, or paid on NEAR — what `A`
+       *   what arrived — `landed` — every delivery confirmed on its chain, or paid on NEAR — what `A`
        *   holds, and the delivery's one-line status.
        */
       function delivery(trade, payouts) {
@@ -97,7 +97,7 @@
         const onNear = trade.recipient_kind === 1 || d?.chain === "near";
         const delivered = payouts.filter((p) => p.state === "delivered");
         const refunded = payouts.some((p) => p.state === "refunded");
-        const landed = onNear || delivered.every((p) => p.dest_tx);
+        const landed = onNear || delivered.every((p) => p.dest_at);
         const held = BigInt(trade.held ?? 0);
         let text;
         if (refunded) text = "Refunded to Ethereum";
@@ -117,7 +117,7 @@
         const out = (raw) => asset(String(raw), d, trade.destination_asset ?? "", chainIcon(chain));
         const s = delivery(trade, payouts);
 
-        // Received: what reached the recipient's chain; until a withdrawal is found there, what left A.
+        // Received: what reached the recipient's chain; until every withdrawal is confirmed, what left A.
         const paid =
           s.onNear || !s.landed
             ? sum(s.delivered.map((p) => p.amount))
@@ -178,9 +178,10 @@
       }
 
       /**
-       * Every payout, oldest first: what left `A`, and — for a withdrawal — what landed on the
-       * destination chain once found, the difference being the bridge's fee, with a link to its
-       * transaction there. A refund goes back to Ethereum.
+       * Every payout, oldest first: what left `A`, and — for a withdrawal — what it pays on the
+       * destination chain, the difference being the bridge's and miner's fees, with a link to its
+       * transaction there: named on NEAR as the withdrawal is submitted, confirming until the
+       * connector verifies it landed. A refund goes back to Ethereum.
        */
       function payouts(trade, list) {
         const d = DEST[trade.destination_asset];
@@ -193,7 +194,7 @@
             const landed =
               !refund && offNear
                 ? p.dest_tx
-                  ? `${asset(p.dest_amount, d, trade.destination_asset ?? "", chainIcon(chain))} ${destTxLink(p.dest_tx, null, DEST_TX[chain] ?? chain, "↗")}`
+                  ? `${asset(p.dest_amount, d, trade.destination_asset ?? "", chainIcon(chain))} ${destTxLink(p.dest_tx, null, DEST_TX[chain] ?? chain, "↗")}${p.dest_at ? "" : ` ${dim("· confirming")}`}`
                   : dim("sending")
                 : dim("—");
             return `<tr>

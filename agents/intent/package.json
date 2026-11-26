@@ -16,7 +16,7 @@
     "docker:up": "docker stack deploy -c docker-compose.yml intent"
   },
   "dependencies": {
-    "@defuse-protocol/one-click-sdk-typescript": "^0.1.17",
+    "@defuse-protocol/one-click-sdk-typescript": "^0.1.26",
     "@fastify/cors": "^10.0.2",
     "fastify": "^5.2.0",
     "near-api-js": "^7.3.1",

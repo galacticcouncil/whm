@@ -31,7 +31,6 @@
         badge,
         chainIcon,
         copyBtn,
-        destTxLink,
         esc,
         json,
         kv,
@@ -73,9 +72,6 @@
           ? pill(`Twap · order ${o.order_index}${o.trade_planned ? ` of ${o.trade_planned}` : ""}`, "var(--lavender)")
           : pill("Swap", "var(--sky)");
 
-      /** Where the destination asset's payout transaction is shown, by the chain it lands on. */
-      const DEST_TX = { zcash: "zec", bitcoin: "btc" };
-
       /**
        * The payout that carried this order's output: the first of its terms signed after its swap. A
        * TWAP's delivery can batch several orders' output, so one payout may show on several orders.
@@ -89,9 +85,9 @@
       }
 
       /**
-       * The last hop: where the user is paid. A withdrawal lands on the asset's own chain, as a
-       * transaction found there; an intents recipient is paid on NEAR. A refund goes back to Ethereum.
-       * The 1Click link is this order's swap.
+       * The last hop, on NEAR: the router swaps the order's ETH there and signs the payout of the
+       * output, whatever the destination. Where a Zcash or Bitcoin withdrawal then lands is the
+       * trade's, in its payouts. A refund goes back to Ethereum. The 1Click link is this order's swap.
        *
        * @param o The order.
        * @param payout The payout that carried its output, if signed yet.
@@ -113,27 +109,13 @@
           });
         }
 
-        const chain = destChain(o) ?? "near";
-        if (chain === "near") {
-          return legCard({
-            where: "near",
-            kind: payout ? "received" : o.swapped ? "swapped" : "pending",
-            ref: payout?.signed,
-            pending: !payout,
-            rows: [payout ? ["", asset(payout.amount, d, o.destination_asset ?? "", chainIcon(chain))] : null, oneClick].filter(Boolean),
-            since,
-          });
-        }
-
-        // Paid on another chain: the payout's own transaction there, once the poller has found it.
-        const landed = payout?.dest_tx;
         return legCard({
-          where: chain,
-          kind: landed ? "received" : payout ? "sending" : o.swapped ? "swapped" : "pending",
-          pending: !landed,
+          where: "near",
+          kind: payout ? "received" : o.swapped ? "swapped" : "pending",
+          ref: payout?.signed,
+          pending: !payout,
           rows: [
-            landed ? ["", asset(payout.dest_amount, d, o.destination_asset ?? "", chainIcon(chain))] : null,
-            landed ? ["tx", destTxLink(payout.dest_tx, null, DEST_TX[chain] ?? chain)] : null,
+            payout ? ["", asset(payout.amount, d, o.destination_asset ?? "", chainIcon(destChain(o) ?? "near"))] : null,
             oneClick,
           ].filter(Boolean),
           since,

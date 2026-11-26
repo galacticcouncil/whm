@@ -17,14 +17,14 @@ importers:
         specifier: ^0.32.1
         version: 0.32.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@defuse-protocol/one-click-sdk-typescript':
-        specifier: ^0.1.17
-        version: 0.1.17
+        specifier: ^0.1.26
+        version: 0.1.26
       '@galacticcouncil/common':
         specifier: ^1.2.0
         version: 1.2.0(polkadot-api@2.2.2(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@5.0.10))(rxjs@7.8.2)
       '@galacticcouncil/descriptors':
-        specifier: ^2.7.0
-        version: 2.7.0
+        specifier: ^2.11.0
+        version: 2.11.0
       '@whm/chopsticks':
         specifier: workspace:*
         version: link:chopsticks
@@ -114,8 +114,8 @@ importers:
   agents/intent:
     dependencies:
       '@defuse-protocol/one-click-sdk-typescript':
-        specifier: ^0.1.17
-        version: 0.1.17
+        specifier: ^0.1.26
+        version: 0.1.26
       '@fastify/cors':
         specifier: ^10.0.2
         version: 10.1.0
@@ -153,20 +153,20 @@ importers:
   agents/scan:
     dependencies:
       '@defuse-protocol/one-click-sdk-typescript':
-        specifier: ^0.1.17
-        version: 0.1.17
+        specifier: ^0.1.26
+        version: 0.1.26
       '@fastify/cors':
         specifier: ^10.0.2
         version: 10.1.0
       '@galacticcouncil/common':
-        specifier: ^1.0.0
-        version: 1.0.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))
+        specifier: ^1.2.0
+        version: 1.2.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(rxjs@7.8.2)
       '@galacticcouncil/descriptors':
-        specifier: ^2.4.0
-        version: 2.4.0
+        specifier: ^2.11.0
+        version: 2.11.0
       '@galacticcouncil/sdk-next':
-        specifier: ^1.3.0
-        version: 1.3.0(@galacticcouncil/common@1.0.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3)))(@galacticcouncil/descriptors@2.4.0)(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(viem@2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76))
+        specifier: ^2.7.0
+        version: 2.7.0(@galacticcouncil/common@1.2.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(rxjs@7.8.2))(@galacticcouncil/descriptors@2.11.0)(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(viem@2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76))
       '@noble/curves':
         specifier: ^1.9.7
         version: 1.9.7
@@ -452,8 +452,8 @@ packages:
   '@datastructures-js/queue@4.3.0':
     resolution: {integrity: sha512-2RYt1+N4dtdcilwmB+A6j9HT/5MImHSK2UUjBA8WQAHoA2AEJC4YxJSSGhGTOBMyLMKpMiowwTrnB315YgtTrA==}
 
-  '@defuse-protocol/one-click-sdk-typescript@0.1.17':
-    resolution: {integrity: sha512-yfZ2TYYhTZx62IbHRLTamPcr6qrwYJQZpUFpCTMXv35WXUPHcjNMOPOBKdYOySuCTFX0eSJGFPccwC9LTC8cSA==}
+  '@defuse-protocol/one-click-sdk-typescript@0.1.26':
+    resolution: {integrity: sha512-vYoBgEbppergtYd/H1IaJW9Jm5mPrX+jAwuuhMvDFstirJB53KFe2HnGLTg0KNyg6qztbOeDK0sA/oEAee+EAw==}
     engines: {node: '>=16', pnpm: '>=8'}
 
   '@dmsnell/diff-match-patch@1.1.0':
@@ -901,22 +901,14 @@ packages:
     engines: {node: '>=v22'}
     hasBin: true
 
-  '@galacticcouncil/common@1.0.0':
-    resolution: {integrity: sha512-pEHDDXvTqB5nbFoR9cv6T+pdqb8yjVKREe8bTnZWl+0XRICaOcioad4+wkL9nYXumbho/GxPKaFaW8xg072O9w==}
-    peerDependencies:
-      polkadot-api: ^2.1.0
-
   '@galacticcouncil/common@1.2.0':
     resolution: {integrity: sha512-+fSVkSx4djf0JhXOvD9ne9pchSUCfG58xsK19uGx3SvdDEzJMSmLB67u7IvlOoxeOtxngwL5cOCqy9CAgmBEjQ==}
     peerDependencies:
       polkadot-api: ^2.1.7
       rxjs: ^7.8.0
 
-  '@galacticcouncil/descriptors@2.4.0':
-    resolution: {integrity: sha512-UAwuDiT6tpmox/AI1tUcJrJXNYFNVzgQwCOpxQ+sqVaxGVQYNTkYzTiSFCX1bWB1H03YbcM9+6JeRemP5kVOhw==}
-
-  '@galacticcouncil/descriptors@2.7.0':
-    resolution: {integrity: sha512-Qkaj+ywc/o1gaJgijxzRu2nYfAjmaJcaPjqfOicO3TX+wTv5kED1q57J09aQcM6V4Mhdrh1h+YKckclSe4X/rA==}
+  '@galacticcouncil/descriptors@2.11.0':
+    resolution: {integrity: sha512-6Rx8fOyXrebIDCCSr8HF4NSKEM2IAOKgcRCAOGp2W8sBfSUUsQGlX8oor9gDxN8rpxb+rmW1DbKq5HlO8PQdZw==}
 
   '@galacticcouncil/math-hsm@1.2.0':
     resolution: {integrity: sha512-SGTYWqWQ6EFFCkJOANLWLx3MkKoJBLNE06BD2tqscuhp7J5kgmfLi1KzRjv4DIjBDFfWz/b6PPMvyu2P07O+4A==}
@@ -939,12 +931,12 @@ packages:
   '@galacticcouncil/math-xyk@1.3.0':
     resolution: {integrity: sha512-ZYVSyI5W2pQKCqpkaRM7t1AJqtPyxQ0P04T2+KpBEEABMRjSpQz2x44s1tk6r3DdFR8dICeZJEh5BI7eQYlT6w==}
 
-  '@galacticcouncil/sdk-next@1.3.0':
-    resolution: {integrity: sha512-KyIKrdmdtu9JVyh5UFInWJlCrspZtvqLn4vZGaHna7jyUcS65GgpWbiymrtGAOr6HGANUBAg/j3EAo2E4uTjbA==}
+  '@galacticcouncil/sdk-next@2.7.0':
+    resolution: {integrity: sha512-zylaeVRl7GAMYe+HKSUG+yhoSRC1VQi7pWN+lXv6EtvQtfPbT0lO4/hUlcupHaoo8WcYVbtGYoHGetunka17BA==}
     peerDependencies:
-      '@galacticcouncil/common': '>=1.0.0'
-      '@galacticcouncil/descriptors': '>=2.2.0'
-      polkadot-api: ^2.1.0
+      '@galacticcouncil/common': '>=1.2.0'
+      '@galacticcouncil/descriptors': '>=2.11.0'
+      polkadot-api: ^2.1.7
       viem: ^2.38.3
 
   '@graphql-typed-document-node/core@3.2.0':
@@ -3712,6 +3704,10 @@ packages:
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
 
+  json-stable-stringify@1.3.0:
+    resolution: {integrity: sha512-qtYiSSFlwot9XHtF9bD9c7rwKjr+RecWT//ZnPvSmEjpV5mmPOCN4j8UjY5hbjNkOwZ/jQv3J6R1/pL7RwgMsg==}
+    engines: {node: '>= 0.4'}
+
   json-stringify-safe@5.0.1:
     resolution: {integrity: sha512-ZClg6AaYvamvYEE82d3Iyd3vSSIjQ+odgjaTzRuO3s7toCdFKczob2i0zCh7JE8kWn17yvAWhUVxvqGwUalsRA==}
 
@@ -3723,6 +3719,9 @@ packages:
     resolution: {integrity: sha512-zE9+AXFq+MkTolDor2Cw1nJzLC0aleqPkYf52Kb4Kn4mJcka/gFHpGI2JBVEJCfWOvBl0OoxZS+wuLdislQcqg==}
     engines: {node: ^18.0.0 || >=20.0.0}
     hasBin: true
+
+  jsonify@0.0.1:
+    resolution: {integrity: sha512-2/Ki0GcmuqSrgFyelQq9M05y7PS0mEwuIzrf3f1fPqkVDVRvZrPZtVSMHxdgo8Aq0sxAOb/cr2aqqA3LeWHVPg==}
 
   jsonpointer@5.0.1:
     resolution: {integrity: sha512-p/nXbhSEcu3pZRdkW1OfJhpsVtW1gd4Wa1fnQc9YLiTfAjn0312eMKimbdIQzuZl9aa9xUGaRlP9T/CJE/ditQ==}
@@ -5718,7 +5717,7 @@ snapshots:
   '@coral-xyz/anchor@0.32.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)':
     dependencies:
       '@coral-xyz/anchor-errors': 0.31.1
-      '@coral-xyz/borsh': 0.31.1(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))
+      '@coral-xyz/borsh': 0.31.1(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))
       '@noble/hashes': 1.8.0
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)
       bn.js: 5.2.2
@@ -5745,6 +5744,12 @@ snapshots:
   '@coral-xyz/borsh@0.31.1(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))':
     dependencies:
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      bn.js: 5.2.2
+      buffer-layout: 1.2.2
+
+  '@coral-xyz/borsh@0.31.1(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))':
+    dependencies:
+      '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)
       bn.js: 5.2.2
       buffer-layout: 1.2.2
 
@@ -6071,10 +6076,14 @@ snapshots:
 
   '@datastructures-js/queue@4.3.0': {}
 
-  '@defuse-protocol/one-click-sdk-typescript@0.1.17':
+  '@defuse-protocol/one-click-sdk-typescript@0.1.26':
     dependencies:
+      '@noble/hashes': 1.8.0
+      '@scure/base': 1.2.6
       axios: 1.16.1
       form-data: 4.0.5
+      json-stable-stringify: 1.3.0
+      tweetnacl: 1.0.3
     transitivePeerDependencies:
       - debug
       - supports-color
@@ -6628,11 +6637,12 @@ snapshots:
       - typeorm-aurora-data-api-driver
       - utf-8-validate
 
-  '@galacticcouncil/common@1.0.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))':
+  '@galacticcouncil/common@1.2.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(rxjs@7.8.2)':
     dependencies:
       big.js: 6.2.2
       lru-cache: 11.2.6
       polkadot-api: 2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3)
+      rxjs: 7.8.2
 
   '@galacticcouncil/common@1.2.0(polkadot-api@2.2.2(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@5.0.10))(rxjs@7.8.2)':
     dependencies:
@@ -6641,9 +6651,7 @@ snapshots:
       polkadot-api: 2.2.2(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@5.0.10)
       rxjs: 7.8.2
 
-  '@galacticcouncil/descriptors@2.4.0': {}
-
-  '@galacticcouncil/descriptors@2.7.0': {}
+  '@galacticcouncil/descriptors@2.11.0': {}
 
   '@galacticcouncil/math-hsm@1.2.0': {}
 
@@ -6659,10 +6667,10 @@ snapshots:
 
   '@galacticcouncil/math-xyk@1.3.0': {}
 
-  '@galacticcouncil/sdk-next@1.3.0(@galacticcouncil/common@1.0.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3)))(@galacticcouncil/descriptors@2.4.0)(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(viem@2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76))':
+  '@galacticcouncil/sdk-next@2.7.0(@galacticcouncil/common@1.2.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(rxjs@7.8.2))(@galacticcouncil/descriptors@2.11.0)(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(viem@2.46.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.3)(zod@3.25.76))':
     dependencies:
-      '@galacticcouncil/common': 1.0.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))
-      '@galacticcouncil/descriptors': 2.4.0
+      '@galacticcouncil/common': 1.2.0(polkadot-api@2.1.6(bufferutil@4.1.0)(esbuild@0.28.0)(rxjs@7.8.2)(utf-8-validate@6.0.3))(rxjs@7.8.2)
+      '@galacticcouncil/descriptors': 2.11.0
       '@galacticcouncil/math-hsm': 1.2.0
       '@galacticcouncil/math-lbp': 1.3.0
       '@galacticcouncil/math-liquidity-mining': 1.3.0
@@ -10226,6 +10234,14 @@ snapshots:
 
   json-schema-traverse@1.0.0: {}
 
+  json-stable-stringify@1.3.0:
+    dependencies:
+      call-bind: 1.0.8
+      call-bound: 1.0.4
+      isarray: 2.0.5
+      jsonify: 0.0.1
+      object-keys: 1.1.1
+
   json-stringify-safe@5.0.1: {}
 
   json5@1.0.2:
@@ -10236,6 +10252,8 @@ snapshots:
   jsondiffpatch@0.7.6:
     dependencies:
       '@dmsnell/diff-match-patch': 1.1.0
+
+  jsonify@0.0.1: {}
 
   jsonpointer@5.0.1: {}
 
