@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
-import type { Alerter, AlertLog } from "./notify";
+import { link, type Alerter, type AlertLog } from "./notify";
 
 /** The Redis calls incidents use — an ioredis client satisfies it. */
 export interface RedisLike {
@@ -63,9 +63,10 @@ export class Incidents {
    * Open an incident for `id`, unless one is open, and alert it.
    *
    * @param id What failed.
-   * @param reason Why — shown in the alert and on `/api/status`.
+   * @param reason Why, in full — on `/api/status`; the alert carries its `summary`.
+   * @param fields What the alert shows about it — a trade, an address.
    */
-  async open(id: string, reason: string): Promise<void> {
+  async open(id: string, reason: string, fields: [string, string][] = []): Promise<void> {
     if (await this.get(id)) return;
     const now = (this.o.now ?? Date.now)();
     const token = randomBytes(24).toString("base64url");
@@ -74,12 +75,11 @@ export class Incidents {
     await this.o.redis.sadd(this.index, id);
     const url = this.o.publicUrl && `${this.o.publicUrl.replace(/\/$/, "")}/reprocess/${encodeURIComponent(id)}?token=${token}`;
     this.o.alerter.alert(`incident:${id}`, String(now), {
-      title: url ? "Stopped — reprocess once ↗" : "Stopped — needs a person",
+      component: this.o.app,
+      action: "stopped",
       level: "error",
-      source: this.o.app,
-      description: reason,
-      fields: [["Id", `\`${id}\``]],
-      url,
+      details: summary(reason),
+      fields: [...fields, ["Reprocess", url ? link("once ↗", url) : "no link — the bot has no PUBLIC_URL"]],
     });
   }
 
@@ -127,6 +127,21 @@ export class Incidents {
     (this.o.log ?? console).warn(`[${this.o.app}] ${id} reprocessed — the next pass tries once more`);
     return "ok";
   }
+}
+
+/**
+ * A failure in one line: a contract's own refusal by its name — `BelowRouteMinimum`, not the receipt
+ * JSON around it — else the reason cut short.
+ *
+ * @param reason The failure, as the bot saw it: `<step> — <error>`.
+ * @returns The line.
+ */
+export function summary(reason: string): string {
+  const step = reason.split(" — ")[0];
+  const refused = /panicked: ([A-Za-z][A-Za-z0-9_]*)/.exec(reason)?.[1];
+  const line = refused ? `${step} refused by the contract — ${refused}` : reason;
+  const capitalised = line.charAt(0).toUpperCase() + line.slice(1);
+  return capitalised.length > 300 ? `${capitalised.slice(0, 299)}…` : capitalised;
 }
 
 /**

@@ -9,13 +9,9 @@ const RETRY_DELAYS_MS = [5_000, 30_000, 120_000, 600_000];
 /** Alerts still being retried; past this many, the oldest is dropped with a log line. */
 const MAX_UNDELIVERED = 500;
 
-/** Discord caps an embed's description, and each field's name and value. */
+/** Discord caps an embed's title and description. */
+const MAX_TITLE = 256;
 const MAX_DESCRIPTION = 4000;
-const MAX_FIELD_NAME = 256;
-const MAX_FIELD_VALUE = 1024;
-
-/** A field value this short sits beside the others; a longer one gets its own line. */
-const MAX_INLINE = 32;
 
 /** Where alert delivery reports itself — an app's logger, or the console. */
 export interface AlertLog {
@@ -26,18 +22,20 @@ export interface AlertLog {
 /** How bad: the embed's colour. */
 export type Level = "error" | "warn" | "ok";
 
-/** An alert as a Discord embed — a coloured card rather than a line of text. `error` tags `@here`. */
+/**
+ * An alert as a Discord embed — a coloured card headed `{component} [{action}]`, a line of details,
+ * then one `Label: value` line per field. `error` tags `@here`.
+ */
 export interface Embed {
-  title: string;
+  /** The app that raised it, e.g. `router`, `utxo relayer`. */
+  component: string;
+  /** What happened, lower case, e.g. `waiting to swap`. */
+  action: string;
   level: Level;
-  /** The app that raised it, in the footer. */
-  source?: string;
-  /** Free text under the title. */
-  description?: string;
-  /** Label and value pairs; wrap ids in backticks so they stay whole and copyable. */
+  /** One sentence on what it means. */
+  details?: string;
+  /** Label and value, each on its own line; values may be markdown links — see `link`. */
   fields?: [string, string][];
-  /** Makes the title a link. */
-  url?: string;
 }
 
 /** A plain line of text, or an embed. */
@@ -46,63 +44,80 @@ export type Message = string | Embed;
 const COLOR: Record<Level, number> = { error: 0xe5484d, warn: 0xf5a524, ok: 0x30a46c };
 
 /**
+ * A long id, shortened to its ends: `0xcddd98…fb4ef`.
+ *
+ * @param id The id.
+ * @param head Characters kept at the start.
+ * @param tail Characters kept at the end.
+ * @returns The id, shortened when longer than both ends.
+ */
+export function short(id: string, head = 8, tail = 5): string {
+  return id.length > head + tail + 1 ? `${id.slice(0, head)}…${id.slice(-tail)}` : id;
+}
+
+/**
+ * A markdown link, for a field value: the text shown, the page a click opens.
+ *
+ * @param text What is shown.
+ * @param url Where it leads; without one, the text alone.
+ * @returns The markdown.
+ */
+export function link(text: string, url?: string): string {
+  return url ? `[${text}](${url})` : text;
+}
+
+/**
  * The webhook body for a message.
  *
  * @param message A line of text or an embed.
- * @param now Unix ms, the embed's timestamp.
  * @returns The JSON Discord takes.
  */
-export function payload(message: Message, now = Date.now()): Record<string, unknown> {
+export function payload(message: Message): Record<string, unknown> {
   if (typeof message === "string") return { content: message.slice(0, MAX_CONTENT) };
   // A mention pings only from the content, never from inside an embed; nothing else may ping.
   const page = message.level === "error";
+  const lines = (message.fields ?? []).map(([label, value]) => `**${label}:** ${value || "—"}`);
+  const description = [message.details, message.details && lines.length ? "" : undefined, ...lines]
+    .filter((l) => l !== undefined)
+    .join("\n");
   return {
     content: page ? "@here" : undefined,
     allowed_mentions: { parse: page ? ["everyone"] : [] },
     embeds: [
       {
-        title: message.title.slice(0, MAX_FIELD_NAME),
-        url: message.url,
-        description: message.description?.slice(0, MAX_DESCRIPTION),
+        title: `${message.component} [${message.action}]`.slice(0, MAX_TITLE),
+        description: description.slice(0, MAX_DESCRIPTION) || undefined,
         color: COLOR[message.level],
-        fields: (message.fields ?? []).map(([name, value]) => ({
-          name: name.slice(0, MAX_FIELD_NAME),
-          value: value.slice(0, MAX_FIELD_VALUE) || "—",
-          inline: value.length <= MAX_INLINE,
-        })),
-        footer: message.source ? { text: message.source } : undefined,
-        timestamp: new Date(now).toISOString(),
       },
     ],
   };
 }
 
 /**
- * A message as one log line.
+ * A message as one log line — links as their address, so the log keeps the full id.
  *
  * @param message A line of text or an embed.
  * @returns The text.
  */
 export function text(message: Message): string {
   if (typeof message === "string") return message;
-  const fields = (message.fields ?? []).map(([name, value]) => `${name}: ${value.replace(/`/g, "")}`);
-  return [`${message.source ? `${message.source}: ` : ""}${message.title}`, message.description, ...fields, message.url]
-    .filter(Boolean)
-    .join(" — ");
+  const plain = (v: string) => v.replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$2");
+  const fields = (message.fields ?? []).map(([label, value]) => `${label}: ${plain(value)}`);
+  return [`${message.component} [${message.action}]`, message.details, ...fields].filter(Boolean).join(" — ");
 }
 
 /**
  * A duration, the way people read it.
  *
  * @param ms Milliseconds.
- * @returns E.g. `20 h 53 min`, `7 min`.
+ * @returns E.g. `20h 53min`, `7min`.
  */
 export function duration(ms: number): string {
   const min = Math.max(0, Math.round(ms / 60_000));
   const d = Math.floor(min / 1440);
   const h = Math.floor((min % 1440) / 60);
   const m = min % 60;
-  return [d && `${d} d`, h && `${h} h`, (m || (!d && !h)) && `${m} min`].filter(Boolean).join(" ");
+  return [d && `${d}d`, h && `${h}h`, (m || (!d && !h)) && `${m}min`].filter(Boolean).join(" ");
 }
 
 /**

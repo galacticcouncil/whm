@@ -1,60 +1,72 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { duration, payload, text } from "./notify";
+import { duration, link, payload, short, text } from "./notify";
 
-const NOW = Date.UTC(2026, 10, 27, 12, 18);
-
-test("a line of text posts as plain content, pinging no one new", () => {
+test("a line of text posts as plain content", () => {
   assert.deepEqual(payload("hello"), { content: "hello" });
 });
 
+test("an embed is headed {component} [{action}], then details, a blank line, one line per field", () => {
+  const body = payload({
+    component: "utxo relayer",
+    action: "withdrawal stuck",
+    level: "warn",
+    details: "Waiting for the settlement",
+    fields: [
+      ["Open", "20h 53min"],
+      ["To", link("t1RPps…1tkvE", "https://blockchair.com/zcash/address/t1RPpso7PVchSGWpGXEmcUHRDuTEux1tkvE")],
+    ],
+  });
+  assert.deepEqual(body.embeds, [
+    {
+      title: "utxo relayer [withdrawal stuck]",
+      description:
+        "Waiting for the settlement\n\n**Open:** 20h 53min\n**To:** [t1RPps…1tkvE](https://blockchair.com/zcash/address/t1RPpso7PVchSGWpGXEmcUHRDuTEux1tkvE)",
+      color: 0xf5a524,
+    },
+  ]);
+});
+
+test("details or fields alone need no blank line", () => {
+  const [onlyDetails] = payload({ component: "router", action: "x", level: "ok", details: "Fine" }).embeds as { description: string }[];
+  assert.equal(onlyDetails.description, "Fine");
+  const [onlyFields] = payload({ component: "router", action: "x", level: "ok", fields: [["A", "1"]] }).embeds as { description: string }[];
+  assert.equal(onlyFields.description, "**A:** 1");
+});
+
 test("an error tags @here, and only it may ping", () => {
-  const body = payload({ title: "Stopped", level: "error" }, NOW);
-  assert.equal(body.content, "@here");
-  assert.deepEqual(body.allowed_mentions, { parse: ["everyone"] });
-  const warn = payload({ title: "Low", level: "warn" }, NOW);
+  const error = payload({ component: "router", action: "stopped", level: "error" });
+  assert.equal(error.content, "@here");
+  assert.deepEqual(error.allowed_mentions, { parse: ["everyone"] });
+  const warn = payload({ component: "router", action: "balance low", level: "warn" });
   assert.equal(warn.content, undefined);
   assert.deepEqual(warn.allowed_mentions, { parse: [] });
 });
 
-test("an embed carries colour, linked title, fields, source and time", () => {
-  const body = payload(
-    {
-      title: "Withdrawal stuck",
+test("an embed logs as one line, links as their address", () => {
+  assert.equal(
+    text({
+      component: "router",
+      action: "waiting to swap",
       level: "warn",
-      source: "utxo relayer",
-      url: "https://bot.example/x",
-      fields: [
-        ["Open", "20 h 53 min"],
-        ["To", "`t1RPpso7PVchSGWpGXEmcUHRDuTEux1tkvE`"],
-        ["Empty", ""],
-      ],
-    },
-    NOW,
+      details: "Price under the floor",
+      fields: [["Trade", link("0xcddd98…fb4ef", "https://scan.example/v2/trade/0xcddd")]],
+    }),
+    "router [waiting to swap] — Price under the floor — Trade: https://scan.example/v2/trade/0xcddd",
   );
-  const [embed] = body.embeds as Record<string, unknown>[];
-  assert.equal(embed.color, 0xf5a524);
-  assert.equal(embed.url, "https://bot.example/x");
-  assert.deepEqual(embed.footer, { text: "utxo relayer" });
-  assert.equal(embed.timestamp, "2026-11-27T12:18:00.000Z");
-  assert.deepEqual(embed.fields, [
-    { name: "Open", value: "20 h 53 min", inline: true },
-    { name: "To", value: "`t1RPpso7PVchSGWpGXEmcUHRDuTEux1tkvE`", inline: false },
-    { name: "Empty", value: "—", inline: true },
-  ]);
 });
 
-test("an embed logs as one line, without backticks", () => {
-  assert.equal(
-    text({ title: "Balance low", level: "warn", source: "router", fields: [["Account", "`relayer.near`"]] }),
-    "router: Balance low — Account: relayer.near",
-  );
+test("long ids are shortened to their ends; short ones kept", () => {
+  assert.equal(short("0xcddd98487cfbe7a7e95c52a9cef24da89af11130a7b887df31b804d59a6fb4ef"), "0xcddd98…fb4ef");
+  assert.equal(short("t1RPpso7PVchSGWpGXEmcUHRDuTEux1tkvE", 6), "t1RPps…1tkvE");
+  assert.equal(short("263"), "263");
+  assert.equal(link("x"), "x");
 });
 
 test("durations read as days, hours and minutes", () => {
-  assert.equal(duration(0), "0 min");
-  assert.equal(duration(7 * 60_000), "7 min");
-  assert.equal(duration(1253 * 60_000), "20 h 53 min");
-  assert.equal(duration(25 * 3_600_000), "1 d 1 h");
+  assert.equal(duration(0), "0min");
+  assert.equal(duration(7 * 60_000), "7min");
+  assert.equal(duration(1253 * 60_000), "20h 53min");
+  assert.equal(duration(25 * 3_600_000), "1d 1h");
 });
