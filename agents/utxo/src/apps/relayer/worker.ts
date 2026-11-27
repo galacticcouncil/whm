@@ -2,7 +2,7 @@ import { setTimeout as sleep } from "timers/promises";
 
 import type { Account, JsonRpcProvider } from "near-api-js";
 
-import type { Alerter, Incidents } from "@whm/common/discord";
+import { duration, type Alerter, type Incidents } from "@whm/common/discord";
 
 import type { ConnectorConfig } from "../../chains";
 import log from "../../logger";
@@ -10,7 +10,7 @@ import { view } from "../../near/client";
 import { listCoins, pickCoin, type Coin } from "../../near/coins";
 import type { Deriver, Params } from "../../near/derive";
 
-import { APP_NAME, BALANCE_FLOOR, RELAY_ATTEMPTS, RELAY_RETRY_MS } from "./config";
+import { APP_NAME, BALANCE_FLOOR, PASS_ALERT_MS, RELAY_ATTEMPTS, RELAY_RETRY_MS } from "./config";
 import { Refused } from "./types";
 import type { Store, Withdrawal } from "./store";
 import { balanceOf, ensureAccount, relay, signWithdraw } from "./withdraw";
@@ -34,6 +34,8 @@ export class WithdrawWorker {
   private timer?: NodeJS.Timeout;
   private busy = false;
   private readonly warnedAt = new Map<string, number>();
+  /** When a pass last completed — a pass failing past `PASS_ALERT_MS` is alerted. */
+  private lastOk = Date.now();
 
   /**
    * @param derivers One per chain, by route key — each carries its chain and its contract's params.
@@ -67,8 +69,19 @@ export class WithdrawWorker {
       }
       for (const w of open) this.warnIfStuck(w);
       await this.checkBalance();
+      this.lastOk = Date.now();
+      this.alerter.clear("pass");
     } catch (e) {
       log.error(`[withdraw] pass: ${(e as Error).stack ?? String(e)}`);
+      if (Date.now() - this.lastOk > PASS_ALERT_MS) {
+        this.alerter.alert("pass", "failing", {
+          title: "No pass completing",
+          level: "error",
+          source: `utxo ${APP_NAME}`,
+          description: `Redis or the NEAR RPC unreachable? Nothing is withdrawn meanwhile. ${(e as Error).message}`,
+          fields: [["Last pass", `${duration(Date.now() - this.lastOk)} ago`]],
+        });
+      }
     } finally {
       this.busy = false;
     }
@@ -79,11 +92,17 @@ export class WithdrawWorker {
     const balance = await this.account.getBalance().catch(() => undefined);
     if (balance === undefined) return;
     if (balance >= BALANCE_FLOOR) return this.alerter.clear("balance");
-    this.alerter.alert(
-      "balance",
-      "low",
-      `🟠 **utxo ${APP_NAME}** account ${this.account.accountId} holds ${Number(balance) / 1e24} NEAR — top it up; every withdrawal's signature and relay is paid from it.`,
-    );
+    this.alerter.alert("balance", "low", {
+      title: "Balance low",
+      level: "warn",
+      source: `utxo ${APP_NAME}`,
+      description: "Every withdrawal's signature and relay is paid from it — top it up.",
+      fields: [
+        ["Account", `\`${this.account.accountId}\``],
+        ["Balance", `${Number(balance) / 1e24} NEAR`],
+        ["Floor", `${Number(BALANCE_FLOOR) / 1e24} NEAR`],
+      ],
+    });
   }
 
   /**
@@ -166,10 +185,20 @@ export class WithdrawWorker {
     const id = `${w.chain}:${w.sequence}`;
     if (now - w.createdAt < this.cfg.stuckMs || now - (this.warnedAt.get(id) ?? 0) < this.cfg.stuckMs) return;
     this.warnedAt.set(id, now);
-    const min = Math.round((now - w.createdAt) / 60_000);
-    const message = `[${id}] open ${min} min: ${w.lastError ?? "waiting for the settlement"}`;
-    log.warn(message);
-    this.alerter.alert(`stuck:${id}`, String(now), `🟠 **utxo ${APP_NAME}** withdrawal ${message} — to ${w.address} via ${w.account}`);
+    const status = w.lastError ?? "waiting for the settlement";
+    log.warn(`[${id}] open ${duration(now - w.createdAt)}: ${status}`);
+    this.alerter.alert(`stuck:${id}`, String(now), {
+      title: "Withdrawal stuck",
+      level: "warn",
+      source: `utxo ${APP_NAME}`,
+      description: status,
+      fields: [
+        ["Record", `\`${id}\``],
+        ["Open", duration(now - w.createdAt)],
+        ["To", `\`${w.address}\``],
+        ["Via", `\`${w.account}\``],
+      ],
+    });
   }
 }
 

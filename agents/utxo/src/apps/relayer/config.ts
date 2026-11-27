@@ -67,6 +67,9 @@ export const publicUrl = process.env.PUBLIC_URL;
 /** Below this the relaying account's NEAR is alerted, yocto. */
 export const BALANCE_FLOOR = 10n ** 24n;
 
+/** A pass failing this long — Redis or NEAR RPC down — is alerted. */
+export const PASS_ALERT_MS = 10 * 60_000;
+
 /** A relay that never reached a decision is resent this many times, this far apart, in the same pass. */
 export const RELAY_ATTEMPTS = 3;
 export const RELAY_RETRY_MS = 3_000;
