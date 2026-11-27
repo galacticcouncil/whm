@@ -5,6 +5,7 @@
   "scripts": {
     "start:api": "node dist/api/app.js",
     "start:relayer": "node dist/relayer/app.js",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
     "prebuild": "npm run clean",
     "build": "node ./esbuild.dist.mjs",
     "clean": "rm -rf dist/",

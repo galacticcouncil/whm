@@ -10,7 +10,8 @@ import { view } from "../../near/client";
 import { listCoins, pickCoin, type Coin } from "../../near/coins";
 import type { Deriver, Params } from "../../near/derive";
 
-import { APP_NAME, BALANCE_FLOOR, PASS_ALERT_MS, RELAY_ATTEMPTS, RELAY_RETRY_MS } from "./config";
+import { alerts, incidentFields } from "./alerts";
+import { BALANCE_FLOOR, PASS_ALERT_MS, RELAY_ATTEMPTS, RELAY_RETRY_MS } from "./config";
 import { Refused } from "./types";
 import type { Store, Withdrawal } from "./store";
 import { balanceOf, ensureAccount, relay, signWithdraw } from "./withdraw";
@@ -74,13 +75,7 @@ export class WithdrawWorker {
     } catch (e) {
       log.error(`[withdraw] pass: ${(e as Error).stack ?? String(e)}`);
       if (Date.now() - this.lastOk > PASS_ALERT_MS) {
-        this.alerter.alert("pass", "failing", {
-          title: "No pass completing",
-          level: "error",
-          source: `utxo ${APP_NAME}`,
-          description: `Redis or the NEAR RPC unreachable? Nothing is withdrawn meanwhile. ${(e as Error).message}`,
-          fields: [["Last pass", `${duration(Date.now() - this.lastOk)} ago`]],
-        });
+        this.alerter.alert("pass", "failing", alerts.passFailing(Date.now() - this.lastOk, (e as Error).message));
       }
     } finally {
       this.busy = false;
@@ -92,17 +87,7 @@ export class WithdrawWorker {
     const balance = await this.account.getBalance().catch(() => undefined);
     if (balance === undefined) return;
     if (balance >= BALANCE_FLOOR) return this.alerter.clear("balance");
-    this.alerter.alert("balance", "low", {
-      title: "Balance low",
-      level: "warn",
-      source: `utxo ${APP_NAME}`,
-      description: "Every withdrawal's signature and relay is paid from it — top it up.",
-      fields: [
-        ["Account", `\`${this.account.accountId}\``],
-        ["Balance", `${Number(balance) / 1e24} NEAR`],
-        ["Floor", `${Number(BALANCE_FLOOR) / 1e24} NEAR`],
-      ],
-    });
+    this.alerter.alert("balance", "low", alerts.balanceLow(this.account.accountId, balance));
   }
 
   /**
@@ -174,7 +159,11 @@ export class WithdrawWorker {
       for (const w of records) await this.store.withdrawn(w, tx);
       log.info(`[${chain.name} ${account}] ${held} -> ${records[0].address}: ${tx}`);
     } catch (e) {
-      await this.incidents.open(account, `${chain.name} ${step} of ${held} to ${records[0].address} — ${(e as Error).message}`);
+      await this.incidents.open(
+        account,
+        `${chain.name} ${step} — ${(e as Error).message}`,
+        incidentFields(chain.name, held, records[0].address, account),
+      );
       throw e;
     }
   }
@@ -185,20 +174,8 @@ export class WithdrawWorker {
     const id = `${w.chain}:${w.sequence}`;
     if (now - w.createdAt < this.cfg.stuckMs || now - (this.warnedAt.get(id) ?? 0) < this.cfg.stuckMs) return;
     this.warnedAt.set(id, now);
-    const status = w.lastError ?? "waiting for the settlement";
-    log.warn(`[${id}] open ${duration(now - w.createdAt)}: ${status}`);
-    this.alerter.alert(`stuck:${id}`, String(now), {
-      title: "Withdrawal stuck",
-      level: "warn",
-      source: `utxo ${APP_NAME}`,
-      description: status,
-      fields: [
-        ["Record", `\`${id}\``],
-        ["Open", duration(now - w.createdAt)],
-        ["To", `\`${w.address}\``],
-        ["Via", `\`${w.account}\``],
-      ],
-    });
+    log.warn(`[${id}] open ${duration(now - w.createdAt)}: ${w.lastError ?? "waiting for the settlement"}`);
+    this.alerter.alert(`stuck:${id}`, String(now), alerts.stuck(w, now));
   }
 }
 
