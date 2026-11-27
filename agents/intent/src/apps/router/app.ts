@@ -1,6 +1,6 @@
 import { Redis } from "ioredis";
 
-import { createAlerter, Incidents, reprocessPage } from "@whm/common/discord";
+import { createAlerter, duration, Incidents, reprocessPage } from "@whm/common/discord";
 
 import { banner } from "../../banner";
 import log from "../../logger";
@@ -52,7 +52,13 @@ async function start(): Promise<void> {
       lastOk = Date.now();
       alerter.clear("pass");
     } else if (Date.now() - lastOk > PASS_ALERT_MS) {
-      alerter.alert("pass", "failing", `🟠 **${APP_NAME}** has not completed a pass in ${Math.round((Date.now() - lastOk) / 60_000)} min — scan or NEAR RPC unreachable? No order is swapped meanwhile.`);
+      alerter.alert("pass", "failing", {
+        title: "No pass completing",
+        level: "error",
+        source: APP_NAME,
+        description: "Scan or the NEAR RPC unreachable? Nothing is swapped, delivered or refunded meanwhile.",
+        fields: [["Last pass", `${duration(Date.now() - lastOk)} ago`]],
+      });
     }
     await checkBalance(alerter);
     await new Promise((r) => setTimeout(r, config.tickMs));
@@ -68,7 +74,17 @@ async function checkBalance(alerter: ReturnType<typeof createAlerter>): Promise<
   const balance = await botBalance().catch(() => undefined);
   if (balance === undefined) return;
   if (balance >= BALANCE_FLOOR) return alerter.clear("balance");
-  alerter.alert("balance", "low", `🟠 **${APP_NAME}** account ${config.account} holds ${Number(balance) / 1e24} NEAR — top it up; every signature and payout is paid from it.`);
+  alerter.alert("balance", "low", {
+    title: "Balance low",
+    level: "warn",
+    source: APP_NAME,
+    description: "Every signature and payout is paid from it — top it up.",
+    fields: [
+      ["Account", `\`${config.account}\``],
+      ["Balance", `${Number(balance) / 1e24} NEAR`],
+      ["Floor", `${Number(BALANCE_FLOOR) / 1e24} NEAR`],
+    ],
+  });
 }
 
 boot(APP_NAME, start);
