@@ -1,5 +1,5 @@
 import { config } from "./config";
-import { Refused } from "./once";
+import { Refused } from "./types";
 
 const ONECLICK_API = "https://1click.chaindefuser.com";
 

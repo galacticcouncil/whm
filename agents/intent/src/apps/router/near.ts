@@ -1,7 +1,7 @@
 import { Account, actions, JsonRpcProvider, KeyPairSigner, PublicKey, teraToGas, type KeyPairString } from "near-api-js";
 
 import { config } from "./config";
-import { Refused } from "./once";
+import { Refused } from "./types";
 import type { UtxoRoute } from "./utxo";
 
 type TxOutcome = Awaited<ReturnType<Account["signAndSendTransaction"]>>;
@@ -33,6 +33,11 @@ const bot = new Account(config.account, provider, KeyPairSigner.fromSecretKey(co
  */
 async function view<T>(contractId: string, method: string, args: object = {}): Promise<T> {
   return (await provider.callFunction({ contractId, method, args: args as Record<string, unknown> })) as T;
+}
+
+/** @returns The bot account's NEAR, yocto — what every signature and payout is paid from. */
+export function botBalance(): Promise<bigint> {
+  return bot.getBalance();
 }
 
 /** @returns The router's configuration. */

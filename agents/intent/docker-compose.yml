@@ -38,11 +38,17 @@ services:
         swarmpit.service.deployment.autoredeploy: "true"
 
   # Intents v2 on NEAR: has the router sign each set of terms' swap, delivery or refund, and
-  # publishes it. Stores nothing — A's balances say what is left to do.
+  # sends it — once. A failure is alerted with a one-time reprocess link and waits for a person;
+  # Redis keeps those and the orders already swapped.
   app-router:
     image: galacticcouncil/intent:latest
     command: [node, router/app.js]
     environment:
+      - REDIS_HOST=redis
+      # Alerts: failed attempts, a failing pass, a low balance.
+      - DISCORD_WEBHOOK_URL=
+      # Where /reprocess/:id is reachable from outside — the alerts link to it.
+      - PUBLIC_URL=
       # The scan intents-v2 app — the terms in play and their orders.
       - SCAN_API=
       - RPC_NEAR=https://free.rpc.fastnear.com
@@ -62,6 +68,19 @@ services:
     deploy:
       labels:
         swarmpit.service.deployment.autoredeploy: "true"
+
+  redis:
+    image: redis:latest
+    isolation: default
+    volumes:
+     - db:/data
+    networks:
+     - default
+    logging:
+      driver: json-file
+
+volumes:
+  db:
 
 networks:
   default:

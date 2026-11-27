@@ -1,10 +1,14 @@
+import { setTimeout as sleep } from "timers/promises";
+
+import type { Incidents, RedisLike } from "@whm/common/discord";
+
 import log from "../../logger";
 
-import { config } from "./config";
+import { config, SEND_ATTEMPTS, SEND_RETRY_MS } from "./config";
 import { balances, deriveAccount, ensureRegistered, execute, sign, signAll, utxoRoutes, type RouterConfig, type Signed } from "./near";
 import { quote, signedFields, submitIntent } from "./oneclick";
-import { balanceKey, Refused, step, type Parked, type Payload, type Pending } from "./once";
 import { plan, type Action } from "./plan";
+import { Refused } from "./types";
 import { liveTerms, newestOrder, type TermsRow } from "./scan";
 import { decodeTerms, type Terms } from "./terms";
 import { delivery, routeFor, type UtxoRoute } from "./utxo";
@@ -13,8 +17,11 @@ import { loadVaa } from "./wormholescan";
 /** A quote outlives the transfer the router signs against it by this much. */
 const QUOTE_MARGIN_MS = 5 * 60_000;
 
-/** A signed payload is treated as expired this long before the router's deadline for it. */
-const EXPIRY_MARGIN_MS = 10_000;
+/** One signed payload, and how the log names it. */
+interface Payload {
+  signed: Signed;
+  label: string;
+}
 
 /**
  * A delivery, refund or settle payload, named for the log.
@@ -34,27 +41,23 @@ export interface Seen {
   dest: string;
   action: Action["kind"];
   error?: string;
-  /** Why the bot stopped signing for these terms. */
-  parked?: string;
+  /** The open incident that stops the bot on these terms. */
+  stopped?: string;
   at: number;
 }
 
 /**
- * Walks every set of terms scan lists, one at a time, and does at most one thing for each. The router
- * and `A`'s balances say what is left to do; what the bot keeps is only what spares its account a
- * signature — a payload signed and not yet executed is resent, never signed again, and terms whose
- * payload was refused or expired are parked until `A`'s balances move. A restart forgets both: at
- * most one more signature per parked set of terms.
+ * Walks every set of terms scan lists, one at a time, and does at most one thing for each — the
+ * router and `A`'s balances say what. A signature costs the bot's account before the step that can
+ * fail, so the bot tries once: a sign that fails, or a send still failing after a few resends of the
+ * same payload, opens an incident and the bot leaves those terms alone until a person reprocesses
+ * them. Incidents and filled orders are in Redis, so a restart pays for neither again.
  */
 export class Worker {
   readonly seen = new Map<string, Seen>();
-  /** Signed and not yet executed, by `auth_path`. */
-  private readonly pending = new Map<string, Pending>();
-  /** No more signing, by `auth_path`. */
-  private readonly parked = new Map<string, Parked>();
   /** `A` per `auth_path` — fixed by the path. */
   private readonly accounts = new Map<string, string>();
-  /** Orders filled by this process, so one is not re-signed on every pass. */
+  /** Orders swapped, so one is never signed twice — loaded from Redis at `init`. */
   private readonly filled = new Set<string>();
   /** Terms finished by this process. */
   private readonly done = new Set<string>();
@@ -63,7 +66,20 @@ export class Worker {
   /** `A_utxo` registrations this process has seen, by `token:account`. */
   private readonly registered = new Set<string>();
 
-  constructor(private readonly rc: RouterConfig) {}
+  constructor(
+    private readonly rc: RouterConfig,
+    private readonly incidents: Incidents,
+    private readonly redis: RedisLike,
+  ) {}
+
+  private get filledKey(): string {
+    return `${config.redis.prefix}:filled`;
+  }
+
+  /** Load the orders already swapped. */
+  async init(): Promise<void> {
+    for (const seq of await this.redis.smembers(this.filledKey)) this.filled.add(seq);
+  }
 
   /** One pass over every set of terms in play. */
   async pass(): Promise<void> {
@@ -99,26 +115,12 @@ export class Worker {
       this.accounts.set(path, account);
     }
     const [eth = 0n, dest = 0n] = await balances(this.rc.intents, account, [this.rc.eth_token, t.destinationAsset]);
-    const held = balanceKey(eth, dest);
     const now = Date.now();
 
-    const parked = this.parked.get(path);
-    if (parked?.balances === held) {
-      this.seen.set(path, { account, eth: eth.toString(), dest: dest.toString(), action: "wait", parked: parked.reason, at: now });
+    const incident = await this.incidents.get(path);
+    if (incident) {
+      this.seen.set(path, { account, eth: eth.toString(), dest: dest.toString(), action: "wait", stopped: incident.reason, at: now });
       return;
-    }
-    if (parked) {
-      this.parked.delete(path);
-      log.info(`[${path}] unparked: A's balances moved`);
-    }
-
-    const pending = this.pending.get(path);
-    if (pending) {
-      const next = step(pending, now, held);
-      if (next === "resend") return this.send(path, pending);
-      this.pending.delete(path);
-      if (next === "park") return this.park(path, held, `${pending.kind} expired unexecuted`);
-      if (pending.seq) this.filled.add(pending.seq);
     }
 
     const priceValidityMs = p.price_validity * 1000;
@@ -147,7 +149,6 @@ export class Worker {
     this.seen.set(path, { account, eth: eth.toString(), dest: dest.toString(), action: action.kind, at: now });
 
     const terms = bytes.toString("base64");
-    const validity = p.transfer_validity * 1000;
     switch (action.kind) {
       case "swap": {
         const vaa = await loadVaa(order!.order_vaa);
@@ -157,23 +158,27 @@ export class Worker {
           destination: t.destinationAsset,
           amount: action.amount,
           slippageBps: p.min_quote_slippage_bps,
-          deadlineMs: now + validity + QUOTE_MARGIN_MS,
+          deadlineMs: now + p.transfer_validity * 1000 + QUOTE_MARGIN_MS,
         });
         const label = `swap order ${action.seq}: ${q.quote.amountIn} wei → ≥ ${q.quote.minAmountOut}`;
         const args = { terms, order_vaa: vaa.toString("base64"), quote: { signed: signedFields(q), signature: q.signature } };
-        return this.signOnce(path, held, { kind: "swap", seq: action.seq }, validity, async () => [{ signed: await sign("swap", args), label }]);
+        await this.attempt(path, "swap", async () => [{ signed: await sign("swap", args), label }]);
+        this.filled.add(action.seq);
+        await this.redis.sadd(this.filledKey, action.seq);
+        return;
       }
       case "deliver":
-      case "refund": {
-        if (action.kind === "deliver") await this.registerUtxo(path, t);
-        return this.signOnce(path, held, { kind: action.kind }, validity, async () => [payout(action.kind, await sign(action.kind, { terms }))]);
-      }
+      case "refund":
+        return this.attempt(path, action.kind, async () => {
+          if (action.kind === "deliver") await this.registerUtxo(path, t);
+          return [payout(action.kind, await sign(action.kind, { terms }))];
+        });
       case "settle": {
-        await this.registerUtxo(path, t);
         const vaa = await loadVaa(action.closeVaa);
-        return this.signOnce(path, held, { kind: "settle" }, validity, async () =>
-          (await signAll("settle", { terms, close_vaa: vaa.toString("base64") })).map((s) => payout("settle", s)),
-        );
+        return this.attempt(path, "settle", async () => {
+          await this.registerUtxo(path, t);
+          return (await signAll("settle", { terms, close_vaa: vaa.toString("base64") })).map((s) => payout("settle", s));
+        });
       }
       case "drop":
         this.done.add(path);
@@ -185,74 +190,34 @@ export class Worker {
   }
 
   /**
-   * Have the router sign, once, and send what it signed. A refusal parks the terms, so a router
-   * that will not sign them is not asked again on every pass.
+   * The paid part, once: have the router sign, then send each payload — a swap to 1Click, a payout
+   * to the verifier from the bot's account. A send that reached no decision is resent as signed, a
+   * few times; any failure past that, or in signing, opens an incident for the terms.
    *
    * @param path The terms' `auth_path`.
-   * @param held `A`'s balances now, from `balanceKey`.
-   * @param head The action, and a swap's order.
-   * @param validityMs How long the router's signature holds — `transfer_validity`.
-   * @param signPayloads Has the router sign; one payload, or a settle's two.
+   * @param kind The action, for the incident.
+   * @param signPayloads Has the router sign — one payload, or a settle's two — and pays for whatever
+   *        it needs first.
+   * @throws The failure, once its incident is open.
    */
-  private async signOnce(
-    path: string,
-    held: string,
-    head: Pick<Pending, "kind" | "seq">,
-    validityMs: number,
-    signPayloads: () => Promise<Payload[]>,
-  ): Promise<void> {
-    const signedAt = Date.now();
-    let payloads: Payload[];
+  private async attempt(path: string, kind: Action["kind"], signPayloads: () => Promise<Payload[]>): Promise<void> {
+    let step = `${kind}: sign`;
     try {
-      payloads = await signPayloads();
-    } catch (e) {
-      if (e instanceof Refused) return this.park(path, held, e.message);
-      throw e;
-    }
-    const p: Pending = { ...head, payloads, expiresAt: signedAt + validityMs - EXPIRY_MARGIN_MS, balances: held };
-    this.pending.set(path, p);
-    return this.send(path, p);
-  }
-
-  /**
-   * Send what is pending, as signed: a swap to 1Click, a payout to the verifier from the bot's account.
-   * A send that never reached a decision throws, and the next pass resends; a refusal parks the terms.
-   *
-   * @param path The terms' `auth_path`.
-   * @param p What the router signed for them.
-   */
-  private async send(path: string, p: Pending): Promise<void> {
-    try {
-      while (p.payloads.length) {
-        const { signed, label } = p.payloads[0];
-        const ref =
-          p.kind === "swap"
-            ? `intent ${(await submitIntent(signed.signed_data)).intentHash}`
-            : `tx ${await execute(this.rc.intents, signed.signed_data)}`;
-        p.payloads.shift();
+      for (const { signed, label } of await signPayloads()) {
+        step = label;
+        const ref = await resend(() =>
+          kind === "swap"
+            ? submitIntent(signed.signed_data).then((s) => `intent ${s.intentHash}`)
+            : execute(this.rc.intents, signed.signed_data).then((tx) => `tx ${tx}`),
+        );
         log.info(`[${path}] ${label}: ${ref}`);
       }
     } catch (e) {
-      if (!(e instanceof Refused)) throw e;
-      this.pending.delete(path);
-      return this.park(path, p.balances, e.message);
+      await this.incidents.open(path, `${step} — ${(e as Error).message}`);
+      const s = this.seen.get(path);
+      if (s) s.stopped = (e as Error).message;
+      throw e;
     }
-    this.pending.delete(path);
-    if (p.seq) this.filled.add(p.seq);
-  }
-
-  /**
-   * Stop signing for a set of terms until `A`'s balances move — `/api/status` shows why.
-   *
-   * @param path The terms' `auth_path`.
-   * @param balances `A`'s balances it parks at.
-   * @param reason Why.
-   */
-  private park(path: string, balances: string, reason: string): void {
-    this.parked.set(path, { balances, reason });
-    const s = this.seen.get(path);
-    if (s) s.parked = reason;
-    log.error(`[${path}] parked — no signing until A's balances move or a restart: ${reason}`);
   }
 
   /**
@@ -271,5 +236,24 @@ export class Worker {
     if (this.registered.has(id)) return;
     if (await ensureRegistered(token, account)) log.info(`[${path}] registered ${account} on ${token}`);
     this.registered.add(id);
+  }
+}
+
+/**
+ * Send, and resend the same thing while it reaches no decision. A refusal is final at once.
+ *
+ * @param send The send.
+ * @returns Its result.
+ * @throws A refusal, or the last failure.
+ */
+async function resend<T>(send: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await send();
+    } catch (e) {
+      if (e instanceof Refused || attempt >= SEND_ATTEMPTS) throw e;
+      log.warn(`send failed (${(e as Error).message}), resending as signed`);
+      await sleep(SEND_RETRY_MS);
+    }
   }
 }
