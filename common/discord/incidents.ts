@@ -72,8 +72,15 @@ export class Incidents {
     const stored: Stored = { id, reason, at: now, token };
     await this.o.redis.set(this.key(id), JSON.stringify(stored));
     await this.o.redis.sadd(this.index, id);
-    const link = this.o.publicUrl ? `\nReprocess once: ${this.o.publicUrl.replace(/\/$/, "")}/reprocess/${encodeURIComponent(id)}?token=${token}` : "";
-    this.o.alerter.alert(`incident:${id}`, String(now), `🔴 **${this.o.app}** stopped on \`${id}\`: ${reason.slice(0, 1200)}${link}`);
+    const url = this.o.publicUrl && `${this.o.publicUrl.replace(/\/$/, "")}/reprocess/${encodeURIComponent(id)}?token=${token}`;
+    this.o.alerter.alert(`incident:${id}`, String(now), {
+      title: url ? "Stopped — reprocess once ↗" : "Stopped — needs a person",
+      level: "error",
+      source: this.o.app,
+      description: reason,
+      fields: [["Id", `\`${id}\``]],
+      url,
+    });
   }
 
   /**

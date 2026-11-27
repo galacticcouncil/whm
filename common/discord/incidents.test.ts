@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { Incidents, type RedisLike } from "./incidents";
+import type { Embed, Message } from "./notify";
 
 /** An in-memory stand-in for the few Redis calls incidents make. */
 function fakeRedis(): RedisLike {
@@ -19,14 +20,14 @@ function fakeRedis(): RedisLike {
 }
 
 function setup(publicUrl?: string) {
-  const alerts: string[] = [];
+  const alerts: Embed[] = [];
   const cleared: string[] = [];
   const quiet = { warn: () => {}, error: () => {} };
   const incidents = new Incidents({
     redis: fakeRedis(),
     prefix: "t",
     app: "router",
-    alerter: { alert: (_k, _s, m) => alerts.push(m), clear: (k) => cleared.push(k) },
+    alerter: { alert: (_k, _s, m: Message) => alerts.push(m as Embed), clear: (k) => cleared.push(k) },
     publicUrl,
     maxRedeemsPerHour: 2,
     log: quiet,
@@ -35,15 +36,17 @@ function setup(publicUrl?: string) {
   return { incidents, alerts, cleared };
 }
 
-const tokenOf = (alert: string) => new URL(alert.split("Reprocess once: ")[1]).searchParams.get("token")!;
+const tokenOf = (alert: Embed) => new URL(alert.url!).searchParams.get("token")!;
 
-test("a failure opens one incident, alerted once with a reprocess link", async () => {
+test("a failure opens one incident, alerted once as an error with a reprocess link", async () => {
   const { incidents, alerts } = setup("https://bot.example/");
   await incidents.open("0xabc", "relay refused");
   await incidents.open("0xabc", "again");
   assert.deepEqual(await incidents.get("0xabc"), { id: "0xabc", reason: "relay refused", at: 1_000 });
   assert.equal(alerts.length, 1);
-  assert.match(alerts[0], /https:\/\/bot\.example\/reprocess\/0xabc\?token=/);
+  assert.equal(alerts[0].level, "error");
+  assert.equal(alerts[0].description, "relay refused");
+  assert.match(alerts[0].url!, /^https:\/\/bot\.example\/reprocess\/0xabc\?token=/);
   assert.deepEqual((await incidents.list()).map((i) => i.id), ["0xabc"]);
 });
 
@@ -72,5 +75,5 @@ test("redeems are capped per hour across incidents", async () => {
 test("without a public URL the alert has no link", async () => {
   const { incidents, alerts } = setup();
   await incidents.open("0xabc", "relay refused");
-  assert.doesNotMatch(alerts[0], /reprocess/);
+  assert.equal(alerts[0].url, undefined);
 });

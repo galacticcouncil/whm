@@ -9,27 +9,117 @@ const RETRY_DELAYS_MS = [5_000, 30_000, 120_000, 600_000];
 /** Alerts still being retried; past this many, the oldest is dropped with a log line. */
 const MAX_UNDELIVERED = 500;
 
+/** Discord caps an embed's description, and each field's name and value. */
+const MAX_DESCRIPTION = 4000;
+const MAX_FIELD_NAME = 256;
+const MAX_FIELD_VALUE = 1024;
+
+/** A field value this short sits beside the others; a longer one gets its own line. */
+const MAX_INLINE = 32;
+
 /** Where alert delivery reports itself — an app's logger, or the console. */
 export interface AlertLog {
   warn(message: string): void;
   error(message: string): void;
 }
 
+/** How bad: the embed's colour. */
+export type Level = "error" | "warn" | "ok";
+
+/** An alert as a Discord embed — a coloured card rather than a line of text. `error` tags `@here`. */
+export interface Embed {
+  title: string;
+  level: Level;
+  /** The app that raised it, in the footer. */
+  source?: string;
+  /** Free text under the title. */
+  description?: string;
+  /** Label and value pairs; wrap ids in backticks so they stay whole and copyable. */
+  fields?: [string, string][];
+  /** Makes the title a link. */
+  url?: string;
+}
+
+/** A plain line of text, or an embed. */
+export type Message = string | Embed;
+
+const COLOR: Record<Level, number> = { error: 0xe5484d, warn: 0xf5a524, ok: 0x30a46c };
+
+/**
+ * The webhook body for a message.
+ *
+ * @param message A line of text or an embed.
+ * @param now Unix ms, the embed's timestamp.
+ * @returns The JSON Discord takes.
+ */
+export function payload(message: Message, now = Date.now()): Record<string, unknown> {
+  if (typeof message === "string") return { content: message.slice(0, MAX_CONTENT) };
+  // A mention pings only from the content, never from inside an embed; nothing else may ping.
+  const page = message.level === "error";
+  return {
+    content: page ? "@here" : undefined,
+    allowed_mentions: { parse: page ? ["everyone"] : [] },
+    embeds: [
+      {
+        title: message.title.slice(0, MAX_FIELD_NAME),
+        url: message.url,
+        description: message.description?.slice(0, MAX_DESCRIPTION),
+        color: COLOR[message.level],
+        fields: (message.fields ?? []).map(([name, value]) => ({
+          name: name.slice(0, MAX_FIELD_NAME),
+          value: value.slice(0, MAX_FIELD_VALUE) || "—",
+          inline: value.length <= MAX_INLINE,
+        })),
+        footer: message.source ? { text: message.source } : undefined,
+        timestamp: new Date(now).toISOString(),
+      },
+    ],
+  };
+}
+
+/**
+ * A message as one log line.
+ *
+ * @param message A line of text or an embed.
+ * @returns The text.
+ */
+export function text(message: Message): string {
+  if (typeof message === "string") return message;
+  const fields = (message.fields ?? []).map(([name, value]) => `${name}: ${value.replace(/`/g, "")}`);
+  return [`${message.source ? `${message.source}: ` : ""}${message.title}`, message.description, ...fields, message.url]
+    .filter(Boolean)
+    .join(" — ");
+}
+
+/**
+ * A duration, the way people read it.
+ *
+ * @param ms Milliseconds.
+ * @returns E.g. `20 h 53 min`, `7 min`.
+ */
+export function duration(ms: number): string {
+  const min = Math.max(0, Math.round(ms / 60_000));
+  const d = Math.floor(min / 1440);
+  const h = Math.floor((min % 1440) / 60);
+  const m = min % 60;
+  return [d && `${d} d`, h && `${h} h`, (m || (!d && !h)) && `${m} min`].filter(Boolean).join(" ");
+}
+
 /**
  * Post one message to a Discord webhook. Never throws, and gives up after 10 s.
  *
  * @param webhook Webhook URL; nothing is sent without one.
- * @param message Message text, truncated to what Discord accepts.
+ * @param message A line of text, or an embed; cut to what Discord accepts.
  * @param log Where a refused or failed post is reported.
  * @returns Whether Discord took it. True without a webhook: the log line is the alert.
  */
-export async function notifyDiscord(webhook: string | undefined, message: string, log: AlertLog = console): Promise<boolean> {
+export async function notifyDiscord(webhook: string | undefined, message: Message, log: AlertLog = console): Promise<boolean> {
   if (!webhook) return true;
   try {
     const res = await globalThis.fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: message.slice(0, MAX_CONTENT) }),
+      body: JSON.stringify(payload(message)),
       signal: AbortSignal.timeout(10_000),
     });
     if (res.ok) return true;
@@ -45,7 +135,7 @@ export interface Alerter {
    * Raise `key` in `state`. Posts when the key is new or its state changed, and repeats an unchanged
    * state at most once per the alerter's repeat interval. Fire-and-forget: never throws.
    */
-  alert(key: string, state: string, message: string): void;
+  alert(key: string, state: string, message: Message): void;
   /** Forget `key`, so raising it again posts at once, and drop a post of it still being retried. */
   clear(key: string): void;
 }
@@ -58,7 +148,7 @@ export interface AlerterOptions {
   /** Alerts still being retried before the oldest is dropped. */
   maxUndelivered?: number;
   now?: () => number;
-  post?: (webhook: string | undefined, message: string) => Promise<boolean>;
+  post?: (webhook: string | undefined, message: Message) => Promise<boolean>;
   log?: AlertLog;
 }
 
@@ -81,7 +171,7 @@ export function createAlerter(opts: AlerterOptions): Alerter {
   /** The post under way for each key: a newer raise of the key, or `clear`, takes its place. */
   const posting = new Map<string, { state: string; token: object }>();
 
-  async function deliver(key: string, state: string, message: string, token: object): Promise<void> {
+  async function deliver(key: string, state: string, message: Message, token: object): Promise<void> {
     const current = () => posting.get(key)?.token === token;
     for (let attempt = 0; ; attempt++) {
       let ok = false;
@@ -99,12 +189,12 @@ export function createAlerter(opts: AlerterOptions): Alerter {
       }
       if (delays.length === 0) {
         posting.delete(key);
-        log.warn(`ALERT not delivered: ${message}`);
+        log.warn(`ALERT not delivered: ${text(message)}`);
         return;
       }
       const wait = delays[Math.min(attempt, delays.length - 1)];
       if (attempt === delays.length - 1) {
-        log.warn(`ALERT not delivered after ${attempt + 1} attempts, retrying every ${wait / 60_000} min: ${message}`);
+        log.warn(`ALERT not delivered after ${attempt + 1} attempts, retrying every ${wait / 60_000} min: ${text(message)}`);
       }
       await sleep(wait, undefined, { ref: false });
       if (!current()) return;
@@ -124,7 +214,7 @@ export function createAlerter(opts: AlerterOptions): Alerter {
         }
         const token = {};
         posting.set(key, { state, token });
-        log.warn(`ALERT ${message}`);
+        log.warn(`ALERT ${text(message)}`);
         void deliver(key, state, message, token).catch(() => {});
       } catch {
         // An alert must never take the caller down with it.
