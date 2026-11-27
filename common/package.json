@@ -8,6 +8,10 @@
     "./evm/artifacts": "./evm/artifacts.ts",
     "./migration": "./migration/index.ts",
     "./near": "./near/index.ts",
-    "./wormhole": "./wormhole/index.ts"
+    "./wormhole": "./wormhole/index.ts",
+    "./discord": "./discord/index.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx --test 'discord/**/*.test.ts' 'evm/**/*.test.ts'"
   }
 }
