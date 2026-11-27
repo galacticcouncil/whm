@@ -1,6 +1,10 @@
 /** The terms fields the bot decides on. Layout: `contracts/src/intents-v2/IntentCodec.sol`. */
 export interface Terms {
+  /** How far a fill may sit under the order's own price. */
+  maxSlippageBps: bigint;
   maxFillMultiplier: bigint;
+  /** The hard floor: destination units per 1e18 wei, whatever the order's price. */
+  minOutPerIn: bigint;
   minDelivery: bigint;
   /** Unix ms. */
   deadlineMs: number;
@@ -24,7 +28,9 @@ export function decodeTerms(bytes: Buffer): Terms {
     throw new Error("unknown terms layout");
   }
   return {
+    maxSlippageBps: BigInt(bytes.readUInt16BE(53)),
     maxFillMultiplier: BigInt(bytes[55]!),
+    minOutPerIn: BigInt(`0x${bytes.subarray(56, 72).toString("hex")}`),
     minDelivery: BigInt(`0x${bytes.subarray(72, 88).toString("hex")}`),
     deadlineMs: Number(bytes.readBigUInt64BE(88)) * 1000,
     recipientKind: bytes[96]!,

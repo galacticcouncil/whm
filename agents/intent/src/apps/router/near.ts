@@ -11,6 +11,8 @@ export interface RouterConfig {
   mpc_signer: string;
   intents: string;
   eth_token: string;
+  /** 1Click keys whose quote signatures the router accepts. */
+  quote_keys: string[];
   params: {
     price_validity: number;
     min_quote_slippage_bps: number;

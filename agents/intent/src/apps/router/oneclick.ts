@@ -16,6 +16,12 @@ export interface QuoteResponse {
 }
 
 /**
+ * Whether 1Click is answering: since when every call has failed without an answer — a timeout, a
+ * 5xx, a 429 — and the last such failure. A 4xx is an answer; any answer clears it.
+ */
+export const oneClickHealth: { failingSince?: number; lastError?: string } = {};
+
+/**
  * A 1Click call with the partner key.
  *
  * @param path The endpoint.
@@ -24,18 +30,46 @@ export interface QuoteResponse {
  * @throws On a non-2xx — `Refused` on a 4xx other than 429, which no resend changes.
  */
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${ONECLICK_API}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": config.oneClickKey },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${ONECLICK_API}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": config.oneClickKey },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    unanswered(`1Click ${path}: ${(e as Error).message}`);
+    throw e;
+  }
   const text = await res.text();
   if (!res.ok) {
     const message = `1Click ${path}: HTTP ${res.status} ${text.slice(0, 400)}`;
-    throw res.status >= 400 && res.status < 500 && res.status !== 429 ? new Refused(message) : new Error(message);
+    if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+      answered();
+      throw new Refused(message);
+    }
+    unanswered(message);
+    throw new Error(message);
   }
+  answered();
   return JSON.parse(text) as T;
+}
+
+/** 1Click answered. */
+function answered(): void {
+  oneClickHealth.failingSince = undefined;
+  oneClickHealth.lastError = undefined;
+}
+
+/**
+ * 1Click did not answer.
+ *
+ * @param error What happened.
+ */
+function unanswered(error: string): void {
+  oneClickHealth.failingSince ??= Date.now();
+  oneClickHealth.lastError = error;
 }
 
 /**

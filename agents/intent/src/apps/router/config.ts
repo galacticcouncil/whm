@@ -27,6 +27,8 @@ export const config = {
   discordWebhook: process.env.DISCORD_WEBHOOK_URL,
   /** Where this app's `/reprocess` page is reachable from outside, for the alerts' links. */
   publicUrl: process.env.PUBLIC_URL,
+  /** Scan's public address, e.g. `https://scan.play.hydration.cloud` — the alerts link trades to it. */
+  scanUrl: process.env.SCAN_URL?.replace(/\/$/, ""),
 };
 
 /** Below this the bot account's NEAR is alerted, yocto — about 270 signatures. */
@@ -34,6 +36,18 @@ export const BALANCE_FLOOR = 10n ** 24n;
 
 /** A pass failing this long — scan unreachable, NEAR RPC down — is alerted. */
 export const PASS_ALERT_MS = 10 * 60_000;
+
+/** An order forwarded this long without `A` credited is alerted — its ETH sits with 1Click/POA. */
+export const CREDIT_ALERT_MS = 30 * 60_000;
+
+/** An order credited and still not swapped this long after its forward is alerted. */
+export const SWAP_ALERT_MS = 60 * 60_000;
+
+/** Terms this close to their deadline with ETH still in `A` are alerted — it will be refunded. */
+export const REFUND_ALERT_MS = 60 * 60_000;
+
+/** 1Click failing — no answer, 5xx, 429 — this long is alerted. */
+export const ONECLICK_ALERT_MS = 10 * 60_000;
 
 /** A send that never reached a decision is resent this many times, this far apart, in the same pass. */
 export const SEND_ATTEMPTS = 3;

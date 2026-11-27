@@ -12,7 +12,9 @@ const ROUTE: UtxoRoute = {
   min_amount: "100000",
 };
 const t: Terms = {
+  maxSlippageBps: 300n,
   maxFillMultiplier: 2n,
+  minOutPerIn: 0n,
   minDelivery: 1n,
   deadlineMs: 0,
   recipientKind: 0,

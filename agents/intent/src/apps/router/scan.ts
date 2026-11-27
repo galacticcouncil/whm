@@ -15,9 +15,13 @@ export interface TermsRow {
 export interface OrderRow {
   seq: string;
   amount: string;
+  /** The dispatcher's price when the order was placed — destination units per 1e18 wei. */
+  out_per_in: string;
   /** `73/<dispatcher>/<messageSequence>`. */
   order_vaa: string;
   published: { blockTimestamp: number };
+  /** When the forwarder paid it into 1Click's deposit address on Ethereum; absent until then. */
+  forwarded?: { blockTimestamp: number } | null;
 }
 
 /**

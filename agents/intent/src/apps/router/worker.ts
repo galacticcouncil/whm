@@ -1,17 +1,31 @@
 import { setTimeout as sleep } from "timers/promises";
 
-import type { Incidents, RedisLike } from "@whm/common/discord";
+import type { Alerter, Incidents, RedisLike } from "@whm/common/discord";
 
 import log from "../../logger";
 
-import { config, SEND_ATTEMPTS, SEND_RETRY_MS } from "./config";
-import { balances, deriveAccount, ensureRegistered, execute, sign, signAll, utxoRoutes, type RouterConfig, type Signed } from "./near";
-import { quote, signedFields, submitIntent } from "./oneclick";
+import { alerts, trade, waiting } from "./alerts";
+import { config, CREDIT_ALERT_MS, REFUND_ALERT_MS, SEND_ATTEMPTS, SEND_RETRY_MS, SWAP_ALERT_MS } from "./config";
+import { checkQuote } from "./floor";
+import {
+  balances,
+  deriveAccount,
+  ensureRegistered,
+  execute,
+  routerConfig,
+  sign,
+  signAll,
+  utxoRoutes,
+  type RouterConfig,
+  type Signed,
+} from "./near";
+import { quote, signedFields, submitIntent, type QuoteResponse } from "./oneclick";
 import { plan, type Action } from "./plan";
 import { Refused } from "./types";
-import { liveTerms, newestOrder, type TermsRow } from "./scan";
+import { liveTerms, newestOrder, type OrderRow, type TermsRow } from "./scan";
 import { decodeTerms, type Terms } from "./terms";
 import { delivery, routeFor, type UtxoRoute } from "./utxo";
+import { watch } from "./watch";
 import { loadVaa } from "./wormholescan";
 
 /** A quote outlives the transfer the router signs against it by this much. */
@@ -65,11 +79,16 @@ export class Worker {
   private routes: Record<string, UtxoRoute> = {};
   /** `A_utxo` registrations this process has seen, by `token:account`. */
   private readonly registered = new Set<string>();
+  /** Why the last swap attempt per `auth_path` stopped before signing. */
+  private readonly blocked = new Map<string, string>();
+  /** The `watch` alerts raised per `auth_path`, so the ones that ended are cleared. */
+  private readonly watched = new Map<string, Set<string>>();
 
   constructor(
-    private readonly rc: RouterConfig,
+    private rc: RouterConfig,
     private readonly incidents: Incidents,
     private readonly redis: RedisLike,
+    private readonly alerter: Alerter,
   ) {}
 
   private get filledKey(): string {
@@ -84,6 +103,8 @@ export class Worker {
   /** One pass over every set of terms in play. */
   async pass(): Promise<void> {
     const since = Math.floor(Date.now() / 1000) - config.graceDays * 86_400;
+    // Read each pass: new quote keys and params apply without a restart.
+    this.rc = await routerConfig();
     this.routes = await utxoRoutes();
     for (const row of await liveTerms(since)) {
       if (this.done.has(row.auth_path)) continue;
@@ -124,7 +145,7 @@ export class Worker {
     }
 
     const priceValidityMs = p.price_validity * 1000;
-    const order = eth > 0n && now <= t.deadlineMs ? await newestOrder(path, now - priceValidityMs) : undefined;
+    const order = now <= t.deadlineMs ? await newestOrder(path, now - priceValidityMs) : undefined;
     const action = plan({
       nowMs: now,
       deadlineMs: t.deadlineMs,
@@ -147,19 +168,30 @@ export class Worker {
       graceMs: config.graceDays * 86_400_000,
     });
     this.seen.set(path, { account, eth: eth.toString(), dest: dest.toString(), action: action.kind, at: now });
+    this.raiseWatched(path, {
+      nowMs: now,
+      deadlineMs: t.deadlineMs,
+      eth,
+      minRefund: BigInt(p.min_refund),
+      maxOrderShortfallBps: BigInt(p.max_order_shortfall_bps),
+      order: order && {
+        seq: order.seq,
+        amount: BigInt(order.amount),
+        forwardedAtMs: order.forwarded?.blockTimestamp,
+        filled: this.filled.has(order.seq),
+      },
+      blocked: this.blocked.get(path),
+      creditAlertMs: CREDIT_ALERT_MS,
+      swapAlertMs: SWAP_ALERT_MS,
+      refundAlertMs: REFUND_ALERT_MS,
+    });
 
     const terms = bytes.toString("base64");
     switch (action.kind) {
       case "swap": {
         const vaa = await loadVaa(order!.order_vaa);
-        const q = await quote({
-          account,
-          origin: this.rc.eth_token,
-          destination: t.destinationAsset,
-          amount: action.amount,
-          slippageBps: p.min_quote_slippage_bps,
-          deadlineMs: now + p.transfer_validity * 1000 + QUOTE_MARGIN_MS,
-        });
+        const q = await this.quote(path, account, t, action.amount);
+        if (!this.swappable(path, q, order!, t)) return;
         const label = `swap order ${action.seq}: ${q.quote.amountIn} wei → ≥ ${q.quote.minAmountOut}`;
         const args = { terms, order_vaa: vaa.toString("base64"), quote: { signed: signedFields(q), signature: q.signature } };
         await this.attempt(path, "swap", async () => [{ signed: await sign("swap", args), label }]);
@@ -182,11 +214,65 @@ export class Worker {
       }
       case "drop":
         this.done.add(path);
+        this.raiseWatched(path, undefined);
         log.info(`[${path}] done${eth > 0n ? `, ${eth} wei below min_refund left in ${account}` : ""}`);
         return;
       case "wait":
         return;
     }
+  }
+
+  /**
+   * 1Click's quote for a swap of `amount` from `A`. A failure is why the trade waits.
+   *
+   * @param path The terms' `auth_path`.
+   * @param account `A`.
+   * @param t The terms.
+   * @param amount ETH in, wei.
+   * @returns The quote.
+   * @throws 1Click's failure.
+   */
+  private async quote(path: string, account: string, t: Terms, amount: bigint): Promise<QuoteResponse> {
+    const p = this.rc.params;
+    return quote({
+      account,
+      origin: this.rc.eth_token,
+      destination: t.destinationAsset,
+      amount,
+      slippageBps: p.min_quote_slippage_bps,
+      deadlineMs: Date.now() + p.transfer_validity * 1000 + QUOTE_MARGIN_MS,
+    }).catch((e: Error) => {
+      this.blocked.set(path, waiting.quoteFailing(e.message));
+      throw e;
+    });
+  }
+
+  /**
+   * Whether the router's `swap` would take the quote — checked here, for free, because the router's
+   * signature is paid for. If not, records why the trade waits, and alerts a quote key it rejects.
+   *
+   * @param path The terms' `auth_path`.
+   * @param q 1Click's quote.
+   * @param order The order it fills.
+   * @param t The terms.
+   * @returns Whether to sign.
+   */
+  private swappable(path: string, q: QuoteResponse, order: OrderRow, t: Terms): boolean {
+    const price = { outPerIn: BigInt(order.out_per_in), maxSlippageBps: t.maxSlippageBps, minOutPerIn: t.minOutPerIn };
+    const check = checkQuote(q, price, this.rc.quote_keys);
+    if (check.ok) {
+      this.alerter.clear("quote-key");
+      this.blocked.delete(path);
+      return true;
+    }
+    if (check.reason === "signature") {
+      this.blocked.set(path, waiting.quoteKey);
+      this.alerter.alert("quote-key", "rejected", alerts.quoteKey(this.rc.quote_keys));
+    } else {
+      this.blocked.set(path, waiting.floor(check));
+      log.info(`[${path}] order ${order.seq}: ${waiting.floor(check)} — waiting`);
+    }
+    return false;
   }
 
   /**
@@ -213,11 +299,26 @@ export class Worker {
         log.info(`[${path}] ${label}: ${ref}`);
       }
     } catch (e) {
-      await this.incidents.open(path, `${step} — ${(e as Error).message}`);
+      await this.incidents.open(path, `${step} — ${(e as Error).message}`, [["Trade", trade(path)]]);
       const s = this.seen.get(path);
       if (s) s.stopped = (e as Error).message;
       throw e;
     }
+  }
+
+  /**
+   * Raise what `watch` finds stuck for a set of terms, and clear what no longer is.
+   *
+   * @param path The terms' `auth_path`.
+   * @param input Their state now; none clears everything raised for them.
+   */
+  private raiseWatched(path: string, input: Parameters<typeof watch>[0] | undefined): void {
+    const now = input ? watch(input) : [];
+    const keys = new Set(now.map((w) => `${path}:${w.key}`));
+    for (const key of this.watched.get(path) ?? []) if (!keys.has(key)) this.alerter.clear(key);
+    for (const w of now) this.alerter.alert(`${path}:${w.key}`, "on", alerts.watched(path, w));
+    if (keys.size) this.watched.set(path, keys);
+    else this.watched.delete(path);
   }
 
   /**
