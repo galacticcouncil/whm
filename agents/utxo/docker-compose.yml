@@ -29,6 +29,10 @@ services:
       # Websocket — EVM.Log is read out of substrate events, not eth_getLogs.
       - RPC_HYDRATION_WSS=wss://rpc.hydradx.cloud
       - REDIS_HOST=redis
+      # Alerts: failed withdrawals, stuck ones, a low balance.
+      - DISCORD_WEBHOOK_URL=
+      # Where /reprocess/:id is reachable from outside — the alerts link to it.
+      - PUBLIC_URL=
     ports:
       - "8091:8080"
     networks:

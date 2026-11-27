@@ -1,4 +1,8 @@
+import { setTimeout as sleep } from "timers/promises";
+
 import type { Account, JsonRpcProvider } from "near-api-js";
+
+import type { Alerter, Incidents } from "@whm/common/discord";
 
 import type { ConnectorConfig } from "../../chains";
 import log from "../../logger";
@@ -6,8 +10,10 @@ import { view } from "../../near/client";
 import { listCoins, pickCoin, type Coin } from "../../near/coins";
 import type { Deriver, Params } from "../../near/derive";
 
+import { APP_NAME, BALANCE_FLOOR, RELAY_ATTEMPTS, RELAY_RETRY_MS } from "./config";
+import { Refused } from "./types";
 import type { Store, Withdrawal } from "./store";
-import { balanceOf, ensureAccount, withdraw } from "./withdraw";
+import { balanceOf, ensureAccount, relay, signWithdraw } from "./withdraw";
 
 export interface WithdrawWorkerCfg {
   intervalMs: number;
@@ -15,10 +21,14 @@ export interface WithdrawWorkerCfg {
 }
 
 /**
- * Retries every open withdrawal until it is processed. A pass reads `A`'s balance; at or above the
- * connector's minimum — `ntt-near` has completed the settlement — it withdraws the whole balance and
- * relays it. The record closes once the balance has left; anything else leaves the funds in `A`, and
- * the next pass tries again with a fresh coin.
+ * Sees every open withdrawal through. A pass reads `A`'s balance; at or above the connector's
+ * minimum — `ntt-near` has completed the settlement — the contract signs a withdrawal of the whole
+ * balance, and the relayer relays it. The record closes once the balance has left.
+ *
+ * The signature costs the relaying account before the step that can fail, so the relayer tries once:
+ * a sign that fails, a relay still failing after a few resends of the same delegate, or a balance
+ * that did not leave opens an incident for `A`, and the relayer leaves `A` alone until a person
+ * reprocesses it. Incidents are in Redis, so a restart does not pay for them again.
  */
 export class WithdrawWorker {
   private timer?: NodeJS.Timeout;
@@ -34,6 +44,8 @@ export class WithdrawWorker {
     private readonly account: Account,
     private readonly derivers: Record<string, Deriver>,
     private readonly store: Store,
+    private readonly incidents: Incidents,
+    private readonly alerter: Alerter,
   ) {}
 
   start(): void {
@@ -54,11 +66,24 @@ export class WithdrawWorker {
         await this.passChain(this.derivers[chain], open.filter((w) => w.chain === chain));
       }
       for (const w of open) this.warnIfStuck(w);
+      await this.checkBalance();
     } catch (e) {
       log.error(`[withdraw] pass: ${(e as Error).stack ?? String(e)}`);
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Alert while the relaying account is below `BALANCE_FLOOR`. */
+  private async checkBalance(): Promise<void> {
+    const balance = await this.account.getBalance().catch(() => undefined);
+    if (balance === undefined) return;
+    if (balance >= BALANCE_FLOOR) return this.alerter.clear("balance");
+    this.alerter.alert(
+      "balance",
+      "low",
+      `🟠 **utxo ${APP_NAME}** account ${this.account.accountId} holds ${Number(balance) / 1e24} NEAR — top it up; every withdrawal's signature and relay is paid from it.`,
+    );
   }
 
   /**
@@ -106,6 +131,7 @@ export class WithdrawWorker {
   ): Promise<void> {
     const { chain, params } = deriver;
     const min = BigInt(config.min_withdraw_amount);
+    if (await this.incidents.get(account)) return;
     const held = await balanceOf(this.provider, params.token, account);
     if (held < min) return;
 
@@ -113,26 +139,55 @@ export class WithdrawWorker {
     const { fee_rate: feeRate } = await view<Params>(this.provider, chain.contract, "get_params");
     // A rate under the market's would leave the transaction waiting; the balance waits here instead.
     if (chain.ready && !(await chain.ready(feeRate))) return;
-
-    if (await ensureAccount(this.account, account)) log.info(`[${chain.name} ${account}] created`);
     const coin = pickCoin(await coins(), config, held, chain.minerFee(config, feeRate));
-    const tx = await withdraw(this.account, chain.contract, records[0].address, coin);
 
-    // A failed receipt anywhere refunds `A`; only a balance that left means the connector has it.
-    const left = await balanceOf(this.provider, params.token, account);
-    if (left >= min) throw new Error(`relay ${tx} left ${left} in ${account}`);
-
-    for (const w of records) await this.store.withdrawn(w, tx);
-    log.info(`[${chain.name} ${account}] ${held} -> ${records[0].address} via ${coin}: ${tx}`);
+    // The paid part, once: anything failing past here waits for a person.
+    let step = "sign";
+    try {
+      if (await ensureAccount(this.account, account)) log.info(`[${chain.name} ${account}] created`);
+      const signed = await signWithdraw(this.account, chain.contract, records[0].address, coin);
+      log.info(`[${chain.name} ${account}] signed ${held} -> ${records[0].address} via ${coin}: ${signed.tx}`);
+      step = "relay";
+      const tx = await resend(() => relay(this.account, signed.delegate));
+      // A failed receipt anywhere refunds `A`; only a balance that left means the connector has it.
+      const left = await balanceOf(this.provider, params.token, account);
+      if (left >= min) throw new Refused(`relay ${tx} left ${left} in ${account}`);
+      for (const w of records) await this.store.withdrawn(w, tx);
+      log.info(`[${chain.name} ${account}] ${held} -> ${records[0].address}: ${tx}`);
+    } catch (e) {
+      await this.incidents.open(account, `${chain.name} ${step} of ${held} to ${records[0].address} — ${(e as Error).message}`);
+      throw e;
+    }
   }
 
-  /** Log a record open longer than `stuckMs`, once per `stuckMs`. */
+  /** Log and alert a record open longer than `stuckMs`, once per `stuckMs`. */
   private warnIfStuck(w: Withdrawal): void {
     const now = Date.now();
     const id = `${w.chain}:${w.sequence}`;
     if (now - w.createdAt < this.cfg.stuckMs || now - (this.warnedAt.get(id) ?? 0) < this.cfg.stuckMs) return;
     this.warnedAt.set(id, now);
     const min = Math.round((now - w.createdAt) / 60_000);
-    log.warn(`[${id}] open ${min} min: ${w.lastError ?? "waiting for the settlement"}`);
+    const message = `[${id}] open ${min} min: ${w.lastError ?? "waiting for the settlement"}`;
+    log.warn(message);
+    this.alerter.alert(`stuck:${id}`, String(now), `🟠 **utxo ${APP_NAME}** withdrawal ${message} — to ${w.address} via ${w.account}`);
+  }
+}
+
+/**
+ * Relay, and relay the same delegate again while it reaches no decision. A refusal is final at once.
+ *
+ * @param send The relay.
+ * @returns Its transaction hash.
+ * @throws A refusal, or the last failure.
+ */
+async function resend(send: () => Promise<string>): Promise<string> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await send();
+    } catch (e) {
+      if (e instanceof Refused || attempt >= RELAY_ATTEMPTS) throw e;
+      log.warn(`relay failed (${(e as Error).message}), relaying the same delegate again`);
+      await sleep(RELAY_RETRY_MS);
+    }
   }
 }

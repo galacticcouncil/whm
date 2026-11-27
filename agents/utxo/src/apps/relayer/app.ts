@@ -1,5 +1,7 @@
 import { isAddress } from "viem";
 
+import { createAlerter, Incidents, reprocessPage } from "@whm/common/discord";
+
 import { banner } from "../../banner";
 import { CHAINS, ROUTER_CHAINS } from "../../chains";
 import log from "../../logger";
@@ -7,7 +9,18 @@ import { Deriver } from "../../near/derive";
 import { boot, serve } from "../../server";
 
 import { account, provider, redis } from "./clients";
-import { APP_NAME, hydration, liveIntervalMs, redis as redisCfg, routes, scan, stuckMs, workIntervalMs } from "./config";
+import {
+  APP_NAME,
+  discordWebhook,
+  hydration,
+  liveIntervalMs,
+  publicUrl,
+  redis as redisCfg,
+  routes,
+  scan,
+  stuckMs,
+  workIntervalMs,
+} from "./config";
 import { ScanWatcher, type UtxoPayout } from "./scan";
 import { Store } from "./store";
 import { HydrationWatcher, type WithdrawRequested } from "./watcher";
@@ -16,8 +29,9 @@ import { WithdrawWorker } from "./worker";
 /**
  * UTXO withdrawals to the coin's own chain. Watches each route's `WithdrawRequested` on Hydration,
  * and the intents router's deliveries on a UTXO route through scan, and keeps a record per event;
- * retries each until the derived account's balance has gone out through the connector. The
- * settlement into that account is `ntt-near`'s (agents/relayer), or the router's payout.
+ * withdraws the derived account's balance through the connector once it has arrived — once: a
+ * failure is alerted, and waits for a person's reprocess (`/reprocess/:id`). The settlement into
+ * that account is `ntt-near`'s (agents/relayer), or the router's payout.
  */
 async function start(): Promise<void> {
   banner(APP_NAME);
@@ -111,13 +125,25 @@ async function start(): Promise<void> {
     onWithdrawal,
   );
   const payouts = new ScanWatcher(scan, store, onPayout);
-  const worker = new WithdrawWorker({ intervalMs: workIntervalMs, stuckMs }, provider, account, derivers, store);
+  const alerter = createAlerter({ webhook: discordWebhook, repeatMs: 6 * 3_600_000, log });
+  const incidents = new Incidents({ redis, prefix: redisCfg.prefix, app: `utxo ${APP_NAME}`, alerter, publicUrl, log });
+  const worker = new WithdrawWorker({ intervalMs: workIntervalMs, stuckMs }, provider, account, derivers, store, incidents, alerter);
 
   await serve({
     name: APP_NAME,
+    routes: (app) => {
+      app.get<{ Params: { id: string }; Querystring: { token?: string } }>("/reprocess/:id", async (req, reply) =>
+        reply.type("text/html").send(reprocessPage(`utxo ${APP_NAME}`, req.params.id, req.query.token ?? "")),
+      );
+      app.post<{ Params: { id: string }; Body: { token?: string } }>("/reprocess/:id", async (req, reply) => {
+        const result = await incidents.redeem(req.params.id, String(req.body?.token ?? ""));
+        return result === "ok" ? { ok: true } : reply.code(result === "limited" ? 429 : 403).send(result);
+      });
+    },
     status: async () => ({
       account: account.accountId,
       cursor: (await store.cursor())?.toString() ?? null,
+      incidents: await incidents.list(),
       open: (await store.open()).map(({ chain, sequence, account, lastError }) => ({ chain, sequence, account, lastError })),
     }),
   });

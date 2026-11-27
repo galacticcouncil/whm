@@ -55,5 +55,18 @@ export const liveIntervalMs = optionalNumber("LIVE_INTERVAL_MS", 12_000);
 /** How often open withdrawals are retried until processed. */
 export const workIntervalMs = optionalNumber("WORK_INTERVAL_MS", 30_000);
 
-/** An open withdrawal older than this is logged, once per interval. */
+/** An open withdrawal older than this is logged and alerted, once per interval. */
 export const stuckMs = 60 * 60_000;
+
+/** Alerts — failed attempts, stuck withdrawals, a low balance. Unset: the log is the alert. */
+export const discordWebhook = process.env.DISCORD_WEBHOOK_URL;
+
+/** Where this app's `/reprocess` page is reachable from outside, for the alerts' links. */
+export const publicUrl = process.env.PUBLIC_URL;
+
+/** Below this the relaying account's NEAR is alerted, yocto. */
+export const BALANCE_FLOOR = 10n ** 24n;
+
+/** A relay that never reached a decision is resent this many times, this far apart, in the same pass. */
+export const RELAY_ATTEMPTS = 3;
+export const RELAY_RETRY_MS = 3_000;
