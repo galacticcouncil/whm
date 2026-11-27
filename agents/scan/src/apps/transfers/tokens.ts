@@ -93,12 +93,22 @@ export const BASEJUMP_ASSETS: Record<string, Token> = {
   "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": { symbol: "USDC", decimals: 6 },
 };
 
+/**
+ * What a PSM transfer sends, by its direction: USDC in, HOLLAR back out. Both are counted in USDC's
+ * units, which is all the contracts speak — HOLLAR is minted and burned at par.
+ */
+export const PSM_ASSETS: Record<string, Token> = {
+  "psm:deposit": { symbol: "USDC", decimals: 6 },
+  "psm:redeem": { symbol: "HOLLAR", decimals: 6 },
+};
+
 for (const [asset, t] of Object.entries(BASEJUMP_ASSETS)) addKey(t.symbol, asset);
+for (const [key, t] of Object.entries(PSM_ASSETS)) addKey(t.symbol, key);
 for (const r of ROUTES) addKey(r.symbol, r.chain);
 
 /**
  * The `token` keys that mean any of these symbols — an NTT manager, a Basejump asset, a UTXO coin's
- * chain — for an asset filter.
+ * chain, a PSM direction — for an asset filter.
  *
  * @param symbols Symbols, as the pages show them.
  */

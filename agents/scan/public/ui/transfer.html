@@ -68,6 +68,7 @@
         deposit: "Deposit",
         withdraw: "Withdraw",
         basejump: "Basejump",
+        psm: "PSM",
       };
 
       let assets = [];
@@ -228,6 +229,80 @@
               : "",
           ];
         },
+
+        psm(v, r) {
+          const since = r.initiated?.blockTimestamp;
+          // The view's symbol is what was sent; a redemption pays out the other one.
+          const usdc = { ...v, symbol: "USDC" };
+          if (r.direction === "deposit") {
+            const minted = r.minted ?? r.flushed;
+            return [
+              legCard({ where: v.from_chain, kind: "deposited", ref: r.initiated, rows: [["", money(r.amount, v)]] }),
+              r.mint_queued
+                ? legCard({
+                    where: v.to_chain,
+                    kind: "queued",
+                    ref: r.mint_queued,
+                    held: !minted && !r.mint_cancelled,
+                    rows: [["", '<span class="dim">minting was paused or over its limit</span>']],
+                    since,
+                  })
+                : "",
+              r.mint_cancelled
+                ? legCard({ where: v.to_chain, kind: "cancelled", ref: r.mint_cancelled, since })
+                : legCard({ where: v.to_chain, kind: "minted", ref: minted, pending: !minted, since }),
+              // A cancelled mint's USDC comes back through the vault's payout queue.
+              r.mint_cancelled
+                ? legCard({
+                    where: v.from_chain,
+                    kind: "refunded",
+                    ref: r.claimed,
+                    pending: !r.claimed,
+                    rows: r.net_amount ? [["", money(r.net_amount, v)]] : [],
+                    since,
+                  })
+                : "",
+            ];
+          }
+          const booked = r.credited ?? r.disputed;
+          const settled = r.claimed ?? r.unpayable;
+          return [
+            legCard({ where: v.from_chain, kind: "redeemed", ref: r.initiated, rows: [["", money(r.amount, v)]] }),
+            r.returned
+              ? legCard({
+                  where: v.to_chain,
+                  kind: "returned",
+                  ref: r.returned,
+                  rows: [["", '<span class="dim">the fee was above its limit</span>']],
+                  since,
+                })
+              : legCard({
+                  where: v.to_chain,
+                  kind: r.disputed ? "disputed" : "credited",
+                  ref: booked,
+                  pending: !booked,
+                  held: !!r.disputed,
+                  since,
+                }),
+            r.returned || r.disputed
+              ? ""
+              : r.cancelled
+                ? legCard({ where: v.to_chain, kind: "cancelled", ref: r.cancelled, since })
+                : legCard({
+                    where: v.to_chain,
+                    kind: r.unpayable ? "unpayable" : "paid out",
+                    ref: settled,
+                    pending: !settled,
+                    held: !!r.unpayable,
+                    rows: r.net_amount ? [["", money(r.net_amount, usdc)]] : [],
+                    since,
+                  }),
+            // Sent back either way, the HOLLAR is minted again to who redeemed.
+            r.returned || r.cancelled
+              ? legCard({ where: v.from_chain, kind: "re-minted", ref: r.minted, pending: !r.minted, since })
+              : "",
+          ];
+        },
       };
 
       /** The detail cards, per rail: [title, [[label, html]]]. */
@@ -327,6 +402,40 @@
             ],
           ],
         ],
+
+        psm: (v, r) => {
+          const deposit = r.direction === "deposit";
+          const usdc = { ...v, symbol: "USDC" };
+          // A credit cancelled out of the queue gave its gross back: no fee kept, nothing received.
+          const kept = r.cancelled ? {} : r;
+          return [
+            [
+              deposit ? "Deposit" : "Redemption",
+              [
+                ["Amount", money(r.amount, v)],
+                ...(deposit
+                  ? [["Minted", r.hollar_amount ? money(r.hollar_amount, { symbol: "HOLLAR", decimals: 18 }) : dim]]
+                  : [
+                      ["Fees", fees(usdc, [["Redemption", kept.fee]])],
+                      ["Received", kept.net_amount ? money(kept.net_amount, usdc) : dim],
+                    ]),
+                ["Sender", `${chainBadge(v.from_chain)}${addrLink(r.sender, v.from_chain)}`],
+                ["Recipient", `${chainBadge(v.to_chain)}${addrLink(r.recipient, v.to_chain)}`],
+                ["Origin transaction", ref(r.initiated)],
+                ["Destination transaction", ref(deposit ? (r.minted ?? r.flushed) : r.claimed)],
+              ],
+            ],
+            [
+              "PSM",
+              [
+                ["Stage", badge(v.stage)],
+                ["Message sequence", mono(r.sequence)],
+                ["Pending mint", mono(r.pending_id)],
+                ["Payout queue slot", mono(r.queue_id)],
+              ],
+            ],
+          ];
+        },
       };
 
       function render(t) {
@@ -369,7 +478,7 @@
       json(`${API}/transfers/filters`).then((f) => {
         assets = f?.assets ?? [];
         live(
-          "ntt,utxo,utxo-signs,basejump",
+          "ntt,utxo,utxo-signs,basejump,psm",
           () => {
             clearTimeout(pending);
             pending = setTimeout(load, 300);

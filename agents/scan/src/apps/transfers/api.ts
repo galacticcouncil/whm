@@ -49,7 +49,7 @@ export function routes(app: FastifyInstance): void {
       (a, b) => rank(a) - rank(b),
     ),
     assets: TOKENS,
-    types: ["transfer", "deposit", "withdraw", "intent", "basejump"],
+    types: ["transfer", "deposit", "withdraw", "intent", "basejump", "psm"],
     statuses: ["pending", "held", "completed", "failed"],
   }));
 

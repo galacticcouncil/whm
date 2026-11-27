@@ -922,7 +922,8 @@ a.addr-pill:hover .ext-site {
 .badge.swapped,
 .badge.received,
 .badge.signed,
-.badge.withdrawn {
+.badge.withdrawn,
+.badge.credited {
   background: var(--lavender-soft);
   color: var(--lavender);
 }
@@ -932,24 +933,31 @@ a.addr-pill:hover .ext-site {
 .badge.redeemed,
 .badge.fulfilled,
 .badge.confirmed,
-.badge.completed {
+.badge.completed,
+.badge.minted,
+.badge.claimed {
   background: var(--green-soft);
   color: var(--green);
 }
 
 .badge.queued,
-.badge.held {
+.badge.held,
+.badge.unpayable,
+.badge.disputed {
   background: var(--amber-soft);
   color: var(--amber);
 }
 
 .badge.expired,
-.badge.ended {
+.badge.ended,
+.badge.cancelled,
+.badge.returned {
   background: var(--panel-hover);
   color: var(--text-low);
 }
 
-.badge.refunded {
+.badge.refunded,
+.badge.reminted {
   background: var(--orange-soft);
   color: var(--orange);
 }

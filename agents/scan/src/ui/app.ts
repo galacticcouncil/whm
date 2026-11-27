@@ -26,6 +26,7 @@ const FLOW_APP: Record<string, string> = {
   utxo: "transfers",
   "utxo-signs": "transfers",
   basejump: "transfers",
+  psm: "transfers",
   orders: "v1",
   "orders-v2": "v2",
   "payouts-v2": "v2",
